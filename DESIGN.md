@@ -319,6 +319,7 @@ CLAUDE.md 要求「Raw bytes, raw headers, no cleanup」。**用 `fetch()` 做�
 | ID | 功能 | 优先级 | 说明 |
 |---|---|---|---|
 | F-07a | WARC 记录构造 | P0 | 标准 WARC，不加私货扩展。每条记录独立 gzip member。 |
+| F-07i | **不写 request 记录** | P0 | WARC 允许把请求也记下来，乍看更完整。但请求头里带着**用户的 Cookie**，而 bundle 是要导出、甚至可能公开的——把会话凭据写进一份准备分享出去的档案不可接受。请求侧真正有归档价值的信息（URL、时间、intent）已经在 `index.ndjson` 里，没有损失。 |
 | F-07b | 即时追加写 | P0 | §2.3 的四步顺序，不攒批。 |
 | F-07c | `index.ndjson` | P0 | 每次抓取一行：capture_id、warc_record_id、URL、intent、verdict、observed_at、路线、所在段与偏移、digest。 |
 | F-07d | `manifest.json` | P0 | spec_version、bundle_id、previous_bundle_id、插件版本、账号、时间范围、段清单、计数、coverage 对账、**抓取存档信息**。 |
