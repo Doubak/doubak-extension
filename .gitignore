@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+
+# Python（规范仓库的校验器会在此产生缓存）
+__pycache__/
+*.pyc
+
+# 开发期产物：写入器跑出来的临时 bundle
+/tmp-bundles/
+
+.DS_Store
