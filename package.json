@@ -13,5 +13,7 @@
     "test:watch": "node --test --watch \"test/**/*.test.js\""
   },
   "dependencies": {},
-  "devDependencies": {}
+  "devDependencies": {
+    "warcio": "^2.4.11"
+  }
 }
