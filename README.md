@@ -9,6 +9,7 @@
 
 - **[DESIGN.md](DESIGN.md)** —— 功能规划、抓取边界模型、三份实测附录
 - **[docs/toolchain.md](docs/toolchain.md)** —— 工具链选型与理由
+- **[docs/ui.md](docs/ui.md)** —— 界面设计：说什么话、怎么显示进度才不撒谎
 - 档案格式定义在另一个仓库：[`doubak-data-specs`](https://github.com/Doubak/doubak-data-specs)
 
 ## 开发
