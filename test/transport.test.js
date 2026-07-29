@@ -229,3 +229,34 @@ describe('闸门：没有绕过的路径', () => {
     assert.throws(() => new Transport({}), /闸门/);
   });
 });
+
+describe('跳转的每一跳都要限速', () => {
+  test('一条短链带出的多跳都过闸门', async () => {
+    // 只给第一跳限速等于给自己开了个后门：一条 douc.cc 短链可能带出好几跳，
+    // 那些都是真实请求。
+    let now = 0;
+    const gateCalls = [];
+    const pacer = new Pacer({ intervalMs: 1000, jitterRatio: 0 });
+    const gate = new RequestGate({
+      pacer,
+      now: () => now,
+      sleep: async (ms) => {
+        gateCalls.push(ms);
+        now += ms;
+      },
+    });
+
+    const http = fakeHttp([
+      { status: 302, headers: { location: 'https://www.douban.com/hop1' } },
+      { status: 302, headers: { location: 'https://www.douban.com/hop2' } },
+      { status: 200, body: '目标' },
+    ]);
+    const t = new Transport({ gate, fetchImpl: http.fetchImpl, now: () => now });
+
+    await t.fetch('https://douc.cc/abc');
+
+    assert.equal(http.calls.length, 3, '一共发了三次请求');
+    assert.equal(gateCalls.length, 2, '第二、三跳各等了一个间隔');
+    assert.deepEqual(gateCalls, [1000, 1000]);
+  });
+});

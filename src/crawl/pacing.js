@@ -162,6 +162,24 @@ export class Pacer {
  *
  * 并发 1 没有例外。抓取是个能跑几小时的后台任务，多开几路省下的时间对用户
  * 没有意义，换来的却是成倍的风控暴露。
+ *
+ * ## 间隔从「上一次请求**结束**」算起
+ *
+ * 两种算法差别不大，但在最要紧的那种情况下方向相反：
+ *
+ * | 上次请求耗时 | 从开始算（start-to-start） | 从结束算（本实现） |
+ * |---|---|---|
+ * | 0.3 秒 | 再等 2.7 秒 | 再等 3 秒 |
+ * | 2.5 秒 | 再等 0.5 秒 | 再等 3 秒 |
+ * | **29 秒**（接近超时） | **再等 0 秒** | 再等 3 秒 |
+ *
+ * 从开始算的话，**响应越慢，我们催得越紧**。而响应变慢恰恰是「服务端在限流
+ * 或者扛不住」最直接的信号——此时维持原压力正好是反的。
+ *
+ * 从结束算则天然顺着这个信号走：对方慢下来，我们自动跟着慢下来。代价是响应
+ * 快时整体慢一点（3.0 秒变 3.3 秒），对一个以账号安全优先的工具来说完全值得。
+ *
+ * 另一个好处是这条保证容易讲清楚：**我们的两次请求之间，总有至少 N 秒的安静。**
  */
 export class RequestGate {
   /**
@@ -177,30 +195,39 @@ export class RequestGate {
     // 用 null 而不是 0 当「还没发过请求」的哨兵：0 是一个合法的时间戳，
     // 拿它当哨兵在注入时钟的测试里会直接撞上（真实 Date.now() 撞不上，
     // 于是这类 bug 会一路潜伏到某天换了时间源才爆）。
-    /** @type {number | null} */
-    this._lastRequestAt = null;
+    /** @type {number | null} 上一次请求【结束】的时刻 */
+    this._lastFinishedAt = null;
     /** @type {Promise<void>} 串行化用的尾链 */
     this._tail = Promise.resolve();
   }
 
   /**
-   * 排队等待一个可以发请求的时机。
+   * 排队、等待、执行一次请求。
    *
-   * 调用方拿到返回值之后再发请求。并发由这里串行化——同时调用多次也会
-   * 一个接一个地放行。
+   * **这是唯一的入口**：不提供「先拿许可、稍后自己发」的用法，因为那样就无法
+   * 知道请求何时结束，间隔也就没法从结束算起。把执行包进来，计时才有保证。
    *
-   * @returns {Promise<{waitedMs: number}>}
+   * @template T
+   * @param {() => Promise<T>} fn
+   * @returns {Promise<{result: T, waitedMs: number}>}
    */
-  async acquire() {
+  async run(fn) {
     const run = this._tail.then(async () => {
       const target = this._pacer.nextDelayMs();
       const wait =
-        this._lastRequestAt === null
+        this._lastFinishedAt === null
           ? 0
-          : Math.max(0, target - (this._now() - this._lastRequestAt));
+          : Math.max(0, target - (this._now() - this._lastFinishedAt));
       if (wait > 0) await this._sleep(wait);
-      this._lastRequestAt = this._now();
-      return { waitedMs: wait };
+
+      try {
+        const result = await fn();
+        return { result, waitedMs: wait };
+      } finally {
+        // 无论成功失败都从「结束」重新计时——失败的请求同样占用了对方的资源，
+        // 何况失败往往正是对方不高兴的表现。
+        this._lastFinishedAt = this._now();
+      }
     });
     // 吞掉异常，避免一次失败把整条尾链毒死
     this._tail = run.then(

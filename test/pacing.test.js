@@ -121,7 +121,7 @@ describe('降速跨会话保留', () => {
   });
 });
 
-describe('请求闸门：并发恒为 1', () => {
+describe('请求闸门：并发恒为 1，间隔从上次结束算起', () => {
   /** 可控时钟 + 假 sleep，避免测试真的等待。 */
   function harness({ intervalMs = 1000 } = {}) {
     let now = 0;
@@ -135,86 +135,97 @@ describe('请求闸门：并发恒为 1', () => {
         now += ms;
       },
     });
-    return { gate, slept, advance: (ms) => (now += ms), nowRef: () => now };
+    /** 模拟一次耗时 cost 毫秒的请求 */
+    const req = (cost = 0) => gate.run(async () => { now += cost; return 'ok'; });
+    return { gate, slept, req, nowRef: () => now };
   }
 
   test('第一次请求不等待', async () => {
-    const { gate, slept } = harness();
-    const r = await gate.acquire();
+    const { req, slept } = harness();
+    const r = await req();
     assert.equal(r.waitedMs, 0);
     assert.deepEqual(slept, []);
   });
 
   test('两次请求之间隔够间隔', async () => {
-    const { gate, slept } = harness({ intervalMs: 1000 });
-    await gate.acquire();
-    const r = await gate.acquire();
+    const { req, slept } = harness({ intervalMs: 1000 });
+    await req();
+    const r = await req();
     assert.equal(r.waitedMs, 1000);
     assert.deepEqual(slept, [1000]);
   });
 
-  test('已经过去的时间可以抵扣', async () => {
-    const { gate, advance } = harness({ intervalMs: 1000 });
-    await gate.acquire();
-    advance(600); // 抓取本身耗时 600ms
-    const r = await gate.acquire();
-    assert.equal(r.waitedMs, 400, '只需再等 400ms');
+  test('请求耗时【不】抵扣间隔 —— 从结束算起', async () => {
+    // 从开始算的话，响应越慢我们催得越紧；而响应变慢恰恰是对方在限流或
+    // 扛不住的信号，此时维持原压力正好是反的。
+    const { req } = harness({ intervalMs: 1000 });
+    await req(600);
+    const r = await req();
+    assert.equal(r.waitedMs, 1000, '耗时 600ms 之后仍然等满 1000ms');
   });
 
-  test('间隔已经过去就不等', async () => {
-    const { gate, advance } = harness({ intervalMs: 1000 });
-    await gate.acquire();
-    advance(5000);
-    const r = await gate.acquire();
-    assert.equal(r.waitedMs, 0);
+  test('接近超时的慢响应之后依然等满', async () => {
+    const { req } = harness({ intervalMs: 3000 });
+    await req(29_000);
+    const r = await req();
+    assert.equal(r.waitedMs, 3000, '慢响应不该换来更短的间隔');
+  });
+
+  test('外部空转的时间可以抵扣', async () => {
+    // 这里抵扣的是「请求结束之后我们自己在干别的」的时间，不是请求耗时。
+    let now = 0;
+    const gate = new RequestGate({
+      pacer: new Pacer({ intervalMs: 1000, jitterRatio: 0 }),
+      now: () => now,
+      sleep: async (ms) => { now += ms; },
+    });
+    await gate.run(async () => {});
+    now += 400; // 写盘、分类等本地工作
+    const r = await gate.run(async () => {});
+    assert.equal(r.waitedMs, 600);
   });
 
   test('并发调用被串行化 —— 同域并发恒为 1，没有例外', async () => {
-    // 抓取是能跑几小时的后台任务，多开几路省下的时间对用户没有意义，
-    // 换来的却是成倍的风控暴露。
     const { gate, slept } = harness({ intervalMs: 1000 });
-
-    const results = await Promise.all([gate.acquire(), gate.acquire(), gate.acquire()]);
-
-    assert.equal(results[0].waitedMs, 0, '第一个立即放行');
-    assert.equal(results[1].waitedMs, 1000);
-    assert.equal(results[2].waitedMs, 1000);
-    assert.deepEqual(slept, [1000, 1000], '后两个各等了一个间隔');
+    const results = await Promise.all([
+      gate.run(async () => 'a'),
+      gate.run(async () => 'b'),
+      gate.run(async () => 'c'),
+    ]);
+    assert.deepEqual(results.map((r) => r.result), ['a', 'b', 'c'], '按调用顺序执行');
+    assert.equal(results[0].waitedMs, 0);
+    assert.deepEqual(slept, [1000, 1000]);
   });
 
   test('退避之后闸门也跟着变慢', async () => {
     let now = 0;
     const pacer = new Pacer({ intervalMs: 1000, jitterRatio: 0 });
     const gate = new RequestGate({
-      pacer,
-      now: () => now,
-      sleep: async (ms) => {
-        now += ms;
-      },
+      pacer, now: () => now, sleep: async (ms) => { now += ms; },
     });
-
-    await gate.acquire();
+    await gate.run(async () => {});
     pacer.slowDown();
-    const r = await gate.acquire();
-    assert.equal(r.waitedMs, 2000, '间隔翻倍后闸门要等更久');
+    const r = await gate.run(async () => {});
+    assert.equal(r.waitedMs, 2000);
+  });
+
+  test('失败的请求同样从结束重新计时', async () => {
+    // 失败的请求一样占用了对方的资源，何况失败往往正是对方不高兴的表现。
+    const { gate, req } = harness({ intervalMs: 1000 });
+    await assert.rejects(() => gate.run(async () => { throw new Error('boom'); }));
+    const r = await req();
+    assert.equal(r.waitedMs, 1000, '失败之后也要等满');
   });
 
   test('一次失败不会毒死后续请求', async () => {
-    // 尾链上如果留下 rejected promise，后面所有 acquire() 都会跟着炸。
-    let now = 0;
-    let calls = 0;
-    const gate = new RequestGate({
-      pacer: new Pacer({ intervalMs: 1000, jitterRatio: 0 }),
-      now: () => now,
-      sleep: async (ms) => {
-        calls += 1;
-        if (calls === 1) throw new Error('模拟 sleep 失败');
-        now += ms;
-      },
-    });
+    const { gate } = harness({ intervalMs: 1000 });
+    await assert.rejects(() => gate.run(async () => { throw new Error('模拟失败'); }));
+    await assert.doesNotReject(() => gate.run(async () => 'ok'));
+  });
 
-    await gate.acquire();
-    await assert.rejects(() => gate.acquire(), /模拟 sleep 失败/);
-    await assert.doesNotReject(() => gate.acquire(), '后续请求应当照常');
+  test('返回值透传', async () => {
+    const { gate } = harness();
+    const r = await gate.run(async () => ({ status: 200 }));
+    assert.deepEqual(r.result, { status: 200 });
   });
 });

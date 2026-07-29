@@ -120,8 +120,6 @@ export class Transport {
    * @returns {Promise<FetchOutcome>}
    */
   async fetch(url, { referer, withCk = false, followRedirects = true } = {}) {
-    await this._gate.acquire();
-
     const requestedUrl = withCk ? withCkToken(url, await this._getCk()) : url;
     const startedAt = this._now();
 
@@ -135,19 +133,26 @@ export class Transport {
         throw new Error(`跳转次数超过 ${MAX_REDIRECTS} 次，疑似跳转环: ${requestedUrl}`);
       }
 
+      // 【每一跳都要过闸门】。跳转也是一次真实请求——一条短链可能带出好几跳，
+      // 只给第一跳限速等于给自己开了个后门。
+      //
       // 必须有超时：挂住的连接会永远卡住队列，而监管层只会看到「还在跑」，
       // 永远不来干预——那是一种静默的失败，比响亮地报错糟糕得多。
-      response = await fetchWithTimeout(
-        this._fetch,
-        currentUrl,
-        {
-          // 不伪造身份：不设 User-Agent，交给浏览器
-          headers: referer ? { 'X-Override-Referer': referer } : {},
-          credentials: 'include',
-          redirect: followRedirects ? 'manual' : 'follow',
-        },
-        { timeoutMs: this._timeoutMs, externalSignal: this._signal },
+      const hopUrl = currentUrl;
+      const { result } = await this._gate.run(() =>
+        fetchWithTimeout(
+          this._fetch,
+          hopUrl,
+          {
+            // 不伪造身份：不设 User-Agent，交给浏览器
+            headers: referer ? { 'X-Override-Referer': referer } : {},
+            credentials: 'include',
+            redirect: followRedirects ? 'manual' : 'follow',
+          },
+          { timeoutMs: this._timeoutMs, externalSignal: this._signal },
+        ),
       );
+      response = result;
 
       const location = headerOf(response, 'location');
       const isRedirect = response.status >= 300 && response.status < 400 && location;
