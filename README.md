@@ -44,9 +44,10 @@ chrome-extension://<扩展ID>/selftest/index.html
 | 脚手架、工具链 | ✅ |
 | 基础类型（标识符 / 时间 / url_key / 摘要 / WARC） | ✅ |
 | bundle 写入器（段轮转 / index / manifest） | ✅ 产出已通过规范校验器 |
-| 崩溃恢复 | 🚧 进行中 |
-| OPFS 存储后端 | ⬜ 未开始 |
-| 抓取引擎、frontier、分类器 | ⬜ 未开始 |
+| 崩溃恢复 | ✅ 真实 OPFS 上验证过 |
+| OPFS 存储后端 | ✅ 与内存实现共用一份契约测试 |
+| 会话守卫、分类器、路线注册表、frontier | ✅ |
+| 抓取引擎（取页、节奏、金丝雀） | ⬜ 未开始 |
 | 界面（见 [docs/ui.md](docs/ui.md)） | ⬜ 未开始 |
 
 测试：`npm test`（零安装即可跑）。装了可选开发依赖后会额外用
