@@ -1,0 +1,53 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # 两个仓库并排检出——这就是本地的默认开发布局，也是不需要 submodule
+      # 的原因。测试按 ../doubak-data-specs 定位规范仓库。
+      - uses: actions/checkout@v4
+        with:
+          path: doubak-extension
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Doubak/doubak-data-specs
+          path: doubak-data-specs
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 规范的参考校验器需要 python3；一致性测试靠它。
+      # 装 jsonschema 是为了让 schema 那一层也真的跑起来。
+      - name: 安装校验依赖
+        run: pip install jsonschema referencing
+
+      # warcio 是可选的开发依赖，只用于独立验证 WARC 输出。
+      # 不装的话那几个互操作测试会跳过——CI 里我们要它们真的跑。
+      - name: 安装可选开发依赖
+        working-directory: doubak-extension
+        run: npm install
+
+      - name: 跑测试
+        working-directory: doubak-extension
+        run: npm test
+
+      # 本地跑测试时，若规范仓库不在场，下面这些检查会「带原因跳过」。
+      # 跳过在本地是合理的，在 CI 里则等于没测——所以显式再验一遍：
+      # 规范仓库必须在，且生成的词表必须是最新的。
+      - name: 确认跨仓库检查确实跑了而不是跳过了
+        working-directory: doubak-extension
+        run: |
+          test -f ../doubak-data-specs/bundle/v1/validate.py || {
+            echo '::error::规范仓库缺失，跨仓库测试会静默跳过'; exit 1; }
+          node tools/generate-spec-constants.mjs --check
