@@ -365,7 +365,7 @@ MV3 的实际限制：`chrome.storage.local` 默认 **10 MB**（Chrome 113 及�
 | F-10f | **自动恢复只针对意外中断** | P0 | 醒来后**不能无条件接着抓**。停下来的原因分两类：意外中断（被杀、崩溃、休眠）可以自动继续；刻意停下（风控、验证码、会话失效、用户暂停、配额）一律等人——停下来本身就是保护措施，自动恢复等于绕过它。醒来就重试软封锁正是把限流升级成封号的路径。未知的停止原因保守处理，不恢复。 |
 | F-10g | 崩溃哨兵 | P0 | worker 被杀时没有机会写任何东西，指望临终留言不现实。所以**反过来**：开工前先写一个 `pause_reason: crash` 的 checkpoint，正常暂停或结束时再改写——「没来得及改写」本身就是崩溃的证据。方向是刻意选的：宁可把正常结束误标成崩溃（代价是多做一次幂等的恢复检查），也不要把崩溃误标成正常（代价是数据对不上却无人察觉）。 |
 | F-10h | 崩溃不得洗掉降速 | P0 | 退避层级跨会话保留在 checkpoint 里。崩溃恢复前必须先等够冷却，否则「崩一次就恢复原速」会变成绕过退避的后门。 |
-| F-10d | OPFS 写入走 Worker | P0 | `FileSystemSyncAccessHandle` 只能在 Worker 里用，而它是唯一够快的低开销追加写方式。 |
+| F-10d | OPFS 写入走 Worker | P0 | ⚠️ **未实现，当前最大的落地缺口。** `FileSystemSyncAccessHandle` 只能在**专用 Worker** 里用——窗口没有，**service worker 也没有**。所以 `src/background.js` 里的 `OpfsFileStore.open()` 目前只在 Node 测试（用 `MemoryFileStore`）与演练里成立，装进浏览器会当场抛错。形状已定：service worker 只管调度，实际写入交给 **offscreen document 里的专用 Worker**（offscreen 不会被杀，本来就是选它的理由）。窗口侧同构的实现已经落地（`src/storage/worker-file-store.js` + `opfs-worker.js`），RPC 协议可直接复用；还需 manifest 加 `offscreen` 权限、一个 offscreen 页面、把 `openBundle` 换成跨过去的 RPC。`test/execution-context.test.js` 钉着这个缺口的记录。 |
 
 ### K. 界面
 

@@ -23,6 +23,24 @@
  * 闹钟是其中唯一一个「我们死了它还在」的东西——这正是自恢复而不是手动重触发
  * 的关键。
  *
+ * ## ⚠️ 已知缺口：这里的 OPFS 写入在真实浏览器里还跑不通
+ *
+ * `OpfsFileStore` 靠 `createSyncAccessHandle()`，而它**只在专用 Worker 里
+ * 可用**——窗口没有，**service worker 也没有**。所以下面这条
+ * `OpfsFileStore.open(dir)` 目前只在 Node 测试里成立（那里用的是
+ * `MemoryFileStore`）。
+ *
+ * 修法是 DESIGN.md F-10 已经定下的形状：service worker 负责调度与生命周期，
+ * 实际的 OPFS 写入交给一个 **offscreen document** 里的**专用 Worker**。
+ * service worker 随时会被杀，offscreen document 不会，这本来也是选它的理由。
+ *
+ * 需要：manifest 加 `offscreen` 权限、一个 offscreen 页面、把
+ * `openBundle` 换成一个跨到那边的 RPC。窗口侧的对应实现已经有了
+ * （`src/storage/worker-file-store.js`），协议可以直接复用。
+ *
+ * 在那之前，抓取只能在 Node 测试与演练里验证，不能装进浏览器真跑。
+ * `test/execution-context.test.js` 钉着这段说明，免得这个缺口被忘掉。
+ *
  * ## 醒来不等于接着抓
  *
  * `Supervisor.tick()` 会先问恢复策略：只有**意外中断**才自动继续；风控、

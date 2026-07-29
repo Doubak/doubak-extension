@@ -18,7 +18,7 @@
 
 import { BundleReader } from '../bundle/bundle-reader.js';
 import { SCENARIOS } from '../crawl/dry-run.js';
-import { OpfsFileStore } from '../storage/opfs-store.js';
+import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { exportBundle, directorySink } from '../bundle/exporter.js';
 import { bundleDirName, bundleIdFromDirName } from '../core/ids.js';
 
@@ -278,12 +278,31 @@ let entries = [];
 /** 当前正在看的档案。 */
 let currentBundleId = null;
 
+/**
+ * 读 OPFS 的专用 Worker。
+ *
+ * 窗口里读不了 OPFS——`createSyncAccessHandle()` 只在 Worker 里可用。而选
+ * 目录、往用户盘上写又只有窗口能做。两边的限制恰好互斥，所以档案页必然是
+ * 跨这条边界的：Worker 读、窗口写，中间按块传。
+ *
+ * @type {Worker | null}
+ */
+let opfsWorker = null;
+function getOpfsWorker() {
+  if (!opfsWorker) {
+    opfsWorker = new Worker(chrome.runtime.getURL('src/storage/opfs-worker.js'), {
+      type: 'module',
+    });
+  }
+  return opfsWorker;
+}
+
 async function loadArchive() {
   // 抓取跑完之后 checkpoint 与指针都不再指向那份档案——所以不能只看状态，
   // 得直接去 OPFS 里数目录。否则「跑完了」恰好等于「再也导不出来」。
   let dirs = [];
   try {
-    dirs = await OpfsFileStore.listBundleDirs();
+    dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
   } catch (e) {
     $('archive-summary').className = 'card err';
     $('archive-summary').textContent = `读不出存储：${e.message}`;
@@ -346,7 +365,7 @@ async function openBundle(bundleId) {
   $('verify-result').replaceChildren();
 
   try {
-    const store = await OpfsFileStore.open(bundleDirName(bundleId));
+    const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(bundleId) });
     reader = new BundleReader({ store, bundleId });
     const s = await reader.summary();
     entries = await reader.index();
@@ -484,7 +503,7 @@ $('export').addEventListener('click', async () => {
     return; // 用户取消了，什么都不用说
   }
 
-  const store = await OpfsFileStore.open(bundleDirName(bundleId));
+  const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(bundleId) });
   const sink = directorySink(dir);
   const run = (overwrite) => exportBundle({
     store, sink, overwrite,
