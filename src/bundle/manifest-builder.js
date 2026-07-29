@@ -9,11 +9,12 @@
  */
 
 import { isRfc3339WithOffset } from '../core/time.js';
+import { SPEC_VERSION, ENUMERATIONS } from '../core/spec-constants.js';
 
-export const SPEC_VERSION = 'bundle/1.0';
+export { SPEC_VERSION };
 
 const STATUSES = new Set(['in_progress', 'complete', 'aborted']);
-const ENUMERATIONS = new Set(['full', 'bounded']);
+const ENUMERATION_SET = new Set(ENUMERATIONS);
 
 /**
  * coverage 里刻意不存在的字段。
@@ -98,7 +99,7 @@ export function crawlStateEntry({
   completedAt = null,
   bundleId,
 }) {
-  if (!ENUMERATIONS.has(enumeration)) {
+  if (!ENUMERATION_SET.has(enumeration)) {
     throw new Error(
       `crawl_state[${routeKey}]: enumeration 必须是 full 或 bounded，实际 ${JSON.stringify(enumeration)}。` +
         `下游据此判断有无资格推断删除，取值不明时猜错的方向是静默地把没删的当成删了。`,

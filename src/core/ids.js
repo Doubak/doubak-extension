@@ -15,8 +15,12 @@ const SEQ_PAD = 6;
 const BUNDLE_ID_RE = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$/;
 const CAPTURE_ID_RE = /^([0-9]{8}T[0-9]{6}Z-[0-9a-f]{6})#([0-9]{6,})$/;
 
+// 注意：不能写成 `export { X } from '...'`——那是纯粹的再导出，不会建立
+// 本模块内的绑定，下面的 segmentFilename 就用不到它了。
+import { SEGMENT_KINDS } from './spec-constants.js';
+
 /** 段文件前缀，表示【留存等级】而非媒体类型（SPEC §2.1）。 */
-export const SEGMENT_KINDS = /** @type {const} */ (['data', 'assets', 'catalog']);
+export { SEGMENT_KINDS };
 
 /**
  * 生成一个新的 bundle_id：UTC 紧凑时间戳 + 6 位十六进制随机。

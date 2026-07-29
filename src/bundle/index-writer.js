@@ -17,6 +17,12 @@
 
 import { EMPTY_SHA256, sha256Hex } from '../core/digest.js';
 import { isRfc3339WithOffset } from '../core/time.js';
+import {
+  VERDICTS,
+  SURFACES,
+  CAPTURE_FIDELITIES,
+  REQUIRED_INDEX_FIELDS,
+} from '../core/spec-constants.js';
 
 /**
  * 字段输出顺序。
@@ -47,29 +53,12 @@ const FIELD_ORDER = [
   'note',
 ];
 
-/** 缺一不可的字段。都属于事后无法从 WARC 重新算出来的那一类。 */
-const REQUIRED = [
-  'capture_id',
-  'warc_record_id',
-  'segment',
-  'offset',
-  'length',
-  'url',
-  'intent',
-  'route_key',
-  'surface',
-  'verdict',
-  'capture_fidelity',
-  'observed_at',
-];
-
-const VERDICTS = new Set(['ok', 'blocked', 'challenge', 'login', 'gone', 'soft404']);
-const SURFACES = new Set(['html', 'api']);
-const FIDELITIES = new Set([
-  'raw',
-  'decoded_body+observed_headers',
-  'decoded_body+filtered_headers',
-]);
+// 以下取值全部来自 spec-constants.js，那是从规范的 JSON Schema 生成的。
+// 手抄会让规范新增一个 verdict 之后，扩展继续把它当非法值拒掉而无人察觉。
+const REQUIRED = REQUIRED_INDEX_FIELDS;
+const VERDICT_SET = new Set(VERDICTS);
+const SURFACE_SET = new Set(SURFACES);
+const FIDELITY_SET = new Set(CAPTURE_FIDELITIES);
 
 /**
  * @param {Record<string, unknown>} entry
@@ -84,16 +73,16 @@ export function assertValidEntry(entry) {
     }
   }
 
-  if (!VERDICTS.has(/** @type {string} */ (entry.verdict))) {
+  if (!VERDICT_SET.has(/** @type {string} */ (entry.verdict))) {
     throw new Error(
       `未知的 verdict: ${JSON.stringify(entry.verdict)}。` +
         `这是封闭词表，拼错必须失败——判不出来的响应应当按失败处理并停下。`,
     );
   }
-  if (!SURFACES.has(/** @type {string} */ (entry.surface))) {
+  if (!SURFACE_SET.has(/** @type {string} */ (entry.surface))) {
     throw new Error(`未知的 surface: ${JSON.stringify(entry.surface)}（只能是 html 或 api）`);
   }
-  if (!FIDELITIES.has(/** @type {string} */ (entry.capture_fidelity))) {
+  if (!FIDELITY_SET.has(/** @type {string} */ (entry.capture_fidelity))) {
     throw new Error(`未知的 capture_fidelity: ${JSON.stringify(entry.capture_fidelity)}`);
   }
 

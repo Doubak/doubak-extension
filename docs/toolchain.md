@@ -106,6 +106,36 @@ test/           与 src 平行，node --test 自动发现 *.test.js
 - **这个依赖由 `spec_version` 字符串表达。** 扩展在 manifest 里写下 `"spec_version": "bundle/1.0"`，声明自己按哪一版写。这正是「显式版本化的跨仓库依赖」应有的样子。
 - **常量重复是可接受的。** 段前缀、verdict 取值这些在规范里是**冻结**的，抄一份的漂移风险接近于零，而下面的一致性测试是兜底。
 
+### 词表从 schema 生成，不手抄
+
+扩展在**写入时**校验，用的是手写的 JS 判断——浏览器里没有 JSON Schema
+校验器，也不该为此引入一个（Ajv 默认走代码生成，MV3 的 CSP 正好禁掉这条路；
+预编译模式则要引入构建步骤）。
+
+于是同一套规则有了两处编码：规范仓库的 schema，和扩展里的判断。两处编码
+必然漂移，最可能的形态是**规范新增一个 verdict 取值，而扩展继续把它当非法
+值拒掉**，且没有任何东西提醒你。
+
+项目的既定原则是「从 schema 生成代码，绝不反过来」。落实方式：
+
+```sh
+node tools/generate-spec-constants.mjs          # 生成 src/core/spec-constants.js
+node tools/generate-spec-constants.mjs --check  # 只比对
+```
+
+生成的文件**提交进仓库**，所以跑扩展和跑测试都不需要规范仓库在场——零构建
+步骤的前提不变。`test/spec-constants.test.js` 会在规范仓库可见时重新生成并
+比对，产物过期就失败。忘记重新生成会让测试红，而不是悄悄漂移。
+
+### 已知缺口：JSON Schema 这一层目前没人跑
+
+`validate.py` 的 schema 校验需要 `jsonschema` 与 `referencing`，未安装时
+它会跳过并只跑结构性检查。也就是说六份 `.schema.json` **目前不被任何自动
+化流程实际执行**——结构性检查、扩展的写入时校验、词表生成器都不经过它们。
+
+要补上这个缺口需要 CI（或本地装上 jsonschema）。在那之前，「产出通过规范
+校验器」这句话的准确含义是：**通过了结构性检查那一层**。
+
 ### 一致性测试怎么找到规范仓库
 
 `bundle/v1/validate.py` 是规范的参考校验器。写入器的最终验收标准是：
