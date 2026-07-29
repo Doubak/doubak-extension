@@ -319,3 +319,53 @@ describe('未解决条目的查询', () => {
     assert.equal(f.hasUnresolved('broadcast.timeline'), true);
   });
 });
+
+describe('判断「还有活吗」不能用 next()', () => {
+  test('hasReady 不改变任何状态', async () => {
+    // next() 会把取出的条目标成 in_flight。拿它当判断用会白白消耗一个条目，
+    // 让它永远卡在 in_flight，进而堵死整条路线——这个 bug 真的写出来过。
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a' }));
+
+    assert.equal(f.hasReady(), true);
+    assert.deepEqual(f.counts(), {
+      pending: 1, in_flight: 0, done: 0, failed: 0, awaiting_human: 0, terminal_stop: 0,
+    });
+
+    // 连查十次也不该消耗掉它
+    for (let i = 0; i < 10; i++) f.hasReady();
+    assert.equal(f.counts().pending, 1);
+    assert.ok(f.next(), '还取得出来');
+  });
+
+  test('对比：next() 确实会改状态', async () => {
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a' }));
+    f.next();
+    assert.equal(f.counts().in_flight, 1);
+    assert.equal(f.hasReady(), false, 'in_flight 的条目会挡住同路线');
+  });
+
+  test('队列空时 hasReady 为 false', () => {
+    assert.equal(new Frontier().hasReady(), false);
+  });
+
+  test('全部完成后 hasReady 为 false', () => {
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a' }));
+    f.settle(f.next(), 'ok');
+    assert.equal(f.hasReady(), false);
+  });
+
+  test('被阻塞的路线不算 ready，别的路线算', () => {
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a', routeKey: 'r1' }));
+    f.enqueue(item({ urlKey: 'b', routeKey: 'r1' }));
+    f.enqueue(item({ urlKey: 'c', routeKey: 'r2' }));
+    f.settle(f.next(), null); // r1 失败，阻塞 r1
+
+    assert.equal(f.hasReady(), true, 'r2 还能跑');
+    f.settle(f.next(), 'ok'); // 跑掉 r2
+    assert.equal(f.hasReady(), false, 'r1 被堵住，没别的可跑了');
+  });
+});

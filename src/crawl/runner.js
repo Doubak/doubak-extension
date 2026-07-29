@@ -267,7 +267,9 @@ export class CrawlRunner {
     const stopped = frontier.stopped;
     await this._saveCheckpoint(stopped ? frontier.stopReason : CRASH_SENTINEL_REASON);
 
-    const done = stopped || frontier.next() === null;
+    // 用 hasReady() 而不是 next()：后者会把条目标成 in_flight，拿它当判断用
+    // 会白白消耗一个条目并让它永远卡住，进而堵死整条路线。
+    const done = stopped || !frontier.hasReady();
     this._emit({ type: 'batch', ...r, done });
     return { ...r, done };
   }

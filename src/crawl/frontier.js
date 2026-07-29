@@ -361,6 +361,24 @@ export class Frontier {
     return this._stopReason;
   }
 
+  /**
+   * 还有没有可以立即抓的条目。
+   *
+   * **不改变任何状态**——这是与 `next()` 的关键区别。`next()` 会把取出的条目
+   * 标成 in_flight，拿它当「还有活吗」的判断用，会白白消耗掉一个条目并让它
+   * 永远卡在 in_flight，进而**堵死整条路线**。
+   */
+  hasReady() {
+    /** @type {Set<string>} */
+    const blocked = new Set();
+    for (const it of this._items) {
+      if (it.state === 'failed' || it.state === 'awaiting_human' || it.state === 'in_flight') {
+        blocked.add(it.routeKey);
+      }
+    }
+    return this._items.some((it) => it.state === 'pending' && !blocked.has(it.routeKey));
+  }
+
   /** 某条路线上还有没有未解决的条目（失败、等待人工、待抓、在途）。 */
   hasUnresolved(routeKey) {
     return this._items.some(
