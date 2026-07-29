@@ -52,6 +52,8 @@ export class BundleWriter {
    * @param {number} [opts.maxSegmentBytes]
    * @param {() => Date} [opts.now]
    * @param {number} [opts.startSeq] 崩溃恢复时传入「已用到的最大序号」
+   * @param {Record<string, {segmentNo: number, segments: object[]}>} [opts.resume]
+   *   崩溃恢复返回的段状态，按留存等级分组。见 recovery.js
    */
   constructor({
     store,
@@ -63,6 +65,7 @@ export class BundleWriter {
     maxSegmentBytes = DEFAULT_MAX_SEGMENT_BYTES,
     now,
     startSeq = 0,
+    resume,
   }) {
     if (!store) throw new Error('缺少 store');
 
@@ -83,6 +86,7 @@ export class BundleWriter {
           software: `${producer.name}/${producer.version}`,
           maxBytes: maxSegmentBytes,
           now: this._now,
+          resume: resume?.[kind],
         }),
       );
     }

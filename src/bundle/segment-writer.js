@@ -45,8 +45,11 @@ export class SegmentWriter {
    * @param {string} opts.software  写进 warcinfo，如 `doubak-extension/0.0.1`
    * @param {number} [opts.maxBytes]
    * @param {() => Date} [opts.now]  便于测试注入
+   * @param {{segmentNo: number, segments: Array<{filename: string, recordCount: number, firstCaptureId: string, lastCaptureId: string}>}} [opts.resume]
+   *   崩溃恢复后续写用。不给这个，写入器会从第 1 段重新开，而那个文件已经
+   *   存在——它会（正确地）拒绝覆盖，于是恢复完了却写不下去。
    */
-  constructor({ store, bundleId, kind, software, maxBytes = DEFAULT_MAX_SEGMENT_BYTES, now }) {
+  constructor({ store, bundleId, kind, software, maxBytes = DEFAULT_MAX_SEGMENT_BYTES, now, resume }) {
     if (!store) throw new Error('缺少 store');
     if (!Number.isInteger(maxBytes) || maxBytes < 1) {
       throw new Error(`maxBytes 必须是正整数: ${maxBytes}`);
@@ -60,9 +63,12 @@ export class SegmentWriter {
     this._now = now ?? (() => new Date());
 
     /** 当前段序号；0 表示还没开过段。 */
-    this._segmentNo = 0;
+    this._segmentNo = resume?.segmentNo ?? 0;
     /** @type {Map<string, {filename: string, recordCount: number, firstCaptureId: string|null, lastCaptureId: string|null}>} */
     this._segments = new Map();
+    for (const meta of resume?.segments ?? []) {
+      this._segments.set(meta.filename, { ...meta });
+    }
 
     // TODO(debug): 开发期计数，确认轮转真的发生了。发布前删。
     this._debug = { rotations: 0, recordsWritten: 0 };
