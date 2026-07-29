@@ -123,6 +123,70 @@ async function probeEnvironment() {
   $('env').replaceChildren(table);
 }
 
+/**
+ * 后台连通性：确认 service worker 醒着、能应答、持久化真的能用。
+ *
+ * 这是 Node 里测不到的一环——RunStore 在测试里用的是内存实现，这里用的是
+ * 真的 chrome.storage + OPFS。
+ */
+async function probeBackground() {
+  const chrome = globalThis.chrome;
+  if (!chrome?.runtime?.sendMessage) {
+    addNote('不在扩展环境里，跳过后台连通性检查（请从 chrome-extension:// 打开本页）');
+    return;
+  }
+
+  const send = (msg) =>
+    new Promise((resolve) => {
+      chrome.runtime.sendMessage(msg, (r) =>
+        resolve(chrome.runtime.lastError ? { ok: false, error: chrome.runtime.lastError.message } : r),
+      );
+    });
+
+  const G = '后台 service worker';
+
+  const status = await send({ type: 'status' });
+  addCase({
+    group: G,
+    name: 'service worker 能被唤醒并应答',
+    ok: !!status?.ok,
+    error: status?.error,
+  });
+
+  if (status?.ok) {
+    addNote(
+      `当前状态：${status.running ? '抓取中' : '空闲'} · ` +
+        `${status.checkpoint ? `有未完成的抓取（${status.checkpoint.pause_reason}）` : '没有未完成的抓取'}`,
+    );
+  }
+
+  const tick = await send({ type: 'tick' });
+  addCase({
+    group: G,
+    name: '心跳可以手动触发（tick 幂等）',
+    ok: !!tick?.ok,
+    error: tick?.error,
+  });
+  if (tick?.ok) {
+    addNote(`tick 结果：${tick.result.acted ? '已恢复' : '未恢复'}——${tick.result.decision.reason}`);
+  }
+
+  // 闹钟是唯一一个「worker 死了它还在」的东西，值得单独确认
+  if (chrome.alarms?.getAll) {
+    const alarms = await chrome.alarms.getAll();
+    addCase({
+      group: G,
+      name: 'chrome.alarms 可用（自恢复靠它）',
+      ok: true,
+    });
+    addNote(
+      alarms.length
+        ? `当前闹钟：${alarms.map((a) => `${a.name}（每 ${a.periodInMinutes} 分钟）`).join('、')}`
+        : '当前没有闹钟——没有未完成的抓取时这是正常的',
+    );
+  }
+}
+
 $('run').addEventListener('click', async () => {
   $('run').disabled = true;
   results.replaceChildren();
@@ -130,6 +194,7 @@ $('run').addEventListener('click', async () => {
   passed = failed = 0;
 
   await probeEnvironment();
+  await probeBackground();
 
   const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
   worker.onmessage = (e) => {
