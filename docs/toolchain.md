@@ -192,3 +192,8 @@ submodule：生成物里带一个 `SPEC_SOURCE_DIGEST`，是实际读取的那�
 找不到就**显示原因并跳过**，不静默变绿。
 
 将来若要在 CI 里强制这项检查，比起加 submodule，更简单的做法是让 CI 把两个仓库都检出——submodule 会给每个 clone 都添上麻烦，而收益只落在一个测试上。
+
+## 相关文档
+
+- `docs/ui.md` —— 界面设计与文案原则
+- `docs/permissions.md` —— 权限审计：声明了什么、刻意不要什么、途中丢失怎么办

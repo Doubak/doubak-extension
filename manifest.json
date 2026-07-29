@@ -11,8 +11,7 @@
   "permissions": [
     "storage",
     "unlimitedStorage",
-    "alarms",
-    "tabs"
+    "alarms"
   ],
   "host_permissions": [
     "https://*.douban.com/*",
@@ -21,16 +20,5 @@
   "action": {
     "default_title": "豆备 Doubak",
     "default_popup": "src/ui/popup.html"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "selftest/*",
-        "src/ui/*"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ]
+  }
 }

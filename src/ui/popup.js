@@ -59,8 +59,20 @@ const PAUSE_COPY = {
   quota: {
     cls: 'err',
     title: '存储空间不足',
-    why: '需要先导出或清理再继续。',
+    why: '需要先导出或清理再继续。已经抓到的都还在。',
     action: null,
+  },
+  host_permission_lost: {
+    cls: 'err',
+    title: '豆备没有访问豆瓣的权限了',
+    why: '请在浏览器的扩展设置里把站点访问权限改回「在所有网站上」。已经抓到的都还在。',
+    action: null,
+  },
+  write_failed: {
+    cls: 'err',
+    title: '写入档案时出错',
+    why: '已经停下来了，以免损坏已有数据。继续之前会先自动修复段文件尾部。',
+    action: '我知道了，继续',
   },
   user_paused: { cls: 'idle', title: '已暂停', why: '进度都在，随时可以继续。', action: '继续' },
   // 这一条应当安静，不该吓人

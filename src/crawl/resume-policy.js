@@ -65,10 +65,42 @@ const POLICY = {
     userVisible: true,
   },
 
+  /** 账号变了。一个档案只能属于一个账号，不存在「继续」这种选项。 */
+  account_switched: {
+    autoResume: false,
+    reason: '抓取途中账号变了。一个档案只能属于一个账号',
+    userVisible: true,
+  },
+
+  /**
+   * 站点权限被用户收回。
+   *
+   * 不能自动恢复，原因和风控不同：这里**根本不是等一等就好**。权限得由用户
+   * 在扩展设置里改回来，而重新授权必须发生在用户手势里，后台自己发起不了。
+   */
+  host_permission_lost: {
+    autoResume: false,
+    reason: '豆备已经没有访问豆瓣的权限了，需要你在扩展设置里重新授权',
+    userVisible: true,
+  },
+
   /** 存储空间不足。自动继续只会再撞一次。 */
   quota: {
     autoResume: false,
     reason: '存储空间不足，需要先导出或清理',
+    userVisible: true,
+  },
+
+  /**
+   * 写档案失败，原因不是空间不足。
+   *
+   * 不自动恢复的理由和风控不同：这里**不知道**上一次写留下了什么。段尾可能
+   * 有半条撕裂的记录，得先跑一次崩溃恢复把它切掉。自动接着写只会继续往一个
+   * 状态不明的文件上追加。
+   */
+  write_failed: {
+    autoResume: false,
+    reason: '写入档案时出错，抓取已停下以免损坏已有数据',
     userVisible: true,
   },
 };

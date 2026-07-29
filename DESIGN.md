@@ -336,8 +336,8 @@ MV3 的实际限制：`chrome.storage.local` 默认 **10 MB**（Chrome 113 及�
 | ID | 功能 | 优先级 | 说明 |
 |---|---|---|---|
 | F-08a | 声明 `unlimitedStorage` | P0 | 不声明的话几百 MB 的档案根本放不下。 |
-| F-08b | 申请持久化存储 | P0 | `navigator.storage.persist()`。不申请的话浏览器在磁盘压力下**可能直接清掉**几小时的抓取成果。UI 要显示是否已获批。 |
-| F-08c | 开抓前空间预检 | P0 | `navigator.storage.estimate()` 比对预估体积，空间不足先警告再开工。 |
+| F-08b | 申请持久化存储 | P0（已澄清） | `navigator.storage.persist()`。不申请的话浏览器在磁盘压力下**可能直接清掉**几小时的抓取成果。UI 要显示是否已获批。 |
+| F-08c | 开抓前空间预检 | P0 | ✅ `navigator.storage.estimate()` 比对**含目录页**的预估体量（800 MB × 1.5 余量）。查不了时返回 `null` 并如实显示「查不了」——不当成「够用」。 |
 | F-08d | 存储管理页 | P0 | 独立页面：总用量/剩余、按 bundle 列出体积与状态（进行中/已完成未导出/已导出）。 |
 | F-08e | 导出 bundle | P0 | ✅ File System Access API 选目录，**分块流式**写出（`createWritable()`，不经 JS 堆）。目录非空默认拒绝——用户在选择器里随手点中的可能是文档目录，而覆盖没有回收站。 |
 | F-08f | 导入 bundle | P1 | 读回旧 bundle 以恢复**抓取存档信息**与 checkpoint，用于增量抓取或换机器。 |

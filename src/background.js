@@ -19,6 +19,7 @@
  * | `runtime.onStartup` | 浏览器启动 |
  * | `runtime.onInstalled` | 安装或更新 |
  * | `runtime.onMessage` | 界面点了按钮 |
+ * | `permissions.onRemoved` | 用户在扩展设置里收回了站点访问权限 |
  *
  * 闹钟是其中唯一一个「我们死了它还在」的东西——这正是自恢复而不是手动重触发
  * 的关键。
@@ -54,6 +55,8 @@ import { CrawlRunner } from './crawl/runner.js';
 import { driveWithinBudget } from './crawl/driver.js';
 import { ChromeKvStore, MemoryKvStore } from './storage/kv-store.js';
 import { dryRunFetch } from './crawl/dry-run.js';
+import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
+import { preflightStorage } from './storage/quota.js';
 import { OpfsFileStore } from './storage/opfs-store.js';
 
 // TODO(debug): 开发期日志。发布前把 debugLog 与所有调用一起删掉。
@@ -262,6 +265,30 @@ async function notify(message) {
   }
 }
 
+/**
+ * 用户收回了站点访问权限。
+ *
+ * Chrome 允许在任何时刻把站点访问改成「点击时」，不需要重装、也不会先问我们。
+ * 一场几小时的抓取跨过这种改动是完全现实的。
+ *
+ * 必须在这里**主动停下**，而不是等下一次 fetch 失败：那一次失败抛的是
+ * `TypeError`，和网络故障长得一模一样。传输层里有兜底判断（见
+ * crawl/permissions.js），但兜底意味着已经白发了一次请求、白等了一轮重试。
+ */
+globalThis.chrome?.permissions?.onRemoved?.addListener(async (removed) => {
+  debugLog('权限被收回', JSON.stringify(removed));
+  try {
+    const r = await checkHostAccess();
+    if (r && !r.granted && getRunner().active) {
+      await getRunner().pause();
+      await getSupervisor().pauseRun(HOST_PERMISSION_LOST);
+      await notify('没有访问豆瓣的权限了，请在扩展设置里重新授权');
+    }
+  } catch (e) {
+    debugLog('处理权限收回时出错', e);
+  }
+});
+
 /** 心跳。这是自恢复的主路径。 */
 globalThis.chrome?.alarms?.onAlarm?.addListener(async (alarm) => {
   if (alarm.name !== ALARM_NAME) return;
@@ -315,9 +342,28 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           });
           break;
         }
+        case 'preflight': {
+          // 界面在开抓前问一次。两项都可能返回 null——那是「查不了」，不是
+          // 「没问题」，界面必须照实显示。
+          sendResponse({
+            ok: true,
+            permissions: await checkHostAccess(),
+            storage: await preflightStorage(),
+          });
+          break;
+        }
         case 'start': {
           const r = getRunner();
           if (r.active) throw new Error('已有抓取在进行中');
+
+          // 权限没了就别开始——第一页就会失败，而失败的样子像网络问题。
+          const perm = await checkHostAccess();
+          if (perm && !perm.granted) {
+            throw new Error(
+              `豆备没有访问 ${perm.missing.join('、')} 的权限。` +
+                '请在浏览器的扩展设置里把站点访问权限改回「在所有网站上」。',
+            );
+          }
           // 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
           const { username } = await r.discoverUsername();
           const started = await r.start({ username, ...scopeToOptions(msg?.scope) });

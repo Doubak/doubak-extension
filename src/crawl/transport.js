@@ -28,6 +28,7 @@ import {
   DECODED_OBSERVED,
 } from './fidelity.js';
 import { fetchWithTimeout, DEFAULT_TIMEOUT_MS } from './errors.js';
+import { permissionErrorIfLost } from './permissions.js';
 
 /** 豆瓣自家的短链域名。只记短链等于在档案里留一个死指针。 */
 const SHORTLINK_HOSTS = new Set(['douc.cc']);
@@ -82,6 +83,7 @@ export class Transport {
    * @param {number} [opts.timeoutMs]
    * @param {AbortSignal} [opts.signal]  用户暂停/关闭时用
    * @param {() => number} [opts.now]
+   * @param {any} [opts.permissions]  注入 chrome.permissions，测试用
    */
   constructor({
     gate,
@@ -91,9 +93,12 @@ export class Transport {
     timeoutMs = DEFAULT_TIMEOUT_MS,
     signal,
     now = () => Date.now(),
+    permissions,
   }) {
     if (!gate) throw new Error('缺少 gate —— 并发与节奏必须经过闸门');
     this._gate = gate;
+    /** 注入用；默认走 chrome.permissions。 */
+    this._permissions = permissions;
     this._fetch = fetchImpl ?? globalThis.fetch;
     this._getCk = getCk ?? (async () => null);
     this._fidelity = canObserveHeaders ? DECODED_OBSERVED : DECODED_FILTERED;
@@ -139,20 +144,33 @@ export class Transport {
       // 必须有超时：挂住的连接会永远卡住队列，而监管层只会看到「还在跑」，
       // 永远不来干预——那是一种静默的失败，比响亮地报错糟糕得多。
       const hopUrl = currentUrl;
-      const { result } = await this._gate.run(() =>
-        fetchWithTimeout(
-          this._fetch,
-          hopUrl,
-          {
-            // 不伪造身份：不设 User-Agent，交给浏览器
-            headers: referer ? { 'X-Override-Referer': referer } : {},
-            credentials: 'include',
-            redirect: followRedirects ? 'manual' : 'follow',
-          },
-          { timeoutMs: this._timeoutMs, externalSignal: this._signal },
-        ),
-      );
-      response = result;
+      /** @type {{result: Response}} */
+      let hopResult;
+      try {
+        hopResult = await this._gate.run(() =>
+          fetchWithTimeout(
+            this._fetch,
+            hopUrl,
+            {
+              // 不伪造身份：不设 User-Agent，交给浏览器
+              headers: referer ? { 'X-Override-Referer': referer } : {},
+              credentials: 'include',
+              redirect: followRedirects ? 'manual' : 'follow',
+            },
+            { timeoutMs: this._timeoutMs, externalSignal: this._signal },
+          ),
+        );
+      } catch (err) {
+        // 站点权限被撤之后，fetch 抛的是 `TypeError`——**和网络故障一模一样**。
+        // 不在这里分开，它就会被判成可重试的网络错误，然后一遍遍重试一个永远
+        // 不会自己好的问题。用户看到的是「网络怎么这么差」。
+        //
+        // 只在失败之后问一次，不在每次请求前问：每页都查一遍权限，是给一件
+        // 极少发生的事付常态开销。
+        const permErr = await permissionErrorIfLost({ permissions: this._permissions });
+        throw permErr ?? err;
+      }
+      response = hopResult.result;
 
       const location = headerOf(response, 'location');
       const isRedirect = response.status >= 300 && response.status < 400 && location;

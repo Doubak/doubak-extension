@@ -33,6 +33,8 @@ import {
 } from './classifier.js';
 import { SessionError } from './session.js';
 import { TransportError } from './errors.js';
+import { PermissionError } from './permissions.js';
+import { classifyWriteError } from '../storage/quota.js';
 import { RouteState } from './route-state.js';
 import { urlKey } from '../core/urlkey.js';
 import { nowRfc3339 } from '../core/time.js';
@@ -200,23 +202,38 @@ export class CrawlLoop {
     //
     // 封锁页与登录页必须进档案：存下来才能在不重新抓取的前提下重训分类器，
     // 而真实旧档案里恰恰是「存了但没标注」造成了静默的数据损坏。
-    const written = await this._writer.writeCapture({
-      url: res.requestedUrl,
-      finalUrl: res.finalUrl !== res.requestedUrl ? res.finalUrl : undefined,
-      intent: route.intent ?? item.intent,
-      routeKey: item.routeKey,
-      surface: route.surface ?? 'html',
-      verdict: cls.verdict ?? 'blocked', // 判不出来的也要留证，但不能标成 ok
-      captureFidelity: this._transport.fidelity,
-      httpStatus: res.status,
-      headers: res.headers,
-      contentType: res.headers.find(([k]) => k.toLowerCase() === 'content-type')?.[1],
-      body: res.body,
-      kind: route.kind ?? 'data',
-      parentCaptureId: item.enqueuedBy ?? this._lastCapture.get(item.routeKey) ?? null,
-      cursor: item.cursor ?? null,
-      note: cls.verdict === null ? `判不出来：${cls.reasons.join('；')}` : undefined,
-    });
+    // 写失败必须让**整场**抓取停下，不是只标这条路线失败然后继续。
+    //
+    // 写入器的契约是「每页都落盘」，这条契约一破，索引里的偏移量、连续性
+    // 证明、captured 计数全都建立在假前提上。而后续的写大概率同样失败，每
+    // 一次都可能在段尾留下撕裂的半条记录——停下来只需一次崩溃恢复就能修好，
+    // 接着写下去是一路撕裂到用户放弃。
+    let written;
+    try {
+      written = await this._writer.writeCapture({
+        url: res.requestedUrl,
+        finalUrl: res.finalUrl !== res.requestedUrl ? res.finalUrl : undefined,
+        intent: route.intent ?? item.intent,
+        routeKey: item.routeKey,
+        surface: route.surface ?? 'html',
+        verdict: cls.verdict ?? 'blocked', // 判不出来的也要留证，但不能标成 ok
+        captureFidelity: this._transport.fidelity,
+        httpStatus: res.status,
+        headers: res.headers,
+        contentType: res.headers.find(([k]) => k.toLowerCase() === 'content-type')?.[1],
+        body: res.body,
+        kind: route.kind ?? 'data',
+        parentCaptureId: item.enqueuedBy ?? this._lastCapture.get(item.routeKey) ?? null,
+        cursor: item.cursor ?? null,
+        note: cls.verdict === null ? `判不出来：${cls.reasons.join('；')}` : undefined,
+      });
+    } catch (err) {
+      const se = classifyWriteError(err);
+      this.stateFor(item.routeKey).markStopped(se.reason);
+      this._frontier.stop(se.reason);
+      this._emit({ type: 'stopped', reason: se.reason, message: se.message });
+      return 'stop';
+    }
     this._lastCapture.set(item.routeKey, written.captureId);
 
     this._emit({
@@ -294,6 +311,15 @@ export class CrawlLoop {
     if (te?.kind === 'aborted') {
       this._frontier.stop('user_paused');
       this._emit({ type: 'stopped', reason: 'user_paused' });
+      return 'stop';
+    }
+
+    // 站点权限被撤：**停止条件**，不是可重试错误。和会话失效同一档——
+    // 重试一个永远不会自己好的问题，只会把几小时耗成一个查不出原因的失败。
+    if (err instanceof PermissionError) {
+      this.stateFor(item.routeKey).markStopped(err.reason);
+      this._frontier.stop(err.reason);
+      this._emit({ type: 'stopped', reason: err.reason, message: err.message });
       return 'stop';
     }
 
