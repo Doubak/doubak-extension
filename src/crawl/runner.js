@@ -25,7 +25,7 @@
 import { BundleWriter } from '../bundle/bundle-writer.js';
 import { CrawlLoop } from './loop.js';
 import { Frontier } from './frontier.js';
-import { SessionGuard } from './session.js';
+import { SessionGuard, extractAccountHints, detectLoginState } from './session.js';
 import { Pacer } from './pacing.js';
 import { Transport } from './transport.js';
 import { RequestGate } from './pacing.js';
@@ -71,8 +71,20 @@ export class CrawlRunner {
    * 自动发现当前登录账号的用户名。
    *
    * 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
-   * `https://www.douban.com/mine/` 会跳转到 `/people/<username>/`，
-   * 而传输层本来就跟随跳转并记下最终 URL。
+   * `https://www.douban.com/mine/` 会跳转到 `/people/<username>/`。
+   *
+   * ## 先看页面内容，再看最终 URL
+   *
+   * 顺序是刻意的。最终 URL 靠的是跳转被正确跟随，而那件事**曾经悄悄失效过**：
+   * `redirect: 'manual'` 在浏览器里返回 opaqueredirect（读不到 Location），
+   * 于是最终 URL 停在跳转前的 `/mine/`，解析不出用户名，报出来的却是
+   * 「请先登录豆瓣」——把人指向完全错误的方向。
+   *
+   * 页面**内容**里的个人主页链接不依赖任何跳转语义，是更硬的证据。所以以它
+   * 为主，URL 只作补充。
+   *
+   * 还有一层好处：内容解析能顺带区分「跳转没成」与「真的没登录」，而这两件事
+   * 的下一步动作完全不同。
    *
    * @returns {Promise<{username: string, finalUrl: string}>}
    */
@@ -82,15 +94,36 @@ export class CrawlRunner {
     const transport = new Transport({ gate, fetchImpl: this._fetchImpl });
 
     const res = await transport.fetch('https://www.douban.com/mine/');
+
+    // ① 页面内容里的 /people/<name>/ 链接。不依赖跳转语义。
+    const hints = extractAccountHints(res.bodyText);
+    if (hints.username) return { username: hints.username, finalUrl: res.finalUrl };
+
+    // ② 退回到最终 URL。
     const m = /\/people\/([A-Za-z0-9_-]+)\/?/.exec(res.finalUrl);
-    if (!m || m[1] === 'mine') {
-      // 跳转没落到个人主页上——最可能的原因是没登录。
+    if (m && m[1] !== 'mine') return { username: m[1], finalUrl: res.finalUrl };
+
+    // 两条都没成。三种情况的下一步动作完全不同，必须分开说——混成一句话会让
+    // 用户去做没用的事（比如对着一个改版问题反复重新登录）。
+    const state = detectLoginState(res.bodyText);
+    if (state === 'logged_out') {
       throw new Error(
-        '无法确定当前账号。请先在浏览器里登录豆瓣——未登录不仅看不到私密条目，' +
+        '当前未登录豆瓣。请先在浏览器里登录再开始——未登录不仅看不到私密条目，' +
           '请求频率上限也更低。',
       );
     }
-    return { username: m[1], finalUrl: res.finalUrl };
+    if (state !== 'logged_in') {
+      throw new Error(
+        `无法确定登录状态：${res.finalUrl} 返回的页面认不出来（HTTP ${res.status}，` +
+          `${res.bodyText.length} 字节）。可能是登录页或风控页。` +
+          '请先在浏览器里打开豆瓣确认能正常访问。',
+      );
+    }
+    throw new Error(
+      `已登录，但没能从 ${res.finalUrl} 认出用户名（HTTP ${res.status}，` +
+        `${res.bodyText.length} 字节）。豆瓣可能改版了——` +
+        '可以打开调试页跑一次演练，确认其余环节是否正常。',
+    );
   }
 
   get active() {

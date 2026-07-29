@@ -341,11 +341,14 @@ describe('恢复要能自足 —— 指针里带够信息', () => {
 });
 
 describe('自动发现账号，不让用户手输用户名', () => {
-  test('从 /mine/ 的跳转结果里取用户名', async () => {
+  test('从 /mine/ 落地页的内容里取用户名', async () => {
     // 用户已经登录了，浏览器里就有答案，不该再问他一遍。
-    const { runner } = harness(() => PROFILE);
-    // 让 /mine/ 跳到个人主页
-    const orig = runner._fetchImpl;
+    //
+    // 以**页面内容**为主而不是最终 URL：URL 靠的是跳转被正确跟随，而那件事
+    // 曾经悄悄失效过（redirect:'manual' 在浏览器里给 opaqueredirect，读不到
+    // Location，最终 URL 停在跳转前的 /mine/，报出来的却是「请先登录」）。
+    const page = PROFILE.replace(/people\/example/g, 'people/mewcatcher');
+    const { runner } = harness(() => page);
     runner._fetchImpl = async (url) => {
       if (url.endsWith('/mine/')) {
         return {
@@ -354,8 +357,30 @@ describe('自动发现账号，不让用户手输用户名', () => {
           arrayBuffer: async () => new ArrayBuffer(0),
         };
       }
-      return orig(url);
+      const b = new TextEncoder().encode(page);
+      return {
+        status: 200, url,
+        headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
+        arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength),
+      };
     };
+
+    const { username } = await runner.discoverUsername();
+    assert.equal(username, 'mewcatcher');
+  });
+
+  test('跳转没跟上（最终 URL 还停在 /mine/）也能从内容里认出来', async () => {
+    // 这正是那个 bug 的形状：跳转没被跟随，最终 URL 是 /mine/。只要落地页的
+    // 内容是对的，就不该失败——更不该报「请先登录」。
+    const page = PROFILE.replace(/people\/example/g, 'people/mewcatcher');
+    const { runner } = harness(() => page);
+    const b = new TextEncoder().encode(page);
+    runner._fetchImpl = async () => ({
+      status: 200,
+      url: 'https://www.douban.com/mine/', // 没跟上，停在跳转前
+      headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
+      arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength),
+    });
 
     const { username } = await runner.discoverUsername();
     assert.equal(username, 'mewcatcher');

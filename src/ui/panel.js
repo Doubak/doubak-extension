@@ -134,9 +134,17 @@ const PAUSE_COPY = {
   crash: ['run', '正在从断点恢复', '上次被意外中断，没有数据丢失。', null],
 };
 
-/** @param {string} cls @param {string} title @param {string} [why] */
+/**
+ * 状态卡片。**内容没变就一个字节都不动 DOM**——它每 2 秒被调一次。
+ *
+ * @param {string} cls @param {string} title @param {string} [why]
+ */
 function setState(cls, title, why = '') {
   const el = $('state');
+  const key = `${cls}\u0000${title}\u0000${why}`;
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
+
   el.className = `card ${cls}`;
   el.replaceChildren();
   const b = document.createElement('b');
@@ -145,9 +153,21 @@ function setState(cls, title, why = '') {
   if (why) el.append(document.createTextNode(why));
 }
 
-/** @param {Array<[string, () => void]>} buttons */
+/**
+ * 操作按钮。标签没变就不重建——重建会打断按下态，也会让焦点丢掉。
+ *
+ * @param {Array<[string, () => void]>} buttons
+ */
 function setActions(buttons) {
   const el = $('actions');
+  const key = buttons.map(([l]) => l).join('\u0000');
+  if (el.dataset.key === key) {
+    // 标签一样，但回调可能捕获了新的状态，所以只换 onclick。
+    const bs = el.querySelectorAll('button');
+    buttons.forEach(([, fn], i) => { if (bs[i]) bs[i].onclick = fn; });
+    return;
+  }
+  el.dataset.key = key;
   el.replaceChildren();
   for (const [label, fn] of buttons) {
     const b = document.createElement('button');
@@ -170,6 +190,14 @@ async function refresh() {
     return;
   }
 
+  if (s.runner?.active || s.checkpoint) {
+    // 离开空闲态：把预检结果收掉，下次回到空闲再查一次（那时空间已经变了）。
+    if (preflightShown) {
+      preflightShown = false;
+      $('preflight').replaceChildren();
+    }
+  }
+
   if (s.runner?.active) {
     const r = s.runner;
     setState('run', '正在抓取', `档案 ${r.bundleId} · 当前间隔 ${(r.intervalMs / 1000).toFixed(1)} 秒` +
@@ -189,7 +217,12 @@ async function refresh() {
   }
 
   setState('idle', '没有进行中的抓取', '请求全部来自你自己的浏览器和 IP。cookie 不会发送到任何地方。');
-  void showPreflight();
+  // 只在**进入**空闲态时查一次。权限和剩余空间不会每两秒变一次，而每两秒重画
+  // 一次这块，就是用户看到的那种闪动。
+  if (!preflightShown) {
+    preflightShown = true;
+    void showPreflight();
+  }
   setActions([['开始抓取', async () => {
     setState('run', '正在确认账号…');
     const r = await send({ type: 'start' });
@@ -199,72 +232,107 @@ async function refresh() {
   renderRoutes([]);
 }
 
-/** @param {Array<object>} routes */
+/**
+ * 各路线进度。
+ *
+ * ## 为什么不能每次都重建整张表
+ *
+ * 这个函数每 2 秒被调一次。`replaceChildren()` 会把所有 `<tr>` 扔掉重建，于是
+ * 每两秒：文字选中被清掉、滚动位置可能跳、浏览器重排整张表——看上去就是在
+ * 「闪」。而实际变化通常只有一两个数字。
+ *
+ * 所以按 routeKey 复用行，只写**值真的变了**的那个单元格。连
+ * `textContent` 都不无谓赋值：赋一次相同的值也会让浏览器认为节点脏了。
+ *
+ * 这不只是观感问题。一个持续几小时的界面上，闪动会让人不敢去读它，而这一页
+ * 恰恰是抓取期间唯一的观察窗口。
+ *
+ * @param {Array<object>} routes
+ */
 function renderRoutes(routes) {
   const el = $('routes');
-  el.replaceChildren();
+
   if (!routes.length) {
-    el.className = 'muted';
-    el.textContent = '还没有开始';
+    // 空态与表格是两种结构，这时才需要真的重建。
+    if (el.dataset.mode !== 'empty') {
+      el.dataset.mode = 'empty';
+      el.className = 'muted';
+      el.replaceChildren(document.createTextNode('还没有开始'));
+      routeRows.clear();
+    }
     return;
   }
-  el.className = '';
-  el.append(
-    table(
-      ['路线', { text: '已抓', num: true }, '已回溯到', '连续性'],
-      routes.map((r) => [
-        routeName(r.routeKey),
-        { text: String(r.captured), num: true },
-        // 进度用「已回溯到某日」而不是百分比——那个是真的
-        r.highWater ? r.highWater.slice(0, 10) : { text: '—', muted: true },
-        r.contiguous ? '✔ 已验证' : { text: '进行中', muted: true },
-      ]),
-    ),
-  );
+
+  if (el.dataset.mode !== 'table') {
+    el.dataset.mode = 'table';
+    el.className = '';
+    const tbl = document.createElement('table');
+    tbl.id = 'routes-table';
+    const head = document.createElement('tr');
+    for (const h of ['路线', '已抓', '已回溯到', '连续性']) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      if (h === '已抓') th.className = 'num';
+      head.append(th);
+    }
+    tbl.append(head);
+    el.replaceChildren(tbl);
+    routeRows.clear();
+  }
+
+  const tbl = el.querySelector('table');
+  const seen = new Set();
+
+  for (const r of routes) {
+    seen.add(r.routeKey);
+    let row = routeRows.get(r.routeKey);
+    if (!row) {
+      const tr = document.createElement('tr');
+      const cells = [];
+      for (let i = 0; i < 4; i++) {
+        const td = document.createElement('td');
+        if (i === 1) td.className = 'num';
+        tr.append(td);
+        cells.push(td);
+      }
+      cells[0].textContent = routeName(r.routeKey); // 名字不会变，只写一次
+      tbl.append(tr);
+      row = { tr, cells };
+      routeRows.set(r.routeKey, row);
+    }
+
+    setCell(row.cells[1], String(r.captured));
+    // 进度用「已回溯到某日」而不是百分比——豆瓣的计数不可信，拿它当分母会
+    // 给出一个看起来特别可信的假数字。
+    setCell(row.cells[2], r.highWater ? r.highWater.slice(0, 10) : '—', !r.highWater);
+    setCell(row.cells[3], r.contiguous ? '✔ 已验证' : '进行中', !r.contiguous);
+  }
+
+  // 路线只会新增不会消失，但恢复到另一次抓取时整套 key 会换。
+  for (const [key, row] of routeRows) {
+    if (!seen.has(key)) {
+      row.tr.remove();
+      routeRows.delete(key);
+    }
+  }
 }
 
+/** @type {Map<string, {tr: HTMLElement, cells: HTMLElement[]}>} */
+const routeRows = new Map();
+
 /**
- * 开抓前的预检：权限够不够、空间够不够。
+ * 只在值真的变了时写 DOM。
  *
- * 空间要按**含目录页**的体量估。只按列表页估会给出一个乐观得离谱的数字，
- * 然后用户在抓了几小时之后撞墙——预检的全部意义就是把那次撞墙提前到开工前。
+ * 赋一次相同的 textContent 也会让浏览器认为节点脏了，所以这个判断不是
+ * 微优化——它就是「不闪」的实现方式。
  *
- * 两项都可能返回 null，那是「查不了」而不是「没问题」，界面照实说。
+ * @param {HTMLElement} td @param {string} text @param {boolean} [muted]
  */
-async function showPreflight() {
-  const el = $('routes');
-  const r = await send({ type: 'preflight' });
-  if (!r?.ok) return;
-
-  /** @type {Array<[string, string]>} */
-  const rows = [];
-  if (r.permissions === null) rows.push(['站点权限', '查不了（浏览器不支持权限查询）']);
-  else if (r.permissions.granted) rows.push(['站点权限', '✔ 可以访问豆瓣']);
-  else rows.push(['站点权限', `✗ 缺少 ${r.permissions.missing.join('、')}`]);
-
-  if (r.storage === null) rows.push(['存储空间', '查不了（浏览器不肯说配额）']);
-  else if (r.storage.enough) {
-    rows.push(['存储空间', `✔ 可用 ${bytes(r.storage.available)}（预计需要约 ${bytes(r.storage.need)}）`]);
-  } else {
-    rows.push(['存储空间', `✗ 只剩 ${bytes(r.storage.available)}，预计需要约 ${bytes(r.storage.need)}`]);
-  }
-
-  el.className = '';
-  el.replaceChildren(table(['开抓前检查', '结果'], rows));
-
-  const bad = (r.permissions && !r.permissions.granted) || (r.storage && !r.storage.enough);
-  if (bad) {
-    const warn = document.createElement('div');
-    warn.className = 'card warn';
-    const b = document.createElement('b');
-    b.textContent = '现在开始可能会中途停下';
-    warn.append(b, document.createTextNode(
-      r.permissions && !r.permissions.granted
-        ? '请在浏览器的扩展设置里把站点访问权限改回「在所有网站上」。'
-        : '空间可能不够。已经抓到的不会丢，但抓到一半停下来还得再来一次——建议先清理或导出。',
-    ));
-    el.append(warn);
-  }
+function setCell(td, text, muted = false) {
+  if (td.textContent !== text) td.textContent = text;
+  const cls = muted ? 'muted' : '';
+  const want = td.classList.contains('num') ? `num ${cls}`.trim() : cls;
+  if (td.className !== want) td.className = want;
 }
 
 // ── 覆盖率 ──────────────────────────────────────────────────

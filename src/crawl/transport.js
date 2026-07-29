@@ -16,6 +16,31 @@
  *
  * 设一个真实浏览器本来就会发的 Referer 是**提高**保真度，不是降低。
  *
+ * ## 跳转交给浏览器跟随，不自己走
+ *
+ * 原来用 `redirect: 'manual'` 自己一跳一跳走，图的是**每一跳都过闸门**。
+ * 但那在浏览器里根本不成立：`manual` 模式下 fetch 返回的是一个
+ * **opaqueredirect** 响应——`status` 为 0、`url` 为空字符串、**header 列表
+ * 完全是空的**。也就是说读不到 `Location`，压根没法跟。
+ *
+ * 后果不是报错，是**静默地拿错东西**：循环发现没有 `Location`，认为「这不是
+ * 跳转」，于是把 `/mine/` 这个跳转前的 URL 当成最终 URL 返回。上层拿它去解析
+ * 用户名，解析不出来，报的却是「请先登录豆瓣」——一个把人指向完全错误方向的
+ * 提示。（这个 bug 就是这么被发现的。）
+ *
+ * 所以改成 `redirect: 'follow'`，让浏览器跟，我们读 `response.url` 拿最终
+ * URL。代价说清楚：
+ *
+ * - **中间跳数看不见了。** 只知道起点与终点。分类器要判的
+ *   `sec.douban.com` 恰好是**落点**（封锁页就在那儿），所以这条判据不受影响。
+ * - **跳转的那一跳不过闸门。** 一条跳转链通常只有一跳，而替代方案是整个功能
+ *   都不工作。真要拿回逐跳控制，得靠 `chrome.webRequest.onBeforeRedirect`
+ *   观察，那需要额外权限，留到确有必要时再说。
+ *
+ * 手动跟随的循环**保留着**：注入的 fetch 替身（测试、演练）会如实给出 302 与
+ * `Location`，那时按老路走。两种形状都认，才能既在浏览器里对、又在测试里
+ * 测得到跳转逻辑本身。
+ *
  * ## 保真度必须如实标注
  *
  * `fetch()` 拿不到真正的原始字节：响应体已经解除了 `Content-Encoding`，
@@ -171,6 +196,15 @@ export class Transport {
         throw permErr ?? err;
       }
       response = hopResult.result;
+
+      // opaqueredirect：万一哪天又有人把 redirect 改回 manual，要响亮地报错，
+      // 而不是像上次那样静默地把跳转前的 URL 当成最终 URL 用。
+      if (response.status === 0 || response.type === 'opaqueredirect') {
+        throw new Error(
+          `拿到了 opaqueredirect 响应（读不到 Location，跟不了跳转）：${hopUrl}。` +
+            'fetch 的 redirect 模式必须是 follow。',
+        );
+      }
 
       const location = headerOf(response, 'location');
       const isRedirect = response.status >= 300 && response.status < 400 && location;

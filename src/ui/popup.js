@@ -79,9 +79,16 @@ const PAUSE_COPY = {
   crash: { cls: 'run', title: '正在从断点恢复', why: '上次被意外中断，没有数据丢失。', action: null },
 };
 
-/** @param {string} cls @param {string} title @param {string} [why] */
+/**
+ * popup 也每 2 秒刷一次，同样要避免无谓重建（见 panel.js 里的说明）。
+ *
+ * @param {string} cls @param {string} title @param {string} [why]
+ */
 function setState(cls, title, why = '') {
   const el = $('state');
+  const key = `${cls}\u0000${title}\u0000${why}`;
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
   el.className = cls;
   el.replaceChildren();
   const b = document.createElement('b');
@@ -98,6 +105,9 @@ function setState(cls, title, why = '') {
 /** @param {Array<[string, string]>} rows */
 function setStats(rows) {
   const t = $('stats');
+  const key = rows.map((r) => r.join('\u0001')).join('\u0000');
+  if (t.dataset.key === key) return;
+  t.dataset.key = key;
   t.replaceChildren();
   t.hidden = rows.length === 0;
   for (const [k, v] of rows) {
@@ -128,6 +138,9 @@ const ROUTE_NAMES = {
 /** @param {Array<object>} routes */
 function setRoutes(routes) {
   const el = $('routes');
+  const key = routes.map((r) => `${r.routeKey}\u0001${r.captured}\u0001${r.highWater ?? ''}`).join('\u0000');
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
   el.replaceChildren();
   for (const r of routes) {
     const row = document.createElement('div');
@@ -149,7 +162,7 @@ function setRoutes(routes) {
 /** @param {string} text @param {(() => void) | null} onClick */
 function setPrimary(text, onClick) {
   const b = $('primary');
-  b.textContent = text;
+  if (b.textContent !== text) b.textContent = text;
   b.disabled = !onClick;
   b.onclick = onClick;
 }
