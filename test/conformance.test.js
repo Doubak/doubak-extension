@@ -347,3 +347,87 @@ describe('写入器根本不产出违规的 bundle', () => {
     assert.equal(EMPTY_SHA256, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
   });
 });
+
+describe('抓取循环产出的 bundle 也要通过规范校验器', () => {
+  // 上面那组验的是手工组装的 bundle。这一组验的是**抓取循环真跑一遍**
+  // 产出的东西——包括它自己攒出来的 coverage 与 crawl_state。
+
+  test('循环跑完 → 完整 bundle → 通过校验器', async (t) => {
+    if (skipReason) return t.skip(skipReason);
+
+    const { CrawlLoop } = await import('../src/crawl/loop.js');
+    const { Frontier } = await import('../src/crawl/frontier.js');
+    const { Transport } = await import('../src/crawl/transport.js');
+    const { Pacer, RequestGate } = await import('../src/crawl/pacing.js');
+    const { SessionGuard } = await import('../src/crawl/session.js');
+    const { buildRoutes } = await import('../src/crawl/routes.js');
+
+    const NAV = `<li class="nav-user-account"><a href="/accounts/logout">退出</a>
+      <span>示例的账号</span></li><a href="https://www.douban.com/people/example/">主页</a>`;
+    const bcPage = (n, from) => {
+      let items = '';
+      for (let i = 0; i < n; i++) {
+        items += `<div class="status-item" data-sid="${from + i}" data-uid="10001">
+          <span class="created_at" title="2026-07-2${i % 9} 1${i % 9}:00:00">x</span></div>`;
+      }
+      return `<html><head><title>\n示例的广播\n</title></head><body>${NAV}${items}</body></html>`;
+    };
+
+    const script = [bcPage(20, 0), bcPage(20, 20), bcPage(0, 0), bcPage(0, 0), bcPage(0, 0)];
+    let i = 0;
+    let now = 0;
+
+    const store = new MemoryFileStore();
+    const pacer = new Pacer({ intervalMs: 1, jitterRatio: 0 });
+    const gate = new RequestGate({ pacer, now: () => now, sleep: async (ms) => { now += ms; } });
+    const transport = new Transport({
+      gate,
+      now: () => now,
+      fetchImpl: async (url) => {
+        const body = enc.encode(script[Math.min(i++, script.length - 1)]);
+        return {
+          status: 200, url,
+          headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
+          arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+        };
+      },
+    });
+
+    const writer = new BundleWriter({
+      store,
+      account: { user_id: '10001', username: 'example' },
+      now: () => new Date(1750000000000 + now),
+    });
+    const session = new SessionGuard();
+    session.preflight(bcPage(1, 0));
+
+    const frontier = new Frontier();
+    const routes = new Map(buildRoutes({ username: 'example', includeCatalog: false }).map((r) => [r.key, r]));
+    const bc = routes.get('broadcast.timeline');
+    frontier.enqueue({
+      url: bc.entryUrl({ offset: 1 }), urlKey: bc.entryUrl({ offset: 1 }),
+      routeKey: 'broadcast.timeline', intent: 'broadcast.timeline',
+      cursor: { kind: 'page', value: 1 },
+    });
+
+    const loop = new CrawlLoop({ frontier, transport, writer, session, pacer, routes });
+    await loop.run({ maxItems: 8 });
+    loop.flushRouteEvidence();
+    const manifest = await writer.finalize();
+
+    // 先确认它真的产出了完整性证据——空的 crawl_state 也能通过校验器，
+    // 但那等于没有任何完整性依据。
+    assert.ok(manifest.crawl_state.length > 0, '必须产出 crawl_state');
+    assert.equal(manifest.crawl_state[0].advanced, true, '干净跑完应当推进水位线');
+    assert.ok(manifest.coverage.length > 0, '必须产出 coverage');
+
+    const root = await mkdtemp(path.join(tmpdir(), 'doubak-loop-'));
+    try {
+      await dumpTo(store, root);
+      const res = await runValidator(root);
+      assert.ok(res.ok, `校验器应当通过，实际输出：\n${res.output}`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

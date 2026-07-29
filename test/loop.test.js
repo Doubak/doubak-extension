@@ -333,3 +333,94 @@ describe('provenance', () => {
     assert.deepEqual(entries[1].cursor, { kind: 'page', value: 2 });
   });
 });
+
+describe('完整性证据：跑完一条路线要产出连续性证明与覆盖率', () => {
+  // 这是整个设计的落点。豆瓣的计数不可信，所以完整性只能来自抓取过程自身的
+  // 结构化证明。不产出它，bundle 里就没有任何完整性依据，也无从增量。
+
+  test('干净跑完 → advanced=true，水位线可用于下次', async () => {
+    const { loop, writer } = await harness([
+      { body: broadcastPage(20, 0) },
+      { body: broadcastPage(20, 20) },
+      { body: broadcastPage(0) },
+      { body: broadcastPage(0) },
+      { body: broadcastPage(0) },
+    ]);
+    await loop.run({ maxItems: 6 });
+    loop.flushRouteEvidence();
+    const manifest = await writer.finalize();
+
+    const cs = manifest.crawl_state.find((c) => c.route_key === 'broadcast.timeline');
+    assert.ok(cs, '必须产出 crawl_state');
+    assert.equal(cs.contiguous, true);
+    assert.equal(cs.advanced, true, '干净跑完才允许推进水位线');
+    assert.match(cs.high_water_time, /^\d{4}-\d{2}-\d{2}T.*\+08:00$/, '带显式时区偏移');
+    assert.ok(cs.high_water_raw, '原始字符串也要留');
+    assert.equal(cs.enumeration, 'bounded', '广播只走到下界，下游不得推断删除');
+  });
+
+  test('被风控打断 → advanced=false，下次仍从旧下界重走', async () => {
+    // 重复是免费的，空洞是永久且不可检测的。
+    const { loop, writer } = await harness([
+      { body: broadcastPage(20, 0) },
+      { body: BLOCKED_PAGE },
+    ]);
+    await loop.run({ maxItems: 3 });
+    loop.flushRouteEvidence();
+    const manifest = await writer.finalize();
+
+    const cs = manifest.crawl_state.find((c) => c.route_key === 'broadcast.timeline');
+    assert.equal(cs.advanced, false, '被打断绝不许推进水位线');
+    assert.ok(cs.gaps.length > 0, '缺口要显式记录');
+    assert.ok(cs.high_water_time, '但仍如实报告见到的水位线');
+  });
+
+  test('中途没跑完就收尾 → 记为被打断', async () => {
+    const { loop, writer } = await harness([
+      { body: broadcastPage(20, 0) },
+      { body: broadcastPage(20, 20) },
+    ]);
+    await loop.run({ maxItems: 1 }); // 只跑一页就停
+    loop.flushRouteEvidence();
+    const manifest = await writer.finalize();
+
+    const cs = manifest.crawl_state.find((c) => c.route_key === 'broadcast.timeline');
+    assert.equal(cs.advanced, false, '没跑完就不算数');
+  });
+
+  test('广播的 coverage：声称数量为 null，不是 0', async () => {
+    // null = 不知道，0 = 确实没有。界面上也必须分开显示。
+    const { loop, writer } = await harness([
+      { body: broadcastPage(20, 0) },
+      { body: broadcastPage(0) },
+      { body: broadcastPage(0) },
+      { body: broadcastPage(0) },
+    ]);
+    await loop.run({ maxItems: 5 });
+    loop.flushRouteEvidence();
+    const manifest = await writer.finalize();
+
+    const cov = manifest.coverage.find((c) => c.route_key === 'broadcast.timeline');
+    assert.equal(cov.claimed_count, null);
+    assert.equal(cov.delta, null);
+    assert.ok(cov.captured_count > 0, '实抓数量照样要记');
+  });
+
+  test('到达下界就干净结束 —— 增量抓取的正常终点', async () => {
+    const { loop, writer, events } = await harness([
+      { body: broadcastPage(20, 0) },
+    ]);
+    // 把下界设在第一页内容之后：第一页就会触发 reachedFloor
+    loop._floors.set('broadcast.timeline', '2026-07-30T00:00:00+08:00');
+    await loop.run({ maxItems: 3 });
+    loop.flushRouteEvidence();
+
+    const finished = events.find((e) => e.type === 'route_finished');
+    assert.equal(finished?.reason, 'reached_floor');
+
+    const manifest = await writer.finalize();
+    const cs = manifest.crawl_state.find((c) => c.route_key === 'broadcast.timeline');
+    assert.equal(cs.advanced, true, '到达下界是干净完成的一种');
+    assert.equal(cs.floor_time, '2026-07-30T00:00:00+08:00');
+  });
+});

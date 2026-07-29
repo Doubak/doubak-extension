@@ -265,6 +265,10 @@ export const ROUTE_PROFILES = {
     idAnchor: /data-sid="(\d+)"/g,
     // 声明数量：广播没有可信的总数，故为 null
     claimedCount: null,
+    // 每条广播都带完整绝对时间（可见文本才是省略形式）：
+    //   <span class="created_at" title="2026-07-26 12:34:00">7月26日</span>
+    // 水位线就是从这里取的——不带时区，解析时必须显式记录假定时区。
+    timeAnchor: /class="created_at"[^>]*title="([^"]+)"/g,
   },
   'interest.list': {
     // 列表页的标题形如「我看过的影视(1157)」
@@ -311,6 +315,27 @@ export function profileForRoute(routeKey) {
 export function extractItemIds(bodyText, route) {
   if (!route?.idAnchor) return [];
   const re = new RegExp(route.idAnchor.source, 'g');
+  /** @type {string[]} */
+  const out = [];
+  let m;
+  while ((m = re.exec(bodyText)) !== null) out.push(m[1]);
+  return out;
+}
+
+/**
+ * 抽出本页所有条目的原始时间字符串。
+ *
+ * 只做抽取，**不做解析也不做转换**——原始字符串要原样保留，解析与时区假定
+ * 交给 core/time.js。豆瓣页面上的时间不带时区，静默转换会让海外时区的用户
+ * 得到整体偏移数小时的水位线。
+ *
+ * @param {string} bodyText
+ * @param {RouteProfile} route
+ * @returns {string[]} 页面上出现的顺序（豆瓣列表是新→旧，所以第一个最新）
+ */
+export function extractItemTimes(bodyText, route) {
+  if (!route?.timeAnchor) return [];
+  const re = new RegExp(route.timeAnchor.source, 'g');
   /** @type {string[]} */
   const out = [];
   let m;

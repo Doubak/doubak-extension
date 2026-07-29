@@ -23,11 +23,19 @@
  * 任何一点断掉都等价于一次可恢复的空操作。
  */
 
-import { classifyResponse, RollingSize, profileForRoute, extractItemIds } from './classifier.js';
+import {
+  classifyResponse,
+  RollingSize,
+  profileForRoute,
+  extractItemIds,
+  extractItemTimes,
+  extractClaimedCount,
+} from './classifier.js';
 import { SessionError } from './session.js';
-import { StallDetector } from './frontier.js';
 import { TransportError } from './errors.js';
+import { RouteState } from './route-state.js';
 import { urlKey } from '../core/urlkey.js';
+import { nowRfc3339 } from '../core/time.js';
 
 /**
  * @typedef {object} LoopDeps
@@ -48,8 +56,11 @@ import { urlKey } from '../core/urlkey.js';
  */
 
 export class CrawlLoop {
-  /** @param {LoopDeps} deps */
-  constructor({ frontier, transport, writer, session, pacer, routes, onEvent }) {
+  /**
+   * @param {LoopDeps & {floors?: Map<string, string | null>}} deps
+   *   `floors`：每条路线上次的水位线，作为本次的下界。没有就是首次全量。
+   */
+  constructor({ frontier, transport, writer, session, pacer, routes, onEvent, floors }) {
     this._frontier = frontier;
     this._transport = transport;
     this._writer = writer;
@@ -60,16 +71,58 @@ export class CrawlLoop {
 
     /** @type {Map<string, RollingSize>} 每条路线的体积基线 */
     this._sizes = new Map();
-    /** @type {Map<string, StallDetector>} 每条路线的停滞检测 */
-    this._stalls = new Map();
+    /** @type {Map<string, RouteState>} 每条路线的水位线与连续性 */
+    this._states = new Map();
     /** @type {Map<string, string>} routeKey → 最后一次 capture_id，用于 parent 链 */
     this._lastCapture = new Map();
+    this._floors = floors ?? new Map();
   }
 
-  /** @param {string} routeKey */
-  _stallFor(routeKey) {
-    if (!this._stalls.has(routeKey)) this._stalls.set(routeKey, new StallDetector());
-    return this._stalls.get(routeKey);
+  /**
+   * 取（或建）一条路线的推进状态。
+   *
+   * 这是完整性证据的攒集处——豆瓣的计数不可信，连续性证明是唯一的判据。
+   *
+   * @param {string} routeKey
+   */
+  stateFor(routeKey) {
+    if (!this._states.has(routeKey)) {
+      const route = this._routes.get(routeKey) ?? {};
+      this._states.set(
+        routeKey,
+        new RouteState({
+          routeKey,
+          intent: route.intent ?? routeKey,
+          enumeration: route.enumeration ?? 'bounded',
+          floorTime: this._floors.get(routeKey) ?? null,
+        }),
+      );
+    }
+    return this._states.get(routeKey);
+  }
+
+  /** 所有路线的推进状态，供收尾时写进 manifest。 */
+  get routeStates() {
+    return this._states;
+  }
+
+  /**
+   * 收尾：把每条路线的连续性证明与覆盖率观测写进 manifest。
+   *
+   * **必须调用**——不调用的话产出的 bundle 里 coverage 与 crawl_state 都是空的，
+   * 也就是没有任何完整性证据，下次也无从增量。
+   *
+   * @param {string} [completedAt]
+   */
+  flushRouteEvidence(completedAt = nowRfc3339()) {
+    for (const state of this._states.values()) {
+      // 还没结束的路线记为被打断——不许推进水位线。
+      if (!state.contiguous && !state._finished && !state._stopped) {
+        state.markStopped('aborted');
+      }
+      this._writer.addCoverage(state.toCoverage());
+      this._writer.addCrawlState(state.toCrawlState(this._writer.bundleId, completedAt));
+    }
   }
 
   /** @param {string} routeKey */
@@ -180,6 +233,9 @@ export class CrawlLoop {
       this._session.verify(res.bodyText);
     } catch (err) {
       if (err instanceof SessionError) {
+        // 被打断的路线不许推进水位线：已抓到的数据留在 WARC 里，但下次仍从
+        // 旧下界重走。重复是免费的，空洞是永久且不可检测的。
+        this.stateFor(item.routeKey).markStopped(err.reason);
         this._frontier.stop(err.reason);
         this._emit({ type: 'stopped', reason: err.reason, message: err.message });
         return 'stop';
@@ -192,6 +248,7 @@ export class CrawlLoop {
 
     if (t.state === 'awaiting_human') {
       // 软封锁：降速，且**不自动重试**。等人处理完、金丝雀确认之后再继续。
+      this.stateFor(item.routeKey).markStopped(t.reason ?? 'blocked');
       const slowed = this._pacer.slowDown();
       this._emit({
         type: 'awaiting_human',
@@ -202,10 +259,15 @@ export class CrawlLoop {
       return 'failed';
     }
     if (t.stopRun) {
+      this.stateFor(item.routeKey).markStopped(t.reason ?? 'terminal');
       this._emit({ type: 'stopped', reason: t.reason });
       return 'stop';
     }
-    if (t.state === 'failed') return 'failed';
+    if (t.state === 'failed') {
+      // 失败页阻塞该路线，且构成一处缺口——有缺口就不许推进水位线。
+      this.stateFor(item.routeKey).recordGap(t.reason ?? 'failed', item.url);
+      return 'failed';
+    }
 
     // ── 6. 只有 ok 才继续翻页
     if (cls.verdict === 'ok') {
@@ -251,20 +313,50 @@ export class CrawlLoop {
   _enqueueNextPage(item, route, profile, res, captureId) {
     if (!route.entryUrl || !route.pagination) return;
 
+    const state = this.stateFor(item.routeKey);
     const ids = profile ? extractItemIds(res.bodyText, profile) : [];
-    const stall = this._stallFor(item.routeKey);
-    const progress = stall.observePage(ids);
+    const times = profile ? extractItemTimes(res.bodyText, profile) : [];
+    const claimed = profile ? extractClaimedCount(res.bodyText, profile) : null;
+
+    const progress = state.observePage({
+      ids,
+      times,
+      claimed,
+      captureId,
+      observedAt: nowRfc3339(),
+    });
 
     this._emit({
       type: 'page',
       routeKey: item.routeKey,
       newIds: progress.newIds,
       duplicates: progress.duplicates,
-      total: stall.uniqueCount,
+      total: state.stall.uniqueCount,
+      highWater: state.highWater?.iso ?? null,
     });
 
+    // 到达下界：增量抓取的正常终点。这是「干净走完」的一种，可以推进水位线。
+    if (progress.reachedFloor) {
+      state.markFinished();
+      this._emit({
+        type: 'route_finished',
+        routeKey: item.routeKey,
+        reason: 'reached_floor',
+        highWater: state.highWater?.iso ?? null,
+      });
+      return;
+    }
+
+    // 停滞：另一种干净的终点。终止靠它，不靠「本页没有新条目」，更不靠
+    // 「本页条目数少于槽位」——实测列表中段会有被审查抑制的空洞。
     if (progress.stalled) {
-      this._emit({ type: 'route_finished', routeKey: item.routeKey, reason: 'stalled' });
+      state.markFinished();
+      this._emit({
+        type: 'route_finished',
+        routeKey: item.routeKey,
+        reason: 'stalled',
+        highWater: state.highWater?.iso ?? null,
+      });
       return;
     }
 
