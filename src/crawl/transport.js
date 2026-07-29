@@ -27,6 +27,7 @@ import {
   DECODED_FILTERED,
   DECODED_OBSERVED,
 } from './fidelity.js';
+import { fetchWithTimeout, DEFAULT_TIMEOUT_MS } from './errors.js';
 
 /** 豆瓣自家的短链域名。只记短链等于在档案里留一个死指针。 */
 const SHORTLINK_HOSTS = new Set(['douc.cc']);
@@ -78,14 +79,26 @@ export class Transport {
    * @param {typeof fetch} [opts.fetchImpl]
    * @param {() => Promise<string | null>} [opts.getCk]  从 cookie 读 ck
    * @param {boolean} [opts.canObserveHeaders]  能否用 webRequest 补齐真实响应头
+   * @param {number} [opts.timeoutMs]
+   * @param {AbortSignal} [opts.signal]  用户暂停/关闭时用
    * @param {() => number} [opts.now]
    */
-  constructor({ gate, fetchImpl, getCk, canObserveHeaders = false, now = () => Date.now() }) {
+  constructor({
+    gate,
+    fetchImpl,
+    getCk,
+    canObserveHeaders = false,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    signal,
+    now = () => Date.now(),
+  }) {
     if (!gate) throw new Error('缺少 gate —— 并发与节奏必须经过闸门');
     this._gate = gate;
     this._fetch = fetchImpl ?? globalThis.fetch;
     this._getCk = getCk ?? (async () => null);
     this._fidelity = canObserveHeaders ? DECODED_OBSERVED : DECODED_FILTERED;
+    this._timeoutMs = timeoutMs;
+    this._signal = signal;
     this._now = now;
   }
 
@@ -122,12 +135,19 @@ export class Transport {
         throw new Error(`跳转次数超过 ${MAX_REDIRECTS} 次，疑似跳转环: ${requestedUrl}`);
       }
 
-      response = await this._fetch(currentUrl, {
-        // 不伪造身份：不设 User-Agent，交给浏览器
-        headers: referer ? { 'X-Override-Referer': referer } : {},
-        credentials: 'include',
-        redirect: followRedirects ? 'manual' : 'follow',
-      });
+      // 必须有超时：挂住的连接会永远卡住队列，而监管层只会看到「还在跑」，
+      // 永远不来干预——那是一种静默的失败，比响亮地报错糟糕得多。
+      response = await fetchWithTimeout(
+        this._fetch,
+        currentUrl,
+        {
+          // 不伪造身份：不设 User-Agent，交给浏览器
+          headers: referer ? { 'X-Override-Referer': referer } : {},
+          credentials: 'include',
+          redirect: followRedirects ? 'manual' : 'follow',
+        },
+        { timeoutMs: this._timeoutMs, externalSignal: this._signal },
+      );
 
       const location = headerOf(response, 'location');
       const isRedirect = response.status >= 300 && response.status < 400 && location;
