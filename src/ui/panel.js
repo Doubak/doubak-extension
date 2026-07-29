@@ -17,6 +17,7 @@
  */
 
 import { BundleReader } from '../bundle/bundle-reader.js';
+import { SCENARIOS } from '../crawl/dry-run.js';
 import { OpfsFileStore } from '../storage/opfs-store.js';
 import { bundleDirName } from '../core/ids.js';
 
@@ -105,6 +106,7 @@ $('tabs').addEventListener('click', (e) => {
     $(`tab-${b.dataset.tab}`).hidden = !on;
   }
   if (btn.dataset.tab === 'archive') loadArchive();
+  if (btn.dataset.tab === 'debug') loadDebug();
 });
 
 // ── 概览 ────────────────────────────────────────────────────
@@ -449,3 +451,131 @@ refresh();
 setInterval(() => {
   if (!document.hidden) refresh();
 }, 2000);
+
+
+// ── 调试 ────────────────────────────────────────────────────
+
+let debugLoaded = false;
+
+/**
+ * 一行「标题 + 说明 + 按钮」。
+ *
+ * @param {string} label @param {string} why @param {() => void} onClick
+ */
+function actionRow(label, why, onClick) {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:12px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line)';
+  const b = document.createElement('button');
+  b.className = 'act';
+  b.textContent = label;
+  b.style.flex = '0 0 auto';
+  b.onclick = onClick;
+  const note = document.createElement('span');
+  note.className = 'muted';
+  note.style.fontSize = '12px';
+  note.textContent = why;
+  row.append(b, note);
+  return row;
+}
+
+async function loadDebug() {
+  if (debugLoaded) return;
+  debugLoaded = true;
+
+  // 演练剧本：每一个都对准一条**必须走对**的路径。
+  const el = $('scenarios');
+  el.replaceChildren();
+  for (const [key, s] of Object.entries(SCENARIOS)) {
+    el.append(actionRow(s.title, s.expect, () => runDryRun(key)));
+  }
+
+  // 小范围试跑
+  const sc = $('scoped');
+  sc.replaceChildren();
+  const opts = [
+    ['最近 7 天的广播', { days: 7 },
+      '到达下界后干净终止 → 水位线推进。这也是每次增量抓取的正常形态'],
+    ['最近 30 天的广播', { days: 30 }, '同上，范围大一点'],
+    ['舞台剧 · 看过（整条路线）', { routes: ['interest.drama.collect'] },
+      '天然就很小的一条路线，能完整走完整个生命周期而不必截断'],
+    ['最多 10 条（安全阀）', { maxCaptures: 10 },
+      '人为截断 → 不算完成，水位线不推进，产出的是不完整的档案'],
+  ];
+  for (const [label, cfg, why] of opts) sc.append(actionRow(label, why, () => startScoped(cfg)));
+
+  // 环境自检
+  const env = $('env');
+  const rows = [
+    ['OPFS', navigator.storage?.getDirectory ? '可用' : '不可用（致命）'],
+    ['CompressionStream', typeof CompressionStream === 'function' ? '可用' : '不可用（致命）'],
+    ['File System Access', typeof window.showDirectoryPicker === 'function' ? '可用' : '不可用（导不出档案）'],
+  ];
+  if (navigator.storage?.estimate) {
+    const { usage, quota } = await navigator.storage.estimate();
+    rows.push(['存储', `已用 ${bytes(usage ?? 0)} / 配额 ${bytes(quota ?? 0)}`]);
+  }
+  // 不显示 persist()：它在扩展里恒为 false，是预期行为而不是风险信号，
+  // 保护来自 unlimitedStorage 权限。摆出来只会制造假的不确定性。
+  env.replaceChildren(table(['项', '值'], rows));
+}
+
+/** @param {string} key */
+async function runDryRun(key) {
+  const el = $('dryrun-result');
+  el.className = 'card idle';
+  el.textContent = `正在演练「${SCENARIOS[key].title}」…（不发出任何网络请求）`;
+
+  const r = await send({ type: 'dryRun', scenario: key });
+  if (!r?.ok) {
+    el.className = 'card err';
+    el.textContent = `演练失败：${r?.error ?? ''}`;
+    return;
+  }
+
+  const d = r.result;
+  el.className = 'card good';
+  el.replaceChildren();
+  const b = document.createElement('b');
+  b.textContent = `演练完成：${SCENARIOS[key].title}`;
+  el.append(b);
+  el.append(
+    table(
+      ['项', '结果'],
+      [
+        ['写入档案', `${d.captured} 条`],
+        ['失败', String(d.failed)],
+        ['停机原因', d.stoppedBy ?? '（没有，走到终点）'],
+        ['判定分布',
+          Object.entries(d.byVerdict ?? {})
+            .map(([k, v]) => `${VERDICT_NAMES[k] ?? (k === 'unclassified' ? '判不出来' : k)} ${v}`)
+            .join(' · ') || '—'],
+        ['水位线是否推进', d.advanced === null ? '—' : d.advanced ? '是' : '否'],
+      ],
+    ),
+  );
+  const why = document.createElement('div');
+  why.className = 'muted';
+  why.style.fontSize = '12px';
+  why.textContent = `预期：${SCENARIOS[key].expect}`;
+  el.append(why);
+}
+
+/** @param {object} cfg */
+async function startScoped(cfg) {
+  const r = await send({ type: 'start', scope: cfg });
+  if (!r?.ok) {
+    alert(`无法开始：${r?.error ?? ''}`);
+    return;
+  }
+  // 跳回概览——试跑跟真实抓取一样，要在同一个地方观察。
+  for (const b of $('tabs').querySelectorAll('button')) {
+    const on = b.dataset.tab === 'overview';
+    b.setAttribute('aria-selected', String(on));
+    $(`tab-${b.dataset.tab}`).hidden = !on;
+  }
+  refresh();
+}
+
+$('selftest').addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('selftest/index.html') });
+});

@@ -82,6 +82,7 @@
       <button data-tab="coverage" aria-selected="false">覆盖率</button>
       <button data-tab="archive" aria-selected="false">档案</button>
       <button data-tab="log" aria-selected="false">日志</button>
+      <button data-tab="debug" aria-selected="false">调试</button>
     </nav>
   </header>
 
@@ -115,6 +116,30 @@
         <div id="captures" class="muted">选一个档案后显示</div>
         <div id="preview" class="muted">从左边选一条查看原始内容</div>
       </div>
+    </section>
+
+    <section id="tab-debug" hidden>
+      <div class="hint">
+        开发期工具。<b style="display:inline">演练</b>不发任何网络请求——它用固定夹具喂进真实的
+        分类器、队列、写入器，用来验证那些不能靠真跑来验证的路径（被风控拦截、验证码、
+        掉登录）。触发它们的唯一办法是真的去撞，而那正是要不惜代价避免的事。
+      </div>
+
+      <h2>演练（零网络请求）</h2>
+      <div id="scenarios"></div>
+      <div id="dryrun-result"></div>
+
+      <h2>小范围试跑（会真的访问豆瓣）</h2>
+      <div class="hint">
+        <b style="display:inline">自然终止</b>与<b style="display:inline">人为截断</b>是两回事：
+        走到终点（到达下界、或翻完最后一页）才算干净完成，水位线才会推进；
+        被条数上限截断的抓取不算完成，产出的是不完整的档案。
+      </div>
+      <div id="scoped"></div>
+
+      <h2>环境与存储自检</h2>
+      <button class="act" id="selftest">打开自检页</button>
+      <div id="env"></div>
     </section>
 
     <section id="tab-log" hidden>
