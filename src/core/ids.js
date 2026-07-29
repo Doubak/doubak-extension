@@ -93,6 +93,21 @@ export function bundleDirName(bundleId) {
   return `doubak-bundle-${bundleId}`;
 }
 
+/**
+ * 从目录名反解出 bundle_id；不是档案目录则返回 null。
+ *
+ * 存在的理由：抓取跑完之后 checkpoint 会被清掉，指针也不再指向它——那时
+ * **唯一能找到这份档案的办法就是看目录**。而导出恰恰是收尾之后才做的事，
+ * 所以少了这一步，跑完的档案就再也导不出来了。
+ *
+ * @param {string} dirName
+ * @returns {string | null}
+ */
+export function bundleIdFromDirName(dirName) {
+  const m = /^doubak-bundle-(.+)$/.exec(dirName);
+  return m && isBundleId(m[1]) ? m[1] : null;
+}
+
 /** WARC-Record-ID：urn:uuid 形式，满足 WARC 对全局唯一的要求。 */
 export function newWarcRecordId() {
   return `urn:uuid:${crypto.randomUUID()}`;

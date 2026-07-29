@@ -34,6 +34,8 @@
  * 这条结论有实测数据支撑，除非硬件或浏览器行为发生数量级变化，不要重开。
  */
 
+import { bundleIdFromDirName } from '../core/ids.js';
+
 /** @param {string} name */
 function assertName(name) {
   if (typeof name !== 'string' || name.length === 0) {
@@ -204,6 +206,23 @@ export class OpfsFileStore {
     } catch (e) {
       if (e?.name !== 'NotFoundError') throw e;
     }
+  }
+
+  /**
+   * 列出 OPFS 根下所有档案目录，新的在前。
+   *
+   * 抓取收尾之后 checkpoint 与指针都不再指向那份档案——这时目录本身是唯一
+   * 的线索。bundle_id 前缀是时间戳，所以倒序即最新在前。
+   *
+   * @returns {Promise<string[]>} 目录名
+   */
+  static async listBundleDirs() {
+    const root = await navigator.storage.getDirectory();
+    const out = [];
+    for await (const name of root.keys()) {
+      if (bundleIdFromDirName(name)) out.push(name);
+    }
+    return out.sort().reverse();
   }
 
   /** 整个目录删掉。导出后清理用。 */

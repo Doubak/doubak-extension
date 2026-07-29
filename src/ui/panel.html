@@ -53,6 +53,7 @@
     padding: 8px 12px; border-radius: 4px; margin-bottom: 12px;
   }
   button.act { font: inherit; padding: 7px 16px; cursor: pointer; margin-right: 8px; }
+  button.act:disabled { opacity: .5; cursor: default; }
   #log { font-family: ui-monospace, monospace; font-size: 12px; max-height: 60vh; overflow: auto; }
   #log div { padding: 1px 0; border-bottom: 1px solid var(--line); }
 
@@ -107,9 +108,14 @@
       <div class="hint">
         这里读的是档案本身：顺着索引把每条记录从段文件里取出来解压。
         这条路径就是规范承诺第三方能走的那条——不信任何声明，直接看字节。
+        <b style="display:inline">档案没导出之前不算你的</b>：它挂在扩展的存储里，
+        卸载扩展或清站点数据都会把它一次性抹掉，而且不会问你。
       </div>
+      <div id="bundle-pick" style="margin-bottom:12px"></div>
       <div id="archive-summary"></div>
-      <button class="act" id="verify">验一验（逐条取出并解压）</button>
+      <button class="act" id="export" disabled>导出到文件夹</button>
+      <button class="act" id="verify" disabled>验一验（逐条取出并解压）</button>
+      <div id="export-result"></div>
       <div id="verify-result"></div>
       <h2>捕获列表</h2>
       <div class="split">

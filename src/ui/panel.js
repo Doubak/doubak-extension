@@ -19,7 +19,8 @@
 import { BundleReader } from '../bundle/bundle-reader.js';
 import { SCENARIOS } from '../crawl/dry-run.js';
 import { OpfsFileStore } from '../storage/opfs-store.js';
-import { bundleDirName } from '../core/ids.js';
+import { exportBundle, directorySink } from '../bundle/exporter.js';
+import { bundleDirName, bundleIdFromDirName } from '../core/ids.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -274,15 +275,75 @@ let reader = null;
 /** @type {object[]} */
 let entries = [];
 
-async function loadArchive() {
-  const summaryEl = $('archive-summary');
-  const bundleId = lastStatus?.runner?.bundleId ?? lastStatus?.checkpoint?.bundle_id;
+/** 当前正在看的档案。 */
+let currentBundleId = null;
 
-  if (!bundleId) {
-    summaryEl.className = 'muted';
-    summaryEl.textContent = '还没有档案。开始一次抓取之后这里会显示内容。';
+async function loadArchive() {
+  // 抓取跑完之后 checkpoint 与指针都不再指向那份档案——所以不能只看状态，
+  // 得直接去 OPFS 里数目录。否则「跑完了」恰好等于「再也导不出来」。
+  let dirs = [];
+  try {
+    dirs = await OpfsFileStore.listBundleDirs();
+  } catch (e) {
+    $('archive-summary').className = 'card err';
+    $('archive-summary').textContent = `读不出存储：${e.message}`;
     return;
   }
+
+  const active = lastStatus?.runner?.bundleId ?? lastStatus?.checkpoint?.bundle_id ?? null;
+  const ids = dirs.map(bundleIdFromDirName).filter(Boolean);
+
+  renderBundlePicker(ids, active);
+  if (ids.length === 0) {
+    currentBundleId = null;
+    $('archive-summary').className = 'muted';
+    $('archive-summary').textContent = '还没有档案。开始一次抓取之后这里会显示内容。';
+    setArchiveButtons(false);
+    $('captures').className = 'muted';
+    $('captures').textContent = '选一个档案后显示';
+    return;
+  }
+
+  await openBundle(currentBundleId && ids.includes(currentBundleId)
+    ? currentBundleId
+    : (active ?? ids[0]));
+}
+
+/** @param {string[]} ids @param {string | null} active */
+function renderBundlePicker(ids, active) {
+  const el = $('bundle-pick');
+  el.replaceChildren();
+  if (ids.length <= 1) return;
+
+  const label = document.createElement('span');
+  label.className = 'muted';
+  label.style.marginRight = '8px';
+  label.textContent = '档案';
+  const sel = document.createElement('select');
+  sel.style.font = 'inherit';
+  for (const id of ids) {
+    const o = document.createElement('option');
+    o.value = id;
+    o.textContent = id === active ? `${id}（进行中）` : id;
+    o.selected = id === (currentBundleId ?? active ?? ids[0]);
+    sel.append(o);
+  }
+  sel.onchange = () => openBundle(sel.value);
+  el.append(label, sel);
+}
+
+/** @param {boolean} on */
+function setArchiveButtons(on) {
+  $('export').disabled = !on;
+  $('verify').disabled = !on;
+}
+
+/** @param {string} bundleId */
+async function openBundle(bundleId) {
+  currentBundleId = bundleId;
+  const summaryEl = $('archive-summary');
+  $('export-result').replaceChildren();
+  $('verify-result').replaceChildren();
 
   try {
     const store = await OpfsFileStore.open(bundleDirName(bundleId));
@@ -298,17 +359,20 @@ async function loadArchive() {
           ['档案编号', s.bundleId],
           ['账号', `${s.account?.username ?? ''}（${s.account?.user_id ?? ''}）`],
           ['状态', s.status === 'complete' ? '已完成' : '进行中'],
-          ['捕获条数', { text: String(s.captures), num: false }],
+          ['捕获条数', String(s.captures)],
           ['体积', bytes(s.totalBytes)],
           ['判定分布', Object.entries(s.byVerdict).map(([k, v]) => `${VERDICT_NAMES[k] ?? k} ${v}`).join(' · ')],
         ],
       ),
     );
+    setArchiveButtons(true);
     renderCoverage(s.coverage, s.crawlState);
     renderCaptures();
   } catch (e) {
     summaryEl.className = 'card err';
     summaryEl.textContent = `读不出这个档案：${e.message}`;
+    // 读不出摘要不代表导不出去——字节还在，照样该让用户把它搬走。
+    setArchiveButtons(true);
   }
 }
 
@@ -396,6 +460,97 @@ async function showCapture(entry) {
   } catch (e) {
     el.className = 'card err';
     el.textContent = `读不出这条捕获：${e.message}`;
+  }
+}
+
+// ── 导出 ────────────────────────────────────────────────────
+
+$('export').addEventListener('click', async () => {
+  const el = $('export-result');
+  const bundleId = currentBundleId;
+  if (!bundleId) return;
+
+  if (typeof window.showDirectoryPicker !== 'function') {
+    el.className = 'card err';
+    el.textContent = '这个浏览器不支持选择文件夹（File System Access API）。请用 Chrome 或 Edge。';
+    return;
+  }
+
+  /** @type {FileSystemDirectoryHandle} */
+  let dir;
+  try {
+    dir = await window.showDirectoryPicker({ mode: 'readwrite', id: 'doubak-export' });
+  } catch {
+    return; // 用户取消了，什么都不用说
+  }
+
+  const store = await OpfsFileStore.open(bundleDirName(bundleId));
+  const sink = directorySink(dir);
+  const run = (overwrite) => exportBundle({
+    store, sink, overwrite,
+    onProgress: (p) => {
+      el.className = 'card run';
+      const pct = p.total ? Math.round((p.done / p.total) * 100) : 100;
+      // 这里的百分比是**字节数**，不是「抓了多少」——分母是本地文件的真实
+      // 大小，可信；豆瓣的计数不可信，两者不是一回事。
+      el.textContent =
+        `${p.phase === 'copy' ? '正在复制' : '正在校验'} ${p.file}` +
+        `（${p.fileIndex + 1}/${p.files}）${pct}%`;
+    },
+  });
+
+  try {
+    let r;
+    try {
+      r = await run(false);
+    } catch (e) {
+      if (e.code !== 'destination_not_empty') throw e;
+      // 覆盖是不可撤销的，必须用户点头。文件选择器里随手点中的可能是文档目录。
+      if (!confirm(`${e.message}\n\n继续会覆盖同名文件，且没有回收站。确定吗？`)) {
+        el.className = 'card idle';
+        el.textContent = '已取消，什么都没写。';
+        return;
+      }
+      r = await run(true);
+    }
+    showExportResult(r);
+  } catch (e) {
+    el.className = 'card err';
+    el.textContent = `导出失败：${e.message}`;
+  }
+});
+
+/** @param {object} r */
+function showExportResult(r) {
+  const el = $('export-result');
+  el.replaceChildren();
+  const b = document.createElement('b');
+
+  if (r.problems.length) {
+    el.className = 'card err';
+    b.textContent = `导出有问题：${r.problems.length} 个文件没对上`;
+    el.append(b, document.createTextNode(
+      r.problems.map((p) => `${p.name}（${p.reason}）`).join('；') +
+      '。这一份别拿来当备份——原档案还在扩展里，请换个位置重导。',
+    ));
+    return;
+  }
+
+  el.className = 'card good';
+  if (r.verified) {
+    // 只有这一句能说「已校验」：回读了目的地、逐个对上了 manifest 里的摘要。
+    b.textContent = `已导出并校验：${r.files.length} 个文件，${bytes(r.bytes)}`;
+    el.append(b, document.createTextNode(
+      '每个文件都从你选的文件夹里重新读了一遍，字节数与 manifest 里声明的 SHA-256 全部一致。' +
+      '现在可以安全地删掉扩展里那一份了。',
+    ));
+  } else {
+    // 只验了字节数就别说「已校验」——那正是这个项目一直在躲的假安心。
+    b.textContent = `已导出：${r.files.length} 个文件，${bytes(r.bytes)}（只验了字节数）`;
+    el.append(b, document.createTextNode(
+      '这次抓取还没收尾，没有 manifest，所以只核对了每个文件的字节数，没有摘要可对。' +
+      '抓取完成后重导一次才能做完整校验。',
+    ));
   }
 }
 

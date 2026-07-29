@@ -9,6 +9,7 @@ import {
   segmentFilename,
   indexFilename,
   bundleDirName,
+  bundleIdFromDirName,
   newWarcRecordId,
   SequenceAllocator,
 } from '../src/core/ids.js';
@@ -152,5 +153,35 @@ describe('序号分配器', () => {
   test('拒绝非法起点', () => {
     assert.throws(() => new SequenceAllocator(-1), /startAt/);
     assert.throws(() => new SequenceAllocator(1.5), /startAt/);
+  });
+});
+
+describe('bundleIdFromDirName', () => {
+  test('与 bundleDirName 互为逆运算', () => {
+    const id = newBundleId(new Date('2026-07-29T10:15:00Z'));
+    assert.equal(bundleIdFromDirName(bundleDirName(id)), id);
+  });
+
+  test('不是档案目录一律返回 null', () => {
+    // OPFS 根下不止我们的东西，认错一个目录就会去读一份不存在的 manifest。
+    for (const bad of [
+      'doubak-bundle-',
+      'doubak-bundle-不是合法ID',
+      'doubak-bundle-2026',
+      'bundle-20260729-101500',
+      '',
+      'tmp',
+      `doubak-bundle-${newBundleId()}-extra`,
+    ]) {
+      assert.equal(bundleIdFromDirName(bad), null, `${JSON.stringify(bad)} 不该被认成档案目录`);
+    }
+  });
+
+  test('目录名字典序 = 时间序', () => {
+    // 「最新的档案排最前」直接靠字典序倒排，不另存时间。bundle_id 以时间戳
+    // 打头，这个性质要是破了，档案列表的顺序会静默出错。
+    const a = bundleDirName(newBundleId(new Date('2026-01-02T03:04:05Z')));
+    const b = bundleDirName(newBundleId(new Date('2026-07-29T10:15:00Z')));
+    assert.ok(a < b, `${a} 应当排在 ${b} 之前`);
   });
 });
