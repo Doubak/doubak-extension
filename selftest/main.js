@@ -82,17 +82,24 @@ async function probeEnvironment() {
   add('File System Access', typeof window.showDirectoryPicker === 'function'
     ? '可用（导出用得上）' : '不可用——导出需要换方案');
 
-  // 持久化存储：拿不到许可的话，浏览器可能在磁盘紧张时直接清掉几小时的抓取成果。
+  // 持久化存储。
+  //
+  // 【重要】在扩展里 persist() 返回 false 是**预期行为**，不代表数据有风险。
+  // 扩展防驱逐靠的是 manifest 里的 unlimitedStorage 权限，而不是这个 API；
+  // Chrome 从不为持久化存储弹窗询问，所以 persist() 对扩展基本恒为 false。
+  //
+  // 也就是说这一项**不是可靠的风险信号**，别照着它去吓用户。
   if (navigator.storage?.persisted) {
     const already = await navigator.storage.persisted();
-    add('持久化存储（申请前）', already ? '已获批' : '未获批');
-    if (!already && navigator.storage.persist) {
-      const granted = await navigator.storage.persist();
-      add('持久化存储（申请后）', granted
+    const granted = !already && navigator.storage.persist ? await navigator.storage.persist() : already;
+    add(
+      'persist()',
+      granted
         ? '已获批'
-        : '**被拒绝** —— 磁盘紧张时档案可能被浏览器清掉，界面必须显示这一点');
-    }
+        : 'false —— 扩展里这是预期行为，不是风险信号（防驱逐靠 unlimitedStorage 权限）',
+    );
   }
+  add('unlimitedStorage 权限', '见 manifest；这才是扩展防驱逐的实际机制');
 
   if (navigator.storage?.estimate) {
     const { usage, quota } = await navigator.storage.estimate();
