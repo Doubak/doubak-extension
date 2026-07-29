@@ -31,6 +31,13 @@ Chrome / Edge：`chrome://extensions` → 打开开发者模式 → 加载已解
 | 模块 | 状态 |
 |---|---|
 | 脚手架、工具链 | ✅ |
-| bundle 写入器 | 🚧 进行中 |
+| 基础类型（标识符 / 时间 / url_key / 摘要 / WARC） | ✅ |
+| bundle 写入器（段轮转 / index / manifest） | ✅ 产出已通过规范校验器 |
+| 崩溃恢复 | 🚧 进行中 |
+| OPFS 存储后端 | ⬜ 未开始 |
 | 抓取引擎、frontier、分类器 | ⬜ 未开始 |
-| 界面 | ⬜ 未开始 |
+| 界面（见 [docs/ui.md](docs/ui.md)） | ⬜ 未开始 |
+
+测试：`npm test`（零安装即可跑）。装了可选开发依赖后会额外用
+webrecorder 的 warcio 独立验证 WARC 输出；同级目录有 `doubak-data-specs`
+时会额外跑跨仓库一致性检查。
