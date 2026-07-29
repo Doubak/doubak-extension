@@ -339,3 +339,35 @@ describe('恢复要能自足 —— 指针里带够信息', () => {
     await assert.rejects(() => runner.resume(cp), /username/);
   });
 });
+
+describe('自动发现账号，不让用户手输用户名', () => {
+  test('从 /mine/ 的跳转结果里取用户名', async () => {
+    // 用户已经登录了，浏览器里就有答案，不该再问他一遍。
+    const { runner } = harness(() => PROFILE);
+    // 让 /mine/ 跳到个人主页
+    const orig = runner._fetchImpl;
+    runner._fetchImpl = async (url) => {
+      if (url.endsWith('/mine/')) {
+        return {
+          status: 302, url,
+          headers: new Headers({ location: 'https://www.douban.com/people/mewcatcher/' }),
+          arrayBuffer: async () => new ArrayBuffer(0),
+        };
+      }
+      return orig(url);
+    };
+
+    const { username } = await runner.discoverUsername();
+    assert.equal(username, 'mewcatcher');
+  });
+
+  test('跳转没落到个人主页 → 提示先登录', async () => {
+    const { runner } = harness(() => LOGIN);
+    runner._fetchImpl = async (url) => ({
+      status: 200, url: 'https://accounts.douban.com/passport/login',
+      headers: new Headers({ 'content-type': 'text/html' }),
+      arrayBuffer: async () => new TextEncoder().encode(LOGIN).buffer,
+    });
+    await assert.rejects(() => runner.discoverUsername(), /先.*登录|无法确定/);
+  });
+});

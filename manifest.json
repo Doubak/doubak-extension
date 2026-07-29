@@ -11,14 +11,16 @@
   "permissions": [
     "storage",
     "unlimitedStorage",
-    "alarms"
+    "alarms",
+    "tabs"
   ],
   "host_permissions": [
     "https://*.douban.com/*",
     "https://*.doubanio.com/*"
   ],
   "action": {
-    "default_title": "豆备 Doubak"
+    "default_title": "豆备 Doubak",
+    "default_popup": "src/ui/popup.html"
   },
   "web_accessible_resources": [
     {

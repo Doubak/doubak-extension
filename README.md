@@ -51,7 +51,10 @@ chrome-extension://<扩展ID>/selftest/index.html
 | 抓取主循环（frontier→取页→判定→写档案） | ✅ |
 | 生命周期自恢复（心跳、崩溃哨兵） | ✅ |
 | 持久化（IndexedDB）与后台接线 | ⬜ 未开始 |
-| 界面（见 [docs/ui.md](docs/ui.md)） | ⬜ 未开始 |
+| 编排（开始/分批/恢复/收尾） | ✅ |
+| 最小 popup（U1） | ✅ 够跑通并观察第一次真实抓取 |
+| 完整面板、覆盖率页、存储页 | ⬜ 未开始 |
+| 导出（File System Access） | ⬜ 未开始 |
 
 测试：`npm test`（零安装即可跑）。装了可选开发依赖后会额外用
 webrecorder 的 warcio 独立验证 WARC 输出；同级目录有 `doubak-data-specs`

@@ -32,6 +32,8 @@
 
 import { Supervisor, ALARM_NAME } from './crawl/supervisor.js';
 import { RunStore } from './crawl/run-store.js';
+import { CrawlRunner } from './crawl/runner.js';
+import { driveWithinBudget } from './crawl/driver.js';
 import { ChromeKvStore } from './storage/kv-store.js';
 import { OpfsFileStore } from './storage/opfs-store.js';
 
@@ -44,6 +46,60 @@ function debugLog(...args) {
 
 /** @type {Supervisor | null} */
 let supervisor = null;
+/** @type {CrawlRunner | null} */
+let runner = null;
+/** 正在推进的那一段，避免同一次唤醒里重入。 */
+let driving = null;
+
+/** 惰性构造 runner。与 supervisor 同理：worker 每次拉起都是全新的。 */
+function getRunner() {
+  if (runner) return runner;
+  runner = new CrawlRunner({
+    runStore: getRunStore(),
+    openBundle: (dir) => OpfsFileStore.open(dir),
+    onEvent: (e) => debugLog('事件', e.type, e.routeKey ?? e.reason ?? ''),
+  });
+  return runner;
+}
+
+/** @type {RunStore | null} */
+let runStore = null;
+function getRunStore() {
+  if (!runStore) {
+    runStore = new RunStore({
+      kv: new ChromeKvStore(),
+      openBundle: (dir) => OpfsFileStore.open(dir),
+    });
+  }
+  return runStore;
+}
+
+/**
+ * 推进一段有界的抓取。
+ *
+ * 用 `driving` 挡住重入：心跳、界面命令、启动检查都可能同时调到这里，而
+ * 两段并行推进会让同一个 frontier 被两个循环消费。
+ */
+async function drive() {
+  if (driving) return driving;
+  driving = (async () => {
+    try {
+      const r = await driveWithinBudget({
+        runner: getRunner(),
+        onEvent: (e) => debugLog('驱动', e.type),
+      });
+      debugLog('推进结果', JSON.stringify(r));
+      if (r.done && !r.stoppedBy) {
+        await getRunner().finish('complete');
+        await getSupervisor().finishRun();
+      }
+      return r;
+    } finally {
+      driving = null;
+    }
+  })();
+  return driving;
+}
 
 /**
  * 惰性构造监管器。
@@ -55,19 +111,18 @@ let supervisor = null;
 function getSupervisor() {
   if (supervisor) return supervisor;
 
-  const runStore = new RunStore({
-    kv: new ChromeKvStore(),
-    openBundle: (dir) => OpfsFileStore.open(dir),
-  });
-
   supervisor = new Supervisor({
-    store: runStore,
+    store: getRunStore(),
     alarms: globalThis.chrome?.alarms,
     hooks: {
       onResume: async () => {
-        // TODO: 接上 CrawlLoop。现在只记录——在界面（U1）落地之前，
-        // 自动恢复真跑起来反而不好观察。
-        debugLog('自动恢复：从断点继续（抓取循环尚未接上）');
+        const r = getRunner();
+        if (!r.active) {
+          const cp = await getRunStore().loadCheckpoint();
+          if (!cp) return;
+          await r.resume(cp);
+        }
+        await drive();
       },
       onBlocked: async (decision) => {
         debugLog('不自动恢复：', decision.reason);
@@ -141,8 +196,33 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
       switch (msg?.type) {
         case 'status': {
           const sup = getSupervisor();
-          const cp = await sup._store.loadCheckpoint();
-          sendResponse({ ok: true, running: sup.running, checkpoint: cp });
+          const cp = await getRunStore().loadCheckpoint();
+          sendResponse({
+            ok: true,
+            running: sup.running,
+            checkpoint: cp,
+            runner: getRunner().status(),
+          });
+          break;
+        }
+        case 'start': {
+          const r = getRunner();
+          if (r.active) throw new Error('已有抓取在进行中');
+          // 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
+          const { username } = await r.discoverUsername();
+          const started = await r.start({ username });
+          await getSupervisor().startRun({ bundle_id: started.bundleId });
+          void drive(); // 不等它，立刻答复界面
+          sendResponse({ ok: true, ...started });
+          break;
+        }
+        case 'resume': {
+          const cp = await getRunStore().loadCheckpoint();
+          if (!cp) throw new Error('没有可恢复的抓取');
+          const r = getRunner();
+          if (!r.active) await r.resume(cp);
+          void drive();
+          sendResponse({ ok: true });
           break;
         }
         case 'tick': {
@@ -150,6 +230,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           break;
         }
         case 'pause': {
+          await getRunner().pause();
           await getSupervisor().pauseRun('user_paused');
           sendResponse({ ok: true });
           break;

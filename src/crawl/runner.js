@@ -67,6 +67,32 @@ export class CrawlRunner {
     this._run = null;
   }
 
+  /**
+   * 自动发现当前登录账号的用户名。
+   *
+   * 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
+   * `https://www.douban.com/mine/` 会跳转到 `/people/<username>/`，
+   * 而传输层本来就跟随跳转并记下最终 URL。
+   *
+   * @returns {Promise<{username: string, finalUrl: string}>}
+   */
+  async discoverUsername() {
+    const pacer = new Pacer(this._pacerOptions);
+    const gate = new RequestGate({ pacer });
+    const transport = new Transport({ gate, fetchImpl: this._fetchImpl });
+
+    const res = await transport.fetch('https://www.douban.com/mine/');
+    const m = /\/people\/([A-Za-z0-9_-]+)\/?/.exec(res.finalUrl);
+    if (!m || m[1] === 'mine') {
+      // 跳转没落到个人主页上——最可能的原因是没登录。
+      throw new Error(
+        '无法确定当前账号。请先在浏览器里登录豆瓣——未登录不仅看不到私密条目，' +
+          '请求频率上限也更低。',
+      );
+    }
+    return { username: m[1], finalUrl: res.finalUrl };
+  }
+
   get active() {
     return this._run !== null;
   }
