@@ -4,24 +4,30 @@
   "short_name": "豆备",
   "version": "0.0.1",
   "description": "在你自己的浏览器里备份豆瓣数据，存成标准 WARC 档案。所有数据留在本地。",
-
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
   },
-
   "permissions": [
     "storage",
     "unlimitedStorage",
     "alarms"
   ],
-
   "host_permissions": [
     "https://*.douban.com/*",
     "https://*.doubanio.com/*"
   ],
-
   "action": {
     "default_title": "豆备 Doubak"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "selftest/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
 }

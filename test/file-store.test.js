@@ -2,9 +2,20 @@ import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { MemoryFileStore } from '../src/storage/file-store.js';
+import { fileStoreContract } from './helpers/file-store-contract.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+
+// 契约测试：同一组断言也会在浏览器里跑在 OpfsFileStore 上（见 selftest/）。
+// 两个实现必须行为一致，否则 Node 里的测试是在为一件不会真实发生的事背书。
+describe('FileStore 契约（MemoryFileStore）', () => {
+  for (const c of fileStoreContract()) {
+    test(c.name, async () => {
+      await c.fn(new MemoryFileStore());
+    });
+  }
+});
 
 /** @type {MemoryFileStore} */
 let store;

@@ -26,6 +26,17 @@ npm test          # 跑测试（用 Node 内置的测试运行器，不需要 np
 
 Chrome / Edge：`chrome://extensions` → 打开开发者模式 → 加载已解压的扩展程序 → 选本仓库根目录。
 
+### 浏览器自检
+
+有些东西 Node 里测不到：OPFS、持久化存储许可、配额。装载扩展后打开
+
+```
+chrome-extension://<扩展ID>/selftest/index.html
+```
+
+点「开始自检」，它会在真实浏览器里跑 FileStore 契约（与 Node 里跑在内存实现上的是同一组断言）、
+完整的 bundle 写入、崩溃恢复，并报告持久化存储许可与配额。
+
 ## 现状
 
 | 模块 | 状态 |
