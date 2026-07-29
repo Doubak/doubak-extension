@@ -17,7 +17,7 @@
 
 import { test, describe, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -114,5 +114,30 @@ describe('词表内容', () => {
   test('词表是冻结的，运行时改不了', () => {
     assert.throws(() => constants.VERDICTS.push('whatever'));
     assert.ok(Object.isFrozen(constants.VERDICTS));
+  });
+});
+
+describe('溯源', () => {
+  test('记录了生成来源的摘要', () => {
+    // 回答「这份常量是照着哪一版 schema 生成的」，无需 submodule 也能溯源。
+    assert.match(constants.SPEC_SOURCE_DIGEST, /^[0-9a-f]{64}$/);
+  });
+
+  test('摘要只覆盖实际读取的 schema —— 规范仓库改文档不该让它变', async (t) => {
+    if (skipReason) return t.skip(skipReason);
+
+    // 用 git commit 当溯源标记的话，规范仓库任何一次提交都会让本文件「过期」，
+    // freshness 测试沦为噪音，很快就没人当回事。所以只对读到的字节取摘要。
+    const before = await renderConstants(specsDir);
+
+    const readme = path.join(specsDir, 'bundle/README.md');
+    const original = await readFile(readme, 'utf-8');
+    await writeFile(readme, original + '\n<!-- 临时改动 -->\n', 'utf-8');
+    try {
+      const after = await renderConstants(specsDir);
+      assert.equal(after, before, '改规范的文档不该影响生成结果');
+    } finally {
+      await writeFile(readme, original, 'utf-8');
+    }
   });
 });

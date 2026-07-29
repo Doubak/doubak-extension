@@ -39,6 +39,33 @@ export function findSpecsDir() {
   return null;
 }
 
+/** 生成时读取的 schema 文件。摘要只覆盖这几个文件，见下。 */
+const SOURCE_FILES = [
+  'common.schema.json',
+  'index-entry.schema.json',
+  'crawl-state-entry.schema.json',
+];
+
+/**
+ * 来源摘要：把读取到的 schema 文件按序拼起来算 SHA-256。
+ *
+ * 为什么不用规范仓库的 git commit：那样规范仓库任何一次提交（改文档、加
+ * 测试用例）都会让本文件「过期」，freshness 测试变成噪音，很快就没人当回事。
+ * 只对**实际读取的字节**取摘要，则只有真正影响生成结果的改动才会触发重新
+ * 生成——信号才有意义。
+ *
+ * @param {string} v1Dir
+ */
+async function sourceDigest(v1Dir) {
+  const parts = [];
+  for (const name of SOURCE_FILES) {
+    parts.push(`--- ${name} ---\n`, await readFile(path.join(v1Dir, name), 'utf-8'));
+  }
+  const bytes = new TextEncoder().encode(parts.join(''));
+  const buf = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** @param {string} specsDir */
 export async function renderConstants(specsDir) {
   const v1 = path.join(specsDir, 'bundle/v1');
@@ -47,6 +74,7 @@ export async function renderConstants(specsDir) {
   const common = await read('common.schema.json');
   const indexEntry = await read('index-entry.schema.json');
   const crawlState = await read('crawl-state-entry.schema.json');
+  const digest = await sourceDigest(v1);
 
   const defs = common.$defs;
 
@@ -74,6 +102,15 @@ export async function renderConstants(specsDir) {
 
 /** 本扩展按哪一版规范写入。 */
 export const SPEC_VERSION = ${JSON.stringify(specVersion)};
+
+/**
+ * 生成来源的摘要：${SOURCE_FILES.join('、')} 的内容哈希。
+ *
+ * 这是溯源信息——回答「这份常量是照着哪一版 schema 生成的」。只覆盖实际
+ * 读取的文件，所以规范仓库改文档或加测试用例不会让它变，只有真正影响生成
+ * 结果的改动才会。
+ */
+export const SPEC_SOURCE_DIGEST = ${JSON.stringify(digest)};
 
 /**
  * 响应可信度判定。封闭词表——安全相关字段，拼错必须失败。

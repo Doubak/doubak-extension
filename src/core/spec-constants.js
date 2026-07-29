@@ -9,6 +9,15 @@
 export const SPEC_VERSION = "bundle/1.0";
 
 /**
+ * 生成来源的摘要：common.schema.json、index-entry.schema.json、crawl-state-entry.schema.json 的内容哈希。
+ *
+ * 这是溯源信息——回答「这份常量是照着哪一版 schema 生成的」。只覆盖实际
+ * 读取的文件，所以规范仓库改文档或加测试用例不会让它变，只有真正影响生成
+ * 结果的改动才会。
+ */
+export const SPEC_SOURCE_DIGEST = "50148dafdf2b4c623775eb6179ad26b063f76bb0c7e58d199112c71721eae25f";
+
+/**
  * 响应可信度判定。封闭词表——安全相关字段，拼错必须失败。
  * 读者遇到未知取值必须当作不可信，不得当作 ok。
  */
