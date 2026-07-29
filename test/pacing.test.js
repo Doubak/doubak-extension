@@ -36,11 +36,19 @@ describe('基础间隔与抖动', () => {
     assert.ok(Math.abs(mean - 1000) < 30, `均值应接近 1000，实际 ${mean}`);
   });
 
-  test('默认值偏保守', () => {
-    // 我们不知道豆瓣的真实限额，也不能去试。默认值是有理由的保守猜测：
-    // 前代与 tofu 都用 1 秒固定间隔，我们比它们更慢且带抖动。
-    assert.ok(DEFAULT_INTERVAL_MS >= 3000, '不该比前代更激进');
+  test('默认与前代同速，但语义相同且多三重保护', () => {
+    // 前代 its-my-data/doubak 的三处 time.Sleep 全都是从响应回来之后才睡
+    // （核对过源码），也就是本来就是 finish-to-start 1 秒；它在同一个账号上
+    // 跑了 20 个批次、横跨两年没被封。我们同速，但多了抖动、退避、软封锁停机。
+    assert.equal(DEFAULT_INTERVAL_MS, 1000, '与有战绩的先例同速');
     assert.equal(new Pacer().level, 0);
+  });
+
+  test('抖动让实际间隔围绕基础值波动而非固定', () => {
+    // 前代是固定 1 秒，节律非常规整。抖动是我们比它多出来的第一重保护。
+    const p = new Pacer({ intervalMs: 1000, jitterRatio: 0.3, random: () => 0.1 });
+    assert.notEqual(p.nextDelayMs(), 1000);
+    assert.ok(p.nextDelayMs() >= 700 && p.nextDelayMs() <= 1300);
   });
 
   test('拒绝非法参数', () => {
