@@ -261,6 +261,10 @@ export const ROUTE_PROFILES = {
     // 真实终止页（0 条广播）仍然带着这个标题与用户导航
     frameAnchors: [/<title>\s*[^<]*广播\s*<\/title>/],
     itemAnchor: /<div class="status-item"/,
+    // 广播条目自带稳定 ID，用于跨页去重与停滞检测
+    idAnchor: /data-sid="(\d+)"/g,
+    // 声明数量：广播没有可信的总数，故为 null
+    claimedCount: null,
   },
   'interest.list': {
     // 列表页的标题形如「我看过的影视(1157)」
@@ -268,5 +272,65 @@ export const ROUTE_PROFILES = {
     // 2023-12 起电影条目的 class 变成了 item comment-item，
     // 所以按「class 包含 item」匹配而不是等值匹配
     itemAnchor: /class="item[ "]|class="subject-item"|class="common-item"/,
+    // 条目指向作品页，subject id 是稳定的去重键
+    idAnchor: /\/subject\/(\d+)\//g,
+    // 实测：每一张列表页上都有声明数量，不只入口页——可以逐页复读，
+    // 从而发现抓取过程中总数发生了变化
+    claimedCount: /<h1>\s*([^<]*?)\((\d+)\)\s*<\/h1>/,
   },
 };
+
+/**
+ * 按路线 key 找判定描述。
+ *
+ * 路线 key 形如 `interest.movie.collect`，而判定描述是按**族**组织的
+ * （`interest.list`）——同一族的页面结构相同，没必要为每个 medium/status
+ * 各写一份。
+ *
+ * @param {string} routeKey
+ * @returns {RouteProfile | null}
+ */
+export function profileForRoute(routeKey) {
+  if (ROUTE_PROFILES[routeKey]) return ROUTE_PROFILES[routeKey];
+  if (routeKey.startsWith('interest.') && routeKey !== 'interest.item') {
+    return ROUTE_PROFILES['interest.list'];
+  }
+  return null;
+}
+
+/**
+ * 抽出本页所有条目 ID，供跨页去重与停滞检测。
+ *
+ * 这属于「为了推进抓取而必须做的结构抽取」——只进 frontier，不构成 bundle
+ * 的数据模型。语义解析仍然是 parser 的事。
+ *
+ * @param {string} bodyText
+ * @param {RouteProfile} route
+ * @returns {string[]}
+ */
+export function extractItemIds(bodyText, route) {
+  if (!route?.idAnchor) return [];
+  const re = new RegExp(route.idAnchor.source, 'g');
+  /** @type {string[]} */
+  const out = [];
+  let m;
+  while ((m = re.exec(bodyText)) !== null) out.push(m[1]);
+  return out;
+}
+
+/**
+ * 读出页面声称的条目数量。
+ *
+ * **它不是完整性判据**——豆瓣的计数有时统计于审查之前、有时之后。记它是因为
+ * 事后不可恢复，且差值有取证价值。
+ *
+ * @param {string} bodyText
+ * @param {RouteProfile} route
+ * @returns {{count: number, raw: string} | null}
+ */
+export function extractClaimedCount(bodyText, route) {
+  if (!route?.claimedCount) return null;
+  const m = route.claimedCount.exec(bodyText);
+  if (!m) return null;
+  return { count: Number(m[2]), raw: m[0] };
+}
