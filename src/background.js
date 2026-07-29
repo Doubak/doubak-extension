@@ -34,7 +34,8 @@ import { Supervisor, ALARM_NAME } from './crawl/supervisor.js';
 import { RunStore } from './crawl/run-store.js';
 import { CrawlRunner } from './crawl/runner.js';
 import { driveWithinBudget } from './crawl/driver.js';
-import { ChromeKvStore } from './storage/kv-store.js';
+import { ChromeKvStore, MemoryKvStore } from './storage/kv-store.js';
+import { dryRunFetch } from './crawl/dry-run.js';
 import { OpfsFileStore } from './storage/opfs-store.js';
 
 // TODO(debug): 开发期日志。发布前把 debugLog 与所有调用一起删掉。
@@ -99,6 +100,97 @@ async function drive() {
     }
   })();
   return driving;
+}
+
+/**
+ * 把界面上的「小范围试跑」翻译成 runner 的参数。
+ *
+ * 两类选项在性质上完全不同，界面上也必须分开说：
+ *
+ * - `days` → **下界**。走到那一天就是**干净终止**，跟每一次增量抓取的正常
+ *   形态一模一样，水位线照常推进。
+ * - `maxCaptures` → **安全阀**。到量就砍断，不是终止条件；水位线不推进，
+ *   产出的是残缺档案。
+ *
+ * @param {{days?: number, maxCaptures?: number, routes?: string[]} | undefined} scope
+ */
+function scopeToOptions(scope) {
+  if (!scope) return {};
+  const routes = scope.routes ?? ['broadcast.timeline'];
+  /** @type {Record<string, unknown>} */
+  const opts = { onlyRoutes: routes };
+  if (scope.days) {
+    const floor = new Date(Date.now() - scope.days * 86_400_000).toISOString();
+    opts.floors = new Map(routes.map((k) => [k, floor]));
+  }
+  if (scope.maxCaptures) opts.maxCaptures = scope.maxCaptures;
+  return opts;
+}
+
+/**
+ * 跑一次演练：真实的链路，**零网络请求**。
+ *
+ * 用独立的内存 KV，而不是真的那份——演练绝不能覆盖掉一次真实抓取的指针，
+ * 否则「调试一下」就把用户几小时的进度弄丢了。档案本身照样写进真 OPFS，
+ * 那正是要验的东西。
+ *
+ * @param {string} scenario
+ */
+async function runDryRun(scenario) {
+  if (getRunner().active) throw new Error('有真实抓取在进行中，先暂停再演练');
+
+  /** @type {Record<string, number>} */
+  const byVerdict = {};
+
+  const runner = new CrawlRunner({
+    runStore: new RunStore({
+      kv: new MemoryKvStore(),
+      openBundle: (dir) => OpfsFileStore.open(dir),
+    }),
+    openBundle: (dir) => OpfsFileStore.open(dir),
+    fetchImpl: dryRunFetch(scenario),
+    onEvent: (e) => {
+      debugLog('演练', e.type, e.routeKey ?? e.reason ?? '');
+      if (e.type === 'capture') {
+        // 判不出来是 null，而 null 恰恰是最该被看见的一种结果——
+        // 给它一个名字，别让它在计数里消失。
+        const k = e.verdict ?? 'unclassified';
+        byVerdict[k] = (byVerdict[k] ?? 0) + 1;
+      }
+    },
+    // 演练不碰豆瓣，没有降速的理由；用真实节奏只会让人干等几分钟。
+    // 但 Pacer 不接受 0（那会让「有节奏」这件事本身可以被关掉），所以取 1ms。
+    pacerOptions: { intervalMs: 1, jitterRatio: 0 },
+  });
+
+  await runner.start({
+    username: 'dryrun',
+    onlyRoutes: ['broadcast.timeline'],
+    includeCatalog: false,
+  });
+
+  // 有界推进，直到跑完或停机。上限只是防夹具写错导致死循环的兜底。
+  let captured = 0;
+  let failed = 0;
+  let stoppedBy = null;
+  for (let i = 0; i < 40; i++) {
+    const b = await runner.runBatch();
+    captured += b.captured;
+    failed += b.failed;
+    stoppedBy = b.stoppedBy;
+    if (b.done) break;
+  }
+
+  // status() 必须在 finish() 之前读——finish 会把 _run 清空。
+  const st = runner.status();
+  const route = st?.routes?.find((r) => r.routeKey === 'broadcast.timeline');
+  const advanced = route ? Boolean(route.contiguous && route.highWater) : null;
+
+  // 中途停机的档案是 aborted，不是 complete。演练也不许在这一点上撒谎——
+  // 这正是被演练验证的那条规则之一。
+  await runner.finish(stoppedBy ? 'aborted' : 'complete');
+
+  return { captured, failed, stoppedBy, byVerdict, advanced };
 }
 
 /**
@@ -210,10 +302,14 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           if (r.active) throw new Error('已有抓取在进行中');
           // 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
           const { username } = await r.discoverUsername();
-          const started = await r.start({ username });
+          const started = await r.start({ username, ...scopeToOptions(msg?.scope) });
           await getSupervisor().startRun({ bundle_id: started.bundleId });
           void drive(); // 不等它，立刻答复界面
           sendResponse({ ok: true, ...started });
+          break;
+        }
+        case 'dryRun': {
+          sendResponse({ ok: true, result: await runDryRun(msg?.scenario) });
           break;
         }
         case 'resume': {

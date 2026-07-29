@@ -106,8 +106,16 @@ export class CrawlRunner {
    * @param {boolean} [opts.includeCatalog]
    * @param {Map<string, string | null>} [opts.floors]  上次的水位线
    * @param {string | null} [opts.previousBundleId]
+   * @param {string[]} [opts.onlyRoutes]  只抓这几条路线。用于小范围试跑——
+   *   挑一条**天然很小**的路线（比如舞台剧只有一两条），就能完整走完整个
+   *   生命周期，包括干净终止与水位线推进。
+   * @param {number} [opts.maxCaptures]  硬上限。这是**安全阀不是终止条件**：
+   *   被它截断的抓取不算干净完成，水位线不会推进，产出的是不完整的档案。
    */
-  async start({ username, mediums, includeCatalog = true, floors, previousBundleId = null }) {
+  async start({
+    username, mediums, includeCatalog = true, floors, previousBundleId = null,
+    onlyRoutes = null, maxCaptures = null,
+  }) {
     if (this._run) throw new Error('已有抓取在进行中');
 
     const pacer = new Pacer(this._pacerOptions);
@@ -142,7 +150,12 @@ export class CrawlRunner {
       now: this._now,
     });
 
-    const routeDefs = buildRoutes({ username, mediums, includeCatalog });
+    let routeDefs = buildRoutes({ username, mediums, includeCatalog });
+    if (onlyRoutes?.length) {
+      const want = new Set(onlyRoutes);
+      routeDefs = routeDefs.filter((r) => want.has(r.key));
+      if (routeDefs.length === 0) throw new Error(`onlyRoutes 里没有一条已知路线：${onlyRoutes}`);
+    }
     const routes = new Map(routeDefs.map((r) => [r.key, r]));
 
     const frontier = new Frontier();
@@ -154,7 +167,10 @@ export class CrawlRunner {
       onEvent: this._emit,
     });
 
-    this._run = { bundleId, dir, store, writer, frontier, loop, pacer, routes, session };
+    this._run = {
+      bundleId, dir, store, writer, frontier, loop, pacer, routes, session,
+      maxCaptures, capturedSoFar: 0,
+    };
 
     // 指针先落盘，再写崩溃哨兵——顺序反了的话，哨兵会无处可写。
     //
@@ -260,18 +276,28 @@ export class CrawlRunner {
     if (!this._run) throw new Error('没有进行中的抓取');
     const { loop, frontier } = this._run;
 
-    const r = await loop.run({ maxItems: this._batchSize });
+    // 安全阀：剩余额度小于一批时，只跑剩下那么多。
+    const remaining =
+      this._run.maxCaptures === null
+        ? Infinity
+        : Math.max(0, this._run.maxCaptures - this._run.capturedSoFar);
+    const r = await loop.run({ maxItems: Math.min(this._batchSize, remaining) });
+    this._run.capturedSoFar += r.captured + r.failed;
 
     // 每批之后落一次 checkpoint。worker 被杀最多丢掉这一批的游标，而捕获
     // 本身早就落盘了，恢复时按 index 重建即可。
     const stopped = frontier.stopped;
     await this._saveCheckpoint(stopped ? frontier.stopReason : CRASH_SENTINEL_REASON);
 
+    const hitCap =
+      this._run.maxCaptures !== null && this._run.capturedSoFar >= this._run.maxCaptures;
     // 用 hasReady() 而不是 next()：后者会把条目标成 in_flight，拿它当判断用
     // 会白白消耗一个条目并让它永远卡住，进而堵死整条路线。
-    const done = stopped || !frontier.hasReady();
-    this._emit({ type: 'batch', ...r, done });
-    return { ...r, done };
+    const done = stopped || hitCap || !frontier.hasReady();
+
+    // 被安全阀截断 ≠ 干净完成。如实说出来，否则用户会以为「跑完了」。
+    this._emit({ type: 'batch', ...r, done, truncated: hitCap });
+    return { ...r, done, truncated: hitCap };
   }
 
   /**

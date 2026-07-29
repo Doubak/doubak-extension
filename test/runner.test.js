@@ -371,3 +371,76 @@ describe('自动发现账号，不让用户手输用户名', () => {
     await assert.rejects(() => runner.discoverUsername(), /先.*登录|无法确定/);
   });
 });
+
+describe('小范围试跑：自然终止 vs 人为截断', () => {
+  test('只抓指定路线', async () => {
+    // 挑一条天然很小的路线（真实档案里舞台剧只有一两条），就能完整走完
+    // 整个生命周期，包括干净终止与水位线推进。
+    const { runner } = harness(broadcastOnly([bcPage(0)]));
+    await runner.start({
+      username: 'example',
+      onlyRoutes: ['broadcast.timeline'],
+    });
+    const s = runner.status();
+    assert.ok(s.active);
+  });
+
+  test('onlyRoutes 里没有已知路线时明确报错', async () => {
+    const { runner } = harness(broadcastOnly([bcPage(0)]));
+    await assert.rejects(
+      () => runner.start({ username: 'example', onlyRoutes: ['不存在的路线'] }),
+      /没有一条已知路线/,
+    );
+  });
+
+  test('maxCaptures 是安全阀，会如实标注为截断', async () => {
+    // 被它截断的抓取不算干净完成——如实说出来，否则用户会以为「跑完了」。
+    const pages = Array.from({ length: 20 }, (_, i) => bcPage(20, i * 20));
+    const { runner } = harness(broadcastOnly(pages), { batchSize: 2 });
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      onlyRoutes: ['broadcast.timeline'], maxCaptures: 3,
+    });
+
+    let last;
+    for (let i = 0; i < 5; i++) {
+      last = await runner.runBatch();
+      if (last.done) break;
+    }
+    assert.equal(last.done, true);
+    assert.equal(last.truncated, true, '必须标明是被截断的');
+  });
+
+  test('被截断的抓取不推进水位线', async () => {
+    // 人为截断不是干净完成。水位线一旦错误推进，下次增量会从错的位置开始。
+    const pages = Array.from({ length: 20 }, (_, i) => bcPage(20, i * 20));
+    const { runner } = harness(broadcastOnly(pages), { batchSize: 2 });
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      onlyRoutes: ['broadcast.timeline'], maxCaptures: 3,
+    });
+    let done = false;
+    for (let i = 0; i < 5 && !done; i++) ({ done } = await runner.runBatch());
+
+    const manifest = await runner.finish('aborted');
+    const cs = manifest.crawl_state.find((c) => c.route_key === 'broadcast.timeline');
+    assert.equal(cs.advanced, false, '截断绝不能推进水位线');
+  });
+
+  test('自然终止的小范围抓取【会】推进水位线', async () => {
+    // 这是与截断的关键区别：走到终点就是干净完成，哪怕只有一页。
+    const { runner } = harness(broadcastOnly([bcPage(20, 0), bcPage(0), bcPage(0), bcPage(0)]), {
+      batchSize: 50,
+    });
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      onlyRoutes: ['broadcast.timeline'],
+    });
+    let done = false;
+    for (let i = 0; i < 10 && !done; i++) ({ done } = await runner.runBatch());
+
+    const manifest = await runner.finish();
+    const cs = manifest.crawl_state.find((c) => c.route_key === 'broadcast.timeline');
+    assert.equal(cs.advanced, true, '自然终止是干净完成');
+  });
+});
