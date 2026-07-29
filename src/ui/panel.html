@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>豆备</title>
+<style>
+  :root { color-scheme: light dark; --line: #8883; }
+  * { box-sizing: border-box; }
+  body {
+    font: 14px/1.6 system-ui, -apple-system, "Noto Sans CJK SC", sans-serif;
+    margin: 0; padding: 0;
+  }
+  header { padding: 18px 24px 0; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 17px; margin: 0 0 2px; }
+  .sub { opacity: .65; margin: 0 0 14px; font-size: 13px; }
+
+  nav { display: flex; gap: 2px; }
+  nav button {
+    font: inherit; padding: 8px 14px; cursor: pointer;
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: inherit; opacity: .65;
+  }
+  nav button[aria-selected="true"] { opacity: 1; border-bottom-color: currentColor; font-weight: 600; }
+
+  main { padding: 20px 24px 60px; max-width: 1000px; }
+  section[hidden] { display: none; }
+  h2 { font-size: 15px; margin: 22px 0 8px; }
+  h2:first-child { margin-top: 0; }
+
+  .card { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; }
+  .idle { background: #8881; }
+  .run  { background: #e8f0fe; color: #174ea6; }
+  .warn { background: #fef7e0; color: #8a6116; }
+  .err  { background: #fce8e6; color: #a50e0e; }
+  .good { background: #e6f4ea; color: #14622b; }
+  @media (prefers-color-scheme: dark) {
+    .run  { background: #12233f; color: #a9c7f5; }
+    .warn { background: #3a2e10; color: #f5d78e; }
+    .err  { background: #3d1512; color: #f7b4ae; }
+    .good { background: #10361c; color: #a8e5b8; }
+  }
+  .card b { display: block; margin-bottom: 3px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-bottom: 8px; }
+  th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; opacity: .7; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .muted { opacity: .55; }
+
+  .hint {
+    font-size: 12px; opacity: .8; background: #8881;
+    padding: 8px 12px; border-radius: 4px; margin-bottom: 12px;
+  }
+  button.act { font: inherit; padding: 7px 16px; cursor: pointer; margin-right: 8px; }
+  #log { font-family: ui-monospace, monospace; font-size: 12px; max-height: 60vh; overflow: auto; }
+  #log div { padding: 1px 0; border-bottom: 1px solid var(--line); }
+
+  .split { display: grid; grid-template-columns: minmax(240px, 1fr) 2fr; gap: 16px; }
+  @media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
+  #captures { max-height: 60vh; overflow: auto; font-size: 12px; }
+  #captures div {
+    padding: 5px 8px; cursor: pointer; border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; gap: 8px;
+  }
+  #captures div[aria-selected="true"] { background: #8882; }
+  #captures .v { font-size: 11px; opacity: .7; }
+  #preview {
+    border: 1px solid var(--line); border-radius: 4px; padding: 12px;
+    max-height: 60vh; overflow: auto;
+  }
+  #preview pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; margin: 0; }
+  #preview img { max-width: 100%; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>豆备</h1>
+    <p class="sub">在你自己的浏览器里备份豆瓣</p>
+    <nav id="tabs">
+      <button data-tab="overview" aria-selected="true">概览</button>
+      <button data-tab="coverage" aria-selected="false">覆盖率</button>
+      <button data-tab="archive" aria-selected="false">档案</button>
+      <button data-tab="log" aria-selected="false">日志</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-overview">
+      <div id="state" class="card idle">正在读取状态…</div>
+      <div id="actions"></div>
+      <h2>各路线进度</h2>
+      <div id="routes"></div>
+    </section>
+
+    <section id="tab-coverage" hidden>
+      <div class="hint">
+        豆瓣页面上的条目数量<b style="display:inline">不能</b>用来判断备份是否完整。
+        豆瓣有多套内容屏蔽机制，它的计数有时统计于屏蔽之前、有时之后。
+        下表的差值是<b style="display:inline">线索</b>，不是错误——完整性看「连续性」那一列。
+      </div>
+      <div id="coverage"></div>
+    </section>
+
+    <section id="tab-archive" hidden>
+      <div class="hint">
+        这里读的是档案本身：顺着索引把每条记录从段文件里取出来解压。
+        这条路径就是规范承诺第三方能走的那条——不信任何声明，直接看字节。
+      </div>
+      <div id="archive-summary"></div>
+      <button class="act" id="verify">验一验（逐条取出并解压）</button>
+      <div id="verify-result"></div>
+      <h2>捕获列表</h2>
+      <div class="split">
+        <div id="captures" class="muted">选一个档案后显示</div>
+        <div id="preview" class="muted">从左边选一条查看原始内容</div>
+      </div>
+    </section>
+
+    <section id="tab-log" hidden>
+      <div class="hint">仅本地保留，不会发送到任何地方。导出前请自行脱敏——里面有 URL 与用户名。</div>
+      <div id="log"></div>
+    </section>
+  </main>
+
+  <script type="module" src="./panel.js"></script>
+</body>
+</html>

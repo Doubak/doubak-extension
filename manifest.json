@@ -25,7 +25,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "selftest/*"
+        "selftest/*",
+        "src/ui/*"
       ],
       "matches": [
         "<all_urls>"

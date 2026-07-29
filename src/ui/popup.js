@@ -213,8 +213,9 @@ async function refresh() {
   $('note').textContent = '请求全部来自你自己的浏览器和 IP。cookie 不会发送到任何地方。';
 }
 
-$('selftest').addEventListener('click', () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('selftest/index.html') });
+// 长内容都在完整面板里——popup 一失焦就关，放不下日志与表格。
+$('panel').addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('src/ui/panel.html') });
 });
 
 refresh();

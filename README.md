@@ -37,6 +37,11 @@ chrome-extension://<扩展ID>/selftest/index.html
 点「开始自检」，它会在真实浏览器里跑 FileStore 契约（与 Node 里跑在内存实现上的是同一组断言）、
 完整的 bundle 写入、崩溃恢复，并报告持久化存储许可与配额。
 
+### 界面
+
+点工具栏图标是 popup（状态、开始/暂停），里面的「完整面板」按钮会开一个标签页：
+概览、覆盖率对账、**档案预览**（顺着索引把记录从段文件里取出来解压）、日志。
+
 ## 现状
 
 | 模块 | 状态 |
@@ -52,9 +57,10 @@ chrome-extension://<扩展ID>/selftest/index.html
 | 生命周期自恢复（心跳、崩溃哨兵） | ✅ |
 | 持久化（IndexedDB）与后台接线 | ⬜ 未开始 |
 | 编排（开始/分批/恢复/收尾） | ✅ |
-| 最小 popup（U1） | ✅ 够跑通并观察第一次真实抓取 |
-| 完整面板、覆盖率页、存储页 | ⬜ 未开始 |
-| 导出（File System Access） | ⬜ 未开始 |
+| 最小 popup（U1） | ✅ |
+| 完整面板：概览 / 覆盖率 / 档案预览 / 日志 | ✅ |
+| bundle 读取器与「验一验」 | ✅ |
+| 存储页、导出（File System Access） | ⬜ 未开始 |
 
 测试：`npm test`（零安装即可跑）。装了可选开发依赖后会额外用
 webrecorder 的 warcio 独立验证 WARC 输出；同级目录有 `doubak-data-specs`
