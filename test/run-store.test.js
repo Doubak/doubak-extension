@@ -218,7 +218,7 @@ describe('KV 存副本，不共享引用', () => {
 
 describe('MemoryKvStore', () => {
   test('满足 KvStore 契约', async () => {
-    // 它是另外两个实现（ChromeKvStore / ProxyKvStore）的参照，所以它自己也得
+    // 它是 IdbKvStore 的参照，所以它自己也得
     // 过同一份契约——否则「与内存实现一致」这句话就没有基准。
     await kvStoreContract(() => new MemoryKvStore());
   });

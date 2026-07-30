@@ -41,7 +41,7 @@ export const ALARM_NAME = 'doubak-heartbeat';
 /**
  * 抓取运行状态的持久化载体。
  *
- * 刻意做成接口注入：真实实现写 chrome.storage / IndexedDB，测试用内存实现。
+ * 刻意做成接口注入：真实实现写 IndexedDB，测试用内存实现。
  * 监管逻辑本身不碰任何浏览器 API，因此可以完全在 Node 里测。
  *
  * @typedef {object} RunStore

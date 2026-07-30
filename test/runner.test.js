@@ -509,3 +509,41 @@ describe('身份确认对着真实页面', () => {
   });
 });
 
+describe('开工失败不许留下半开的状态', () => {
+  test('落盘失败 → active 退回 false，还能再试', async () => {
+    // 不退的话 `active` 永远是 true，此后每次「开始抓取」都被自己挡掉，报的是
+    // 「已有抓取在进行中」——而真实原因是上一次根本没开成。用户面对的是一个
+    // 既没在抓、又开不了新的死局，除了重装扩展没有出路。这个坑真的踩过。
+    const { runner, runStore } = harness(() => PROFILE);
+
+    let fail = true;
+    const orig = runStore.setCurrentRun.bind(runStore);
+    runStore.setCurrentRun = async (p) => {
+      if (fail) throw new Error('存储坏了');
+      return orig(p);
+    };
+
+    await assert.rejects(() => runner.start({ username: 'example', includeCatalog: false }), /存储坏了/);
+    assert.equal(runner.active, false, 'active 没退回去 —— 之后再也开不了工');
+
+    // 修好之后照样能开
+    fail = false;
+    const r = await runner.start({ username: 'example', includeCatalog: false });
+    assert.ok(r.bundleId);
+    assert.equal(runner.active, true);
+  });
+
+  test('checkpoint 写失败也一样退回', async () => {
+    const { runner, runStore } = harness(() => PROFILE);
+    runStore.saveCheckpoint = async () => { throw new Error('写不进去'); };
+
+    await assert.rejects(() => runner.start({ username: 'example', includeCatalog: false }), /写不进去/);
+    assert.equal(runner.active, false);
+  });
+
+  test('身份确认失败不留状态（它发生在 _run 被设之前）', async () => {
+    const { runner } = harness(() => '<html><body>认不出来</body></html>');
+    await assert.rejects(() => runner.start({ username: 'example', includeCatalog: false }));
+    assert.equal(runner.active, false);
+  });
+});

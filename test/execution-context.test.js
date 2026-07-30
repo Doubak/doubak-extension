@@ -116,7 +116,7 @@ describe('执行上下文约束', () => {
     assert.equal(/bytes/.test(host), false, 'host.js 里出现了 bytes —— 字节不许走这条通道');
   });
 
-  test('offscreen 只用 chrome.runtime，其余 API 一律借道 service worker', async () => {
+  test('offscreen 只用 chrome.runtime，其余能力走标准 Web API', async () => {
     // offscreen document 虽然是扩展页面，可用的扩展 API 却只有一小部分。这件事
     // 咬过两次，两次的症状都与真实原因毫无关系：
     //
@@ -135,9 +135,36 @@ describe('执行上下文约束', () => {
       'offscreen 里出现了 chrome.runtime 之外的 API —— 它在那个上下文里很可能是 undefined');
 
     // 具体挡一下最容易顺手写出来的那个
-    assert.equal(code.includes('ChromeKvStore'), false,
-      'offscreen 拿不到 chrome.storage，要用 ProxyKvStore');
-    assert.match(src, /ProxyKvStore/);
+    assert.equal(code.includes('chrome.storage'), false,
+      'offscreen 拿不到 chrome.storage，抓取状态要用 IdbKvStore');
+    assert.match(src, /IdbKvStore/);
+  });
+
+  test('抓取状态不许借道 service worker —— 那会形成请求/响应环', async () => {
+    // service worker 正 await offscreen 的「开始抓取」响应，offscreen 又 await
+    // service worker 帮它写 checkpoint。它在浏览器里的表现是 `setCurrentRun()`
+    // 看起来成功了、紧接着的 `getCurrentRun()` 却拿不到东西，报出「还没有
+    // setCurrentRun」——一句完全指不到真实原因的话。
+    //
+    // IndexedDB 没有这个问题：普通 DOM/Worker API，两边直接用、看同一份数据。
+    for (const f of ['src/offscreen/offscreen.js', 'src/background.js']) {
+      const code = stripComments(await read(f));
+      assert.equal(code.includes('ProxyKvStore'), false, `${f} 又在借道了`);
+      assert.match(code, /IdbKvStore/, `${f} 应当直接用 IndexedDB`);
+    }
+  });
+
+  test('service worker 与 offscreen 用同一个库，否则各写各的', async () => {
+    // 两边必须看到同一份 checkpoint：offscreen 写、service worker 读（决定该不该
+    // 恢复）。库名或 store 名不一致的话，恢复永远找不到东西，而且**不会报错**。
+    const idb = await read('src/storage/idb-kv-store.js');
+    assert.match(idb, /export const DB_NAME/);
+    for (const f of ['src/offscreen/offscreen.js', 'src/background.js']) {
+      const code = stripComments(await read(f));
+      // 不许自己传 dbName —— 传了就有机会传成两个不一样的
+      assert.equal(/new IdbKvStore\(\s*\{/.test(code), false,
+        `${f} 给 IdbKvStore 传了参数，两边就有可能指向不同的库`);
+    }
   });
 
   test('传输层的权限兜底在查不了时返回 null，而不是假装有权限', async () => {

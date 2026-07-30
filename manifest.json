@@ -9,7 +9,6 @@
     "type": "module"
   },
   "permissions": [
-    "storage",
     "unlimitedStorage",
     "alarms",
     "offscreen",

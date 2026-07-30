@@ -16,6 +16,22 @@ import { REQUIRED_ORIGINS } from '../src/crawl/permissions.js';
 const root = new URL('../', import.meta.url);
 const manifest = JSON.parse(await readFile(new URL('manifest.json', root), 'utf-8'));
 
+/**
+ * 去掉注释。
+ *
+ * 必须的：这些文件的注释里**正需要**写「offscreen 拿不到 chrome.storage，所以
+ * 改用 IndexedDB」，而一个只会字符串匹配的检查会把那句解释本身当成「用到了
+ * chrome.storage」，然后要求声明一条其实不需要的权限。
+ *
+ * @param {string} src
+ */
+function stripComments(src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/([^:])\/\/.*$/gm, '$1');
+}
+
 /** 把 src/ 与 selftest/ 下所有 js 拼起来，用来查 API 到底有没有被调用。 */
 async function allSource() {
   /** @param {URL} dir */
@@ -23,7 +39,7 @@ async function allSource() {
     let out = '';
     for (const e of await readdir(dir, { withFileTypes: true })) {
       if (e.isDirectory()) out += await walk(new URL(`${e.name}/`, dir));
-      else if (e.name.endsWith('.js')) out += await readFile(new URL(e.name, dir), 'utf-8');
+      else if (e.name.endsWith('.js')) out += stripComments(await readFile(new URL(e.name, dir), 'utf-8'));
     }
     return out;
   }

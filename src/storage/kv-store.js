@@ -7,7 +7,7 @@
  * 为什么要分开：service worker 启动时还不知道 bundle 是哪个，得先有个地方
  * 问一句「上次在抓什么」。这个地方必须极小、极稳，且不依赖 OPFS 已经打开。
  *
- * 与 FileStore 同样的做法：接口注入，内存实现给测试，chrome.storage 实现给
+ * 与 FileStore 同样的做法：接口注入，内存实现给测试，IndexedDB 实现给
  * 浏览器。监管与恢复逻辑因此完全可以在 Node 里测。
  */
 
@@ -44,34 +44,16 @@ export class MemoryKvStore {
   }
 }
 
-/**
- * chrome.storage.local 实现。
+/*
+ * 这里曾经有一个 `ChromeKvStore`（`chrome.storage.local`）。删掉了。
  *
- * 注意**不能用 `chrome.storage.sync`**：它有约 100 KB 的硬上限且会跨设备
- * 同步，无论如何都不该用来放抓取状态。
+ * 原因不是它不好用，而是**它在 offscreen document 里压根不可用**——而抓取跑在
+ * 那里。让 offscreen 借道 service worker 会形成一个请求/响应环（SW 正 await
+ * offscreen 的响应，offscreen 又 await SW），实际表现是「刚 set 完就 get 不到」。
  *
- * @implements {KvStore}
+ * 换成 `IdbKvStore`：IndexedDB 是普通 DOM/Worker API，service worker、offscreen、
+ * 窗口都能直接用，同源同库。这本来也是设计里写的（DESIGN.md F-10b）。
+ *
+ * 连带结果：`storage` 权限不再需要，已从 manifest 里删掉。少一条权限就少一条要向
+ * 用户解释的东西。
  */
-export class ChromeKvStore {
-  /** @param {any} [area] 默认 chrome.storage.local */
-  constructor(area) {
-    this._area = area ?? globalThis.chrome?.storage?.local;
-    if (!this._area) throw new Error('chrome.storage.local 不可用');
-  }
-
-  /** @param {string} key */
-  async get(key) {
-    const out = await this._area.get(key);
-    return out?.[key];
-  }
-
-  /** @param {string} key @param {unknown} value */
-  async set(key, value) {
-    await this._area.set({ [key]: value });
-  }
-
-  /** @param {string} key */
-  async remove(key) {
-    await this._area.remove(key);
-  }
-}

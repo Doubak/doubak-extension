@@ -216,8 +216,18 @@ export class CrawlRunner {
     //
     // 指针里带上 username：恢复时要靠它重建路线表，而 checkpoint 里没有
     // 这个信息（那里只放推导不出来的抓取状态）。少了它，崩溃之后就恢复不了。
-    await this._runStore.setCurrentRun({ bundleId, dir, username, mediums, includeCatalog });
-    await this._saveCheckpoint(CRASH_SENTINEL_REASON);
+    //
+    // **这两步失败必须把 `_run` 退回去。** 否则 `active` 一直是 true，此后每次
+    // 「开始抓取」都被自己挡掉，报的是「已有抓取在进行中」——而真实原因是上一次
+    // 根本没开成。用户面对的是一个既没在抓、又开不了新的死局，除了重装扩展没有
+    // 出路。（这个坑真的踩过。）
+    try {
+      await this._runStore.setCurrentRun({ bundleId, dir, username, mediums, includeCatalog });
+      await this._saveCheckpoint(CRASH_SENTINEL_REASON);
+    } catch (err) {
+      this._run = null;
+      throw err;
+    }
 
     this._emit({ type: 'started', bundleId, routes: routeDefs.length });
     return { bundleId, dir, account };

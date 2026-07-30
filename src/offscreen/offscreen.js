@@ -53,7 +53,7 @@
  * | API | 在这里 | 后果 |
  * |---|---|---|
  * | `chrome.runtime`（消息、getURL） | ✓ | 命令与事件都靠它 |
- * | `chrome.storage` | **✗** | checkpoint 要经由 service worker 走一跳（`ProxyKvStore`） |
+ * | `chrome.storage` | **✗** | 所以抓取状态存 IndexedDB（`IdbKvStore`），那是普通 DOM API，不是 `chrome.*` |
  * | `chrome.permissions` | **✗** | 传输层的权限兜底在这里查不了，会返回 `null`（「查不了」而不是「有权限」）。主动那道 `permissions.onRemoved` 在 service worker 里，仍然有效 |
  * | `chrome.notifications` | **✗** | 通知一律由 service worker 发 |
  * | `fetch`（带 host 权限与 cookie） | ✓ | 抓取靠它 |
@@ -66,7 +66,7 @@ import { CrawlRunner } from '../crawl/runner.js';
 import { RunStore } from '../crawl/run-store.js';
 import { driveWithinBudget } from '../crawl/driver.js';
 import { MemoryKvStore } from '../storage/kv-store.js';
-import { ProxyKvStore } from '../storage/proxy-kv-store.js';
+import { IdbKvStore } from '../storage/idb-kv-store.js';
 import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { dryRunFetch } from '../crawl/dry-run.js';
 import { OFFSCREEN_TARGET } from './protocol.js';
@@ -106,14 +106,13 @@ function openBundle(dir) {
 /** @type {RunStore | null} */
 let runStore = null;
 function getRunStore() {
-  // **不能**用 ChromeKvStore：offscreen document 拿不到 `chrome.storage`。
-  // 它虽然是扩展页面，可用的扩展 API 却只有一小部分（`chrome.runtime` 在，
-  // `chrome.storage` 不在）。所以经由 service worker 走一跳。
+  // 用 IndexedDB，**不是** `chrome.storage`（这里拿不到它），也**不是**借道
+  // service worker（那会形成一个请求/响应环：SW 正在 await 我们的响应，我们又去
+  // await 它。见 idb-kv-store.js 开头）。
   //
-  // 代价是每次读写多一条消息，而 checkpoint 一页写一次、内容是几百字节的小
-  // JSON——和这条只认 JSON 的通道正好匹配。这与 WARC 记录完全相反，那才是抓取
-  // 必须整条搬进来的原因。
-  if (!runStore) runStore = new RunStore({ kv: new ProxyKvStore({ context: 'offscreen' }), openBundle });
+  // IndexedDB 在这三种上下文里都能直接用，同源同库，谁都不需要求谁。而且这本来
+  // 就是设计里写的（DESIGN.md F-10b）。
+  if (!runStore) runStore = new RunStore({ kv: new IdbKvStore(), openBundle });
   return runStore;
 }
 

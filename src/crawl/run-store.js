@@ -7,7 +7,7 @@
  *
  * | 放哪 | 内容 | 为什么 |
  * |---|---|---|
- * | KV（chrome.storage） | 当前 bundle 的 id 与目录 | worker 启动时还不知道 bundle 是哪个，得先有地方问一句 |
+ * | KV（IndexedDB） | 当前 bundle 的 id 与目录 | worker 启动时还不知道 bundle 是哪个，得先有地方问一句 |
  * | bundle 目录里的 `checkpoint.json` | 真正的抓取状态 | 规范要求它随档案走——导出的半成品到别的机器上也能续抓 |
  *
  * ## checkpoint 不需要、也不该每页重写

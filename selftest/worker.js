@@ -10,6 +10,8 @@
 
 import { OpfsFileStore } from '../src/storage/opfs-store.js';
 import { fileStoreContract } from '../test/helpers/file-store-contract.js';
+import { kvStoreContract } from '../test/helpers/kv-store-contract.js';
+import { IdbKvStore } from '../src/storage/idb-kv-store.js';
 import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { coverageEntry, crawlStateEntry } from '../src/bundle/manifest-builder.js';
 import { recoverBundle } from '../src/bundle/recovery.js';
@@ -78,6 +80,51 @@ async function check(group, name, fn) {
     post({ type: 'case', group, name, ok: false, error: e.message });
     return false;
   }
+}
+
+/**
+ * 抓取状态的持久化（IndexedDB）。
+ *
+ * **这是 IdbKvStore 唯一的真实覆盖。** Node 里没有 IndexedDB，所以那边只能测参数
+ * 校验，测不到事务语义——而事务语义恰恰是这里最要紧的一点：等的必须是
+ * `transaction.oncomplete` 而不是 `request.onsuccess`，因为后者早于真正提交。
+ * 写完就以为落盘了、然后进程被杀，那一次写可能根本没提交，而 checkpoint 的全部
+ * 意义就是「被杀之后还在」。
+ */
+async function runIdbKv() {
+  const dbName = `doubak-selftest-${Date.now()}`;
+  const kv = new IdbKvStore({ dbName });
+
+  await check('抓取状态（IndexedDB）', 'KvStore 契约', () => kvStoreContract(() => kv));
+
+  await check('抓取状态（IndexedDB）', '写完之后换一个实例也读得到', async () => {
+    // 这一条才是 checkpoint 真正依赖的性质：写它的上下文（offscreen）和读它的
+    // 上下文（service worker）不是同一个，中间还可能隔着一次进程被杀。
+    await kv.set('doubak.selftest', { bundleId: 'x', dir: 'y', n: 1 });
+    const other = new IdbKvStore({ dbName });
+    const got = await other.get('doubak.selftest');
+    if (got?.bundleId !== 'x' || got?.n !== 1) {
+      throw new Error(`换实例读不到同一份数据：${JSON.stringify(got)}`);
+    }
+  });
+
+  await check('抓取状态（IndexedDB）', '删掉不存在的键不抛', () => kv.remove('从来没写过'));
+
+  await check('抓取状态（IndexedDB）', '空键被拒绝', async () => {
+    let threw = false;
+    try {
+      await kv.get('');
+    } catch {
+      threw = true;
+    }
+    if (!threw) throw new Error('空键该被拒绝');
+  });
+
+  // 收拾现场：自检不该留下一个库
+  await new Promise((resolve) => {
+    const req = indexedDB.deleteDatabase(dbName);
+    req.onsuccess = req.onerror = req.onblocked = () => resolve(undefined);
+  });
 }
 
 /** 在 OPFS 上真正跑一遍 bundle 写入器。 */
@@ -218,6 +265,8 @@ self.onmessage = async (e) => {
 
     const contract = await runContract();
     post({ type: 'note', text: `FileStore 契约：${contract.passed}/${contract.total} 通过` });
+
+    await runIdbKv();
 
     const ctx = await runWriter();
     await runRecovery(ctx);

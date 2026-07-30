@@ -1,16 +1,15 @@
 /**
  * KvStore 的共享契约。
  *
- * 现在有三个实现，而上层（`RunStore`）只认接口——它不该知道自己写在内存里、
- * 写在 `chrome.storage` 里，还是隔着一跳消息写在别的上下文里：
+ * 两个实现，而上层（`RunStore`）只认接口——它不该知道自己写在内存里还是写在
+ * IndexedDB 里：
  *
  * | 实现 | 在哪 |
  * |---|---|
  * | `MemoryKvStore` | 测试与演练 |
- * | `ChromeKvStore` | service worker（唯一真的碰 chrome.storage 的地方） |
- * | `ProxyKvStore` | offscreen document，借道 service worker |
+ * | `IdbKvStore` | service worker 与 offscreen document（**同一个库**） |
  *
- * 三者行为必须一致。最容易分叉的是**边界值**：取不存在的键、存 `null`、存
+ * 两者行为必须一致。最容易分叉的是**边界值**：取不存在的键、存 `null`、存
  * `false`——它们都可能被某个实现悄悄折成 `undefined`，而 checkpoint 里恰好
  * 用得到「明确的 null」。
  */

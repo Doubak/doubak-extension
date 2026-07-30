@@ -10,7 +10,6 @@
 
 | 权限 | 为什么要 | 安装警告 |
 |---|---|---|
-| `storage` | `chrome.storage.local` 存 checkpoint 与当前抓取指针 | 无 |
 | `unlimitedStorage` | 不声明的话几百 MB 的档案放不下。**它也是 OPFS 不被浏览器在磁盘压力下清掉的实际保护**（`persist()` 在扩展里恒为 false，见 DESIGN.md 附录 C.9） | 无 |
 | `alarms` | 心跳。service worker 约 30 秒空闲即被杀，闹钟是**唯一一个我们死了它还在**的东西 | 无 |
 | `offscreen` | 抓取本体跑在 offscreen document 里。service worker 不是专用 Worker，`createSyncAccessHandle()` 用不了，所以它写不了 OPFS（见 `src/offscreen/offscreen.js`） | 无 |
@@ -91,6 +90,7 @@
 |---|---|---|---|
 | `chrome.runtime`（消息、getURL） | ✓ | ✓ | ✓ |
 | `chrome.storage` | ✓ | **✗** | ✓ |
+| **IndexedDB**（标准 API，不是 `chrome.*`） | ✓ | ✓ | ✓ |
 | `chrome.permissions` | ✓ | **✗** | ✓ |
 | `chrome.notifications` | ✓ | **✗** | ✓ |
 | `chrome.alarms` | ✓ | ✗ | ✗ |
@@ -107,16 +107,39 @@
 一直用得好好的），所以第一反应是去查权限配置。真正抛它的是 offscreen 那一侧，而
 错误信息里没有任何上下文。
 
+### 第一次修法是错的：借道会形成请求/响应环
+
+第一反应是「让 offscreen 经由消息借道 service worker 去读写 `chrome.storage`」。
+那撞上了第三个坑，而且是**架构性**的：
+
+```
+service worker ──「开始抓取」──▶ offscreen        （SW 在 await 这个响应）
+                                  │
+               ◀──「帮我写 checkpoint」──┘        （offscreen 又在 await SW）
+```
+
+表现是 `setCurrentRun()` 看起来成功了，紧接着的 `getCurrentRun()` 却拿不到东西，
+报「还没有 setCurrentRun，无处写 checkpoint」——又一句完全指不到真实原因的话。
+
+**正确答案是根本不用 `chrome.*`**：抓取状态存 **IndexedDB**。它是普通的
+DOM/Worker API，service worker、offscreen、窗口都能直接用，同源同库，谁都不需要
+求谁。而这本来就是设计里写的（DESIGN.md F-10b）——`chrome.storage.local` 是偏离。
+
+连带两个好处：
+
+- **offscreen 落 checkpoint 不再依赖 service worker 当时活着**，而 SW 随时会被杀
+  正是这个项目最核心的约束之一。
+- **`storage` 权限不再需要**，已从 manifest 删掉。少一条权限就少一条要向用户解释
+  的东西。
+
 三条应对：
 
-- **收敛。** `chrome.storage` 在整个扩展里只有 service worker 一处真的碰；
-  offscreen 经由 `ProxyKvStore` 借道过去。checkpoint 一页写一次、几百字节的小
-  JSON，正好匹配这条只认 JSON 的通道。
-- **错误信息带上下文。** `ProxyKvStore` 的每条错误都说明是谁在喊、卡在哪一步
-  （没送到 / 没答复 / 那边报错）。
+- **不跨上下文求人。** 能用标准 Web API 的地方就别用 `chrome.*`——后者的可用性
+  按上下文变化，而标准 API 不会。
+- **错误信息带上下文。** 说明是谁在喊、卡在哪一步。
 - **源码层面钉死**（`test/execution-context.test.js`）：offscreen 里除了
-  `chrome.runtime` 不许出现任何 `chrome.*`。Node 测试永远抓不到这类问题——那里
-  压根没有「执行上下文」这个概念。
+  `chrome.runtime` 不许出现任何 `chrome.*`；两个上下文都不许再借道 KV。
+  Node 测试永远抓不到这类问题——那里压根没有「执行上下文」这个概念。
 
 `chrome.permissions` 在 offscreen 里也不可用，所以传输层那道权限兜底在抓取上下文
 里是**失效**的。可以接受：主动那道 `permissions.onRemoved` 在 service worker 里

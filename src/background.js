@@ -44,8 +44,7 @@
 
 import { Supervisor, ALARM_NAME } from './crawl/supervisor.js';
 import { RunStore } from './crawl/run-store.js';
-import { ChromeKvStore } from './storage/kv-store.js';
-import { KV_MESSAGE, handleKvMessage } from './storage/proxy-kv-store.js';
+import { IdbKvStore } from './storage/idb-kv-store.js';
 import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
 import { preflightStorage } from './storage/quota.js';
 import { ensureOffscreen, withOffscreen, serializeScope } from './offscreen/host.js';
@@ -62,18 +61,22 @@ function debugLog(...args) {
 let supervisor = null;
 /** @type {RunStore | null} */
 let runStore = null;
-/** @type {ChromeKvStore | null} */
+/** @type {IdbKvStore | null} */
 let kv = null;
 
 /**
- * `chrome.storage` 在整个扩展里**只有这一处**真的被碰。
+ * 抓取状态存 IndexedDB，**不是** `chrome.storage.local`。
  *
- * offscreen document 拿不到它（见 `src/offscreen/offscreen.js` 的 API 表），
- * 所以那一侧的读写都经由 `ProxyKvStore` 转到这里。把它收敛成一处，就少一整类
- * 「在这里能用、在那里不能用」的意外。
+ * 原因是一个架构性的死结：offscreen document 拿不到 `chrome.storage`，而让它借道
+ * 这里会形成请求/响应环——service worker 正 await offscreen 的「开始抓取」响应，
+ * offscreen 又 await service worker 帮它写 checkpoint。详见
+ * `src/storage/idb-kv-store.js` 开头。
+ *
+ * IndexedDB 是普通 DOM/Worker API，两个上下文都能直接用、看到同一份数据。这也
+ * 正是设计里写的（DESIGN.md F-10b）。
  */
 function getKv() {
-  if (!kv) kv = new ChromeKvStore();
+  if (!kv) kv = new IdbKvStore();
   return kv;
 }
 
@@ -214,13 +217,6 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
   if (msg?.target) return;
   // offscreen 转发给界面的抓取事件也不是命令。
   if (msg?.type === 'crawl_event') return;
-
-  // offscreen 借道读写 chrome.storage。单独处理是因为它**不带 `target`**——
-  // 带了就会被 offscreen 自己的监听器抢走，而它正是这条消息的发起方。
-  if (msg?.type === KV_MESSAGE) {
-    handleKvMessage(msg, getKv()).then(sendResponse);
-    return true;
-  }
 
   (async () => {
     try {
