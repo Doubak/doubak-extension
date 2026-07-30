@@ -25,6 +25,7 @@ function fakeWorker(dirs, { delay = 0 } = {}) {
 
   return {
     seen: [],
+    _onMessage: onMessage,
     addEventListener(type, fn) {
       (type === 'message' ? onMessage : onError).add(fn);
     },
@@ -39,6 +40,10 @@ function fakeWorker(dirs, { delay = 0 } = {}) {
         else if (op === 'size') result = await dirs[dir].size(name);
         else if (op === 'exists') result = await dirs[dir].exists(name);
         else if (op === 'read') result = await dirs[dir].read(name, offset, length);
+        else if (op === 'append') result = await dirs[dir].append(name, msg.bytes);
+        else if (op === 'replace') result = await dirs[dir].replace(name, msg.bytes);
+        else if (op === 'truncate') result = await dirs[dir].truncate(name, length);
+        else if (op === 'remove') result = await dirs[dir].remove(name);
         else throw new Error(`未知操作：${op}`);
         reply = { id, ok: true, result };
       } catch (e) {
@@ -130,15 +135,43 @@ describe('WorkerFileStore', () => {
     await assert.rejects(() => p, /存储 Worker 出错.*OPFS 没了/);
   });
 
-  test('写操作一律抛，不静默吞掉', async () => {
+  test('默认只读：写操作一律抛，且一个消息都不发', async () => {
     // 静默的空实现会让「为什么没写进去」变成一次漫长的排查。
+    // 「不发消息」也要验：发出去再被拒绝，等于把一条本可以在客户端就挡住的
+    // 错误变成一次往返。
     const worker = fakeWorker({ 'doubak-bundle-A': await bundleDir() });
     const s = new WorkerFileStore({ worker, dir: 'doubak-bundle-A' });
 
     for (const op of ['append', 'replace', 'truncate', 'remove']) {
-      await assert.rejects(() => s[op]('f', new Uint8Array(1)), /只读/, `${op} 该抛`);
+      assert.throws(() => s[op]('f', new Uint8Array(1)), /只读/, `${op} 该抛`);
     }
     assert.equal(worker.seen.length, 0, '写操作不该发出任何消息');
+  });
+
+  test('readOnly:false 时写操作真的转发过去', async () => {
+    const dir = await bundleDir();
+    const worker = fakeWorker({ 'doubak-bundle-A': dir });
+    const s = new WorkerFileStore({ worker, dir: 'doubak-bundle-A', readOnly: false });
+
+    await s.append('新文件', enc.encode('abc'));
+    assert.equal(new TextDecoder().decode(await dir.read('新文件')), 'abc');
+  });
+
+  test('错误的 name 会被还原 —— 上层要靠它认出配额耗尽', async () => {
+    // Error 本身跨不过 postMessage。只传 message 的话，QuotaExceededError 会
+    // 退化成一个普通错误，于是「磁盘满了」被显示成「未知错误」。
+    const worker = fakeWorker({});
+    worker.postMessage = async function (msg) {
+      this.seen.push(msg);
+      for (const fn of this._onMessage) {
+        fn({ data: { id: msg.id, ok: false, error: '满了', errorName: 'QuotaExceededError' } });
+      }
+    };
+    const s = new WorkerFileStore({ worker, dir: 'd', readOnly: false });
+    await assert.rejects(() => s.append('f', enc.encode('x')), (e) => {
+      assert.equal(e.name, 'QuotaExceededError');
+      return true;
+    });
   });
 
   test('listBundleDirs 不需要先绑定某一份档案', async () => {

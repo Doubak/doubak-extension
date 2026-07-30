@@ -47,13 +47,16 @@ describe('执行上下文约束', () => {
     assert.equal(src.includes('worker-file-store.js'), false);
   });
 
-  test('专用 Worker 才用 OpfsFileStore', async () => {
-    // 允许直接用它的只有：storage/ 自己、selftest 的 Worker，以及
-    // background.js（那一处是已知待修，见下一条）。
+  test('只有专用 Worker 直接用 OpfsFileStore', async () => {
+    // 允许名单**只有专用 Worker**。service worker 与窗口都得经由 RPC。
+    //
+    // background.js 曾经在这份名单里（带着「已知待修」的记号），现在不在了——
+    // 抓取搬进 offscreen document 之后，它连开 bundle 的能力都不该有。
     const allowed = new Set([
-      'src/storage/opfs-worker.js',
+      'src/storage/opfs-rpc.js',      // 分发逻辑，两个 Worker 入口共用
+      'src/storage/opfs-worker.js',   // 只读入口（面板）
+      'src/storage/opfs-rw-worker.js',// 读写入口（offscreen）
       'selftest/worker.js',
-      'src/background.js',
     ]);
 
     /** @param {URL} dir @param {string} prefix */
@@ -78,20 +81,35 @@ describe('执行上下文约束', () => {
     }
   });
 
-  test('background.js 用 OPFS 这件事有明确记录，不是被忘了', async () => {
-    // service worker 也**不是**专用 Worker，所以抓取的写入路径同样跑不通。
-    // 修法是 offscreen document + 专用 Worker（DESIGN.md F-10）。
-    // 这条测试的作用不是让它通过，而是保证这个缺口在文档里留着字——
-    // 一个没写下来的已知缺口，三个月后就变成一个未知缺口。
+  test('service worker 不直接读写档案', async () => {
+    // service worker 也**不是**专用 Worker，`createSyncAccessHandle()` 在里面
+    // 用不了。所以它连 OpfsFileStore 都不该 import——那是 offscreen 的事。
     const src = await read('src/background.js');
-    assert.match(
-      src,
-      /offscreen/i,
-      'background.js 通过 OPFS 写档案，但 service worker 里 createSyncAccessHandle 不可用；' +
-        '必须在文件里写明这一点与 offscreen 方案',
-    );
+    assert.equal(/from\s+['"][^'"]*opfs-store\.js['"]/.test(src), false);
+    assert.equal(src.includes('WorkerFileStore'), false, 'service worker 里没有 Worker 可用');
+    // 它必须经由 offscreen
+    assert.match(src, /offscreen\/host\.js/);
+  });
 
-    const design = await read('DESIGN.md');
-    assert.match(design, /offscreen/i);
+  test('字节绝不跨 chrome.runtime.sendMessage', async () => {
+    // 那条通道只认 JSON：`Uint8Array` 过去会变成 `{"0":1,"1":2,…}`。整条抓取链
+    // 之所以搬进 offscreen，就是为了让字节根本不用过这条界。
+    //
+    // 这里挡的是最可能被写出来的那种回退：有人为了「只把落盘搬过去」，往
+    // host.js 里加一个带 bytes 的命令。
+    const host = await read('src/offscreen/host.js');
+    assert.equal(/bytes/.test(host), false, 'host.js 里出现了 bytes —— 字节不许走这条通道');
+  });
+
+  test('offscreen 的入口模块不会被 service worker 拉进来', async () => {
+    // offscreen.js 一加载就起 Worker、注册消息监听器。那些副作用绝不能在
+    // service worker 里发生，所以协议常量必须住在一个没有副作用的模块里。
+    const host = await read('src/offscreen/host.js');
+    assert.equal(host.includes("'./offscreen.js'"), false);
+    assert.match(host, /protocol\.js/);
+
+    const protocol = await read('src/offscreen/protocol.js');
+    // 只许有导出常量，不许有任何顶层调用
+    assert.equal(/^\s*(chrome|self|new |await )/m.test(protocol), false);
   });
 });

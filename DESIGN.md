@@ -358,14 +358,14 @@ MV3 的实际限制：`chrome.storage.local` 默认 **10 MB**（Chrome 113 及�
 
 | ID | 功能 | 优先级 | 说明 |
 |---|---|---|---|
-| F-10a | 心跳保活 | P0 | `chrome.alarms` + offscreen document。service worker 约 30 秒空闲即被杀，对几小时的抓取是致命的。 |
+| F-10a | 心跳保活 | P0 | ✅ `chrome.alarms` + offscreen document。service worker 约 30 秒空闲即被杀，对几小时的抓取是致命的。 |
 | F-10b | 无状态恢复 | P0 | 进度状态全在 IndexedDB，内存里不留唯一副本。 |
 | F-10c | 关标签页/重启浏览器可续 | P0 | 重开插件即从 checkpoint 继续。 |
 | F-10e | **自恢复，不是手动重触发** | P0 | service worker 被杀在几小时的抓取里是**常态**而非异常（一次抓取会被杀几十上百次）。心跳用 `chrome.alarms` 而非 `setTimeout`——后者活在 worker 内存里，worker 一死就没了；闹钟由浏览器持有，跨 worker 生命周期、跨浏览器重启存活，系统休眠期间挂起、醒来补发。**它是唯一一个我们死了它还在的东西。** |
 | F-10f | **自动恢复只针对意外中断** | P0 | 醒来后**不能无条件接着抓**。停下来的原因分两类：意外中断（被杀、崩溃、休眠）可以自动继续；刻意停下（风控、验证码、会话失效、用户暂停、配额）一律等人——停下来本身就是保护措施，自动恢复等于绕过它。醒来就重试软封锁正是把限流升级成封号的路径。未知的停止原因保守处理，不恢复。 |
 | F-10g | 崩溃哨兵 | P0 | worker 被杀时没有机会写任何东西，指望临终留言不现实。所以**反过来**：开工前先写一个 `pause_reason: crash` 的 checkpoint，正常暂停或结束时再改写——「没来得及改写」本身就是崩溃的证据。方向是刻意选的：宁可把正常结束误标成崩溃（代价是多做一次幂等的恢复检查），也不要把崩溃误标成正常（代价是数据对不上却无人察觉）。 |
 | F-10h | 崩溃不得洗掉降速 | P0 | 退避层级跨会话保留在 checkpoint 里。崩溃恢复前必须先等够冷却，否则「崩一次就恢复原速」会变成绕过退避的后门。 |
-| F-10d | OPFS 写入走 Worker | P0 | ⚠️ **未实现，当前最大的落地缺口。** `FileSystemSyncAccessHandle` 只能在**专用 Worker** 里用——窗口没有，**service worker 也没有**。所以 `src/background.js` 里的 `OpfsFileStore.open()` 目前只在 Node 测试（用 `MemoryFileStore`）与演练里成立，装进浏览器会当场抛错。形状已定：service worker 只管调度，实际写入交给 **offscreen document 里的专用 Worker**（offscreen 不会被杀，本来就是选它的理由）。窗口侧同构的实现已经落地（`src/storage/worker-file-store.js` + `opfs-worker.js`），RPC 协议可直接复用；还需 manifest 加 `offscreen` 权限、一个 offscreen 页面、把 `openBundle` 换成跨过去的 RPC。`test/execution-context.test.js` 钉着这个缺口的记录。 |
+| F-10d | OPFS 写入走 Worker | P0 | ✅ 已落地，形状比原计划更彻底：**整条抓取链**跑在 offscreen document 里（fetch、判定、WARC 组装、gzip、落盘），由它起一个专用 Worker 写 OPFS。原因是字节过不去——`chrome.runtime.sendMessage` 只认 JSON，`Uint8Array` 过去会变成 `{"0":1,…}`；只搬「落盘」这一步的话，每条 WARC 记录都要在 SW ↔ offscreen 之间过一次 JSON。service worker 退回它唯一擅长的事：拿着闹钟。 |
 
 ### K. 界面
 

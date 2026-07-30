@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>豆备 · 存储</title>
+</head>
+<body>
+<!--
+  这个页面用户永远看不到。
+
+  它存在的唯一理由：OPFS 的原地读写 createSyncAccessHandle() 只能在**专用
+  Worker** 里用，而 service worker 不是专用 Worker——所以 service worker 自己
+  写不了档案。offscreen document 可以起专用 Worker，而且不像 service worker 那样
+  空闲就被杀。
+
+  见 src/offscreen/offscreen.js 与 DESIGN.md F-10d。
+-->
+<script type="module" src="./offscreen.js"></script>
+</body>
+</html>
