@@ -47,6 +47,7 @@ import { ScheduleStore } from './crawl/run-store.js';
 import { IdbKvStore } from './storage/idb-kv-store.js';
 import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
 import { FAILURES_PENDING } from './crawl/resume-policy.js';
+import { readLog, clearLog } from './crawl/event-log.js';
 import { preflightStorage } from './storage/quota.js';
 import { exportedKey } from './storage/storage-usage.js';
 import { ensureOffscreen, withOffscreen, serializeScope } from './offscreen/host.js';
@@ -313,6 +314,15 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
 
         case 'tick':
           sendResponse({ ok: true, result: await getSupervisor().tick() });
+          break;
+
+        case 'readLog':
+          sendResponse({ ok: true, rows: await readLog(getKv()) });
+          break;
+
+        case 'clearLog':
+          await clearLog(getKv());
+          sendResponse({ ok: true });
           break;
 
         case 'retryFailed': {

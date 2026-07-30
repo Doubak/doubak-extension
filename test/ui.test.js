@@ -276,6 +276,41 @@ describe('面板脚本', () => {
     assert.match(fn, /e\.verdict === 'ok'/);
   });
 
+  test('抓完之后不清空进度表 —— 显示上一次的结果', async () => {
+    // 抓完立刻变回「还没有开始」，等于把刚跑完那一次的结果扔了，而那正是用户此刻最想
+    // 看的东西。数据取自最新档案的 manifest（权威记录），不是内存里的快照。
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /function showLastRun/);
+    assert.match(js, /crawlState/, '要读 manifest 的 crawl_state');
+    assert.match(js, /low_water_time/, '「已回溯到」用最旧那一端');
+  });
+
+  test('覆盖率页有自己的加载，且先说「正在读取」', async () => {
+    // 它原来只是 openBundle() 的副作用：第一次直接点进来是空白的，而空白看起来像
+    // 「正在加载」——实际什么都不会发生。
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /if \(btn\.dataset\.tab === 'coverage'\) loadCoverage\(\)/);
+    const fn = js.slice(js.indexOf('async function loadCoverage'), js.indexOf('function renderCoverage'));
+    assert.match(fn, /正在读取/);
+  });
+
+  test('日志页读的是持久化的日志，不是内存数组', async () => {
+    // 原来只记面板打开期间的事件、一刷新就没，而界面上却写着「仅本地保留…导出前请自行
+    // 脱敏」——同时暗示了「存下来了」和「有导出」，两个都不存在。
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /type: 'readLog'/);
+    assert.equal(js.includes('const logLines = []'), false, '内存数组不该还在');
+    assert.match(js, /formatLogText/, '要有复制/导出');
+  });
+
+  test('日志页的说明与实现一致', async () => {
+    const html = await readRepoFile('src/ui/panel.html');
+    const hint = html.slice(html.indexOf('id="tab-log"'), html.indexOf('id="log"'));
+    assert.match(hint, /IndexedDB|存在本机/, '说清存在哪');
+    assert.match(hint, /500/, '说清有上限');
+    assert.match(hint, /脱敏/, '说清里面有 URL 与用户名');
+  });
+
   test('每个 $(id) 都在 HTML 里真的存在', async () => {
     // `$()` 返回 null 之后往上一步才炸，栈里看不出缺的是哪个 id。
     const js = await readRepoFile('src/ui/panel.js');

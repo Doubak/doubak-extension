@@ -213,6 +213,8 @@ export class RouteState {
       highWaterTime: this.highWater?.iso ?? null,
       highWaterRaw: this.highWater?.raw ?? null,
       highWaterIds: this.highWaterIds,
+      lowWaterTime: this.lowWater?.iso ?? null,
+      lowWaterRaw: this.lowWater?.raw ?? null,
       floorTime: this.floorTime,
       enumeration: this.enumeration,
       contiguous: this.contiguous,

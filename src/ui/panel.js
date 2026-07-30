@@ -22,6 +22,7 @@ import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { exportBundle, directorySink } from '../bundle/exporter.js';
 import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../storage/storage-usage.js';
 import { captureTitle, captureSubtitle } from './capture-label.js';
+import { shouldLog, formatEntry, formatLogText } from '../crawl/event-log.js';
 import { bundleDirName, bundleIdFromDirName } from '../core/ids.js';
 
 const $ = (id) => document.getElementById(id);
@@ -117,6 +118,11 @@ $('tabs').addEventListener('click', (e) => {
   }
   if (btn.dataset.tab === 'archive') loadArchive();
   if (btn.dataset.tab === 'debug') loadDebug();
+  // 覆盖率原来**没有自己的加载**——它只是 `openBundle()` 的副作用，所以第一次直接点
+  // 进来是空白的（要先去过档案页才有东西）。空白看起来像「正在加载」，而它其实什么
+  // 都不会发生。
+  if (btn.dataset.tab === 'coverage') loadCoverage();
+  if (btn.dataset.tab === 'log') loadLog();
 });
 
 // ── 概览 ────────────────────────────────────────────────────
@@ -211,6 +217,8 @@ async function refresh() {
       preflightShown = false;
       $('preflight').replaceChildren();
     }
+    // 上一次的结果也让位给正在进行的这一次
+    lastRunShown = false;
   }
 
   if (s.runner?.active) {
@@ -253,6 +261,13 @@ async function refresh() {
 
   renderFailures([]);
   setState('idle', '没有进行中的抓取', '请求全部来自你自己的浏览器和 IP。cookie 不会发送到任何地方。');
+  // **不清空进度表。** 抓完之后立刻变回「还没有开始」，等于把刚跑完那一次的结果扔了
+  // ——而那正是用户此刻最想看的东西。改成显示上一份档案的 crawl_state：那是
+  // **权威记录**（写在 manifest 里），比内存里的快照更可信。
+  if (!lastRunShown) {
+    lastRunShown = true;
+    void showLastRun();
+  }
   // 只在**进入**空闲态时查一次。权限和剩余空间不会每两秒变一次，而每两秒重画
   // 一次这块，就是用户看到的那种闪动。
   if (!preflightShown) {
@@ -380,6 +395,47 @@ function setCell(td, text, muted = false) {
  * 权限和剩余空间不会每两秒变一次，而每两秒重画一块就是用户看到的那种闪动。
  */
 let preflightShown = false;
+let lastRunShown = false;
+
+/**
+ * 空闲时显示**上一次**抓取的结果。
+ *
+ * 数据取自最新那份档案的 `manifest.crawl_state` + `coverage`——那是权威记录，
+ * 而不是内存里的快照。抓完之后 runner 就清空了，只看内存的话进度表会立刻变回
+ * 「还没有开始」，把刚跑完的结果扔掉。
+ */
+async function showLastRun() {
+  try {
+    const dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
+    const id = dirs.map(bundleIdFromDirName).find(Boolean);
+    if (!id) return;
+
+    const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(id) });
+    const reader = new BundleReader({ store, bundleId: id });
+    const s = await reader.summary();
+    if (!s.hasManifest) return; // 没收尾的没有 crawl_state
+
+    const byRoute = new Map((s.coverage ?? []).map((c) => [c.route_key, c]));
+    const rows = (s.crawlState ?? []).map((cs) => ({
+      routeKey: cs.route_key,
+      captured: byRoute.get(cs.route_key)?.captured_count ?? 0,
+      // 「已回溯到」用最旧那一端。规范 §5.4.1.1 之前只存了上界，所以旧档案这里是 null。
+      oldestSeen: cs.low_water_time ?? null,
+      newestSeen: cs.high_water_time ?? null,
+      contiguous: cs.contiguous,
+    }));
+    if (rows.length === 0) return;
+
+    renderRoutes(rows);
+    const note = document.createElement('div');
+    note.className = 'muted';
+    note.style.fontSize = '12px';
+    note.textContent = `以上是上一次抓取（档案 ${id}）的结果，来自它的 manifest。`;
+    $('routes').append(note);
+  } catch {
+    // 读不出来就维持「还没有开始」。这只是个便利显示，不该让概览页报错。
+  }
+}
 
 /**
  * 开抓前的预检：权限够不够、空间够不够。
@@ -544,6 +600,39 @@ function renderFailures(failures) {
 }
 
 // ── 覆盖率 ──────────────────────────────────────────────────
+
+/**
+ * 覆盖率页自己去读档案。
+ *
+ * 读 OPFS 要经过 Worker，是异步的——所以必须先说「正在读取」。空白会被当成加载中，
+ * 而空白其实意味着什么都不会发生。
+ */
+async function loadCoverage() {
+  const el = $('coverage');
+  el.className = 'muted';
+  el.textContent = '正在读取档案…';
+
+  try {
+    const dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
+    const id = currentBundleId ?? dirs.map(bundleIdFromDirName).find(Boolean);
+    if (!id) {
+      el.className = 'muted';
+      el.textContent = '还没有档案。开始一次抓取之后这里会显示对账结果。';
+      return;
+    }
+    const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(id) });
+    const s = await new BundleReader({ store, bundleId: id }).summary();
+    if (!s.hasManifest) {
+      el.className = 'muted';
+      el.textContent = '这次抓取还没收尾——覆盖率证据是收尾时才攒的，现在还没有。';
+      return;
+    }
+    renderCoverage(s.coverage, s.crawlState);
+  } catch (e) {
+    el.className = 'card err';
+    el.textContent = `读不出来：${e.message}`;
+  }
+}
 
 /** @param {object[]} coverage @param {object[]} crawlState */
 function renderCoverage(coverage, crawlState) {
@@ -1003,28 +1092,90 @@ $('verify').addEventListener('click', async () => {
 
 // ── 日志 ────────────────────────────────────────────────────
 
-const logLines = [];
-/** @param {string} text */
-function addLog(text) {
-  logLines.unshift(`${new Date().toLocaleTimeString()}  ${text}`);
-  if (logLines.length > 500) logLines.pop();
+/**
+ * 日志页。
+ *
+ * 事件由 offscreen 落进 IndexedDB（见 crawl/event-log.js），这里只负责读与显示。
+ * 原来是个内存数组，只记面板打开期间的事件、一刷新就没——而界面上却写着「仅本地保留…
+ * 导出前请自行脱敏」，同时暗示了「存下来了」和「有导出」，两个都不存在。
+ */
+let logRows = [];
+
+async function loadLog() {
   const el = $('log');
+  el.className = 'muted';
+  el.textContent = '正在读取…';
+
+  const r = await send({ type: 'readLog' });
+  logRows = r?.ok ? r.rows : [];
+  renderLog();
+}
+
+function renderLog() {
+  const el = $('log');
+  el.className = '';
   el.replaceChildren();
-  for (const l of logLines) {
-    const d = document.createElement('div');
-    d.textContent = l;
-    el.append(d);
+
+  if (logRows.length === 0) {
+    el.className = 'muted';
+    el.textContent = '还没有事件。这里只记重试、停机、错误这类——正常抓完的页面在档案的 index 里。';
+  } else {
+    for (const r of logRows) {
+      const d = document.createElement('div');
+      const bits = [r.at?.slice(0, 19).replace('T', ' '), r.type, r.routeKey, r.reason, r.url, r.message];
+      d.textContent = bits.filter(Boolean).join('  ·  ');
+      el.append(d);
+    }
   }
+
+  const acts = $('log-actions');
+  acts.replaceChildren();
+
+  const copy = document.createElement('button');
+  copy.className = 'act';
+  copy.textContent = '复制日志';
+  copy.disabled = logRows.length === 0;
+  copy.onclick = async () => {
+    const text = formatLogText(logRows);
+    try {
+      await navigator.clipboard.writeText(text);
+      copy.textContent = '已复制 ✔';
+      setTimeout(() => { copy.textContent = '复制日志'; }, 1500);
+    } catch {
+      // 剪贴板可能被策略挡住。**必须有退路**——「复制失败」而没有别的办法，
+      // 等于这个功能不存在（自检页那边踩过同一个坑）。
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.rows = 16;
+      ta.style.width = '100%';
+      ta.style.font = '12px ui-monospace, monospace';
+      acts.append(ta);
+      ta.select();
+    }
+  };
+
+  const clear = document.createElement('button');
+  clear.className = 'act';
+  clear.textContent = '清空';
+  clear.disabled = logRows.length === 0;
+  clear.onclick = async () => {
+    if (!confirm('清空日志？诊断记录会丢掉，但不影响任何已抓到的数据。')) return;
+    await send({ type: 'clearLog' });
+    loadLog();
+  };
+
+  acts.append(copy, clear);
 }
 
 chrome.runtime.onMessage?.addListener((msg) => {
   if (msg?.type !== 'crawl_event') return;
-  const e = msg.event;
-  // **必须带上 message。** 只记 type 与 reason 的话，「写入档案时出错」在日志里
-  // 也还是「写入档案时出错」——真实原因（哪个文件、什么异常）全丢了，而那正是
-  // 唯一能查下去的线索。
-  const bits = [e.type, e.routeKey, e.reason, e.url, e.message].filter(Boolean);
-  addLog(bits.join(' · '));
+  // 事件的落盘在 offscreen 那边做（那样不依赖面板开着）。这里只是让**正在看**日志页的
+  // 用户即时看到，不必等下一次读取。
+  if (!shouldLog(msg.event)) return;
+  logRows.unshift(formatEntry(msg.event, new Date().toISOString()));
+  if (logRows.length > 500) logRows.pop();
+  const tab = $('tabs').querySelector('button[data-tab="log"]');
+  if (tab?.getAttribute('aria-selected') === 'true') renderLog();
 });
 
 refresh();

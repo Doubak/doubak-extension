@@ -91,6 +91,8 @@ export function crawlStateEntry({
   highWaterTime,
   highWaterRaw = null,
   highWaterIds = [],
+  lowWaterTime = null,
+  lowWaterRaw = null,
   floorTime,
   enumeration,
   contiguous,
@@ -137,6 +139,10 @@ export function crawlStateEntry({
     high_water_time: highWaterTime,
     high_water_raw: highWaterRaw,
     high_water_ids: highWaterIds,
+    // 区间的另一端：本次见到的最旧一条。**不是**水位线，不参与增量判断——
+    // 它回答的是「这次覆盖了哪一段」（规范 §5.4.1.1）。
+    low_water_time: lowWaterTime,
+    low_water_raw: lowWaterRaw,
     floor_time: floorTime,
     enumeration,
     contiguous,

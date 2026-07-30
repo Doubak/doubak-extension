@@ -67,6 +67,7 @@ import { RunStore } from '../crawl/run-store.js';
 import { driveWithinBudget } from '../crawl/driver.js';
 import { MemoryKvStore } from '../storage/kv-store.js';
 import { IdbKvStore } from '../storage/idb-kv-store.js';
+import { appendEvent } from '../crawl/event-log.js';
 import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { dryRunFetch } from '../crawl/dry-run.js';
 import { OFFSCREEN_TARGET } from './protocol.js';
@@ -139,6 +140,13 @@ function relayEvent(e) {
   debugLog('事件', e.type, e.routeKey ?? e.reason ?? '');
   // 没有界面打开时 sendMessage 会 reject，那是正常的，不是错误。
   chrome.runtime.sendMessage({ type: 'crawl_event', event: e }).catch(() => {});
+
+  // **落盘。** 面板里那个日志原来只是内存数组，一刷新就没了——而排查问题时最想要的
+  // 恰好是「上次那次抓取在哪一步停下的」。
+  //
+  // 只记 index.ndjson 里没有的事件（重试、停机、门控、错误）：成功的捕获那边已经逐条
+  // 记了，而且更权威。抄一遍只会把真正稀少的信号淹掉。
+  void appendEvent(new IdbKvStore(), e).catch((err) => debugLog('日志写入失败', err));
 }
 
 /**

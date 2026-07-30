@@ -164,7 +164,12 @@
     </section>
 
     <section id="tab-log" hidden>
-      <div class="hint">仅本地保留，不会发送到任何地方。导出前请自行脱敏——里面有 URL 与用户名。</div>
+      <div class="hint">
+        存在本机（IndexedDB），最多保留 500 条，重开也还在。**只记重试、停机、错误这类事件**——
+        每一次成功的捕获已经逐条写在档案的 index.ndjson 里了，抄一遍只会把稀少的信号淹掉。
+        不会发送到任何地方；<b style="display:inline">里面有 URL 与用户名，贴出去之前请自行脱敏</b>。
+      </div>
+      <div id="log-actions"></div>
       <div id="log"></div>
     </section>
   </main>
