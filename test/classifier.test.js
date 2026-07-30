@@ -1,5 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { classifyResponse, RollingSize, ROUTE_PROFILES } from '../src/crawl/classifier.js';
 import { fixtures, stripLoginMarkers, anonymizeWithLoginPrompt } from './helpers/fixtures.js';
@@ -265,5 +266,87 @@ describe('未登录但页面上有数据 —— 真实档案里 151 个页面就
       .replace('class="nav-user-account"', 'class="something-else"')
       .replace('</body>', '<a href="/accounts/logout">退出</a></body>');
     assert.equal(classify({ bodyText: withLogoutOnly }).verdict, 'ok');
+  });
+});
+
+describe('对着真实页面校准（2026-07）', () => {
+  const real = readFileSync(new URL('./fixtures/broadcast-2026-07.html', import.meta.url), 'utf-8');
+
+  test('真实的广播页判 ok —— 标题叫「我的动态」也一样', () => {
+    // 这是那次实际失败的复现。分类器原来靠 `<title>…广播</title>` 认这条路线，
+    // 而豆瓣把标题从「我的广播」改成了「我的动态」——于是真跑第一页就判不出来，
+    // 一条都没抓到，报出来的只有一句「缺少 1 个页面框架标志」。
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/people/mewcatcher/statuses?p=1',
+      status: 200,
+      bodyText: real,
+      route: ROUTE_PROFILES['broadcast.timeline'],
+    });
+
+    assert.equal(r.verdict, 'ok', `判成了 ${r.verdict}：${r.reasons.join('；')}`);
+    assert.ok(r.itemCount > 0);
+  });
+
+  test('标题里根本没有「广播」二字 —— 别再拿它当标志', () => {
+    // 先去掉 HTML 注释，再看。夹具顶部那段说明里**引用了旧的标志本身**
+    // （`<title>…广播</title>`），不去掉的话第一个匹配到的是注释里那个。
+    // 浏览器看到的也是去掉注释之后的内容，所以这么比才对。
+    const markup = real.replace(/<!--[\s\S]*?-->/g, '');
+    assert.match(markup, /<title>\s*我的动态\s*<\/title>/);
+    const title = /<title>[\s\S]*?<\/title>/.exec(markup)[0];
+    assert.equal(title.includes('广播'), false);
+  });
+
+  test('时间与 ID 照样抽得出来', () => {
+    // 水位线与去重都靠它们。标志换了不该影响这两样。
+    const p = ROUTE_PROFILES['broadcast.timeline'];
+    assert.ok([...real.matchAll(p.idAnchor)].length > 0, '取不到 data-sid');
+    assert.ok([...real.matchAll(p.timeAnchor)].length > 0, '取不到 created_at');
+  });
+});
+
+describe('最终 URL 是最强的一条标志 —— 它不依赖 markup', () => {
+  const real = readFileSync(new URL('./fixtures/broadcast-2026-07.html', import.meta.url), 'utf-8');
+  const route = ROUTE_PROFILES['broadcast.timeline'];
+
+  test('被跳到首页 → 判不出来，即使页面里有 stream-items', () => {
+    // 首页信息流同样有 `stream-items`。单看 markup 会把它认成广播时间线，
+    // 然后把别人的动态当成自己的档案写进去。
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/',
+      status: 200,
+      bodyText: real,
+      route,
+    });
+    assert.equal(r.verdict, null);
+    assert.ok(r.reasons.some((x) => x.includes('最终 URL 不像这条路线')));
+  });
+
+  test('URL 对了会明确记一笔，方便事后复盘', () => {
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/people/mewcatcher/statuses?p=3',
+      status: 200,
+      bodyText: real,
+      route,
+    });
+    assert.ok(r.reasons.some((x) => x.includes('最终 URL 仍是这条路线')));
+  });
+
+  test('改版（框架标志没了）判 null，并说清缺的是哪一个', () => {
+    // 只说「缺少 1 个」的话，事后只能对着一份 100 KB 的 HTML 猜是哪一个——
+    // 而改版正是这条路径最常见的触发原因，那时候要的恰好是「哪个标志没了」。
+    const drifted = real.replace(/id="db-usr-profile"/, 'id="db-user-header"');
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/people/mewcatcher/statuses?p=1',
+      status: 200,
+      bodyText: drifted,
+      route,
+    });
+
+    assert.equal(r.verdict, null, '认不出来就不能判 ok');
+    const why = r.reasons.join('；');
+    assert.match(why, /db-usr-profile/, '要说出缺的是哪一个');
+    assert.match(why, /改版/, '要指出最可能的原因');
+    assert.match(why, /不必重抓/, '要说清这一页已经存下来了');
   });
 });

@@ -30,7 +30,8 @@ function broadcastPage(n, from = 0) {
   }
   return `<html><head><title>
     示例的广播
-</title></head><body>${NAV}<div class="stream-items">${items}</div></body></html>`;
+</title></head><body>${NAV}<div id="db-usr-profile"><div class="info"><h1>示例</h1></div></div>
+<div class="stream-items">${items}</div></body></html>`;
 }
 
 const LOGIN_PAGE = `<html><head><title>

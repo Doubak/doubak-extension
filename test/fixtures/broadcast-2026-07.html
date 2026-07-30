@@ -1,0 +1,75 @@
+<!--
+  真实广播页的**结构骨架**，2026-07-30 从
+  https://www.douban.com/people/mewcatcher/statuses?p=1 取得（原页 100 KB）。
+
+  ## 为什么留它
+
+  分类器原来靠 `<title>…广播</title>` 认这条路线。那在 2022 年的档案上是对的，
+  但豆瓣后来把标题改成了**「我的动态」**——于是 2026 年真跑第一页就判不出来，
+  一条都没抓到，而失败信息只说「缺少 1 个页面框架标志」。
+
+  留下这份骨架，是让「标题改名不影响判定」这件事有一个来自真实页面的锚点。
+
+  ## 已经删掉的
+
+  只保留判定用得上的骨架：head、全局导航、个人页头、两条自己的广播。删掉了正文
+  内容、回应区、以及任何第三方痕迹。这是公开仓库，第三方数据不该进来。
+-->
+<!DOCTYPE html>
+<html lang="zh-CN" class="ua-webkit">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>
+    我的动态
+</title>
+</head>
+<body>
+<div id="db-global-nav" class="global-nav"><div class="bd">
+<div class="top-nav-info"><ul><li class="nav-user-account">
+  <a href="https://accounts.douban.com/passport/setting/" class="bn-more"><span>MewX的账号</span></a>
+  <div class="more-items"><a href="https://www.douban.com/accounts/logout?source=main&ck=XOTQ">退出</a></div>
+</li></ul></div>
+</div></div>
+<script>
+  ;window._GLOBAL_NAV = {
+    USER_ID: "82160871",
+    UPLOAD_AUTH_TOKEN: "82160871:a29917019ba457422eff8d4878028f2bc0f148aa",
+    SSE_TOKEN: "35bdb5613e9e187a07a7f1089392e9a63d59ce2b",
+    SSE_TIMESTAMP: "1785407347",
+    DOUBAN_URL: "https://www.douban.com",
+    N_NEW_NOTIS: 0,
+    N_NEW_DOUMAIL: 0
+  };
+</script>
+<div id="db-usr-profile" class="clearfix">
+  <div class="pic"><a href="https://www.douban.com/people/mewcatcher/"><img width="48" height="48" src="https://img3.doubanio.com/icon/up82160871-12.jpg" alt="MewX"/></a></div>
+  <div class="info"><h1>MewX</h1>
+    <ul><li><a href="https://www.douban.com/people/mewcatcher/statuses">广播</a></li></ul>
+  </div>
+</div>
+<div class="stream-items">
+<div class="status-item" style="" data-sid="9380922040" data-action="1" data-target-type="movie" data-object-kind="1002" data-object-id="0">
+  <div class="mod" data-status-id="9380922040">
+    <div class="bd layout-1">
+      <p class="text"><a href="https://www.douban.com/people/mewcatcher/">MewX</a> 想看 <a href="#">（正文已删）</a></p>
+      <div class="actions">
+        <span class="created_at" title="2026-07-30 06:04:23"><a href="https://www.douban.com/people/82160871/status/9380922040/">时间</a></span>
+      </div>
+      <div class="others"><div class="comments"><div class="comments-items"></div></div></div>
+    </div>
+  </div>
+</div>
+<div class="status-item" style="" data-sid="9351468114" data-action="1" data-target-type="movie" data-object-kind="1002" data-object-id="0">
+  <div class="mod" data-status-id="9351468114">
+    <div class="bd layout-1">
+      <p class="text"><a href="https://www.douban.com/people/mewcatcher/">MewX</a> 想看 <a href="#">（正文已删）</a></p>
+      <div class="actions">
+        <span class="created_at" title="2026-07-26 12:34:00"><a href="https://www.douban.com/people/82160871/status/9351468114/">时间</a></span>
+      </div>
+      <div class="others"><div class="comments"><div class="comments-items"></div></div></div>
+    </div>
+  </div>
+</div>
+</div>
+</body>
+</html>

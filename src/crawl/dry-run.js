@@ -46,6 +46,7 @@ function broadcastPage(n, from, day = '26') {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>
     演练的广播
 </title></head><body><div id="db-global-nav">${NAV_IN}</div>
+<div id="db-usr-profile"><div class="info"><h1>演练的账号</h1></div></div>
 <div class="stream-items">${items}</div></body></html>`;
 }
 
@@ -70,8 +71,9 @@ const CHALLENGE = `<!DOCTYPE html><html><head><title>豆瓣</title></head>
 const ANON_WITH_DATA = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>
     某人的广播
 </title></head><body><div id="db-global-nav">${NAV_OUT}</div>
-<div class="status-item" data-sid="777" data-uid="12345">
-<span class="created_at" title="2026-07-26 12:00:00">x</span></div></body></html>`;
+<div id="db-usr-profile"><div class="info"><h1>某人</h1></div></div>
+<div class="stream-items"><div class="status-item" data-sid="777" data-uid="12345">
+<span class="created_at" title="2026-07-26 12:00:00">x</span></div></div></body></html>`;
 
 /**
  * 可选的演练剧本。每个都对准一条**必须走对**的路径。

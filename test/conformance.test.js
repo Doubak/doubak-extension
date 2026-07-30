@@ -373,7 +373,11 @@ const NAV = `<li class="nav-user-account"><a href="/accounts/logout">退出</a>
         items += `<div class="status-item" data-sid="${from + i}" data-uid="10001">
           <span class="created_at" title="2026-07-2${i % 9} 1${i % 9}:00:00">x</span></div>`;
       }
-      return `<html><head><title>\n示例的广播\n</title></head><body>${NAV}${items}</body></html>`;
+      // 标题按 2026 实测（豆瓣把「我的广播」改成了「我的动态」）；框架标志靠
+      // db-usr-profile + stream-items，不看标题。
+      return `<html><head><title>\n我的动态\n</title></head><body>${NAV}
+<div id="db-usr-profile"><div class="info"><h1>示例</h1></div></div>
+<div class="stream-items">${items}</div></body></html>`;
     };
 
     const script = [bcPage(20, 0), bcPage(20, 20), bcPage(0, 0), bcPage(0, 0), bcPage(0, 0)];

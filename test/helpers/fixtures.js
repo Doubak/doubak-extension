@@ -95,9 +95,21 @@ ${body}
 </body></html>`;
 }
 
+/**
+ * 个人页头。真实的广播页上一定有它——而它正是把广播时间线与**首页信息流**区分开
+ * 的那个标志（后者同样有 `stream-items`）。
+ *
+ * 分类器改用结构性标志之后（不再看标题里的字，因为豆瓣把「我的广播」改成了
+ * 「我的动态」），夹具也得照真实结构写。
+ */
+const PROFILE_HEADER = `<div id="db-usr-profile" class="clearfix">
+  <div class="pic"><a href="https://www.douban.com/people/example/"><img src="https://img3.doubanio.com/icon/up82160871-12.jpg"></a></div>
+  <div class="info"><h1>示例用户</h1></div>
+</div>`;
+
 /** @param {number} n */
 function statusItems(n) {
-  let out = '<div class="stream-items">';
+  let out = PROFILE_HEADER + '<div class="stream-items">';
   for (let i = 0; i < n; i++) {
     out += `
     <div class="new-status status-wrapper" data-sid="${4600000000 + i}" data-uid="82160871">
@@ -113,7 +125,10 @@ function statusItems(n) {
 
 export const fixtures = {
   /** 正常的广播列表页。真实档案里这类页面中位数约 98 KB。 */
-  broadcastPage: page('示例用户的广播', statusItems(20)),
+  // 标题按 2026 实测写成「我的动态」——豆瓣把它从「我的广播」改过了，而分类器
+  // 现在根本不看标题（见 classifier.js 的 frameAnchors 说明）。夹具照实写，是为了
+  // 让「改名不影响判定」这件事在测试里真的被覆盖到。
+  broadcastPage: page('我的动态', statusItems(20)),
 
   /**
    * 越界终止页：翻过了最后一页。
@@ -122,7 +137,9 @@ export const fixtures = {
    * 标题与用户导航都在。路线逻辑据此判断「这条线走完了」，而分类器必须
    * 判它为 ok——判成故障会让正常的翻页终点变成一次误报。
    */
-  broadcastEmptyPage: page('示例用户的广播', '<div class="stream-items"></div>'),
+  // 真实的越界终止页只是 `stream-items` **空着**，页面框架照旧完整——所以它仍然
+  // 会被判成 ok。用条目数判定会把正常的翻页终点当成故障。
+  broadcastEmptyPage: page('我的动态', `${PROFILE_HEADER}<div class="stream-items"></div>`),
 
   /**
    * 会话过期的登录页。

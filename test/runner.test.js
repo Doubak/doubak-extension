@@ -29,7 +29,10 @@ function bcPage(n, from = 0) {
     items += `<div class="status-item" data-sid="${from + i}" data-uid="82160871">
       <span class="created_at" title="2026-07-2${i % 9} 1${i % 9}:00:00">x</span></div>`;
   }
-  return `<html><head><title>\n示例的广播\n</title></head><body>${NAV}${items}</body></html>`;
+  // 标题按 2026 实测写成「我的动态」；框架标志靠 db-usr-profile + stream-items。
+  return `<html><head><title>\n我的动态\n</title></head><body>${NAV}
+<div id="db-usr-profile"><div class="info"><h1>示例</h1></div></div>
+<div class="stream-items">${items}</div></body></html>`;
 }
 
 const LOGIN = `<html><head><title>\n登录豆瓣\n</title></head><body>验证码</body></html>`;

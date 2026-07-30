@@ -181,13 +181,33 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   }
   reasons.push('导航栏中存在登录状态');
 
-  // ── 6. 页面框架必须齐全
+  // ── 6a. 最终 URL 还是不是这条路线
+  //
+  // 放在框架检查之前，因为它**不依赖任何 markup**，因此也不会被改版影响。
+  // 它挡的是「被跳走了」：首页信息流同样有 `stream-items`，单看 markup 会认错。
+  if (route.urlAnchor && !route.urlAnchor.test(finalUrl)) {
+    reasons.push(`最终 URL 不像这条路线：${finalUrl}`);
+    return { verdict: null, reasons, itemCount };
+  }
+  if (route.urlAnchor) reasons.push('最终 URL 仍是这条路线');
+
+  // ── 6b. 页面框架必须齐全
   //
   // 这是区分「越界终止页」与「出了别的问题」的关键：终止页条目数为 0，
   // 但框架是完整的。用条目数判定会把正常的翻页终点当成故障。
+  //
+  // 走到这里 URL 已经对了、登录状态也在，所以框架标志缺失基本只有一个含义：
+  // **豆瓣改版了**。判 null（安全），并在原因里说清缺的是哪一个。
   const missing = route.frameAnchors.filter((re) => !re.test(bodyText));
   if (missing.length > 0) {
-    reasons.push(`缺少 ${missing.length} 个页面框架标志——不像是这条路线的页面`);
+    // **把缺的是什么说出来。** 只说「缺少 1 个」的话，事后只能对着一份 100 KB 的
+    // HTML 猜是哪一个不匹配了——而豆瓣改版正是这条路径最常见的触发原因，那时候
+    // 需要的恰好是「哪个标志没了」。
+    reasons.push(
+      `缺少 ${missing.length} 个页面框架标志（${missing.map((re) => re.source).join('、')}）——` +
+        'URL 与登录状态都正常，所以最可能是豆瓣改版了。这一页已如实存进档案，' +
+        '可据此重新校准标志，不必重抓。',
+    );
     return { verdict: null, reasons, itemCount };
   }
   reasons.push('页面框架完整');
@@ -258,8 +278,58 @@ export class RollingSize {
  */
 export const ROUTE_PROFILES = {
   'broadcast.timeline': {
-    // 真实终止页（0 条广播）仍然带着这个标题与用户导航
-    frameAnchors: [/<title>\s*[^<]*广播\s*<\/title>/],
+    /**
+     * 最终 URL 必须还是这条路线。**这是最强的一条，因为它不依赖任何 markup。**
+     *
+     * 豆瓣改不动它：我们请求 `/people/<user>/statuses`，跟完跳转之后还在那儿，
+     * 那这就是那一页。改版能改标题、能改 class，改不了「你请求的资源是什么」。
+     *
+     * 它挡的是另一类事：被跳到首页、被跳到登录页、被跳到 `sec.douban.com`。
+     * 那些情况下页面里可能照样有 `stream-items`（首页信息流就有），单看 markup
+     * 会认错。
+     */
+    urlAnchor: /\/people\/[^/]+\/statuses(\?|$)/,
+
+    /**
+     * 框架标志按**结构**来认，不按标题里的字。
+     *
+     * 原来用的是 `<title>…广播</title>`。它在 2022 年的真实档案上是对的
+     * （标题就是「我的广播」），但豆瓣在那之后把它**改成了「我的动态」**——于是
+     * 2026 年真跑第一页就判不出来，一条都没抓到。
+     *
+     * 教训不是「把新标题也加上」，而是**别拿显示文字当结构标志**：标题会改名、
+     * 会本地化、会做 A/B。而这两个页面版本的结构一模一样：
+     *
+     * | | 2022 档案 | 2026 实测 |
+     * |---|---|---|
+     * | `<title>` | 我的广播 | **我的动态** |
+     * | `class="stream-items"` | ✓ | ✓ |
+     * | `id="db-usr-profile"` | ✓ | ✓ |
+     * | `<div class="status-item"` | ✓ | ✓ |
+     *
+     * 两个标志一起用，是为了不把**首页信息流**也认成这条路线——那里同样有
+     * `stream-items`，但没有 `db-usr-profile`（个人页头）。
+     *
+     * ## 这两个是拿 403 页真实数据挑出来的
+     *
+     * 旧档案里 2022-12 → 2024-08 共 403 个广播页：
+     *
+     * | 标志 | 命中 |
+     * |---|---|
+     * | `class="stream-items"` | **401 / 403** |
+     * | `id="db-usr-profile"` | **401 / 403** |
+     * | `<title>…广播` | 401 / 403（而 2026 年归零） |
+     *
+     * 缺的那 2 个是 15529 字节的登录页——它们**应该**不匹配，而且在走到这一步
+     * 之前就已经被登录状态判掉了。
+     *
+     * 真实的越界终止页（p116，19590 字节）两个标志**都还在**，只是 `stream-items`
+     * 里空着。所以它照旧判 ok，而不是被当成故障——这正是「不能用条目数判定」的
+     * 那条规则要保住的东西。
+     *
+     * 也就是说：这两个标志与标题一样稳，但它们**活过了那次改名**。
+     */
+    frameAnchors: [/class="stream-items"/, /id="db-usr-profile"/],
     itemAnchor: /<div class="status-item"/,
     // 广播条目自带稳定 ID，用于跨页去重与停滞检测
     idAnchor: /data-sid="(\d+)"/g,

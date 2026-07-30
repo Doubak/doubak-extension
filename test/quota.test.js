@@ -106,7 +106,9 @@ describe('写失败让整场抓取停下', () => {
       items += `<div class="status-item" data-sid="${i}" data-uid="82160871">
         <span class="created_at" title="2026-07-2${i % 9} 10:00:00">x</span></div>`;
     }
-    return `<html><head><title>\n示例的广播\n</title></head><body>${NAV}${items}</body></html>`;
+    return `<html><head><title>\n我的动态\n</title></head><body>${NAV}
+<div id="db-usr-profile"><div class="info"><h1>示例</h1></div></div>
+<div class="stream-items">${items}</div></body></html>`;
   }
 
   function harness(writer) {
