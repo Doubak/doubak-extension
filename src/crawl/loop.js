@@ -30,6 +30,7 @@ import {
   extractItemIds,
   extractItemTimes,
   extractClaimedCount,
+  extractSubjectLinks,
 } from './classifier.js';
 import { SessionError } from './session.js';
 import { TransportError } from './errors.js';
@@ -62,7 +63,7 @@ export class CrawlLoop {
    * @param {LoopDeps & {floors?: Map<string, string | null>}} deps
    *   `floors`：每条路线上次的水位线，作为本次的下界。没有就是首次全量。
    */
-  constructor({ frontier, transport, writer, session, pacer, routes, onEvent, floors }) {
+  constructor({ frontier, transport, writer, session, pacer, routes, onEvent, floors, bypassGates = false }) {
     this._frontier = frontier;
     this._transport = transport;
     this._writer = writer;
@@ -78,6 +79,14 @@ export class CrawlLoop {
     /** @type {Map<string, string>} routeKey → 最后一次 capture_id，用于 parent 链 */
     this._lastCapture = new Map();
     this._floors = floors ?? new Map();
+    /**
+     * 跳过抓取顺序的门控。**只给调试用**。
+     *
+     * 门控的意义是「不能拿最不可替代的东西去换最可替代的东西」——广播可静默删除，
+     * 作品详情页随时能重抓。小范围试跑要验的恰恰是作品详情页那条路线，不该先花几小时
+     * 把广播抓完，所以给一个显式的后门；而界面上必须说清它绕过了什么。
+     */
+    this._bypassGates = bypassGates;
   }
 
   /**
@@ -101,6 +110,25 @@ export class CrawlLoop {
       );
     }
     return this._states.get(routeKey);
+  }
+
+  /**
+   * 一条路线到达终点时放开受它门控的条目。
+   *
+   * 条件是 `canAdvance`（连续、无缺口、有水位线）——也就是「这条线以上全都抓到了」
+   * 真的成立。半途而废不算跑完，那时候放开门控等于把顺序保证白扔了。
+   *
+   * @param {string} routeKey
+   */
+  _maybeOpenGate(routeKey) {
+    if (this._frontier.isGateOpen(routeKey)) return;
+    const state = this._states.get(routeKey);
+    if (!state?.canAdvance) return;
+    // 这条路线上还有待抓的条目就不算跑完
+    if (this._frontier.snapshot().some((it) => it.routeKey === routeKey && it.state === 'pending')) return;
+
+    this._frontier.openGate(routeKey);
+    this._emit({ type: 'gate_opened', routeKey });
   }
 
   /** 所有路线的推进状态，供收尾时写进 manifest。 */
@@ -308,10 +336,15 @@ export class CrawlLoop {
       return 'failed';
     }
 
-    // ── 6. 只有 ok 才继续翻页
+    // ── 6. 只有 ok 才继续翻页 / 派生新条目
     if (cls.verdict === 'ok') {
       this._enqueueNextPage(item, route, profile, res, written.captureId, items);
+      this._enqueueSubjects(item, res, written.captureId);
     }
+
+    // ── 7. 这条路线跑到终点了？放开受它门控的条目。
+    this._maybeOpenGate(item.routeKey);
+
     return 'ok';
   }
 
@@ -364,6 +397,63 @@ export class CrawlLoop {
     );
     this._emit({ type: 'error', url: item.url, message: String(err?.message ?? err) });
     return 'failed';
+  }
+
+  /**
+   * 从标记列表页派生作品详情页。
+   *
+   * ## 这条路线原本压根跑不起来
+   *
+   * `interest.item` 没有 `entryUrl`（所以永不入种子），也没有任何代码把作品 URL 放进
+   * 队列——它有定义、有判定描述、有门控，但**从来没跑过一次**。这个函数是缺的那一环。
+   *
+   * ## 门控：等广播跑完
+   *
+   * 作品详情页占档案九成体积，但它是**最可替代的**——随时能重抓。而广播是可静默删除、
+   * 删了就再也拿不回来的。所以不能拿最不可替代的东西去换最可替代的东西
+   * （DESIGN F-03d/F-03k）。
+   *
+   * 实现上不是「门没开就丢掉」，而是**照样入队、由 frontier 挡住**。丢掉的话，一旦
+   * 列表页在广播之前抓完（优先级排序保证了不会，但不该依赖那个），这些 URL 就再也不会
+   * 被发现了。
+   *
+   * @param {object} item      刚抓完的那个列表页条目
+   * @param {object} res
+   * @param {string} captureId
+   */
+  _enqueueSubjects(item, res, captureId) {
+    const def = this._routes.get(item.routeKey);
+    // 只从标记列表页派生。作品详情页自己不派生（它没有列表），个人主页也不派生。
+    if (!def || !item.routeKey.startsWith('interest.') || item.routeKey === 'interest.item') return;
+
+    const target = this._routes.get('interest.item');
+    if (!target) return; // includeCatalog:false
+
+    let enqueued = 0;
+    for (const url of extractSubjectLinks(res.bodyText)) {
+      const ok = this._frontier.enqueue({
+        url,
+        urlKey: urlKey(url),
+        routeKey: 'interest.item',
+        intent: target.intent,
+        enqueuedBy: captureId,
+        // 叶子：条目之间没有先后关系，一个失败不该连带其余的。
+        ordered: false,
+        priority: target.priority,
+        // 门控由 frontier 执行；`bypassGates` 是调试用的显式后门（见 CrawlLoop 构造）。
+        gatedBy: this._bypassGates ? null : (target.requires?.[0] ?? null),
+      });
+      if (ok) enqueued += 1;
+    }
+
+    if (enqueued > 0) {
+      this._emit({
+        type: 'subjects_enqueued',
+        routeKey: item.routeKey,
+        count: enqueued,
+        gated: !this._bypassGates && Boolean(target.requires?.length),
+      });
+    }
   }
 
   /**

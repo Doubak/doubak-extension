@@ -197,7 +197,13 @@ export function buildRoutes({
       source: 'archive',
       enumeration: 'full',
       safetyNet: 'contiguity',
-      pagination: { kind: 'page', step: 1, first: 1 },
+      // **没有 pagination。** 作品详情页不分页——它是一个集合，URL 来自标记列表页上
+      // 抽出的链接（见 loop.js 的 `_enqueueSubjects`）。
+      //
+      // 原来这里写着 `pagination: { kind: 'page', ... }`，那是错的，而且有实际后果：
+      // `ordered` 由「有没有 pagination」推导，于是这条路线被判成有序，一个作品页
+      // 失败会连带堵死其余的——而那正是「叶子失败不该连带」这条规则要保护的路线。
+      ordered: false,
       // 必须等广播抓完。不能拿最不可替代的东西去换最可替代的东西。
       requires: ['broadcast.timeline'],
       note: '生成静态站的必要输入，但占档案九成体积；单独成段以便整批丢弃',

@@ -210,6 +210,9 @@ export function buildCheckpoint({
         state: it.state === 'in_flight' ? 'pending' : it.state,
         attempts: it.attempts,
         enqueued_by: it.enqueuedBy ?? null,
+        // 门控要跟着走：不记的话恢复之后作品详情页会在广播抓完之前就开跑，
+        // 而那正是「不能拿最不可替代的换最可替代的」要防的事。
+        gated_by: it.gatedBy ?? null,
       })),
     rate_state: pacer.serialize(),
   };

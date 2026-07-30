@@ -43,6 +43,8 @@ export const MAX_NETWORK_RETRIES = 2;
  * @property {number} attempts
  * @property {boolean} ordered  这条路线的条目之间**有先后关系**吗（分页列表有，
  *   叶子条目没有）。决定一个失败条目要不要连带堵住同路线的其它条目。
+ * @property {number} priority  越小越先抓。见 `next()` 里的说明。
+ * @property {string | null} gatedBy  必须等这条路线先跑完（`requires`）。
  * @property {string | null} enqueuedBy  产生这个 URL 的那次捕获
  * @property {object | null} cursor
  * @property {string} [lastError]
@@ -233,6 +235,8 @@ export class Frontier {
     this._stopped = false;
     /** @type {string | null} */
     this._stopReason = null;
+    /** 已经放开的门控（前置路线跑完了）。 @type {Set<string>} */
+    this._openGates = new Set();
   }
 
   /**
@@ -247,7 +251,10 @@ export class Frontier {
    * @param {object | null} [item.cursor]
    * @returns {boolean} 是否真的入队了
    */
-  enqueue({ url, urlKey, routeKey, intent, enqueuedBy = null, cursor = null, ordered = true, state = 'pending', attempts = 0 }) {
+  enqueue({
+    url, urlKey, routeKey, intent, enqueuedBy = null, cursor = null,
+    ordered = true, state = 'pending', attempts = 0, priority = 50, gatedBy = null,
+  }) {
     if (this._stopped) return false;
     if (this._enqueued.has(urlKey)) return false;
 
@@ -262,6 +269,8 @@ export class Frontier {
       state,
       attempts,
       ordered,
+      priority,
+      gatedBy,
       enqueuedBy,
       cursor,
     });
@@ -281,14 +290,48 @@ export class Frontier {
 
     const blockedRoutes = this._blockedRoutes();
 
+    // **严格按优先级取，而不是按入队顺序。**
+    //
+    // 早先是「取第一个 pending」。那看起来等价——种子是按优先级插入的——但翻页会把
+    // 后续页面**追加到队尾**：广播第 2 页排在所有标记列表种子之后。于是广播与列表
+    // 交错抓，而设计要求的恰好相反：
+    //
+    //   广播 → 长文 → 图片 → 标记列表 → 作品详情页
+    //   「中途被打断时，先跑完的一定是最难补的」
+    //
+    // 交错的后果是一次中断让所有路线都半途而废，那正好抹掉了排序的全部意义。
+    // 而广播是唯一「可静默删除、删了就再也拿不回来」的东西。
+    //
+    // 同优先级内保持入队顺序（先进先出）：分页必须按页序走。
+    let best = null;
     for (const it of this._items) {
-      if (it.state === 'pending' && !blockedRoutes.has(it.routeKey)) {
-        it.state = 'in_flight';
-        it.attempts += 1;
-        return it;
-      }
+      if (it.state !== 'pending') continue;
+      if (blockedRoutes.has(it.routeKey)) continue;
+      if (it.gatedBy && !this._openGates.has(it.gatedBy)) continue;
+      if (!best || it.priority < best.priority) best = it;
     }
-    return null;
+    if (!best) return null;
+
+    best.state = 'in_flight';
+    best.attempts += 1;
+    return best;
+  }
+
+  /**
+   * 前置路线跑完了，放开受它门控的条目。
+   *
+   * 门控的意义是抓取**顺序**，不是依赖关系：作品详情页占九成体积，但它是最可替代的
+   * （随时能重抓），所以不能拿最不可替代的东西去换它。
+   *
+   * @param {string} routeKey
+   */
+  openGate(routeKey) {
+    this._openGates.add(routeKey);
+  }
+
+  /** @param {string} routeKey */
+  isGateOpen(routeKey) {
+    return this._openGates.has(routeKey);
   }
 
   /**
@@ -400,7 +443,22 @@ export class Frontier {
    */
   hasReady() {
     const blocked = this._blockedRoutes();
-    return this._items.some((it) => it.state === 'pending' && !blocked.has(it.routeKey));
+    return this._items.some(
+      (it) => it.state === 'pending'
+        && !blocked.has(it.routeKey)
+        && (!it.gatedBy || this._openGates.has(it.gatedBy)),
+    );
+  }
+
+  /**
+   * 被门控挡住、还没轮到的条目数。
+   *
+   * 上层要靠它区分「真的跑完了」与「只是前置还没完成」——后者绝不是 done。
+   */
+  gatedCount() {
+    return this._items.filter(
+      (it) => it.state === 'pending' && it.gatedBy && !this._openGates.has(it.gatedBy),
+    ).length;
   }
 
   /**

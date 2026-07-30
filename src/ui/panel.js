@@ -1105,8 +1105,24 @@ async function loadDebug() {
       '天然就很小的一条路线，能完整走完整个生命周期而不必截断'],
     ['最多 10 条（安全阀）', { maxCaptures: 10 },
       '人为截断 → 不算完成，水位线不推进，产出的是不完整的档案'],
+    ['作品详情页（约 12 次请求）',
+      { routes: ['interest.drama.collect', 'interest.item'], maxCaptures: 12, bypassGates: true },
+      '先抓一页舞台剧列表，再抓它上面的作品详情页 —— 那条路线占真实档案九成体积，' +
+      '但在全量抓取里排在最后，几小时之后才轮到。这里几十次请求就能验完'],
   ];
   for (const [label, cfg, why] of opts) sc.append(actionRow(label, why, () => startScoped(cfg)));
+
+  // 绕过门控这件事必须说出来，而不是藏在按钮说明里
+  const gateNote = document.createElement('div');
+  gateNote.className = 'card idle';
+  const gb = document.createElement('b');
+  gb.textContent = '作品详情页那一项会绕过抓取顺序';
+  gateNote.append(gb, document.createTextNode(
+    '正常抓取里，作品详情页要等广播抓完才开始——广播可以被静默删除，删了就再也拿不' +
+    '回来；而作品详情页随时能重抓。不能拿最不可替代的东西去换最可替代的。' +
+    '这一项为了几十次请求就能验完那条路线，显式跳过了这个顺序，所以它只适合调试。',
+  ));
+  sc.append(gateNote);
 
   await loadStorage();
 

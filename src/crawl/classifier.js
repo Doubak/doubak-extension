@@ -521,6 +521,41 @@ export function profileForRoute(routeKey) {
 }
 
 /**
+ * 各媒介作品详情页的绝对 URL。
+ *
+ * 每个媒介的路径都不一样，所以只能列举：
+ *
+ *     movie/book/music → https://<m>.douban.com/subject/<id>/
+ *     game/app         → https://www.douban.com/<kind>/<id>/
+ *     drama            → https://www.douban.com/location/drama/<id>/
+ */
+const SUBJECT_LINK =
+  /https?:\/\/(?:movie|book|music)\.douban\.com\/subject\/\d+\/?|https?:\/\/www\.douban\.com\/(?:game|app)\/\d+\/?|https?:\/\/www\.douban\.com\/location\/drama\/\d+\/?/g;
+
+/**
+ * 从标记列表页抽出作品详情页的 URL。
+ *
+ * ## 为什么整页扫而不是先框定条目区域
+ *
+ * 因为实测证明整页扫是准的，而且**比数条目更准**。拿旧档案 400 个标记列表页量过：
+ * 抽出 5805 条链接，每页的唯一链接数与该页槽位数一致。有 108 个页面「链接数 ≠ 条目数」
+ * ——全是游戏列表页，那里 `class="item"` 这个条目选择器多算了 2 个，而链接数始终是 15。
+ *
+ * 也就是说列表页上**没有游离的作品链接**（没有「喜欢这部电影的人也喜欢」那类推荐区）。
+ * 一旦哪天有了，这个函数会开始多抽——那时候去重会兜住一部分，但真正的防线是
+ * `interest.item` 自己的 `urlAnchor` 与判定：抓到不该抓的页面也会被如实记录，
+ * 而不是静默混进档案。
+ *
+ * @param {string} html
+ * @returns {string[]} 去重后的绝对 URL
+ */
+export function extractSubjectLinks(html) {
+  if (typeof html !== 'string') return [];
+  SUBJECT_LINK.lastIndex = 0;
+  return [...new Set(html.match(SUBJECT_LINK) ?? [])];
+}
+
+/**
  * 抽出本页所有条目 ID，供跨页去重与停滞检测。
  *
  * 这属于「为了推进抓取而必须做的结构抽取」——只进 frontier，不构成 bundle

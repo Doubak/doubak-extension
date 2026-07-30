@@ -395,13 +395,18 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
  * - `maxCaptures` → **安全阀**。到量就砍断，不是终止条件；水位线不推进，产出的
  *   是残缺档案。
  *
- * @param {{days?: number, maxCaptures?: number, routes?: string[]} | undefined} scope
+ * `bypassGates` 只给调试用：作品详情页正常要等广播抓完（不能拿最不可替代的东西去换
+ * 最可替代的），而小范围试跑要验的恰恰是那条路线，不该先花几小时抓广播。界面上必须
+ * 说清它绕过了什么。
+ *
+ * @param {{days?: number, maxCaptures?: number, routes?: string[], bypassGates?: boolean} | undefined} scope
  */
 function scopeToOptions(scope) {
   if (!scope) return {};
   const routes = scope.routes ?? ['broadcast.timeline'];
   /** @type {Record<string, unknown>} */
   const opts = { onlyRoutes: routes };
+  if (scope.bypassGates) opts.bypassGates = true;
   if (scope.days) {
     const floor = new Date(Date.now() - scope.days * 86_400_000).toISOString();
     opts.floors = new Map(routes.map((k) => [k, floor]));

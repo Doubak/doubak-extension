@@ -147,7 +147,7 @@ export class CrawlRunner {
    */
   async start({
     username, mediums, includeCatalog = true, floors, previousBundleId = null,
-    onlyRoutes = null, maxCaptures = null,
+    onlyRoutes = null, maxCaptures = null, bypassGates = false,
   }) {
     if (this._run) throw new Error('已有抓取在进行中');
 
@@ -205,6 +205,7 @@ export class CrawlRunner {
       frontier, transport, writer, session, pacer, routes,
       floors: floors ?? new Map(),
       onEvent: this._emit,
+      bypassGates,
     });
 
     this._run = {
@@ -222,7 +223,9 @@ export class CrawlRunner {
     // 根本没开成。用户面对的是一个既没在抓、又开不了新的死局，除了重装扩展没有
     // 出路。（这个坑真的踩过。）
     try {
-      await this._runStore.setCurrentRun({ bundleId, dir, username, mediums, includeCatalog });
+      await this._runStore.setCurrentRun({
+      bundleId, dir, username, mediums, includeCatalog, bypassGates,
+    });
       await this._saveCheckpoint(CRASH_SENTINEL_REASON);
     } catch (err) {
       this._run = null;
@@ -294,7 +297,9 @@ export class CrawlRunner {
         routeKey: it.route_key,
         intent: it.intent,
         enqueuedBy: it.enqueued_by ?? null,
-        ordered: def ? Boolean(def.pagination) : true,
+        ordered: def ? (def.ordered ?? Boolean(def.pagination)) : true,
+        priority: def?.priority ?? 50,
+        gatedBy: it.gated_by ?? null,
         // **原样还原状态与已用次数。**
         //
         // 早先这里一律按「新条目」重建（pending、attempts 归零），于是 checkpoint 里
@@ -315,13 +320,15 @@ export class CrawlRunner {
       const url = def.entryUrl({ offset: r.cursor.value });
       frontier.enqueue({
         url, urlKey: url, routeKey: r.route_key, intent: def.intent, cursor: r.cursor,
-        ordered: Boolean(def.pagination),
+        ordered: def.ordered ?? Boolean(def.pagination),
+        priority: def.priority ?? 50,
       });
     }
 
     const loop = new CrawlLoop({
       frontier, transport, writer, session, pacer, routes,
       onEvent: this._emit,
+      bypassGates: Boolean(pointer.bypassGates),
     });
 
     this._run = {
@@ -551,7 +558,10 @@ export function seedFrontier(frontier, routeDefs) {
         // 有分页就是有序：跳过抓不下来的第 7 页去抓第 8 页，就再也不能声称
         // 「第 7 页以上全都抓到了」，而水位线正建立在那句话上。
         // 没有分页的（作品详情页）是一个集合，条目之间互不相干。
-        ordered: Boolean(def.pagination),
+        //
+        // 路线可以显式覆盖——`interest.item` 就必须（它曾经带着一个错误的 pagination）。
+        ordered: def.ordered ?? Boolean(def.pagination),
+        priority: def.priority ?? 50,
       })
     ) {
       seeded += 1;
