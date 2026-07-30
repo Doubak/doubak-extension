@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { classifyResponse, RollingSize, ROUTE_PROFILES } from '../src/crawl/classifier.js';
-import { fixtures } from './helpers/fixtures.js';
+import { fixtures, stripLoginMarkers, anonymizeWithLoginPrompt } from './helpers/fixtures.js';
 
 const BROADCAST_URL = 'https://www.douban.com/people/82160871/statuses?p=1';
 
@@ -98,7 +98,9 @@ describe('会话状态', () => {
   test('导航栏没有登录状态 → login', () => {
     // 页面既不是登录页也没有风控提示，但会话在某个环节掉了——此时页面上的
     // 内容不代表这个账号，不能当数据存。
-    const anonymous = fixtures.broadcastPage.replace(/<div class="nav-user-account">[\s\S]*?<\/div>/, '');
+    // 用集中的 stripLoginMarkers，而不是在这里手写正则去抠夹具内部结构——
+    // 夹具一改，手写的正则会匹配不到，于是这条测试静默地不再测它想测的东西。
+    const anonymous = stripLoginMarkers(fixtures.broadcastPage);
     const r = classify({ bodyText: anonymous });
     assert.equal(r.verdict, 'login');
     assert.ok(r.reasons.some((x) => x.includes('没有登录状态')));
@@ -244,8 +246,7 @@ describe('未登录但页面上有数据 —— 真实档案里 151 个页面就
   // 公开视图里没有私密条目，它不代表这个账号。
 
   test('有内容但导航栏是登录入口 → login', () => {
-    const anonymousWithData = fixtures.interestListPage
-      .replace(/<div class="nav-user-account">[\s\S]*?<\/div>/, '<a href="/accounts/login" class="nav-login">登录</a>');
+    const anonymousWithData = anonymizeWithLoginPrompt(fixtures.interestListPage);
 
     const r = classifyResponse({
       finalUrl: 'https://www.douban.com/people/x/games?action=collect',

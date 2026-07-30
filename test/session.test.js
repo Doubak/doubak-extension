@@ -1,5 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   detectLoginState,
@@ -10,8 +11,12 @@ import {
 } from '../src/crawl/session.js';
 
 /**
- * 按真实档案里的导航栏结构构造，不含真人数据。
- * 已登录页的实测形态：`<li class="nav-user-account">` + `<span>昵称的账号</span>`。
+ * 按真实页面的导航栏结构构造（校准依据 test/fixtures/profile-2026-07.html）。
+ *
+ * 数字 uid 放在 `_GLOBAL_NAV.USER_ID` 里，**不是**广播条目的 `data-uid`。
+ * 早先的夹具只有后者，于是整套测试对着一个真实页面上并不成立的假设跑——而那个
+ * 假设一旦当真，抓取会在第一张作品详情页上把评论者的 ID 当成本人然后误判
+ * 「账号被换掉」。见 src/crawl/session.js 里 UID_PATTERNS 的说明。
  */
 function loggedInPage({ display = '示例', username = 'example_user', uid = '10000001' } = {}) {
   return `<!DOCTYPE html><html><head><title>示例</title></head><body>
@@ -24,7 +29,10 @@ function loggedInPage({ display = '示例', username = 'example_user', uid = '10
   </li>
   <a href="https://www.douban.com/people/${username}/">我的主页</a>
 </div></div></div>
-<div class="status-item" data-sid="1" data-uid="${uid}">内容</div>
+<script>
+  ;window._GLOBAL_NAV = { USER_ID: "${uid}", DOUBAN_URL: "https://www.douban.com" };
+</script>
+<div class="status-item" data-sid="1" data-uid="99999999">内容（这条的 data-uid 刻意与本人不同：真实页面上它可能是别人的）</div>
 </body></html>`;
 }
 
@@ -81,8 +89,9 @@ describe('账号身份抽取', () => {
   });
 
   test('取不到就是 null，不猜', () => {
-    // 数字 ID 多数页面上没有——实测标记列表页就没有 data-uid。
-    const noUid = loggedInPage().replace(/ data-uid="\d+"/, '');
+    // 抹掉全局导航的初始化脚本，uid 就该没了——那是唯一的来源。
+    // （页面上残留的 `data-uid` 刻意不算：它可能是别人的。）
+    const noUid = loggedInPage().replace(/<script>[\s\S]*?<\/script>/, '');
     assert.equal(extractAccountHints(noUid).userId, null);
 
     const empty = extractAccountHints('<html></html>');
@@ -113,7 +122,8 @@ describe('preflight：开抓前的身份确认', () => {
 
   test('取不到数字 ID 时拒绝开始 —— 它是档案的归属主键', () => {
     const g = new SessionGuard();
-    const noUid = loggedInPage().replace(/ data-uid="\d+"/, '');
+    // 抹掉全局导航的初始化脚本：那是 uid 唯一的来源。
+    const noUid = loggedInPage().replace(/<script>[\s\S]*?<\/script>/, '');
     assert.throws(() => g.preflight(noUid), /数字用户 ID/);
   });
 
@@ -176,13 +186,21 @@ describe('verify：每页的廉价复核', () => {
   });
 
   test('页面上取不到某个字段时不算不一致', () => {
-    // 标记列表页没有 data-uid，不能因为「这页没有 ID」就判定换了账号。
+    // 不能因为「这页没有 ID」就判定换了账号。接口响应、以及个别没有全局导航脚本
+    // 的页面都会这样。
     const g = ready();
-    const noUid = loggedInPage({ username: 'mewcatcher', display: 'MewX' }).replace(
-      / data-uid="\d+"/,
-      '',
-    );
+    const noUid = loggedInPage({ username: 'mewcatcher', display: 'MewX' })
+      .replace(/<script>[\s\S]*?<\/script>/, '');
     assert.doesNotThrow(() => g.verify(noUid));
+  });
+
+  test('页面上残留别人的 data-uid 也不算换账号', () => {
+    // 这是 verify 最容易误报的地方：作品详情页上的评论者 ID。误报的代价是
+    // **整场停机**，而且是在一张完全正常的页面上。
+    const g = ready();
+    const withOthers = loggedInPage({ uid: '82160871', username: 'mewcatcher', display: 'MewX' })
+      .replace('</body>', '<div class="status-item" data-uid="154611037">别人的评论</div></body>');
+    assert.doesNotThrow(() => g.verify(withOthers));
   });
 
   test('没 preflight 就 verify 是用法错误', () => {
@@ -213,44 +231,77 @@ describe('身份比对', () => {
   });
 });
 
-describe('数字 uid 的多路取证', () => {
-  test('data-uid（广播条目上）', () => {
-    const html = '<div class="status-item" data-uid="82160871">x</div>';
-    assert.equal(extractAccountHints(html).userId, '82160871');
+describe('数字 uid 的取证点', () => {
+  const real = readFileSync(new URL('./fixtures/profile-2026-07.html', import.meta.url), 'utf-8');
+
+  test('真实的个人主页 —— 三个身份字段全都取得出来', () => {
+    // 这条是整组测试的地基：夹具是 2026-07-30 从真实页面取的，不是构造的。
+    // 之前 uid 藏在哪里全靠猜，猜错的表现是「开始抓取」直接失败，而报出来的
+    // 原因还指向错误的方向（「请确认这是个人主页」）。
+    const h = extractAccountHints(real);
+    assert.equal(h.userId, '82160871');
+    assert.equal(h.username, 'mewcatcher');
+    assert.equal(h.displayName, 'MewX');
+    assert.equal(detectLoginState(real), 'logged_in');
   });
 
-  test('头像 URL —— 个人主页上不一定有广播条目，但一定有自己的头像', () => {
-    // 一开始只找 data-uid，而那**只在广播条目上**。个人主页上可能压根没有任何
-    // 广播条目，于是「开始抓取」报「页面上取不到数字用户 ID」。真实旧档案里的
-    // 广播列表页全都有 data-uid，那让人误以为它到处都有。
-    for (const url of [
-      'https://img1.doubanio.com/icon/u82160871-3.jpg',
-      'https://img9.doubanio.com/icon/up82160871-8.jpg',
-    ]) {
-      assert.equal(extractAccountHints(`<img src="${url}">`).userId, '82160871', url);
+  test('四个取证点各自都能单独工作', () => {
+    // 全都在**全局导航**里——那是每张登录后页面都有的共享组件，包括作品详情页。
+    // 这正是它们可靠的原因。
+    const cases = [
+      ['_GLOBAL_NAV.USER_ID', '<script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>'],
+      ['UPLOAD_AUTH_TOKEN', '<script>var x = { UPLOAD_AUTH_TOKEN: "82160871:abcdef" };</script>'],
+      ['piwik setUserId', "<script>_paq.push(['setUserId', '82160871']);</script>"],
+      ['data-moreurl-dict（HTML 实体转义过）',
+        '<a data-moreurl-dict="{&quot;from&quot;:&quot;top-nav&quot;,&quot;uid&quot;:&quot;82160871&quot;}">豆瓣</a>'],
+    ];
+    for (const [name, html] of cases) {
+      assert.equal(extractAccountHints(html).userId, '82160871', name);
     }
   });
 
-  test('数字形式的个人主页链接', () => {
+  test('data-moreurl-dict 必须按转义后的样子匹配', () => {
+    // 那个属性值在 HTML 源码里是 `&quot;uid&quot;:&quot;123&quot;`。照 `"uid":"123"`
+    // 去找，一个都匹配不到——而这种错不会报警，只会让取证点静默失效。
+    assert.equal(extractAccountHints('<a data-moreurl-dict=\'{"uid":"82160871"}\'>').userId, null);
     assert.equal(
-      extractAccountHints('<a href="https://www.douban.com/people/82160871/">我</a>').userId,
+      extractAccountHints('<a data-moreurl-dict="{&quot;uid&quot;:&quot;82160871&quot;}">').userId,
       '82160871',
     );
   });
 
-  test('查询参数与内嵌 JSON', () => {
-    assert.equal(extractAccountHints('<a href="/x?uid=82160871&p=2">').userId, '82160871');
-    assert.equal(extractAccountHints('<script>var d={"uid":82160871}</script>').userId, '82160871');
-    assert.equal(extractAccountHints('<script>var d={"uid":"82160871"}</script>').userId, '82160871');
+  test('**不**从广播条目的 data-uid 取', () => {
+    // 这是整件事里最要紧的一条。`data-uid` 在个人主页上是本人，在**作品详情页**
+    // 上是评论者——而 `verify()` 会拿这个 ID 在每一页上比对，不一致就判
+    // `account_switched` 并整场停机。
+    //
+    // 所以一个「有时取到别人 ID」的取证点，会让抓取在第一张作品详情页上假装
+    // 账号被换掉然后停下。取错比取不到糟糕得多。
+    assert.equal(extractAccountHints('<div class="status-item" data-uid="99999999">x</div>').userId, null);
   });
 
-  test('优先级：data-uid 与头像都在时取 data-uid', () => {
-    // 顺序有意义——靠前的更可能是本人的 ID。
-    const html = '<img src="/icon/u111-1.jpg"><div data-uid="222"></div>';
-    assert.equal(extractAccountHints(html).userId, '222');
+  test('**不**从头像 URL 取', () => {
+    // 同理：「我的关注」一段里全是别人的头像（`icon/up154611037-2.jpg`），
+    // 而在作品详情页上第一个头像更可能是别人的。
+    assert.equal(extractAccountHints('<img src="https://img1.doubanio.com/icon/up154611037-2.jpg">').userId, null);
   });
 
-  test('一个都没有就是 null，不猜', () => {
+  test('**不**从数字形式的 /people/<id>/ 链接取', () => {
+    // 它可以指向任何人。真实主页上「我的关注」里就有一串。
+    assert.equal(extractAccountHints('<a href="https://www.douban.com/people/154611037/">别人</a>').userId, null);
+  });
+
+  test('真实主页里有别人的 ID，但取出来的仍然是本人', () => {
+    // 端到端地钉住上面那几条：往真实夹具里塞进一堆别人的痕迹，结果不许变。
+    const polluted = real.replace('</body>', `
+      <div class="status-item" data-uid="154611037">别人的广播</div>
+      <img src="https://img1.doubanio.com/icon/up272752938-9.jpg">
+      <a href="https://www.douban.com/people/140685615/">别人</a>
+      </body>`);
+    assert.equal(extractAccountHints(polluted).userId, '82160871');
+  });
+
+  test('一个取证点都没有就是 null，不猜', () => {
     assert.equal(extractAccountHints('<html><body>什么都没有</body></html>').userId, null);
   });
 
@@ -263,7 +314,6 @@ describe('数字 uid 的多路取证', () => {
     assert.throws(() => guard.preflight(html), (e) => {
       assert.equal(e.reason, 'missing_user_id');
       assert.notEqual(e.reason, 'session_expired');
-      // 报错要带上已经找到了什么，否则无从判断是没登录还是改版
       assert.match(e.message, /someone/);
       assert.match(e.message, /某人/);
       assert.match(e.message, /字节/);
@@ -271,10 +321,10 @@ describe('数字 uid 的多路取证', () => {
     });
   });
 
-  test('退路的失败说明会被一起带出来', () => {
-    // 主页与广播页都试过了，报错里得看得出两处都试了。
+  test('每页复核在真实主页上通过', () => {
+    // verify() 跑在每一页上。用真实页面确认它不会误报。
     const guard = new SessionGuard();
-    const html = '<li class="nav-user-account"><a href="/accounts/logout">退出</a></li>';
-    assert.throws(() => guard.preflight(html, { fallbackFrom: '主页上也没有' }), /此前还试过.*主页上也没有/);
+    guard.preflight(real);
+    guard.verify(real); // 不抛即通过
   });
 });

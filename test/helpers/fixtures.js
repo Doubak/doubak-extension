@@ -9,10 +9,78 @@
  * 这样将来有人怀疑夹具失真时，知道该去核对什么。
  */
 
-const NAV_LOGGED_IN = `
-<div class="nav-user-account">
-  <a href="https://www.douban.com/people/00000000/" class="bn-more"><span>示例用户</span></a>
-</div>`;
+/**
+ * 已登录的全局导航。
+ *
+ * `_GLOBAL_NAV.USER_ID` 这一段是**必须**的：数字 uid 就取自那里，而不是从广播
+ * 条目的 `data-uid`。原因见 src/crawl/session.js 里 UID_PATTERNS 的说明——
+ * 简版：`data-uid` 在作品详情页上是**评论者**的 ID，拿它当身份会让抓取在第一张
+ * 详情页上误判「账号被换掉」然后停机。
+ *
+ * 早先的夹具只有 `data-uid`，那让整套测试对着一个真实页面上并不成立的假设跑。
+ * 这里按 test/fixtures/profile-2026-07.html 的真实结构写。
+ */
+/**
+ * 已登录的全局导航，按真实页面的结构写。
+ *
+ * `_GLOBAL_NAV.USER_ID` 那一段是**必须**的：数字 uid 就取自那里，而不是广播条目
+ * 的 `data-uid`。原因见 src/crawl/session.js 里 UID_PATTERNS 的说明——简版：
+ * `data-uid` 在作品详情页上是**评论者**的 ID，拿它当身份会让抓取在第一张详情页上
+ * 误判「账号被换掉」然后停机。
+ *
+ * 早先的夹具只有 `data-uid`，于是整套测试对着一个在真实页面上并不成立的假设跑。
+ * 校准依据：test/fixtures/profile-2026-07.html。
+ */
+const NAV_LOGGED_IN = `<div class="top-nav-info">
+  <ul><li class="nav-user-account">
+    <a href="https://accounts.douban.com/passport/setting/" class="bn-more"><span>示例用户的账号</span></a>
+    <div class="more-items"><table><tbody>
+      <tr><td><a href="https://www.douban.com/mine/">个人主页</a></td></tr>
+      <tr><td><a href="https://www.douban.com/accounts/logout?source=main&ck=XXXX">退出</a></td></tr>
+    </tbody></table></div>
+  </li></ul>
+</div>
+<div class="global-nav-items"><ul>
+  <li class="on"><a href="https://www.douban.com" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-main&quot;,&quot;uid&quot;:&quot;82160871&quot;}">豆瓣</a></li>
+</ul></div>
+<script>
+  ;window._GLOBAL_NAV = {
+    USER_ID: "82160871",
+    UPLOAD_AUTH_TOKEN: "82160871:0000000000000000000000000000000000000000",
+    DOUBAN_URL: "https://www.douban.com"
+  };
+</script>`;
+
+/**
+ * 把一张已登录页面改成「未登录但页面上有数据」的样子。
+ *
+ * 这是真实档案里最阴的一种：151 个页面就是这样——结构完整、条目是真的，只有
+ * 导航栏露了馅。当成账号数据就是把公开视图（没有私密条目）冒充成完整列表。
+ *
+ * @param {string} html
+ */
+export function anonymizeWithLoginPrompt(html) {
+  return `${stripLoginMarkers(html)}
+<div id="db-global-nav"><a href="https://accounts.douban.com/passport/login" class="nav-login">登录/注册</a></div>`;
+}
+
+/**
+ * 把一张已登录页面改成「会话在某个环节掉了」的样子。
+ *
+ * 集中在这里，而不是让每个测试自己写正则去抠夹具内部结构——那样夹具一改，测试
+ * 会**静默地不再测它想测的东西**（strip 匹配不到，页面依旧是登录态，于是断言
+ * 「应当判 login」的测试拿到了 ok）。这件事真的发生过。
+ *
+ * @param {string} html
+ */
+export function stripLoginMarkers(html) {
+  return html
+    .replace(/<div class="top-nav-info">[\s\S]*?<\/div>\s*<\/div>/, '')
+    .replace(/<li class="nav-user-account">[\s\S]*?<\/li>/, '')
+    .replace(/<script>[\s\S]*?_GLOBAL_NAV[\s\S]*?<\/script>/, '')
+    .replace(/https:\/\/www\.douban\.com\/accounts\/logout[^"]*/g, '#')
+    .replace(/\/accounts\/logout/g, '#');
+}
 
 /** @param {string} title @param {string} body @param {boolean} loggedIn */
 function page(title, body, loggedIn = true) {

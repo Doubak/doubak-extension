@@ -160,22 +160,13 @@ export class CrawlRunner {
     const profileUrl = `https://www.douban.com/people/${encodeURIComponent(username)}/`;
     const probe = await transport.fetch(profileUrl);
 
-    // 个人主页上不一定有数字 uid（它最常见的落脚处是广播条目的 `data-uid`，而
-    // 主页上可能压根没有广播条目）。所以留一条退路：去广播列表页再取一次。
+    // 不需要退路。数字 uid 取自**全局导航**（`_GLOBAL_NAV.USER_ID` 等），而全局
+    // 导航是每张登录后页面都有的共享组件——包括作品详情页。
     //
-    // 那一页**一定**有——真实旧档案里 7353 个广播列表页全都带 `data-uid`。
-    // 代价是多一个请求，只在必要时发；而取不到 uid 就完全开不了工。
-    let account;
-    try {
-      account = session.preflight(probe.bodyText);
-    } catch (err) {
-      if (err.reason !== 'missing_user_id') throw err;
-      this._emit({ type: 'uid_fallback', from: profileUrl });
-      const alt = await transport.fetch(`${profileUrl}statuses`);
-      // 用主页判登录态、用广播页补 uid：两张页面拼一份身份。**不放松要求**——
-      // 补不到照样抛，只是错误信息里会说两处都试过了。
-      account = session.preflight(alt.bodyText, { fallbackFrom: err.message });
-    }
+    // 曾经想过「主页取不到就去广播页补一次」。不需要了，而且那条退路本身有个更深
+    // 的问题：它默认「广播条目上的 data-uid 就是本人」，而在作品详情页上那是
+    // **评论者**的 ID。见 session.js 里 UID_PATTERNS 的说明。
+    const account = session.preflight(probe.bodyText);
     this._emit({ type: 'preflight', account });
 
     const bundleId = newBundleId(this._now());

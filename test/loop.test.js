@@ -15,8 +15,11 @@ import { TransportError } from '../src/crawl/errors.js';
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
+// 数字 uid 取自 `_GLOBAL_NAV.USER_ID`，不是广播条目的 `data-uid`——后者在作品
+// 详情页上是评论者的 ID。见 src/crawl/session.js 里 UID_PATTERNS 的说明。
 const NAV = `<li class="nav-user-account"><a href="/accounts/logout">退出</a>
-<span>示例的账号</span></li><a href="https://www.douban.com/people/example/">主页</a>`;
+<span>示例的账号</span></li><a href="https://www.douban.com/people/example/">主页</a>
+<script>;window._GLOBAL_NAV = { USER_ID: "10001" };</script>`;
 
 /** 一页广播，n 条，ID 从 from 开始。 */
 function broadcastPage(n, from = 0) {

@@ -25,8 +25,11 @@
  * 一起工作」——而那是 Node 测不到的一层。
  */
 
+// `_GLOBAL_NAV.USER_ID` 是数字 uid 的唯一来源。真实页面上它就在全局导航里，
+// 而全局导航每张登录后页面都有——包括作品详情页。见 src/crawl/session.js。
 const NAV_IN = `<li class="nav-user-account"><a href="/accounts/logout">退出</a>
-<span>演练的账号</span></li><a href="https://www.douban.com/people/dryrun/">主页</a>`;
+<span>演练的账号</span></li><a href="https://www.douban.com/people/dryrun/">主页</a>
+<script>;window._GLOBAL_NAV = { USER_ID: "99000001" };</script>`;
 
 const NAV_OUT = `<a href="https://accounts.douban.com/passport/login" class="nav-login">登录/注册</a>`;
 

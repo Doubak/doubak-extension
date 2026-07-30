@@ -1,0 +1,204 @@
+<!--
+  真实的个人主页片段，2026-07-30 从 https://www.douban.com/people/mewcatcher/ 取得。
+
+  ## 为什么留这份夹具
+
+  数字 uid 藏在哪里，之前是**猜**的——猜错的代价是「开始抓取」直接失败，而报出来
+  的原因还指向错误的方向（「请确认这是个人主页」）。有一份真页面之后，那件事就从
+  猜变成了查。
+
+  ## 已经删掉的部分
+
+  只保留与身份识别有关的骨架。刻意删掉了：
+
+  - 「我的关注」整段（**别人的**用户名、数字 ID、头像 URL）
+  - 小组、日记、相册、留言板
+  - 收藏条目列表（很长，且与身份无关）
+
+  删第一项是原则问题：这是个公开仓库，而那些是第三方数据。项目对用户档案的要求
+  就是「默认排除第三方内容」，自己的测试夹具没有理由破例。
+
+  账号本人的信息保留原样——本人的豆瓣是公开的，且项目刻意在公开仓库里保留真实身份。
+-->
+<!DOCTYPE html>
+<html lang="zh-CN" class="ua-webkit">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>
+MewX
+</title>
+    <meta http-equiv="mobile-agent" content="format=html5; url=https://m.douban.com/people/mewcatcher/">
+<link rel="alternate" href="https://www.douban.com/feed/people/mewcatcher/interests" type="application/rss+xml" title="MewX的收藏" />
+</head>
+<body>
+<div id="db-global-nav" class="global-nav">
+  <div class="bd">
+<div class="top-nav-info">
+  <ul>
+    <li>
+    <a id="top-nav-doumail-link" href="https://www.douban.com/doumail/">豆邮</a>
+    </li>
+    <li class="nav-user-account">
+      <a target="_blank" href="https://accounts.douban.com/passport/setting/" class="bn-more">
+        <span>MewX的账号</span><span class="arrow"></span>
+      </a>
+      <div class="more-items">
+        <table cellpadding="0" cellspacing="0">
+          <tbody>
+            <tr>
+              <td>
+                <a href="https://www.douban.com/mine/">个人主页</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a href="https://www.douban.com/accounts/logout?source=main&ck=XOTQ">退出</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+  </ul>
+</div>
+
+<div class="global-nav-items">
+  <ul>
+    <li class="on">
+      <a href="https://www.douban.com"  data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-main&quot;,&quot;uid&quot;:&quot;82160871&quot;}">豆瓣</a>
+    </li>
+    <li class="">
+      <a href="https://book.douban.com" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-book&quot;,&quot;uid&quot;:&quot;82160871&quot;}">读书</a>
+    </li>
+  </ul>
+</div>
+
+  </div>
+</div>
+<script>
+  ;window._GLOBAL_NAV = {
+    USER_ID: "82160871",
+    UPLOAD_AUTH_TOKEN: "82160871:a29917019ba457422eff8d4878028f2bc0f148aa",
+    SSE_TOKEN: "098acb0e1a79b15229f65769f1e3acaa9374e4a0",
+    SSE_TIMESTAMP: "1785383537",
+    DOUBAN_URL: "https://www.douban.com",
+    N_NEW_NOTIS: 0,
+    N_NEW_DOUMAIL: 0
+  };
+</script>
+
+<div id="wrapper">
+<div id="content">
+    <div class="grid-16-8 clearfix">
+        <div class="article">
+    <div id="db-usr-profile" class="clearfix">
+        <div class="pic">
+            <a href="https://www.douban.com/people/mewcatcher/">
+                <img width="48" height="48" src="https://img3.doubanio.com/icon/up82160871-12.jpg" alt="MewX"/>
+            </a>
+        </div>
+        <div class="info">
+            <h1>
+                MewX
+            </h1>
+            <ul>
+                    <li class=""><a href="https://www.douban.com/people/mewcatcher/">我的主页</a></li>
+                    <li class="content-menu-item"><a href="https://www.douban.com/people/mewcatcher/statuses">广播</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="sort " id="movie">
+    <h2>
+        我看
+            <span class="pl">&nbsp;(
+                <a href="https://movie.douban.com/mine?status=do" target="_blank">18部在看</a>&nbsp;&middot;&nbsp;<a href="https://movie.douban.com/mine?status=wish" target="_blank">746部想看</a>&nbsp;&middot;&nbsp;<a href="https://movie.douban.com/mine?status=collect" target="_blank">1333部看过</a>&nbsp;&middot;&nbsp;<a href="/people/82160871/subject_doulists/movie" target="_blank">5个片单</a>
+                ) </span>
+    </h2>
+    </div>
+
+    <div class="sort " id="drama">
+    <h2>
+        我的舞台剧
+            <span class="pl">&nbsp;(
+                <a href="https://www.douban.com/location/people/82160871/drama/wish" target="_blank">2部想看</a>&nbsp;&middot;&nbsp;<a href="https://www.douban.com/location/people/82160871/drama/collect" target="_blank">3部看过</a>
+                ) </span>
+    </h2>
+    </div>
+
+        </div>
+        <div class="aside">
+<div id="profile">
+<div class="infobox">
+    <div class="bd">
+<div class="basic-info">
+  <img src="https://img3.doubanio.com/icon/ul82160871-12.jpg" class="userface" alt="" />
+
+  <div class="user-info">
+    常居:&nbsp;<a href="https://www.douban.com/location/sydney/">Sydney, Australia</a><br />
+
+    <div class="pl">
+      82160871
+      (mewcatcher)
+      <br/>
+      2014-01-10加入 <br />
+      <span class="ip-location">IP属地：澳大利亚</span>
+    </div>
+
+  </div>
+</div>
+    </div>
+</div>
+</div>
+
+    <div id="statuses">
+      <div class="stream-items">
+    <h2>
+        我的广播
+            <span class="pl">&nbsp;(
+                    <a href="/people/mewcatcher/statuses" target="_self">全部</a>
+                ) </span>
+    </h2>
+
+<div class="status-item" style=""
+    data-sid="9380922040"
+    data-action="1"
+    data-target-type="game"
+    data-object-kind="3114"
+    data-object-id="35483411">
+  <div class="mod" data-status-id="9380922040">
+    <div class="bd layout-1">
+  <p class="text">
+      <a href="https://www.douban.com/people/mewcatcher/">MewX</a>
+      想玩 <a href="https://www.douban.com/game/35483411/" target="_blank">取景器 Viewfinder</a>
+  </p>
+  <div class="actions">
+      <span class="created_at" title="2026-07-30 06:04:23">
+        <a href="https://www.douban.com/people/82160871/status/9380922040/?_spm_id=ODIxNjA4NzE">今天上午</a>
+      </span>
+  </div>
+      <div class="others">
+        <div class="comments">
+          <div class="comments-items"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+      </div>
+    </div>
+
+    <p class="pl">本页永久链接: <a href="https://www.douban.com/people/mewcatcher/">https://www.douban.com/people/mewcatcher/</a></p>
+        </div>
+    </div>
+</div>
+</div>
+
+<script type="text/javascript">
+var _paq = window._paq || [];
+  _paq.push(['setUserId', '82160871']);
+_paq.push(['trackPageView']);
+</script>
+</body>
+</html>

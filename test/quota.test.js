@@ -97,7 +97,8 @@ describe('写失败让整场抓取停下', () => {
   }
 
   const NAV = `<li class="nav-user-account"><a href="/accounts/logout">退出</a>
-<span>示例的账号</span></li><a href="https://www.douban.com/people/example/">主页</a>`;
+<span>示例的账号</span></li><a href="https://www.douban.com/people/example/">主页</a>
+<script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>`;
 
   function page(n) {
     let items = '';

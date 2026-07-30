@@ -362,8 +362,11 @@ describe('抓取循环产出的 bundle 也要通过规范校验器', () => {
     const { SessionGuard } = await import('../src/crawl/session.js');
     const { buildRoutes } = await import('../src/crawl/routes.js');
 
-    const NAV = `<li class="nav-user-account"><a href="/accounts/logout">退出</a>
-      <span>示例的账号</span></li><a href="https://www.douban.com/people/example/">主页</a>`;
+    // 数字 uid 取自 `_GLOBAL_NAV.USER_ID`，不是广播条目的 `data-uid`——后者在作品
+// 详情页上是评论者的 ID。见 src/crawl/session.js 里 UID_PATTERNS 的说明。
+const NAV = `<li class="nav-user-account"><a href="/accounts/logout">退出</a>
+      <span>示例的账号</span></li><a href="https://www.douban.com/people/example/">主页</a>
+<script>;window._GLOBAL_NAV = { USER_ID: "10001" };</script>`;
     const bcPage = (n, from) => {
       let items = '';
       for (let i = 0; i < n; i++) {

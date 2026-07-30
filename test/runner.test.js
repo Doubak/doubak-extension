@@ -1,5 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { CrawlRunner, seedFrontier, DEFAULT_BATCH_SIZE } from '../src/crawl/runner.js';
 import { RunStore } from '../src/crawl/run-store.js';
@@ -12,8 +13,11 @@ import { indexFilename } from '../src/core/ids.js';
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
+// `_GLOBAL_NAV.USER_ID` 是数字 uid 的唯一来源——不是广播条目的 `data-uid`
+// （那在作品详情页上是评论者的 ID）。见 src/crawl/session.js。
 const NAV = `<li class="nav-user-account"><a href="/accounts/logout">退出</a>
-<span>示例的账号</span></li><a href="https://www.douban.com/people/example/">主页</a>`;
+<span>示例的账号</span></li><a href="https://www.douban.com/people/example/">主页</a>
+<script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>`;
 
 /** 个人主页：必须能取到数字用户 ID。 */
 const PROFILE = `<html><head><title>示例的账号</title></head><body>${NAV}
@@ -470,41 +474,38 @@ describe('小范围试跑：自然终止 vs 人为截断', () => {
   });
 });
 
-describe('个人主页没有数字 uid 时的退路', () => {
-  /** 一张登录态正常、但**没有任何 uid 线索**的主页。 */
-  const NO_UID = `<html><head><title>示例的账号</title></head><body>
-<li class="nav-user-account"><a href="/accounts/logout">退出</a><span>示例的账号</span></li>
-<a href="https://www.douban.com/people/example/">主页</a>
-</body></html>`;
+describe('身份确认对着真实页面', () => {
+  const real = readFileSync(new URL('./fixtures/profile-2026-07.html', import.meta.url), 'utf-8');
 
-  test('退到广播页取 uid，抓取照样开得起来', async () => {
-    // 个人主页上不一定有广播条目，而 data-uid 最常见的落脚处正是广播条目。
-    // 真实旧档案里 7353 个广播列表页全都带 data-uid，所以那一页是可靠的退路。
-    const { runner, calls, events } = harness((url) =>
-      url.includes('statuses') ? bcPage(20) : NO_UID);
+  test('真实个人主页 —— 一个请求就够，不需要任何退路', async () => {
+    // 曾经有过一条退路：「主页取不到 uid 就去广播页补一次」。删掉了，因为 uid
+    // 现在取自**全局导航**，而全局导航每张登录后页面都有。
+    //
+    // 那条退路本身还有个更深的问题：它默认「广播条目上的 data-uid 就是本人」，
+    // 而在作品详情页上那是**评论者**的 ID。
+    const { runner, calls } = harness(() => real);
 
-    const r = await runner.start({ username: 'example', includeCatalog: false });
+    const r = await runner.start({ username: 'mewcatcher', includeCatalog: false });
 
     assert.equal(r.account.userId, '82160871');
-    assert.ok(calls.some((u) => u.includes('statuses')), '该去广播页补一次');
-    assert.ok(events.some((e) => e.type === 'uid_fallback'), '走了退路要留痕');
+    assert.equal(r.account.username, 'mewcatcher');
+    assert.equal(calls.length, 1, '身份确认只该发一个请求');
+    assert.ok(calls[0].includes('/people/mewcatcher/'));
   });
 
-  test('两处都没有才失败，且报错里说了两处都试过', async () => {
-    // **不放松要求**：uid 是档案的归属主键，取不到就不能开始。退路只是多试一处，
-    // 不是降低标准。
-    const { runner } = harness(() => NO_UID);
-    await assert.rejects(() => runner.start({ username: 'example', includeCatalog: false }), (e) => {
+  test('全局导航被抹掉 → 明确失败，不去别处猜', async () => {
+    // 取错比取不到糟糕得多：取不到是开不了工，取错是把档案挂在别人名下。
+    // 把四个取证点全部抹掉：两段脚本 + 导航项的埋点属性。
+    const stripped = real
+      .replace(/<script[\s\S]*?<\/script>/g, '')
+      .replace(/data-moreurl-dict="[^"]*"/g, '');
+    const { runner, calls } = harness(() => stripped);
+
+    await assert.rejects(() => runner.start({ username: 'mewcatcher', includeCatalog: false }), (e) => {
       assert.equal(e.reason, 'missing_user_id');
-      assert.match(e.message, /此前还试过/);
       return true;
     });
-  });
-
-  test('主页上有 uid 时不发那次多余的请求', async () => {
-    // 退路只在必要时走——每个请求都算账。
-    const { runner, calls } = harness(() => PROFILE);
-    await runner.start({ username: 'example', includeCatalog: false });
-    assert.equal(calls.filter((u) => u.includes('statuses')).length, 0);
+    assert.equal(calls.length, 1, '失败了也不该再去别的页面碰运气');
   });
 });
+
