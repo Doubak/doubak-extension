@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { classifyResponse, RollingSize, ROUTE_PROFILES } from '../src/crawl/classifier.js';
+import { classifyResponse, RollingSize, ROUTE_PROFILES, profileForRoute } from '../src/crawl/classifier.js';
 import { fixtures, stripLoginMarkers, anonymizeWithLoginPrompt } from './helpers/fixtures.js';
 
 const BROADCAST_URL = 'https://www.douban.com/people/82160871/statuses?p=1';
@@ -348,5 +348,124 @@ describe('最终 URL 是最强的一条标志 —— 它不依赖 markup', () =>
     assert.match(why, /db-usr-profile/, '要说出缺的是哪一个');
     assert.match(why, /改版/, '要指出最可能的原因');
     assert.match(why, /不必重抓/, '要说清这一页已经存下来了');
+  });
+});
+
+describe('作品详情页 —— 占档案九成体积的那条路线', () => {
+  const route = ROUTE_PROFILES['interest.item'];
+  const fx = (n) => readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf-8');
+  const MOVIE_URL = 'https://movie.douban.com/subject/26729145/';
+  const GAME_URL = 'https://www.douban.com/game/20002850/';
+
+  test('这条路线**必须**有判定描述', () => {
+    // 在此之前 profileForRoute('interest.item') 返回 null，于是判定退回到
+    // 「HTTP 200 就是 ok」——而豆瓣用 200 送封锁页。这条路线是数千次请求、排在几小时
+    // 抓取的最后，也就是最可能撞上限流的时候。一次软封锁会让几千页被标成 ok。
+    assert.ok(profileForRoute('interest.item'), '没有判定描述等于只看状态码');
+  });
+
+  test('评分被关掉的作品页仍然判 ok', () => {
+    // 2017 央视春晚：88 KB 的正常页面，豆瓣关掉了它的评分，所以没有 interest_sectl。
+    // 用「缺一不可」的话它会被判成故障然后停机——而它完完全全是一张好页面。
+    // 对一个专门在意审查痕迹的项目来说，把「评分被关掉」当成故障尤其荒谬。
+    const body = fx('subject-movie-rating-disabled.html');
+    assert.equal(/id="interest_sectl"/.test(body.replace(/<!--[\s\S]*?-->/, '')), false,
+      '前提：这张页面确实没有评分控件');
+
+    const r = classifyResponse({ finalUrl: MOVIE_URL, status: 200, bodyText: body, route });
+    assert.equal(r.verdict, 'ok', r.reasons.join('；'));
+  });
+
+  test('游戏页与影视页没有共同的内容区块，两者都要判 ok', () => {
+    // 游戏页没有 mainpic、没有 <div id="info"、没有 v:itemreviewed。一套「缺一不可」
+    // 的标志不可能同时覆盖两者。
+    for (const [name, url] of [
+      ['subject-game.html', GAME_URL],
+      ['subject-movie-rating-disabled.html', MOVIE_URL],
+    ]) {
+      const r = classifyResponse({ finalUrl: url, status: 200, bodyText: fx(name), route });
+      assert.equal(r.verdict, 'ok', `${name}: ${r.reasons.join('；')}`);
+    }
+  });
+
+  test('一个内容区块都没有 → 判不出来，并说清试过哪些', () => {
+    // 封锁页与错误页一个区块都不会有。而报错要能让人重新校准——这条路线的标志
+    // 是拿 6341 个真实页面量出来的，重新校准也得靠真实页面。
+    const nav = fx('subject-game.html').match(/<div id="db-global-nav"[\s\S]*?<\/script>/)[0];
+    const blocked = `<html><head><title>豆瓣</title></head><body>${nav}
+<div id="content"><p>有异常请求，请稍后再试</p></div></body></html>`;
+
+    const r = classifyResponse({ finalUrl: MOVIE_URL, status: 200, bodyText: blocked, route });
+    assert.equal(r.verdict, 'blocked', '这一条应当先被风控文案判掉');
+
+    // 去掉风控文案，只剩「什么区块都没有」
+    const bare = blocked.replace('有异常请求，请稍后再试', '一段无害的文字');
+    const r2 = classifyResponse({ finalUrl: MOVIE_URL, status: 200, bodyText: bare, route });
+    assert.equal(r2.verdict, null, '认不出来就绝不能判 ok');
+    const why = r2.reasons.join('；');
+    assert.match(why, /一个内容区块都没有/);
+    assert.match(why, /interest_sectl/, '要说出试过哪些标志');
+    assert.match(why, /改版/);
+    assert.match(why, /不必重抓/);
+  });
+
+  test('被跳到别处 → 判不出来，即使页面内容完好', () => {
+    // urlAnchor 不依赖 markup，所以改版影响不到它。
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/',
+      status: 200,
+      bodyText: fx('subject-movie-rating-disabled.html'),
+      route,
+    });
+    assert.equal(r.verdict, null);
+    assert.ok(r.reasons.some((x) => x.includes('最终 URL 不像这条路线')));
+  });
+
+  test('五个媒介的 URL 都认得', () => {
+    for (const url of [
+      'https://movie.douban.com/subject/1292052/',
+      'https://book.douban.com/subject/1084336/',
+      'https://music.douban.com/subject/1406522/',
+      'https://www.douban.com/game/10437501/',
+      'https://www.douban.com/app/26835723/',
+      'https://www.douban.com/location/drama/24750414/',
+    ]) {
+      assert.ok(route.urlAnchor.test(url), url);
+    }
+    // 而列表页与个人页不该被认成作品页
+    for (const url of [
+      'https://www.douban.com/people/mewcatcher/statuses',
+      'https://movie.douban.com/mine?status=collect',
+      'https://www.douban.com/',
+    ]) {
+      assert.equal(route.urlAnchor.test(url), false, url);
+    }
+  });
+
+  test('作品页没有条目概念 → itemCount 是 null，不是 0', () => {
+    // null 是「这条路线没有条目概念」，0 是「数过了，是空的」。混起来会让
+    // 「0 条」这个翻页终点信号在作品页上凭空出现。
+    const r = classifyResponse({
+      finalUrl: MOVIE_URL, status: 200,
+      bodyText: fx('subject-movie-rating-disabled.html'), route,
+    });
+    assert.equal(r.itemCount, null);
+  });
+});
+
+describe('空响应不是页面 —— 与路线无关', () => {
+  test('0 字节的 200 判不出来，绝不是 ok', () => {
+    // 旧档案里 6341 个作品详情页中有 7 个是 0 字节，全在同一天，被前代当数据留在了
+    // 磁盘上、没有任何标记。当时的逻辑就是「HTTP 200 即成功」。
+    for (const routeKey of ['broadcast.timeline', 'interest.item', 'interest.movie.collect']) {
+      const r = classifyResponse({
+        finalUrl: 'https://movie.douban.com/subject/1/',
+        status: 200,
+        bodyText: '',
+        route: profileForRoute(routeKey) ?? ROUTE_PROFILES['interest.item'],
+      });
+      assert.equal(r.verdict, null, routeKey);
+      assert.ok(r.reasons.some((x) => x.includes('0 字节')), routeKey);
+    }
   });
 });

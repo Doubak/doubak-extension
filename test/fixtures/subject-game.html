@@ -1,0 +1,28 @@
+<!--
+  真实游戏详情页的**骨架**，取自旧档案（www.douban.com/game/…）。
+
+  留它的理由：游戏页与影视/图书/音乐页**在 markup 上没有共同的内容区块**——没有
+  `id="mainpic"`、没有 `<div id="info"`、没有 `v:itemreviewed`。所以一套「缺一不可」
+  的标志不可能同时覆盖两者，这也是 `anyFrameAnchors` 的第二个理由。
+
+  第三方内容（短评等）已全部删除。
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>暗黑破坏神3 Diablo III (豆瓣)</title>
+</head>
+<body>
+<div id="db-global-nav"><div class="bd"><div class="top-nav-info"><ul>
+  <li class="nav-user-account"><a href="https://accounts.douban.com/passport/setting/"><span>MewX的账号</span></a>
+    <div class="more-items"><a href="https://www.douban.com/accounts/logout?source=main&ck=XOTQ">退出</a></div></li>
+</ul></div></div></div>
+<script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>
+<div id="content">
+  <!-- 评分控件 id="interest_sectl" -->
+  <div id="interest_sectl"> <div class="rating_wrap clearbox" rel="v:rating"> <div class="rating_logo">豆瓣评分</div> <div class="rating_self clearfix" typeof="v:Rating"> <strong class="ll rating_num" property="v:average"> 8.1 </strong> <span property="v:best" content="10.0"></span> 
+  <!-- 短评区 id="comments"（游戏页唯一的第二条独立标志） -->
+  <div class="mod item-notes" id="comments">
+</div>
+</body></html>

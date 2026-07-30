@@ -54,7 +54,12 @@ const MARKERS = {
  * 一条路线的判定描述。
  *
  * @typedef {object} RouteProfile
- * @property {RegExp[]} frameAnchors  页面框架标志。**缺一不可**——它们在，
+ * @property {RegExp} [urlAnchor]      最终 URL 必须匹配。**不依赖 markup，因此不受
+ *   改版影响**，是最稳的一条：改版能改标题与 class，改不了「你请求的资源是什么」。
+ * @property {RegExp[]} [anyFrameAnchors]  内容区块，**至少中一个**即可。用于
+ *   作品详情页：那类页面会合法地缺少区块（豆瓣会关掉某些条目的评分），要求全中会把
+ *   好页面判成故障。与 `frameAnchors` 二选一。
+ * @property {RegExp[]} [frameAnchors]  页面框架标志。**缺一不可**——它们在，
  *   才说明这确实是这条路线的页面。空列表页也有框架，所以框架而非条目数
  *   才是判定依据。
  * @property {RegExp} [itemAnchor]    单个条目的标志。只用于计数，不参与判定。
@@ -106,6 +111,21 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   /** @type {string[]} */
   const reasons = [];
   const itemCount = route.itemAnchor ? countMatches(bodyText, route.itemAnchor) : null;
+
+  // ── 0. 空响应不是页面
+  //
+  // 通用规则，与路线无关。**0 字节的 HTTP 200 不是数据。**
+  //
+  // 这条来自实测：旧档案里 6341 个作品详情页中有 **7 个是 0 字节**，全在同一天
+  // （2023-12-18），被前代工具当数据留在了磁盘上，没有任何标记。而当时的判定逻辑
+  // 就是「HTTP 200 即成功」——那正是这里要挡掉的东西。
+  //
+  // 判 null 而不是某种失败：我们不知道它为什么空（连接断了？被掐了？），
+  // 而「判不出来」本来就是这套系统里唯一诚实的答案。
+  if (!bodyText || bodyText.length === 0) {
+    reasons.push('响应体为空——0 字节的 200 不是页面');
+    return { verdict: null, reasons, itemCount };
+  }
 
   // ── 1. 跳转到风控域名：最明确的信号，优先于一切
   let host = '';
@@ -198,7 +218,29 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   //
   // 走到这里 URL 已经对了、登录状态也在，所以框架标志缺失基本只有一个含义：
   // **豆瓣改版了**。判 null（安全），并在原因里说清缺的是哪一个。
-  const missing = route.frameAnchors.filter((re) => !re.test(bodyText));
+  // 两种语义，按路线选：
+  //
+  // - `frameAnchors`（**缺一不可**）——用于形态固定的列表页。少一个就说明不是这条
+  //   路线的页面。
+  // - `anyFrameAnchors`（**至少中一个**）——用于作品详情页。那类页面会合法地缺少
+  //   区块（豆瓣会关掉某些条目的评分），要求全中会把好页面判成故障。
+  //
+  // 两者都能挡住封锁页与错误页：那些页面一个区块都不会有。
+  if (route.anyFrameAnchors) {
+    const hit = route.anyFrameAnchors.some((re) => re.test(bodyText));
+    if (!hit) {
+      reasons.push(
+        `一个内容区块都没有（试过 ${route.anyFrameAnchors.map((re) => re.source).join('、')}）` +
+          '——URL 与登录状态都正常，所以最可能是豆瓣改版了。这一页已如实存进档案，' +
+          '可据此重新校准标志，不必重抓。',
+      );
+      return { verdict: null, reasons, itemCount };
+    }
+    reasons.push('内容区块存在');
+    return finish(reasons, itemCount, bodyText, sizeStats);
+  }
+
+  const missing = (route.frameAnchors ?? []).filter((re) => !re.test(bodyText));
   if (missing.length > 0) {
     // **把缺的是什么说出来。** 只说「缺少 1 个」的话，事后只能对着一份 100 KB 的
     // HTML 猜是哪一个不匹配了——而豆瓣改版正是这条路径最常见的触发原因，那时候
@@ -212,11 +254,24 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   }
   reasons.push('页面框架完整');
 
-  // ── 7. 体积异常只作为警示，不单独定罪
-  //
-  // 体积能区分正常页与封锁页（实测：广播正常页中位数约 98 KB，登录页
-  // 16 KB），但上面的信号已经更直接。这里只在框架齐全却异常小的时候留个记录，
-  // 用于事后发现「豆瓣换了新的封锁形态」。
+  return finish(reasons, itemCount, bodyText, sizeStats);
+}
+
+/**
+ * 判定为 ok 之前的最后两笔记录。两种框架语义（全中 / 任一）共用。
+ *
+ * ## 7. 体积异常只作为警示，不单独定罪
+ *
+ * 体积能区分正常页与封锁页（实测：广播正常页中位数约 98 KB，登录页 16 KB；作品详情页
+ * 中位数 120 KB，soft404 是 17 KB），但上面的信号已经更直接。这里只在框架齐全却异常小
+ * 的时候留个记录，用于事后发现「豆瓣换了新的封锁形态」。
+ *
+ * @param {string[]} reasons
+ * @param {number | null} itemCount
+ * @param {string} bodyText
+ * @param {{count: number, median: number} | null} sizeStats
+ */
+function finish(reasons, itemCount, bodyText, sizeStats) {
   if (sizeStats && sizeStats.count >= 8) {
     const ratio = bodyText.length / sizeStats.median;
     if (ratio < 0.25) {
@@ -339,6 +394,99 @@ export const ROUTE_PROFILES = {
     //   <span class="created_at" title="2026-07-26 12:34:00">7月26日</span>
     // 水位线就是从这里取的——不带时区，解析时必须显式记录假定时区。
     timeAnchor: /class="created_at"[^>]*title="([^"]+)"/g,
+  },
+  /**
+   * 作品详情页。**占真实档案九成体积，也是抓取的最后一个阶段。**
+   *
+   * ## 为什么必须有这份描述
+   *
+   * 在此之前 `profileForRoute('interest.item')` 返回 `null`，于是判定退回到
+   * 「HTTP 200 就是 ok」——而那正是这套系统开篇就否掉的做法（豆瓣用 200 送封锁页）。
+   *
+   * 后果不对称：这条路线是**数千次请求**，且排在几小时抓取的最后，也就是最可能撞上
+   * 限流的时候。一次软封锁会让几千页被标成 `ok` 写进档案，而档案的全部价值就建立在
+   * 「标着 ok 的就是真数据」之上。
+   *
+   * ## 为什么要分变体
+   *
+   * 因为**没有一个 markup 标志跨得过所有媒介**。拿旧档案 6341 个作品详情页量过：
+   *
+   * | 标志 | movie | game | music | book | drama |
+   * |---|---|---|---|---|---|
+   * | `id="interest_sectl"` | ✔ | ✔ | ✔ | ✔ | ✗ |
+   * | `id="mainpic"` / `id="info"` | ✔ | ✗ | ✔ | ✔ | ✗ |
+   * | `v:itemreviewed` | ✔ | ✗ | ✗ | ✔ | ✗ |
+   * | `og:url` | ✔ | ✗ | ✔ | ✔ | ✗ |
+   *
+   * 而全都命中的那几个（`id="wrapper"`、`id="content"`、`<h1>`）在**每一张**豆瓣页面
+   * 上都有，认不出「这是作品详情页」，等于没检查。
+   *
+   * 舞台剧压根是另一套应用（`/location/drama/`），所以它是自己的变体。
+   *
+   * ## 命中率是排除掉「已经能判出来的失败」之后测的
+   *
+   * 第一次测出来是 397/400，差的 3 个是 2 个空文件与 1 个 soft404——它们**本该**不
+   * 匹配，而且在走到框架检查之前就已经被判掉了（空响应见 §0，soft404 见文案标志）。
+   * 排除之后 movie/game/music/book 合计 **1056 个样本，100% 命中**。
+   */
+  'interest.item': {
+    /**
+     * 最终 URL 必须还是某个媒介的作品页。**不依赖 markup，因此不受改版影响**——
+     * 改版能改 class，改不了「你请求的资源是什么」。
+     *
+     * 它挡的是被跳走：跳回首页、跳到登录页、跳到 `sec.douban.com`。
+     */
+    urlAnchor:
+      /(?:movie|book|music)\.douban\.com\/subject\/\d+|www\.douban\.com\/(?:game|app)\/\d+|www\.douban\.com\/location\/drama\/\d+/,
+
+    /**
+     * 内容区块 —— **至少中一个**（`anyFrameAnchors`，不是「缺一不可」）。
+     *
+     * ## 为什么这条路线的语义必须是「任一」
+     *
+     * 因为**作品页会合法地缺少区块**。实测撞到的那个：
+     *
+     *     2017年中央电视台春节联欢晚会 —— 88 KB 的正常页面，
+     *     有 v:itemreviewed / mainpic / info，但**没有评分控件**
+     *     （豆瓣把这个条目的评分关了）
+     *
+     * 用「缺一不可」的话，这类页面会被判成「认不出来」然后停机——而它完完全全是
+     * 一张好页面。对一个专门在意审查痕迹的项目来说，把「评分被关掉」当成故障尤其
+     * 荒谬：那正是最该完整存下来的东西。
+     *
+     * 「任一」仍然足够严：封锁页与错误页**一个区块都不会有**。而 `urlAnchor` 已经
+     * 保证了我们在正确的资源上，所以这里只需要回答一个问题——**内容渲染出来了吗**。
+     *
+     * ## 每个媒介至少被两条标志覆盖（除舞台剧）
+     *
+     * 拿旧档案 6341 个作品详情页量的（已排除空文件、soft404、未登录页）：
+     *
+     * | 标志 | movie | book | music | game | drama |
+     * |---|---|---|---|---|---|
+     * | `id="interest_sectl"` | ✔ | ✔ | ✔ | ✔ | ✗ |
+     * | `id="mainpic"` | ✔ | ✔ | ✔ | ✗ | ✗ |
+     * | `<div id="info"` | ✔ | ✔ | ✔ | ✗ | ✗ |
+     * | `id="comments"` | ✗ | ✗ | ✗ | ✔ | ✗ |
+     * | `drama-info` | ✗ | ✗ | ✗ | ✗ | ✔ |
+     *
+     * 全部 100%。四个媒介各有至少两条独立标志，所以任一条被改掉都还剩一条。
+     *
+     * ⚠ **舞台剧只有一条，而且没有校准**：旧档案里 3 个舞台剧详情页**全部**是未登录
+     * 状态下抓的，所以手上没有任何一张登录态的样本。`drama-info` 取自那 3 页的内容
+     * 区块（内容部分与登录无关，所以大概率成立），但这是全套标志里唯一没有可信样本
+     * 的一条。失败方向是安全的（判 null 然后停），且报错会说出缺的是哪个。
+     */
+    anyFrameAnchors: [
+      /id="interest_sectl"/,
+      /id="mainpic"/,
+      /<div id="info"/,
+      /id="comments"/,
+      /drama-info/,
+    ],
+
+    // 作品详情页没有「条目」概念，也没有分页与声明数量。
+    itemAnchor: undefined,
+    claimedCount: null,
   },
   'interest.list': {
     // 列表页的标题形如「我看过的影视(1157)」
