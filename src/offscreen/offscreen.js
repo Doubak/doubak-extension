@@ -45,12 +45,28 @@
  * 会把它重新拉起来并从断点继续——和 service worker 被杀走的是同一条路。
  *
  * 换句话说，这里没有引入新的失败模式，只是把已有的那个搬了个地方。
+ *
+ * ## 这里能用哪些 chrome API
+ *
+ * offscreen document 虽然是扩展页面，可用的扩展 API 却只有一小部分：
+ *
+ * | API | 在这里 | 后果 |
+ * |---|---|---|
+ * | `chrome.runtime`（消息、getURL） | ✓ | 命令与事件都靠它 |
+ * | `chrome.storage` | **✗** | checkpoint 要经由 service worker 走一跳（`ProxyKvStore`） |
+ * | `chrome.permissions` | **✗** | 传输层的权限兜底在这里查不了，会返回 `null`（「查不了」而不是「有权限」）。主动那道 `permissions.onRemoved` 在 service worker 里，仍然有效 |
+ * | `chrome.notifications` | **✗** | 通知一律由 service worker 发 |
+ * | `fetch`（带 host 权限与 cookie） | ✓ | 抓取靠它 |
+ *
+ * 「哪个上下文有哪个 API」是 MV3 里最容易踩空的一类知识，而踩空的样子往往是一句
+ * 与真实原因毫无关系的错误信息。所以列在这里。
  */
 
 import { CrawlRunner } from '../crawl/runner.js';
 import { RunStore } from '../crawl/run-store.js';
 import { driveWithinBudget } from '../crawl/driver.js';
-import { ChromeKvStore, MemoryKvStore } from '../storage/kv-store.js';
+import { MemoryKvStore } from '../storage/kv-store.js';
+import { ProxyKvStore } from '../storage/proxy-kv-store.js';
 import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { dryRunFetch } from '../crawl/dry-run.js';
 import { OFFSCREEN_TARGET } from './protocol.js';
@@ -89,7 +105,14 @@ function openBundle(dir) {
 /** @type {RunStore | null} */
 let runStore = null;
 function getRunStore() {
-  if (!runStore) runStore = new RunStore({ kv: new ChromeKvStore(), openBundle });
+  // **不能**用 ChromeKvStore：offscreen document 拿不到 `chrome.storage`。
+  // 它虽然是扩展页面，可用的扩展 API 却只有一小部分（`chrome.runtime` 在，
+  // `chrome.storage` 不在）。所以经由 service worker 走一跳。
+  //
+  // 代价是每次读写多一条消息，而 checkpoint 一页写一次、内容是几百字节的小
+  // JSON——和这条只认 JSON 的通道正好匹配。这与 WARC 记录完全相反，那才是抓取
+  // 必须整条搬进来的原因。
+  if (!runStore) runStore = new RunStore({ kv: new ProxyKvStore({ context: 'offscreen' }), openBundle });
   return runStore;
 }
 

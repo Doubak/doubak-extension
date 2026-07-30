@@ -23,6 +23,21 @@ const root = new URL('../', import.meta.url);
 /** @param {string} rel */
 const read = (rel) => readFile(new URL(rel, root), 'utf-8');
 
+/**
+ * 去掉注释再查。
+ *
+ * 必须的：这些文件的注释里**正需要**写「offscreen 拿不到 chrome.storage」，
+ * 而一个只会字符串匹配的检查会把那句解释本身当成违规。
+ *
+ * @param {string} src
+ */
+function stripComments(src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/([^:])\/\/.*$/gm, '$1');
+}
+
 describe('执行上下文约束', () => {
   test('窗口侧代码不许直接 import OpfsFileStore', async () => {
     // 窗口里 createSyncAccessHandle 不可用。窗口要读 OPFS 只能经由
@@ -99,6 +114,40 @@ describe('执行上下文约束', () => {
     // host.js 里加一个带 bytes 的命令。
     const host = await read('src/offscreen/host.js');
     assert.equal(/bytes/.test(host), false, 'host.js 里出现了 bytes —— 字节不许走这条通道');
+  });
+
+  test('offscreen 只用 chrome.runtime，其余 API 一律借道 service worker', async () => {
+    // offscreen document 虽然是扩展页面，可用的扩展 API 却只有一小部分。这件事
+    // 咬过两次，两次的症状都与真实原因毫无关系：
+    //
+    //   点「开始抓取」 → 「chrome.storage.local 不可用」
+    //
+    // 那句话在 service worker 里根本不可能出现（`storage` 权限声明着、一直用得
+    // 好好的），所以第一反应是去查权限配置。真正抛它的是 offscreen 那一侧。
+    //
+    // 这种错 Node 测试永远抓不到——那里压根没有「执行上下文」这个概念。所以在
+    // 源码层面钉死。
+    const src = await read('src/offscreen/offscreen.js');
+    const code = stripComments(src);
+
+    const used = new Set((code.match(/chrome\.[a-zA-Z]+/g) ?? []));
+    assert.deepEqual([...used].sort(), ['chrome.runtime'],
+      'offscreen 里出现了 chrome.runtime 之外的 API —— 它在那个上下文里很可能是 undefined');
+
+    // 具体挡一下最容易顺手写出来的那个
+    assert.equal(code.includes('ChromeKvStore'), false,
+      'offscreen 拿不到 chrome.storage，要用 ProxyKvStore');
+    assert.match(src, /ProxyKvStore/);
+  });
+
+  test('传输层的权限兜底在查不了时返回 null，而不是假装有权限', async () => {
+    // `chrome.permissions` 在 offscreen 里也不可用，所以那道兜底在抓取上下文里
+    // 是**失效**的。这可以接受——主动那道 `permissions.onRemoved` 在 service
+    // worker 里仍然有效——但前提是「查不了」必须退化成 null，绝不能退化成
+    // 「有权限」或者「没权限」。前者悄悄关掉检查，后者会把每个网络抖动都说成
+    // 权限问题。
+    const src = stripComments(await read('src/crawl/permissions.js'));
+    assert.match(src, /if \(!api\?\.contains\) return null;/);
   });
 
   test('offscreen 的入口模块不会被 service worker 拉进来', async () => {

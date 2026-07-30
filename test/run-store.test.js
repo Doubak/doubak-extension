@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { RunStore, buildCheckpoint, CURRENT_RUN_KEY } from '../src/crawl/run-store.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
+import { kvStoreContract } from './helpers/kv-store-contract.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { Frontier, StallDetector } from '../src/crawl/frontier.js';
 import { Pacer } from '../src/crawl/pacing.js';
@@ -212,5 +213,13 @@ describe('KV 存副本，不共享引用', () => {
 
   test('不存在的键返回 undefined', async () => {
     assert.equal(await new MemoryKvStore().get('nope'), undefined);
+  });
+});
+
+describe('MemoryKvStore', () => {
+  test('满足 KvStore 契约', async () => {
+    // 它是另外两个实现（ChromeKvStore / ProxyKvStore）的参照，所以它自己也得
+    // 过同一份契约——否则「与内存实现一致」这句话就没有基准。
+    await kvStoreContract(() => new MemoryKvStore());
   });
 });

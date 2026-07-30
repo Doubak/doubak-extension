@@ -81,6 +81,48 @@
 `webRequest` 目前只出现在注释里（用来补齐真实响应头的方案），没有任何调用，
 因此不声明。
 
+## 哪个上下文有哪个 API —— 这一类踩空最难查
+
+不是权限问题，但症状长得像权限问题，所以放在这里。
+
+**offscreen document 虽然是扩展页面，可用的扩展 API 却只有一小部分。**
+
+| API | service worker | offscreen | 窗口（面板/popup） |
+|---|---|---|---|
+| `chrome.runtime`（消息、getURL） | ✓ | ✓ | ✓ |
+| `chrome.storage` | ✓ | **✗** | ✓ |
+| `chrome.permissions` | ✓ | **✗** | ✓ |
+| `chrome.notifications` | ✓ | **✗** | ✓ |
+| `chrome.alarms` | ✓ | ✗ | ✗ |
+| `createSyncAccessHandle()`（OPFS 原地写） | **✗** | **✗** | **✗**（只有专用 Worker 有） |
+| `showDirectoryPicker()` | ✗ | ✗ | ✓ |
+| 带 cookie 的 `fetch` | ✓ | ✓ | ✓ |
+
+这张表咬过两次，两次的症状都与真实原因毫无关系：
+
+1. 面板读档案 → 「createSyncAccessHandle 不可用」（窗口里没有）
+2. 点开始抓取 → 「**chrome.storage.local 不可用**」
+
+第二条尤其误导：那句话在 service worker 里根本不可能出现（`storage` 权限声明着、
+一直用得好好的），所以第一反应是去查权限配置。真正抛它的是 offscreen 那一侧，而
+错误信息里没有任何上下文。
+
+三条应对：
+
+- **收敛。** `chrome.storage` 在整个扩展里只有 service worker 一处真的碰；
+  offscreen 经由 `ProxyKvStore` 借道过去。checkpoint 一页写一次、几百字节的小
+  JSON，正好匹配这条只认 JSON 的通道。
+- **错误信息带上下文。** `ProxyKvStore` 的每条错误都说明是谁在喊、卡在哪一步
+  （没送到 / 没答复 / 那边报错）。
+- **源码层面钉死**（`test/execution-context.test.js`）：offscreen 里除了
+  `chrome.runtime` 不许出现任何 `chrome.*`。Node 测试永远抓不到这类问题——那里
+  压根没有「执行上下文」这个概念。
+
+`chrome.permissions` 在 offscreen 里也不可用，所以传输层那道权限兜底在抓取上下文
+里是**失效**的。可以接受：主动那道 `permissions.onRemoved` 在 service worker 里
+仍然有效。但前提是「查不了」必须退化成 `null`——而那正是 `checkHostAccess()` 一开始
+就定下的规矩，这里刚好收到了回报。
+
 ## 权限在抓取途中丢掉怎么办
 
 这是最容易被漏掉的一类，因为它在开发和测试里几乎不会发生。

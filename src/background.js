@@ -45,6 +45,7 @@
 import { Supervisor, ALARM_NAME } from './crawl/supervisor.js';
 import { RunStore } from './crawl/run-store.js';
 import { ChromeKvStore } from './storage/kv-store.js';
+import { KV_MESSAGE, handleKvMessage } from './storage/proxy-kv-store.js';
 import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
 import { preflightStorage } from './storage/quota.js';
 import { ensureOffscreen, withOffscreen, serializeScope } from './offscreen/host.js';
@@ -61,6 +62,20 @@ function debugLog(...args) {
 let supervisor = null;
 /** @type {RunStore | null} */
 let runStore = null;
+/** @type {ChromeKvStore | null} */
+let kv = null;
+
+/**
+ * `chrome.storage` 在整个扩展里**只有这一处**真的被碰。
+ *
+ * offscreen document 拿不到它（见 `src/offscreen/offscreen.js` 的 API 表），
+ * 所以那一侧的读写都经由 `ProxyKvStore` 转到这里。把它收敛成一处，就少一整类
+ * 「在这里能用、在那里不能用」的意外。
+ */
+function getKv() {
+  if (!kv) kv = new ChromeKvStore();
+  return kv;
+}
 
 /**
  * service worker 侧的 RunStore **只读 checkpoint**。
@@ -72,7 +87,7 @@ let runStore = null;
 function getRunStore() {
   if (!runStore) {
     runStore = new RunStore({
-      kv: new ChromeKvStore(),
+      kv: getKv(),
       openBundle: () => {
         throw new Error(
           'service worker 里不能开 bundle：createSyncAccessHandle 只在专用 Worker 中可用。' +
@@ -199,6 +214,13 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
   if (msg?.target) return;
   // offscreen 转发给界面的抓取事件也不是命令。
   if (msg?.type === 'crawl_event') return;
+
+  // offscreen 借道读写 chrome.storage。单独处理是因为它**不带 `target`**——
+  // 带了就会被 offscreen 自己的监听器抢走，而它正是这条消息的发起方。
+  if (msg?.type === KV_MESSAGE) {
+    handleKvMessage(msg, getKv()).then(sendResponse);
+    return true;
+  }
 
   (async () => {
     try {
