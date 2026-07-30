@@ -384,9 +384,27 @@ export class CrawlRunner {
    */
   async pause(reason = 'user_paused') {
     if (!this._run) return;
+
+    // **先停 frontier，再落盘。** 顺序是刻意的：停 frontier 是纯内存操作，一定
+    // 成功；落盘可能失败（配额、句柄冲突）。反过来的话，一次写失败会让「暂停」
+    // 整个失败——而用户按暂停往往正是因为出了问题，此时最不该做的就是拒绝停下。
     this._run.frontier.stop(reason);
-    await this._saveCheckpoint(reason);
-    this._emit({ type: 'paused', reason });
+
+    try {
+      await this._saveCheckpoint(reason);
+    } catch (err) {
+      // 落盘失败要说出来，但**不改变「已经停下了」这个事实**。下次唤醒会退回到
+      // 崩溃哨兵那条路，那是保守且安全的。
+      this._emit({
+        type: 'paused',
+        reason,
+        checkpointSaved: false,
+        message: `已停下，但 checkpoint 没写成：${err?.message ?? err}`,
+      });
+      return;
+    }
+
+    this._emit({ type: 'paused', reason, checkpointSaved: true });
   }
 
   /** 当前进度快照，供界面读取。 */
@@ -394,7 +412,12 @@ export class CrawlRunner {
     if (!this._run) return { active: false };
     const { bundleId, frontier, pacer, loop } = this._run;
     return {
+      // `active` 意思是「这次抓取还在内存里，可以继续」——**不是**「正在发请求」。
+      // 两者混为一谈的后果是：暂停之后界面依旧显示「正在抓取」，用户以为暂停按钮
+      // 没生效，然后反复去点。所以另外报 `stopped` 与 `stoppedBy`。
       active: true,
+      stopped: frontier.stopped,
+      stoppedBy: frontier.stopped ? frontier.stopReason : null,
       bundleId,
       counts: frontier.counts(),
       intervalMs: pacer.intervalMs,

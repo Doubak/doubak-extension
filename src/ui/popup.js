@@ -176,6 +176,22 @@ async function refresh() {
     return;
   }
 
+  // 已经在内存里但停下来了。`active` 不等于「正在发请求」——不分开的话，暂停之后
+  // 界面还写着「正在抓取」，用户会以为按钮没生效。
+  if (s.runner?.active && s.runner.stopped) {
+    const copy = PAUSE_COPY[s.runner.stoppedBy] ?? {
+      cls: 'warn', title: '抓取已停下', why: `原因：${s.runner.stoppedBy}`, action: '继续',
+    };
+    setState(copy.cls, copy.title, copy.why);
+    setStats([['档案', s.runner.bundleId]]);
+    setRoutes(s.runner.routes ?? []);
+    setPrimary(copy.action ?? '无法继续', copy.action
+      ? async () => { await send({ type: 'resume' }); refresh(); }
+      : null);
+    $('note').textContent = '';
+    return;
+  }
+
   // 正在抓
   if (s.runner?.active) {
     const r = s.runner;

@@ -159,6 +159,62 @@ describe('面板脚本', () => {
     }
   });
 
+  test('停下来的抓取不显示「正在抓取」', async () => {
+    // `active` 是「这次抓取还在内存里」，不是「正在发请求」。不分开的话，暂停之后
+    // 界面还写着「正在抓取」，用户会以为按钮没生效然后反复去点。
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return {
+            ok: true, running: false, checkpoint: null,
+            runner: {
+              active: true, stopped: true, stoppedBy: 'user_paused',
+              bundleId: 'b', intervalMs: 1000, backoffLevel: 0,
+              counts: { done: 5, pending: 3 }, routes: [],
+            },
+          };
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      const t = dom.byId.get('state').textContent;
+      assert.equal(/正在抓取/.test(t), false, '停下来了却还说「正在抓取」');
+      assert.match(t, /已暂停/);
+      // 而且要给出「继续」，不是「暂停」
+      assert.match(dom.byId.get('actions').textContent, /继续/);
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('写入失败停机时说出真实原因，并给出下一步', async () => {
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return {
+            ok: true, running: false, checkpoint: null,
+            runner: {
+              active: true, stopped: true, stoppedBy: 'write_failed',
+              bundleId: 'b', intervalMs: 1000, backoffLevel: 0,
+              counts: { done: 5, pending: 3 }, routes: [],
+            },
+          };
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      const t = dom.byId.get('state').textContent;
+      assert.match(t, /写入档案时出错/);
+      assert.equal(/write_failed/.test(t), false, '界面上不许出现内部标识');
+    } finally {
+      dom.restore();
+    }
+  });
+
   test('每个 $(id) 都在 HTML 里真的存在', async () => {
     // `$()` 返回 null 之后往上一步才炸，栈里看不出缺的是哪个 id。
     const js = await readRepoFile('src/ui/panel.js');

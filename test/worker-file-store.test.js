@@ -148,6 +148,30 @@ describe('WorkerFileStore', () => {
     assert.equal(worker.seen.length, 0, '写操作不该发出任何消息');
   });
 
+  test('写入**不**转移 buffer 所有权 —— 转移会 detach 调用方的数据', async () => {
+    // 转移过，然后撤了。`postMessage` 转移的是**整个 ArrayBuffer**，而传进来的
+    // Uint8Array 完全可能只是某个更大 buffer 上的视图（subarray）。转移它等于把
+    // 调用方还要用的数据一起 detach 掉——而 detach 之后 length 变成 0，
+    // **没有任何异常**，字节悄悄空了。这是往档案里写数据的路径。
+    const dir = await bundleDir();
+    const worker = fakeWorker({ 'doubak-bundle-A': dir });
+    /** @type {any[]} */
+    const transfers = [];
+    const inner = worker.postMessage.bind(worker);
+    worker.postMessage = (msg, transfer) => {
+      transfers.push(transfer);
+      return inner(msg);
+    };
+
+    const s = new WorkerFileStore({ worker, dir: 'doubak-bundle-A', readOnly: false });
+    await s.append('f', enc.encode('abc'));
+    await s.replace('g', enc.encode('def'));
+
+    for (const tr of transfers) {
+      assert.ok(!tr || tr.length === 0, `写入不该转移任何东西，实际转移了 ${tr?.length} 项`);
+    }
+  });
+
   test('readOnly:false 时写操作真的转发过去', async () => {
     const dir = await bundleDir();
     const worker = fakeWorker({ 'doubak-bundle-A': dir });

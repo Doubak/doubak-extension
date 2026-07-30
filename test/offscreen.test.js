@@ -124,6 +124,21 @@ describe('OPFS RPC 的读写分界', () => {
     assert.deepEqual(await s.read('f'), new Uint8Array([7, 8]));
   });
 
+  test('读操作转移、写操作不转移', async () => {
+    // 不对称是刻意的：读方向的 buffer 是 Worker 刚分配、之后再也不碰的，转移安全；
+    // 写方向的 buffer 属于调用方，转移会把它 detach 掉。
+    const s = new MemoryFileStore();
+    await s.replace('f', new Uint8Array([1, 2, 3]));
+    const one = async () => s;
+
+    const r = await handleOpfsRpc({ op: 'read', name: 'f' }, { allowWrites: true, storeFor: one });
+    assert.deepEqual(r.transfer, [r.result.buffer]);
+
+    const w = await handleOpfsRpc({ op: 'append', name: 'f', bytes: new Uint8Array([4]) },
+      { allowWrites: true, storeFor: one });
+    assert.equal(w.transfer, undefined, '写操作不该带 transfer');
+  });
+
   test('不认识的操作直接抛', async () => {
     await assert.rejects(
       () => handleOpfsRpc({ op: '把档案发到我服务器' }, { allowWrites: true, storeFor }),
@@ -173,5 +188,84 @@ describe('通知文案', () => {
     const src = await readFile(new URL('../src/ui/notify.js', import.meta.url), 'utf-8');
     const done = src.slice(src.indexOf('export async function notifyDone'));
     assert.match(done.slice(0, 1200), /导出/);
+  });
+});
+
+describe('通知去重', () => {
+  test('同一个原因只弹一次', async () => {
+    // 心跳每 30 秒醒一次，每次都会重新判断「该不该恢复」。不去重的话同一件事每
+    // 半分钟糊到用户脸上一次，而它还带 requireInteraction 不会自己消失。
+    //
+    // 那不只是烦：**被轰炸的用户会去关掉通知权限**，然后连真正要紧的那条也收不到，
+    // 于是这个功能反而让「把人叫回来」更难了。
+    const { notifyNeedsAction, clearAttention, NOTIFIED_KEY } =
+      await import('../src/ui/notify.js');
+    const { MemoryKvStore } = await import('../src/storage/kv-store.js');
+
+    const created = [];
+    const badges = [];
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'chrome');
+    Object.defineProperty(globalThis, 'chrome', {
+      configurable: true, writable: true,
+      value: {
+        notifications: {
+          create: async (id, o) => created.push(o.title),
+          clear: async () => {},
+        },
+        action: {
+          setBadgeText: async ({ text }) => badges.push(text),
+          setBadgeBackgroundColor: async () => {},
+          setTitle: async () => {},
+        },
+        runtime: { getURL: (p) => p },
+      },
+    });
+
+    try {
+      const kv = new MemoryKvStore();
+      await notifyNeedsAction('blocked', { kv });
+      await notifyNeedsAction('blocked', { kv });
+      await notifyNeedsAction('blocked', { kv });
+      assert.equal(created.length, 1, `同一个原因弹了 ${created.length} 次`);
+
+      // 换了原因就该说
+      await notifyNeedsAction('challenge', { kv });
+      assert.equal(created.length, 2);
+
+      // 角标不受去重限制——它是常亮的兜底，重设同样的值没有代价
+      assert.ok(badges.length >= 4);
+
+      // 解决之后再发生同一件事，必须重新提醒：那是一次全新的事件
+      await clearAttention({ kv });
+      assert.equal(await kv.get(NOTIFIED_KEY), undefined, '去重状态要一起清掉');
+      await notifyNeedsAction('challenge', { kv });
+      assert.equal(created.length, 3);
+    } finally {
+      if (saved) Object.defineProperty(globalThis, 'chrome', saved);
+      else delete globalThis.chrome;
+    }
+  });
+
+  test('不传 kv 就不去重 —— 刻意不静默生效', async () => {
+    // 静默去重会让测试以为去重生效了，而实际上取决于调用方有没有传 kv。
+    const { notifyNeedsAction } = await import('../src/ui/notify.js');
+    const created = [];
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'chrome');
+    Object.defineProperty(globalThis, 'chrome', {
+      configurable: true, writable: true,
+      value: {
+        notifications: { create: async (id, o) => created.push(o.title), clear: async () => {} },
+        action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {} },
+        runtime: { getURL: (p) => p },
+      },
+    });
+    try {
+      await notifyNeedsAction('blocked');
+      await notifyNeedsAction('blocked');
+      assert.equal(created.length, 2);
+    } finally {
+      if (saved) Object.defineProperty(globalThis, 'chrome', saved);
+      else delete globalThis.chrome;
+    }
   });
 });

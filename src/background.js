@@ -124,7 +124,10 @@ function getSupervisor() {
       },
       onBlocked: async (decision) => {
         debugLog('不自动恢复：', decision.reason);
-        if (decision.userVisible) await notifyNeedsAction(decision.reason);
+        // 传 kv 才会去重。心跳每 30 秒来一次，不去重的话同一件事会每半分钟弹一遍，
+        // 而它还带 requireInteraction 不会自己消失——用户会去关掉通知权限，
+        // 然后连真正要紧的那条也收不到。
+        if (decision.userVisible) await notifyNeedsAction(decision.pauseReason ?? decision.reason, { kv: getKv() });
       },
     },
   });
@@ -139,9 +142,12 @@ async function drive() {
   if (r.result.done && !r.result.stoppedBy) {
     await withOffscreen({ op: 'finish', status: 'complete' });
     await getSupervisor().finishRun();
-    await notifyDone(r.result);
+    await notifyDone(r.result, { kv: getKv() });
   } else if (r.result.stoppedBy) {
-    await notifyNeedsAction(r.result.stoppedBy);
+    // 把真实原因记进调度镜像，否则心跳会一直把它当崩溃哨兵去自动恢复——
+    // 而「醒来就重试一个软封锁」正是把限流升级成封号的路径。
+    await getSupervisor().pauseRun(r.result.stoppedBy);
+    await notifyNeedsAction(r.result.stoppedBy, { kv: getKv() });
   }
   return r.result;
 }
@@ -198,7 +204,7 @@ globalThis.chrome?.permissions?.onRemoved?.addListener(async (removed) => {
     if (!r || r.granted) return;
     await withOffscreen({ op: 'pause', reason: HOST_PERMISSION_LOST }).catch(() => {}); // 它可能已经关了
     await getSupervisor().pauseRun(HOST_PERMISSION_LOST);
-    await notifyNeedsAction(HOST_PERMISSION_LOST);
+    await notifyNeedsAction(HOST_PERMISSION_LOST, { kv: getKv() });
   } catch (e) {
     debugLog('处理权限收回时出错', e);
   }
@@ -270,7 +276,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
             options: serializeScope(scopeToOptions(msg?.scope)),
           });
           await getSupervisor().startRun({ bundle_id: started.bundleId });
-          await clearAttention();
+          await clearAttention({ kv: getKv() });
           void drive(); // 不等它，立刻答复界面
           sendResponse({ ok: true, bundleId: started.bundleId, account: started.account });
           break;
@@ -281,7 +287,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           if (!cp) throw new Error('没有可恢复的抓取');
           // 全本 checkpoint 在档案里，offscreen 自己读（见上面 onResume 的说明）。
           await withOffscreen({ op: 'resume' });
-          await clearAttention();
+          await clearAttention({ kv: getKv() });
           void drive();
           sendResponse({ ok: true });
           break;

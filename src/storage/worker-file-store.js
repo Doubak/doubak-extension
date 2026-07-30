@@ -111,17 +111,34 @@ export class WorkerFileStore {
     }
   }
 
-  /** @param {string} name @param {Uint8Array} bytes */
+  /**
+   * 写入**不转移** buffer 所有权，让结构化克隆复制一份。
+   *
+   * 转移过所有权，然后撤了。原因是它在这里根本不安全：
+   *
+   * 1. `postMessage` 转移的是**整个 ArrayBuffer**，而传进来的 `Uint8Array` 完全
+   *    可能只是某个更大 buffer 上的一个视图（`subarray`）。转移它等于把调用方还要
+   *    用的数据一起 detach 掉。
+   * 2. detach 之后调用方那一侧的 `bytes.length` 变成 0。**没有任何异常**，只是
+   *    数据悄悄空了——而这是往档案里写字节的路径。
+   *
+   * 一条 WARC 记录几十 KB，复制一次的代价接近零；OPFS 实测吞吐 45.5 MB/s，
+   * 瓶颈从来不在这里。为一个可以忽略的收益换一类静默的数据损坏，是净亏。
+   *
+   * 读方向仍然转移（见 opfs-rpc.js）：那边的 buffer 是 Worker 刚分配、之后再也
+   * 不碰的，转移是安全的。
+   *
+   * @param {string} name @param {Uint8Array} bytes
+   */
   append(name, bytes) {
     this._assertWritable('append');
-    // 转移所有权：一条 WARC 记录动辄几十 KB，没必要复制一遍。
-    return this._call({ op: 'append', name, bytes }, [bytes.buffer]);
+    return this._call({ op: 'append', name, bytes });
   }
 
   /** @param {string} name @param {Uint8Array} bytes */
   replace(name, bytes) {
     this._assertWritable('replace');
-    return this._call({ op: 'replace', name, bytes }, [bytes.buffer]);
+    return this._call({ op: 'replace', name, bytes });
   }
 
   /** @param {string} name @param {number} length */

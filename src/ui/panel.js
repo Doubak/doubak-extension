@@ -207,9 +207,27 @@ async function refresh() {
 
   if (s.runner?.active) {
     const r = s.runner;
+
+    // `active` 是「这次抓取还在内存里」，**不是**「正在发请求」。停下来之后仍然
+    // active（那样才能继续），所以必须分开显示——否则暂停之后界面还写着
+    // 「正在抓取」，用户会以为按钮没生效然后反复去点。
+    if (r.stopped) {
+      const [cls, title, why, action] = PAUSE_COPY[r.stoppedBy] ??
+        ['warn', '抓取已停下', `原因：${r.stoppedBy}`, '继续'];
+      setState(cls, title, why);
+      setActions(action ? [[action, async () => { await send({ type: 'resume' }); refresh(); }]] : []);
+      renderRoutes(r.routes ?? []);
+      return;
+    }
+
     setState('run', '正在抓取', `档案 ${r.bundleId} · 当前间隔 ${(r.intervalMs / 1000).toFixed(1)} 秒` +
       (r.backoffLevel ? `（已降速 ${r.backoffLevel} 级）` : ''));
-    setActions([['暂停', async () => { await send({ type: 'pause' }); refresh(); }]]);
+    setActions([['暂停', async () => {
+      // 立刻给反馈。一批最长 22 秒，期间不给任何回应的话按钮看起来就是坏的。
+      setState('idle', '正在暂停…', '当前这一页抓完就停，不会丢东西。');
+      await send({ type: 'pause' });
+      refresh();
+    }]]);
     renderRoutes(r.routes ?? []);
     return;
   }
@@ -821,7 +839,13 @@ function addLog(text) {
 }
 
 chrome.runtime.onMessage?.addListener((msg) => {
-  if (msg?.type === 'crawl_event') addLog(`${msg.event.type} ${msg.event.routeKey ?? msg.event.reason ?? ''}`);
+  if (msg?.type !== 'crawl_event') return;
+  const e = msg.event;
+  // **必须带上 message。** 只记 type 与 reason 的话，「写入档案时出错」在日志里
+  // 也还是「写入档案时出错」——真实原因（哪个文件、什么异常）全丢了，而那正是
+  // 唯一能查下去的线索。
+  const bits = [e.type, e.routeKey, e.reason, e.url, e.message].filter(Boolean);
+  addLog(bits.join(' · '));
 });
 
 refresh();

@@ -70,14 +70,35 @@ function copyFor(reason) {
 /**
  * 需要用户做点什么。
  *
- * 角标先点亮再发通知：角标是那条不会消失的兜底，通知可能压根没权限。
+ * ## 只在状态**变化**时弹
  *
- * @param {string} reason  停机原因，或一句现成的话
+ * 心跳每 30 秒醒一次，每次都会重新判断「该不该恢复」，不该恢复就走到这里。原来
+ * 每次都弹一遍，于是同一件事每半分钟糊到用户脸上一次——而它还带
+ * `requireInteraction`，不会自己消失。
+ *
+ * 那不只是烦：**被通知轰炸的用户会去关掉通知权限**，然后连真正要紧的那条也收不到，
+ * 于是这个功能反而让「把人叫回来」更难了。
+ *
+ * 去重要跨 service worker 的生死，所以状态得**存起来**（内存里存不住，worker 随时
+ * 清零）。角标不受这条限制——它本来就是常亮的兜底，重复设成同样的值没有代价。
+ *
+ * @param {string} reason  停机原因
+ * @param {object} [opts]
+ * @param {{get: (k: string) => Promise<any>, set: (k: string, v: any) => Promise<void>}} [opts.kv]
+ *   去重状态存哪。不给就不去重（每次都弹）——刻意不静默去重，
+ *   免得测试里以为去重生效了而实际没有。
  */
-export async function notifyNeedsAction(reason) {
-  await setBadge('!', '#d93025', `豆备：${copyFor(reason).title}`);
-
+export async function notifyNeedsAction(reason, { kv } = {}) {
   const { title, body } = copyFor(reason);
+  // 角标先点亮：它是那条不会消失的兜底，而通知可能压根没权限。
+  await setBadge('!', '#d93025', `豆备：${title}`);
+
+  if (kv) {
+    const last = await kv.get(NOTIFIED_KEY);
+    if (last === reason) return; // 同一件事已经说过了
+    await kv.set(NOTIFIED_KEY, reason);
+  }
+
   await show(ATTENTION_ID, {
     title,
     message: body,
@@ -86,13 +107,16 @@ export async function notifyNeedsAction(reason) {
   });
 }
 
+/** 去重状态的键。与抓取指针分开放：它是界面状态，不是抓取状态。 */
+export const NOTIFIED_KEY = 'doubak.notifiedReason';
+
 /**
  * 抓完了。
  *
  * @param {{captured?: number, failed?: number}} [result]
  */
-export async function notifyDone(result = {}) {
-  await clearAttention();
+export async function notifyDone(result = {}, { kv } = {}) {
+  await clearAttention({ kv });
 
   const n = result.captured ?? 0;
   await show(DONE_ID, {
@@ -106,14 +130,23 @@ export async function notifyDone(result = {}) {
   });
 }
 
-/** 问题解决了：角标和「要处理」的通知一起收掉。 */
-export async function clearAttention() {
+/**
+ * 问题解决了：角标、通知、以及去重状态一起收掉。
+ *
+ * 去重状态**必须**一起清：不清的话，同一个原因第二次发生时会被当成「已经说过了」
+ * 而不再提醒——而那是一次全新的、真的需要人处理的事件。
+ *
+ * @param {object} [opts]
+ * @param {{remove: (k: string) => Promise<void>}} [opts.kv]
+ */
+export async function clearAttention({ kv } = {}) {
   await setBadge('', '#5f6368', '豆备 Doubak');
   try {
     await globalThis.chrome?.notifications?.clear?.(ATTENTION_ID);
   } catch {
     // 通知本来就可能不存在，清不掉不是问题。
   }
+  await kv?.remove(NOTIFIED_KEY).catch(() => {});
 }
 
 /**

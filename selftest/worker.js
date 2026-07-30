@@ -12,6 +12,7 @@ import { OpfsFileStore } from '../src/storage/opfs-store.js';
 import { fileStoreContract } from '../test/helpers/file-store-contract.js';
 import { kvStoreContract } from '../test/helpers/kv-store-contract.js';
 import { IdbKvStore } from '../src/storage/idb-kv-store.js';
+import { WorkerFileStore } from '../src/storage/worker-file-store.js';
 import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { coverageEntry, crawlStateEntry } from '../src/bundle/manifest-builder.js';
 import { recoverBundle } from '../src/bundle/recovery.js';
@@ -125,6 +126,83 @@ async function runIdbKv() {
     const req = indexedDB.deleteDatabase(dbName);
     req.onsuccess = req.onerror = req.onblocked = () => resolve(undefined);
   });
+}
+
+/**
+ * `WorkerFileStore` ↔ `serveOpfsRpc` 那条 RPC 路径。
+ *
+ * **这条路径以前一次都没被端到端跑过。** Node 测试用 `MemoryFileStore`，
+ * 之前的自检直接用 `OpfsFileStore`——而抓取真正走的是 RPC。中间那一层（结构化
+ * 克隆、buffer 转移、句柄串行化）因此完全没有覆盖。
+ *
+ * 代价已经付过了：写入路径上转移了 buffer 所有权，把调用方还要用的数据 detach
+ * 掉，表现是「写入档案时出错」然后整场停机。跑一遍契约就能抓到。
+ *
+ * 这里用**真的** Worker，不是替身——要测的正是那条边界。
+ */
+async function runRpcContract() {
+  const worker = new Worker(new URL('../src/storage/opfs-rw-worker.js', import.meta.url), {
+    type: 'module',
+  });
+  const dir = `doubak-bundle-rpc-${Date.now()}`;
+  const store = new WorkerFileStore({ worker, dir, readOnly: false });
+
+  const cases = fileStoreContract();
+  let passed = 0;
+  for (const c of cases) {
+    try {
+      await c.fn(store);
+      passed += 1;
+      post({ type: 'case', group: 'FileStore 契约（经由 RPC）', name: c.name, ok: true });
+    } catch (e) {
+      post({ type: 'case', group: 'FileStore 契约（经由 RPC）', name: c.name, ok: false, error: e.message });
+    }
+  }
+
+  await check('RPC 路径', '写入之后调用方的 bytes 还能用', async () => {
+    // 转移过 buffer 所有权，然后撤了。`postMessage` 转移的是**整个 ArrayBuffer**，
+    // 而传进来的 Uint8Array 完全可能只是某个更大 buffer 上的视图——转移它等于把
+    // 调用方还要用的数据一起 detach 掉。detach 之后 length 变成 0，**没有异常**，
+    // 数据悄悄空了。
+    const buf = new Uint8Array(64);
+    for (let i = 0; i < buf.length; i++) buf[i] = i;
+    const view = buf.subarray(8, 24);
+
+    await store.append('detach-test', view);
+    if (view.length !== 16) throw new Error(`调用方的视图被 detach 了：length=${view.length}`);
+    if (buf[8] !== 8) throw new Error('调用方的底层 buffer 被动过了');
+
+    // 同一份字节再写一次也必须成立
+    await store.append('detach-test', view);
+    if (await store.size('detach-test') !== 32) throw new Error('第二次写没成');
+  });
+
+  await check('RPC 路径', '同一文件上的并发写不会撞句柄', async () => {
+    // OPFS 的同步访问句柄是独占的。RPC 消息并发到达，两条针对同一文件的操作会
+    // 重叠——不串行化的话必然一方抛 NoModificationAllowedError。
+    const chunk = new Uint8Array([1, 2, 3, 4]);
+    await Promise.all(Array.from({ length: 20 }, () => store.append('concurrent', chunk)));
+    const size = await store.size('concurrent');
+    if (size !== 80) throw new Error(`并发写丢了数据：期望 80 字节，实得 ${size}`);
+  });
+
+  await check('RPC 路径', '只读 Worker 拒绝写', async () => {
+    const ro = new Worker(new URL('../src/storage/opfs-worker.js', import.meta.url), { type: 'module' });
+    // 客户端标成可写，让请求真的发出去——要验的是 **Worker 一侧**的拒绝。
+    const sneaky = new WorkerFileStore({ worker: ro, dir, readOnly: false });
+    let threw = false;
+    try {
+      await sneaky.append('should-not-exist', new Uint8Array([1]));
+    } catch (e) {
+      threw = /只读/.test(e.message);
+    }
+    ro.terminate();
+    if (!threw) throw new Error('只读 Worker 居然接受了写操作');
+  });
+
+  worker.terminate();
+  await OpfsFileStore.destroy(dir);
+  return { passed, total: cases.length };
 }
 
 /** 在 OPFS 上真正跑一遍 bundle 写入器。 */
@@ -267,6 +345,9 @@ self.onmessage = async (e) => {
     post({ type: 'note', text: `FileStore 契约：${contract.passed}/${contract.total} 通过` });
 
     await runIdbKv();
+
+    const rpc = await runRpcContract();
+    post({ type: 'note', text: `FileStore 契约（经由 RPC）：${rpc.passed}/${rpc.total} 通过` });
 
     const ctx = await runWriter();
     await runRecovery(ctx);

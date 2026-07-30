@@ -134,12 +134,20 @@ export function decideResume(checkpoint, { now = Date.now() } = {}) {
     return {
       resume: false,
       reason: `未知的停止原因（${checkpoint.pause_reason}），出于谨慎不自动恢复`,
+      pauseReason: checkpoint.pause_reason,
       userVisible: true,
     };
   }
 
   if (!policy.autoResume) {
-    return { resume: false, reason: policy.reason, userVisible: policy.userVisible };
+    // `reason` 是给人看的整句话，`pauseReason` 是机器可读的键。通知文案要按后者
+    // 查表——拿整句话去查表只会次次落到兜底文案上。
+    return {
+      resume: false,
+      reason: policy.reason,
+      pauseReason: checkpoint.pause_reason,
+      userVisible: policy.userVisible,
+    };
   }
 
   // 意外中断也要尊重降速：如果上次已经退避过，恢复前先把冷却等够。

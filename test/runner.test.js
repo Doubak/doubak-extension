@@ -547,3 +547,51 @@ describe('开工失败不许留下半开的状态', () => {
     assert.equal(runner.active, false);
   });
 });
+
+describe('暂停', () => {
+  test('停下来之后 status 报 stopped —— active 不等于「正在发请求」', async () => {
+    // 两者混为一谈的后果：暂停之后界面依旧显示「正在抓取」，用户以为按钮没生效，
+    // 然后反复去点。
+    const { runner } = harness(broadcastOnly([bcPage(20)]));
+    await runner.start({ username: 'example', includeCatalog: false });
+
+    assert.equal(runner.status().stopped, false);
+    await runner.pause();
+
+    const st = runner.status();
+    assert.equal(st.active, true, '还在内存里，可以继续');
+    assert.equal(st.stopped, true, '但已经不发请求了');
+    assert.equal(st.stoppedBy, 'user_paused');
+  });
+
+  test('原因会被带下去 —— 不同原因的恢复方式完全不同', async () => {
+    // 一律写 user_paused 的话，「权限被撤」会被当成「用户自己暂停的」，
+    // 于是界面告诉他点「继续」——而权限没改回来，继续必然再失败。
+    const { runner } = harness(broadcastOnly([bcPage(20)]));
+    await runner.start({ username: 'example', includeCatalog: false });
+    await runner.pause('host_permission_lost');
+    assert.equal(runner.status().stoppedBy, 'host_permission_lost');
+  });
+
+  test('checkpoint 写失败**不**让暂停失败', async () => {
+    // 用户按暂停往往正是因为出了问题（比如写盘一直在报错）。此时最不该做的就是
+    // 拒绝停下——那会让他只能去关浏览器。
+    const { runner, runStore, events } = harness(broadcastOnly([bcPage(20)]));
+    await runner.start({ username: 'example', includeCatalog: false });
+
+    runStore.saveCheckpoint = async () => { throw new Error('盘满了'); };
+    await assert.doesNotReject(() => runner.pause());
+
+    assert.equal(runner.status().stopped, true, '不管落盘成不成，都已经停了');
+    const paused = events.filter((e) => e.type === 'paused').at(-1);
+    assert.equal(paused.checkpointSaved, false);
+    assert.match(paused.message, /盘满了/, '失败原因要说出来，不能悄悄吞掉');
+  });
+
+  test('落盘成功时明确标出来', async () => {
+    const { runner, events } = harness(broadcastOnly([bcPage(20)]));
+    await runner.start({ username: 'example', includeCatalog: false });
+    await runner.pause();
+    assert.equal(events.filter((e) => e.type === 'paused').at(-1).checkpointSaved, true);
+  });
+});

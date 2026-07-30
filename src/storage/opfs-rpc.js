@@ -96,6 +96,38 @@ function toBytes(b) {
 }
 
 /**
+ * OPFS 的同步访问句柄是**独占的**：同一个文件上已经有一个打开的句柄时，
+ * `createSyncAccessHandle()` 会抛 `NoModificationAllowedError`。
+ *
+ * 两种撞法都真实存在：
+ *
+ * 1. **同一个 Worker 内**——RPC 消息是并发到达的，两条针对同一文件的操作会重叠。
+ *    靠串行化彻底消除。
+ * 2. **两个 Worker 之间**——面板（只读）在读索引，同时 offscreen 在往索引里追加。
+ *    串行化管不到别人，只能重试。
+ *
+ * 第二种尤其阴：它只在「用户正好打开了档案页」时发生，也就是**抓取跑了几小时之后
+ * 用户去看一眼进度**的那一刻。而它的表现是「写入档案时出错」，然后整场停机。
+ *
+ * @param {() => Promise<any>} fn
+ */
+async function withRetry(fn) {
+  // 句柄冲突是**瞬时**的（对面开关一次句柄只占几毫秒），所以短退避几次足够。
+  // 退避上限刻意小：真正长时间占着句柄意味着别处有 bug，那时应该报错而不是干等。
+  const delays = [5, 20, 60, 150];
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const name = err?.name ?? '';
+      const retryable = name === 'NoModificationAllowedError' || name === 'InvalidStateError';
+      if (!retryable || i >= delays.length) throw err;
+      await new Promise((r) => setTimeout(r, delays[i]));
+    }
+  }
+}
+
+/**
  * 把 `handleOpfsRpc` 接到一个 Worker 的 `onmessage` 上。
  *
  * @param {object} opts
@@ -109,10 +141,32 @@ export function serveOpfsRpc({ allowWrites }) {
     return open.get(dir);
   };
 
+  /**
+   * 按「目录/文件」串行化。
+   *
+   * 同一个文件上的两次操作绝不重叠——句柄是独占的，重叠必然一方失败。不同文件之间
+   * 照旧并发（段文件与索引就是两个文件，没有理由互相等）。
+   *
+   * @type {Map<string, Promise<unknown>>}
+   */
+  const chains = new Map();
+
+  /** @param {string} key @param {() => Promise<any>} fn */
+  function serialize(key, fn) {
+    const prev = chains.get(key) ?? Promise.resolve();
+    // 用 `.then(fn, fn)` 而不是 `.then(fn)`：前一个失败了后一个照样要跑，
+    // 否则一次失败会把这个文件的队列永久堵死。
+    const next = prev.then(fn, fn);
+    chains.set(key, next.catch(() => {}));
+    return next;
+  }
+
   self.onmessage = async (e) => {
     const id = e.data?.id;
     try {
-      const { result, transfer = [] } = await handleOpfsRpc(e.data, { allowWrites, storeFor });
+      const key = `${e.data?.dir ?? ''}/${e.data?.name ?? ''}`;
+      const { result, transfer = [] } = await serialize(key, () =>
+        withRetry(() => handleOpfsRpc(e.data, { allowWrites, storeFor })));
       self.postMessage({ id, ok: true, result }, transfer);
     } catch (err) {
       // Error 本身跨不过 postMessage，只能传字符串。name 要带上——上层要靠它
