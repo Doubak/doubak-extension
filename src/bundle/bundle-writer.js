@@ -133,6 +133,10 @@ export class BundleWriter {
    * @param {'data' | 'assets' | 'catalog'} [cap.kind]  留存等级，默认 data
    * @param {string | null} [cap.parentCaptureId]
    * @param {object | null} [cap.cursor]
+   * @param {number | null} [cap.itemCount]  这一页渲染出来的条目数。
+   *   `null` 与 `0` 是两件事：null 是「这条路线没有条目概念」，0 是「数过了，是空的」。
+   * @param {{oldest: string | null, newest: string | null} | null} [cap.itemTimeRange]
+   *   这一页覆盖的时间区间，**原样**保留豆瓣给出的形式（不归一化时区）。
    * @param {string} [cap.observedAt]
    * @param {string} [cap.note]
    * @returns {Promise<{captureId: string, segment: string, offset: number, length: number}>}
@@ -153,6 +157,8 @@ export class BundleWriter {
       kind = 'data',
       parentCaptureId = null,
       cursor = null,
+      itemCount = null,
+      itemTimeRange = null,
       observedAt,
       note,
     } = cap;
@@ -205,6 +211,8 @@ export class BundleWriter {
       content_sha256: await sha256Hex(body),
       parent_capture_id: parentCaptureId,
       cursor,
+      item_count: itemCount,
+      item_time_range: itemTimeRange,
       ...(note ? { note } : {}),
     });
 

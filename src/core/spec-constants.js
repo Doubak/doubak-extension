@@ -15,7 +15,7 @@ export const SPEC_VERSION = "bundle/1.0";
  * 读取的文件，所以规范仓库改文档或加测试用例不会让它变，只有真正影响生成
  * 结果的改动才会。
  */
-export const SPEC_SOURCE_DIGEST = "5090075c9ad01a00eeb54fd432324b25cd889a2ea16f28365eff530346555307";
+export const SPEC_SOURCE_DIGEST = "95c2aba60e74292a814eef32538867c6c37a1f02a68ddef1478e301ffe6890f6";
 
 /**
  * 响应可信度判定。封闭词表——安全相关字段，拼错必须失败。

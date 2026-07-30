@@ -428,3 +428,71 @@ describe('完整性证据：跑完一条路线要产出连续性证明与覆盖�
     assert.equal(cs.floor_time, '2026-07-30T00:00:00+08:00');
   });
 });
+
+describe('index 里记下条目数与时间区间', () => {
+  test('条目数与时间区间都写进 index', async () => {
+    // 抓取时本来就算过（判定要用），扔掉之后再想知道就得把记录取出来解压、
+    // 再跑一遍选择器——而豆瓣改版之后那些选择器可能已经对不上了。这次就撞过一回。
+    const { loop, writer, store } = await harness([{ body: broadcastPage(20) }, { body: broadcastPage(0) }]);
+    await loop.run({ maxItems: 2 });
+
+    const lines = new TextDecoder()
+      .decode(await store.read(indexFilename(writer.bundleId)))
+      .trim().split('\n').map((l) => JSON.parse(l));
+
+    const first = lines[0];
+    assert.equal(first.item_count, 20);
+    assert.ok(first.item_time_range, '要有时间区间');
+    assert.ok(first.item_time_range.oldest);
+    assert.ok(first.item_time_range.newest);
+  });
+
+  test('时间区间原样保留豆瓣给出的形式，不归一化时区', async () => {
+    // 列表页不带时区，归一化就等于替它假定一个，而假定错了不可恢复。
+    const { loop, writer, store } = await harness([{ body: broadcastPage(20) }, { body: broadcastPage(0) }]);
+    await loop.run({ maxItems: 1 });
+
+    const line = JSON.parse(
+      new TextDecoder().decode(await store.read(indexFilename(writer.bundleId))).trim().split('\n')[0],
+    );
+    // 夹具里的时间形如 2026-07-2X 12:00:00 —— 原样，没有 Z、没有 +08:00
+    assert.match(line.item_time_range.oldest, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  });
+
+  test('区间按解析后的时间取，不按字符串比大小', async () => {
+    // 同一份列表里格式是混着来的（「今天上午」与绝对时间都出现过），字典序会给出
+    // 错误的顺序。
+    const { loop, writer, store } = await harness([{ body: broadcastPage(20) }, { body: broadcastPage(0) }]);
+    await loop.run({ maxItems: 1 });
+
+    const line = JSON.parse(
+      new TextDecoder().decode(await store.read(indexFilename(writer.bundleId))).trim().split('\n')[0],
+    );
+    const { parseDoubanTimestamp } = await import('../src/crawl/../core/time.js');
+    const o = parseDoubanTimestamp(line.item_time_range.oldest).epochMs;
+    const n = parseDoubanTimestamp(line.item_time_range.newest).epochMs;
+    assert.ok(o <= n, 'oldest 不该晚于 newest');
+  });
+
+  test('0 条的终止页记 0，不是 null —— 两者含义不同', async () => {
+    // null 是「这条路线没有条目概念」，0 是「数过了，是空的」——而空页正是翻页
+    // 终点的正常形态，那是有用的信息。
+    const { loop, writer, store } = await harness([{ body: broadcastPage(0) }, { body: broadcastPage(0) }]);
+    await loop.run({ maxItems: 1 });
+
+    const line = JSON.parse(
+      new TextDecoder().decode(await store.read(indexFilename(writer.bundleId))).trim().split('\n')[0],
+    );
+    assert.equal(line.item_count, 0);
+    assert.notEqual(line.item_count, null);
+    assert.equal(line.item_time_range, null, '没有条目就没有区间');
+  });
+
+  test('只扫一遍 HTML —— 判定、水位线、index 共用同一次抽取', async () => {
+    // 这是对一份 100 KB 的 HTML 跑正则，抽两遍没有理由。
+    const src = await (await import('node:fs/promises')).readFile(
+      new URL('../src/crawl/loop.js', import.meta.url), 'utf-8');
+    assert.equal((src.match(/extractItemTimes\(/g) ?? []).length, 1);
+    assert.equal((src.match(/extractItemIds\(/g) ?? []).length, 1);
+  });
+});

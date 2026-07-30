@@ -425,9 +425,14 @@ export class CrawlRunner {
       routes: [...loop.routeStates.values()].map((s) => ({
         routeKey: s.routeKey,
         captured: s.capturedCount,
-        // 界面上显示「已回溯到 X」而不是百分比——豆瓣的计数不可信，
-        // 拿它当分母会给出一个看起来很可信的假数字。
-        highWater: s.highWater?.iso ?? null,
+        // 界面上显示「已回溯到 X」而不是百分比——豆瓣的计数不可信，拿它当分母
+        // 会给出一个看起来很可信的假数字。
+        //
+        // **进度是 `lowWater`（本次最旧的一条），不是 `highWater`。** 列表是
+        // 新→旧，`highWater` 在第一页就定住了，拿它当进度会一动不动——看起来
+        // 像卡住了。两个都报出去，名字直说各自是什么。
+        oldestSeen: s.lowWater?.iso ?? null,
+        newestSeen: s.highWater?.iso ?? null,
         contiguous: s.contiguous,
       })),
     };

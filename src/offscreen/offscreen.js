@@ -219,7 +219,9 @@ async function runDryRun(scenario) {
   // status() 必须在 finish() 之前读——finish 会把 _run 清空。
   const st = r.status();
   const route = st?.routes?.find((x) => x.routeKey === 'broadcast.timeline');
-  const advanced = route ? Boolean(route.contiguous && route.highWater) : null;
+  // 「水位线能不能推进」看的是 `newestSeen`（本次最新的一条），**不是**进度。
+  // 进度是 `oldestSeen`，那是给人看的。
+  const advanced = route ? Boolean(route.contiguous && route.newestSeen) : null;
 
   // 中途停机的档案是 aborted，不是 complete。演练也不许在这一点上撒谎——
   // 这正是被演练验证的规则之一。

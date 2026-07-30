@@ -60,10 +60,13 @@
   .split { display: grid; grid-template-columns: minmax(240px, 1fr) 2fr; gap: 16px; }
   @media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
   #captures { max-height: 60vh; overflow: auto; font-size: 12px; }
-  #captures div {
-    padding: 5px 8px; cursor: pointer; border-bottom: 1px solid var(--line);
-    display: flex; justify-content: space-between; gap: 8px;
+  #captures > div {
+    padding: 6px 8px; cursor: pointer; border-bottom: 1px solid var(--line);
   }
+  .cap-main { display: flex; justify-content: space-between; gap: 8px; }
+  .cap-sub { font-size: 11px; opacity: .6; margin-top: 1px; }
+  .warn-text { color: #a50e0e; }
+  @media (prefers-color-scheme: dark) { .warn-text { color: #f7b4ae; } }
   #captures div[aria-selected="true"] { background: #8882; }
   #captures .v { font-size: 11px; opacity: .7; }
   #preview {

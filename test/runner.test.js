@@ -224,8 +224,12 @@ describe('进度快照供界面读取', () => {
     const s = runner.status();
     assert.equal(s.active, true);
     const bc = s.routes.find((r) => r.routeKey === 'broadcast.timeline');
-    assert.ok(bc.highWater, '要有「已回溯到」这个信息');
-    assert.match(bc.highWater, /\+08:00$/);
+    // 「已回溯到」用的是 `oldestSeen`（本次最旧的一条）。水位线（最新那条）在第
+    // 一页就定住了，拿它当进度会一动不动——那正是被当成 bug 报过来的现象。
+    assert.ok(bc.oldestSeen, '要有「已回溯到」这个信息');
+    assert.match(bc.oldestSeen, /\+08:00$/);
+    assert.ok(bc.newestSeen, '水位线也要报出来（下次抓取的下界）');
+    assert.ok(bc.oldestSeen <= bc.newestSeen, '最旧不该晚于最新');
     assert.ok(!('percent' in bc), '不提供百分比');
   });
 

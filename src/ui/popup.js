@@ -138,7 +138,7 @@ const ROUTE_NAMES = {
 /** @param {Array<object>} routes */
 function setRoutes(routes) {
   const el = $('routes');
-  const key = routes.map((r) => `${r.routeKey}\u0001${r.captured}\u0001${r.highWater ?? ''}`).join('\u0000');
+  const key = routes.map((r) => `${r.routeKey}\u0001${r.captured}\u0001${r.oldestSeen ?? ''}`).join('\u0000');
   if (el.dataset.key === key) return;
   el.dataset.key = key;
   el.replaceChildren();
@@ -150,8 +150,10 @@ function setRoutes(routes) {
     const info = document.createElement('span');
     info.className = 'hw';
     // 进度用「已回溯到 X」而不是百分比——豆瓣的计数不可信。
-    info.textContent = r.highWater
-      ? `${r.captured} 条 · 已回溯到 ${r.highWater.slice(0, 10)}`
+    // 进度是 `oldestSeen`（本次最旧的一条）。水位线（最新那条）在第一页就定住了，
+    // 拿它当进度会一动不动。
+    info.textContent = r.oldestSeen
+      ? `${r.captured} 条 · 已回溯到 ${r.oldestSeen.slice(0, 10)}`
       : `${r.captured} 条`;
 
     row.append(name, info);

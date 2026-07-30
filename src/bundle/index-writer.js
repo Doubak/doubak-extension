@@ -50,6 +50,8 @@ const FIELD_ORDER = [
   'content_sha256',
   'parent_capture_id',
   'cursor',
+  'item_count',
+  'item_time_range',
   'note',
 ];
 

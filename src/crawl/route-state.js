@@ -19,6 +19,22 @@
  *   增量抓取取上次的水位线。比较用**闭区间**：宁可重复，不可遗漏。
  * - **上界 `highWaterTime`**：本次抓到的最新一条。豆瓣列表是新→旧，所以
  *   它就是第一页的第一条。跑完之后成为下次的下界。
+ *
+ * ## `highWater` 不是进度，别拿它当进度显示
+ *
+ * 它是**下次抓取的下界**，而不是「这次走到哪儿了」。因为列表是新→旧，第一页就把它
+ * 定住了，之后**永远不动**——界面上原来用它显示「已回溯到 X」，于是抓了十页那个
+ * 日期一动不动，看起来像卡住了。（真的被当成 bug 报过。）
+ *
+ * 表示进度的是另一头：`lowWater`，**本次见过的最旧一条**。每往回翻一页它就往前走
+ * 一点，那才是「已回溯到」这句话的意思。
+ *
+ * 两者都留着，因为它们回答的是两个不同的问题：
+ *
+ * | | 是什么 | 谁要看 |
+ * |---|---|---|
+ * | `highWater` | 本次最新的一条 | 下次抓取（当下界） |
+ * | `lowWater` | 本次最旧的一条 | 用户（当进度） |
  */
 
 import { parseDoubanTimestamp, hasReachedFloor } from '../core/time.js';
@@ -45,6 +61,11 @@ export class RouteState {
 
     /** @type {{iso: string, raw: string, epochMs: number} | null} 本次见过的最新时间 */
     this.highWater = null;
+    /**
+     * 本次见过的**最旧**一条。这才是给人看的进度——见文件开头。
+     * @type {{iso: string, raw: string, epochMs: number} | null}
+     */
+    this.lowWater = null;
     /** @type {string[]} 处于水位线那一刻的条目 ID，同秒多条时用于去重 */
     this.highWaterIds = [];
 
@@ -102,6 +123,12 @@ export class RouteState {
       } else if (this.highWater && parsed.epochMs === this.highWater.epochMs) {
         // 同一秒可能有多条，全都记下来供下次去重
         if (ids[i] && !this.highWaterIds.includes(ids[i])) this.highWaterIds.push(ids[i]);
+      }
+
+      // 另一头：本次见过的最旧一条。它是**进度**，每往回翻一页就前进一点。
+      // 同样不假设顺序，取最小值。
+      if (!this.lowWater || parsed.epochMs < this.lowWater.epochMs) {
+        this.lowWater = { iso: parsed.iso, raw: parsed.raw, epochMs: parsed.epochMs };
       }
 
       // 闭区间比较：正好等于下界也算到达。用严格小于会漏掉边界上那一秒的条目。

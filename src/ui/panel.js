@@ -328,9 +328,12 @@ function renderRoutes(routes) {
     }
 
     setCell(row.cells[1], String(r.captured));
-    // 进度用「已回溯到某日」而不是百分比——豆瓣的计数不可信，拿它当分母会
-    // 给出一个看起来特别可信的假数字。
-    setCell(row.cells[2], r.highWater ? r.highWater.slice(0, 10) : '—', !r.highWater);
+    // 进度用「已回溯到某日」而不是百分比——豆瓣的计数不可信，拿它当分母会给出
+    // 一个看起来特别可信的假数字。
+    //
+    // 用 `oldestSeen`（本次最旧的一条）。原来用的是水位线（最新的一条），而列表
+    // 是新→旧，那个值在第一页就定住了——抓了十页日期一动不动，看起来像卡住了。
+    setCell(row.cells[2], r.oldestSeen ? r.oldestSeen.slice(0, 10) : '—', !r.oldestSeen);
     setCell(row.cells[3], r.contiguous ? '✔ 已验证' : '进行中', !r.contiguous);
   }
 
@@ -617,6 +620,27 @@ async function openBundle(bundleId) {
   }
 }
 
+/**
+ * 捕获列表。
+ *
+ * ## 为什么每行要说这么多
+ *
+ * 原来一行只有路线名与判定，于是列表长成一串「广播 正常 / 广播 正常 / 广播 正常」
+ * ——除了顺序之外什么信息都没有，而档案页存在的意义恰恰是**在档案里找东西**。
+ *
+ * 现在每行给四样，都是不解压任何记录就能拿到的（全在 index 里）：
+ *
+ * | | 从哪来 | 回答什么 |
+ * |---|---|---|
+ * | 路线 · 第几页 | `route_key` / `cursor` | 这是哪条线的第几页 |
+ * | 条目数 | `item_count` | 这一页有多少条（0 是终点的正常形态） |
+ * | 时间区间 | `item_time_range` | **这一页是哪段时间** ← 找东西时的第一个问题 |
+ * | 判定 · 体积 | `verdict` / `length` | 正常吗、多大 |
+ *
+ * 时间区间是这次专门为此加进规范的可选字段（bundle/v1 §6.1.2）：抓取时本来就算过，
+ * 扔掉之后再想知道就得把记录取出来解压、再跑一遍选择器——而豆瓣改版之后那些选择器
+ * 可能已经对不上了。
+ */
 function renderCaptures() {
   const el = $('captures');
   el.replaceChildren();
@@ -626,24 +650,82 @@ function renderCaptures() {
     el.textContent = '这个档案里还没有捕获';
     return;
   }
+
   for (const e of entries.slice(0, 500)) {
     const row = document.createElement('div');
     row.dataset.id = e.capture_id;
+
+    const main = document.createElement('div');
+    main.className = 'cap-main';
+
     const left = document.createElement('span');
-    left.textContent = routeName(e.route_key);
+    left.textContent = captureTitle(e);
     const right = document.createElement('span');
     right.className = 'v';
-    right.textContent = VERDICT_NAMES[e.verdict] ?? e.verdict;
-    row.append(left, right);
+    // 判定只在**不是 ok** 的时候才显示。一整列「正常」是纯噪音，而那正好淹没了
+    // 真正要看见的那几行。
+    right.textContent = e.verdict === 'ok'
+      ? bytes(e.length ?? 0)
+      : `${VERDICT_NAMES[e.verdict] ?? e.verdict} · ${bytes(e.length ?? 0)}`;
+    if (e.verdict !== 'ok') right.classList.add('warn-text');
+    main.append(left, right);
+
+    const sub = document.createElement('div');
+    sub.className = 'cap-sub';
+    sub.textContent = captureSubtitle(e);
+
+    row.append(main, sub);
     row.onclick = () => showCapture(e);
     el.append(row);
   }
+
   if (entries.length > 500) {
     const more = document.createElement('div');
     more.className = 'muted';
     more.textContent = `另有 ${entries.length - 500} 条未列出`;
     el.append(more);
   }
+}
+
+/** 「广播 · 第 7 页」 @param {object} e */
+function captureTitle(e) {
+  const page = e.cursor?.kind === 'page' && e.cursor.value != null ? `第 ${e.cursor.value} 页` : null;
+  const offset = e.cursor?.kind === 'offset' && e.cursor.value != null ? `第 ${e.cursor.value} 条起` : null;
+  return [routeName(e.route_key), page ?? offset].filter(Boolean).join(' · ');
+}
+
+/**
+ * 「20 条 · 2026-07-24 → 2026-07-30」
+ *
+ * `item_count` 的 `null` 与 `0` 不能显示成一样：null 是「这条路线没有条目概念」
+ * （个人主页），0 是「数过了，是空的」——而空页正是翻页终点的正常形态，看到它
+ * 说明这条线走完了，那是有用的信息。
+ *
+ * @param {object} e
+ */
+function captureSubtitle(e) {
+  const bits = [];
+
+  if (e.item_count === 0) bits.push('0 条（到这儿就没有了）');
+  else if (typeof e.item_count === 'number') bits.push(`${e.item_count} 条`);
+
+  const r = e.item_time_range;
+  if (r?.oldest || r?.newest) {
+    const o = day(r.oldest);
+    const n = day(r.newest);
+    bits.push(o === n ? o : `${o} → ${n}`);
+  }
+
+  // 一条时间信息都没有时才退回抓取时间。它回答的是**另一个**问题（什么时候抓的，
+  // 不是内容属于什么时候），所以只在别无可说时才占这个位置，且标明是「抓于」。
+  if (bits.length === 0 && e.observed_at) bits.push(`抓于 ${day(e.observed_at)}`);
+
+  return bits.join(' · ');
+}
+
+/** 只取日期那一段。列表里精确到秒是噪音。 @param {string | null | undefined} s */
+function day(s) {
+  return s ? String(s).slice(0, 10) : '?';
 }
 
 /** @param {object} entry */

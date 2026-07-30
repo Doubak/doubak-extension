@@ -77,7 +77,9 @@ async function runScenario(key) {
 
   const st = runner.status();
   const route = st.routes?.find((r) => r.routeKey === 'broadcast.timeline');
-  const advanced = route ? Boolean(route.contiguous && route.highWater) : null;
+  // 「水位线能不能推进」看的是 `newestSeen`（本次最新的一条），**不是**进度。
+  // 进度是 `oldestSeen`，那是给人看的。
+  const advanced = route ? Boolean(route.contiguous && route.newestSeen) : null;
   const bundleId = st.bundleId;
   await runner.finish(stoppedBy ? 'aborted' : 'complete');
 

@@ -37,7 +37,7 @@ import { PermissionError } from './permissions.js';
 import { classifyWriteError } from '../storage/quota.js';
 import { RouteState } from './route-state.js';
 import { urlKey } from '../core/urlkey.js';
-import { nowRfc3339 } from '../core/time.js';
+import { nowRfc3339, parseDoubanTimestamp } from '../core/time.js';
 
 /**
  * @typedef {object} LoopDeps
@@ -202,6 +202,17 @@ export class CrawlLoop {
     //
     // 封锁页与登录页必须进档案：存下来才能在不重新抓取的前提下重训分类器，
     // 而真实旧档案里恰恰是「存了但没标注」造成了静默的数据损坏。
+    // ── 2b. 条目与时间：抽一次，两处用
+    //
+    // 翻页逻辑本来就要它们。顺手记进 index 是因为**算完扔掉就补不回来了**：
+    // 事后想知道「第 7 页是哪段时间」，得把记录取出来解压再跑一遍选择器——而豆瓣
+    // 改版之后那些选择器可能已经对不上了（这次就撞过一回）。
+    //
+    // 抽一次而不是抽两次：这是对一份 100 KB 的 HTML 跑正则。
+    const items = profile
+      ? { ids: extractItemIds(res.bodyText, profile), times: extractItemTimes(res.bodyText, profile) }
+      : { ids: [], times: [] };
+
     // 写失败必须让**整场**抓取停下，不是只标这条路线失败然后继续。
     //
     // 写入器的契约是「每页都落盘」，这条契约一破，索引里的偏移量、连续性
@@ -225,6 +236,10 @@ export class CrawlLoop {
         kind: route.kind ?? 'data',
         parentCaptureId: item.enqueuedBy ?? this._lastCapture.get(item.routeKey) ?? null,
         cursor: item.cursor ?? null,
+        // null 与 0 是两件事：null 是「这条路线没有条目概念」（个人主页），
+        // 0 是「数过了，是空的」——而空页正是翻页终点的正常形态。
+        itemCount: profile ? cls.itemCount : null,
+        itemTimeRange: itemTimeRange(items.times),
         note: cls.verdict === null ? `判不出来：${cls.reasons.join('；')}` : undefined,
       });
     } catch (err) {
@@ -288,7 +303,7 @@ export class CrawlLoop {
 
     // ── 6. 只有 ok 才继续翻页
     if (cls.verdict === 'ok') {
-      this._enqueueNextPage(item, route, profile, res, written.captureId);
+      this._enqueueNextPage(item, route, profile, res, written.captureId, items);
     }
     return 'ok';
   }
@@ -336,14 +351,13 @@ export class CrawlLoop {
    * 槽位」。实测中列表中段会出现被审查抑制的空洞（第 7、14、17 页只渲染
    * 14、14、13 条，槽位 15），把短页当末页会把列表拦腰截断。
    */
-  _enqueueNextPage(item, route, profile, res, captureId) {
+  _enqueueNextPage(item, route, profile, res, captureId, items) {
     if (!route.entryUrl || !route.pagination) return;
 
     const state = this.stateFor(item.routeKey);
-    const ids = profile ? extractItemIds(res.bodyText, profile) : [];
-    const times = profile ? extractItemTimes(res.bodyText, profile) : [];
     const claimed = profile ? extractClaimedCount(res.bodyText, profile) : null;
 
+    const { ids, times } = items;
     const progress = state.observePage({
       ids,
       times,
@@ -400,3 +414,40 @@ export class CrawlLoop {
     });
   }
 }
+
+/**
+ * 这一页覆盖的时间区间。
+ *
+ * **原样保留**豆瓣给出的字符串，不解析成 ISO、不归一化时区——列表页不带时区，
+ * 归一化就等于替它假定一个，而假定错了不可恢复（时区假定统一记在 manifest 里）。
+ *
+ * 但**排序**必须按解析后的毫秒，不能按字符串比大小：同一份列表里格式是混着来的
+ * （「今天上午」与「2026-07-26 12:34:00」都出现过），字典序会给出错误的顺序。
+ *
+ * @param {string[]} times
+ * @returns {{oldest: string | null, newest: string | null} | null}
+ */
+function itemTimeRange(times) {
+  if (!times || times.length === 0) return null;
+
+  /** @type {{ms: number, raw: string} | null} */
+  let oldest = null;
+  /** @type {{ms: number, raw: string} | null} */
+  let newest = null;
+
+  for (const raw of times) {
+    let ms;
+    try {
+      ms = parseDoubanTimestamp(raw).epochMs;
+    } catch {
+      // 解析不了就不参与算区间。**这件事不会被静默丢掉**——同一页的时间解析失败
+      // 由 RouteState 记成一处缺口（那才是它该管的地方），而有缺口就不许推进水位线。
+      continue;
+    }
+    if (oldest === null || ms < oldest.ms) oldest = { ms, raw };
+    if (newest === null || ms > newest.ms) newest = { ms, raw };
+  }
+
+  return oldest ? { oldest: oldest.raw, newest: newest.raw } : null;
+}
+
