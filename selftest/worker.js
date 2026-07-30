@@ -144,20 +144,34 @@ async function runRpcContract() {
   const worker = new Worker(new URL('../src/storage/opfs-rw-worker.js', import.meta.url), {
     type: 'module',
   });
-  const dir = `doubak-bundle-rpc-${Date.now()}`;
-  const store = new WorkerFileStore({ worker, dir, readOnly: false });
 
   const cases = fileStoreContract();
   let passed = 0;
-  for (const c of cases) {
+  for (const [i, c] of cases.entries()) {
+    // **每条一个新目录。** 契约用例之间不隔离的话，前一条留下的文件会让后一条
+    // 失败得莫名其妙：「不存在的文件长度为 0（期望 0，实际 9）」、
+    // 「起初不存在（期望 false，实际 true）」、list 里冒出别的用例的文件……
+    //
+    // 第一版复用了同一个目录，于是 20 条里报了 7 条失败，看起来像 RPC 那一层
+    // 坏了——**而那些失败全是脚手架自己造的**。旁边 `runContract()` 一开始就是
+    // 每条一个新目录，我加这份的时候没照着做。
+    const dir = `doubak-bundle-rpc-${i}`;
+    const store = new WorkerFileStore({ worker, dir, readOnly: false });
     try {
+      await WorkerFileStore.destroy(worker, dir); // 上次跑剩下的
       await c.fn(store);
       passed += 1;
       post({ type: 'case', group: 'FileStore 契约（经由 RPC）', name: c.name, ok: true });
     } catch (e) {
       post({ type: 'case', group: 'FileStore 契约（经由 RPC）', name: c.name, ok: false, error: e.message });
+    } finally {
+      await WorkerFileStore.destroy(worker, dir).catch(() => {});
     }
   }
+
+  // 下面几条 RPC 专项检查各自用自己的目录，同样不共享状态。
+  const dir = `doubak-bundle-rpc-extra-${Date.now()}`;
+  const store = new WorkerFileStore({ worker, dir, readOnly: false });
 
   await check('RPC 路径', '写入之后调用方的 bytes 还能用', async () => {
     // 转移过 buffer 所有权，然后撤了。`postMessage` 转移的是**整个 ArrayBuffer**，

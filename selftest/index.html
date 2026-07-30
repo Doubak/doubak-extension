@@ -23,9 +23,11 @@
   }
   h2 { font-size: 15px; margin: 22px 0 6px; padding-bottom: 4px; border-bottom: 1px solid #8884; }
   .case { padding: 2px 0 2px 22px; position: relative; }
-  .case::before { position: absolute; left: 2px; }
-  .case.ok::before { content: "✔"; color: #1e8e3e; }
-  .case.no::before { content: "✖"; color: #d93025; }
+  /* 记号必须是**真文本**，不是 ::before。
+     伪元素复制不出来——复制走的报告里每一行都长得一样，看不出哪条失败了，
+     而那正是要把结果贴给别人看的时候。 */
+  .case.ok { color: #1e8e3e; }
+  .case.no { color: #d93025; font-weight: 600; }
   .err { margin: 2px 0 6px 22px; padding: 6px 10px; background: #8881; border-radius: 4px;
          white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
   .note { margin: 6px 0; padding: 6px 10px; background: #8881; border-radius: 4px; font-size: 13px; }
@@ -42,12 +44,19 @@
   </p>
 
   <button id="run">开始自检</button>
+  <button id="copy" disabled title="把完整报告复制成纯文本，可以直接贴出来">复制报告</button>
   <div id="summary" class="run" hidden></div>
 
   <h2>环境</h2>
   <div id="env"></div>
 
   <div id="results"></div>
+  <!-- 剪贴板被策略挡住时的退路：报告直接摊在这里，手动全选复制。
+       「复制失败」如果没有退路，等于这个功能不存在。 -->
+  <details id="report-fallback" hidden>
+    <summary>剪贴板不可用 —— 手动复制这段</summary>
+    <textarea id="report-text" rows="20" style="width:100%;font-family:ui-monospace,monospace;font-size:12px"></textarea>
+  </details>
 
   <script type="module" src="./main.js"></script>
 </body>

@@ -30,11 +30,23 @@ function groupEl(name) {
 }
 
 /** @param {{group: string, name: string, ok: boolean, error?: string}} c */
+/**
+ * 所有结果的结构化记录，用来生成可复制的报告。
+ *
+ * 从**数据**生成而不是从 DOM 里扒：扒 DOM 会把 CSS 伪元素、缩进、按钮文字一起
+ * 带进去，而且一改样式就坏。
+ *
+ * @type {Array<{kind: 'env' | 'note' | 'case', group?: string, name?: string, ok?: boolean, error?: string, text?: string, value?: string}>}
+ */
+const report = [];
+
 function addCase(c) {
   const el = groupEl(c.group);
   const line = document.createElement('div');
   line.className = `case ${c.ok ? 'ok' : 'no'}`;
-  line.textContent = c.name;
+  // 记号写进 **textContent**，不用 ::before。伪元素复制不出来——复制走的报告里
+  // 每一行都长得一样，看不出哪条失败了，而那正是要把结果贴给别人看的时候。
+  line.textContent = `${c.ok ? '✔' : '✖'} ${c.name}`;
   el.append(line);
   if (!c.ok) {
     const err = document.createElement('div');
@@ -42,6 +54,7 @@ function addCase(c) {
     err.textContent = c.error ?? '(无错误信息)';
     el.append(err);
   }
+  report.push({ kind: 'case', group: c.group, name: c.name, ok: c.ok, error: c.error });
   c.ok ? passed++ : failed++;
   updateSummary(false);
 }
@@ -52,6 +65,54 @@ function addNote(text) {
   el.className = 'note';
   el.textContent = text;
   results.append(el);
+  report.push({ kind: 'note', text });
+}
+
+/**
+ * 生成纯文本报告。
+ *
+ * 每条用例前缀 `[PASS]` / `[FAIL]`，**不靠符号**：`✔` 与 `✖` 在等宽字体和某些
+ * 终端里长得很像，而这份报告的用途就是贴给别人看。失败的那几条另外汇总到开头，
+ * 免得在几十行通过里找。
+ */
+function buildReport() {
+  const lines = [];
+  const fails = report.filter((r) => r.kind === 'case' && !r.ok);
+
+  lines.push('豆备自检报告');
+  lines.push(`生成时间：${new Date().toISOString()}`);
+  lines.push(`结果：${failed} 项失败，${passed} 项通过`);
+  lines.push('');
+
+  if (fails.length) {
+    lines.push(`失败汇总（${fails.length} 项）—— 详情见下方对应分组`);
+    for (const f of fails) lines.push(`  [FAIL] ${f.group} / ${f.name}: ${f.error ?? '(无错误信息)'}`);
+    lines.push('');
+  }
+
+  lines.push('── 环境 ──');
+  for (const r of report.filter((x) => x.kind === 'env')) lines.push(`${r.name}: ${r.value}`);
+  lines.push('');
+
+  /** @type {string | null} */
+  let group = null;
+  lines.push('── 检查项 ──');
+  for (const r of report) {
+    if (r.kind === 'note') {
+      lines.push(`(note) ${r.text}`);
+      continue;
+    }
+    if (r.kind !== 'case') continue;
+    if (r.group !== group) {
+      group = r.group;
+      lines.push('');
+      lines.push(`[${group}]`);
+    }
+    lines.push(`  ${r.ok ? '[PASS]' : '[FAIL]'} ${r.name}`);
+    if (!r.ok) lines.push(`         → ${r.error ?? '(无错误信息)'}`);
+  }
+
+  return lines.join('\n');
 }
 
 /** @param {boolean} done */
@@ -119,6 +180,8 @@ async function probeEnvironment() {
     td2.textContent = v;
     tr.append(td1, td2);
     table.append(tr);
+    // 环境信息也要进报告：几乎每次排查都要先问一句「什么浏览器、配额多少」。
+    report.push({ kind: 'env', name: k, value: v });
   }
   $('env').replaceChildren(table);
 }
@@ -193,6 +256,10 @@ $('run').addEventListener('click', async () => {
   groups.clear();
   passed = failed = 0;
 
+  report.length = 0;
+  $('copy').disabled = true;
+  $('report-fallback').hidden = true;
+
   await probeEnvironment();
   await probeBackground();
 
@@ -204,6 +271,7 @@ $('run').addEventListener('click', async () => {
     else if (m.type === 'done') {
       updateSummary(true);
       $('run').disabled = false;
+      $('copy').disabled = false;
       worker.terminate();
     } else if (m.type === 'fatal') {
       failed++;
@@ -214,6 +282,8 @@ $('run').addEventListener('click', async () => {
       results.append(err);
       updateSummary(true);
       $('run').disabled = false;
+      // 中断了也要能复制——那时候报告**最有用**。
+      $('copy').disabled = false;
       worker.terminate();
     }
   };
@@ -257,6 +327,7 @@ $('run').addEventListener('click', async () => {
 
     updateSummary(true);
     $('run').disabled = false;
+    $('copy').disabled = false;
   };
 
   // 结构化克隆失败会走这里，而不是 onerror。不接住的话表现为「Worker 没反应」。
@@ -265,7 +336,25 @@ $('run').addEventListener('click', async () => {
     addNote(`Worker 的消息解不开（结构化克隆失败）：${JSON.stringify(e.data ?? null)}`);
     updateSummary(true);
     $('run').disabled = false;
+    $('copy').disabled = false;
   };
 
   worker.postMessage('run');
+});
+
+$('copy').addEventListener('click', async () => {
+  const text = buildReport();
+  try {
+    await navigator.clipboard.writeText(text);
+    const b = $('copy');
+    const was = b.textContent;
+    b.textContent = '已复制 ✔';
+    setTimeout(() => { b.textContent = was; }, 1500);
+  } catch {
+    // 剪贴板可能被策略挡住。**必须有退路**——「复制失败」而没有别的办法，
+    // 等于这个功能不存在。
+    $('report-fallback').hidden = false;
+    $('report-text').value = text;
+    $('report-text').select();
+  }
 });
