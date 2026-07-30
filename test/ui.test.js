@@ -255,34 +255,19 @@ describe('面板脚本', () => {
     assert.match(before, /problems\.length === 0/);
   });
 
-  test('捕获列表每行都说得出「哪条线第几页、多少条、哪段时间」', async () => {
-    // 原来一行只有路线名与判定，列表长成一串「广播 正常 / 广播 正常 / 广播 正常」
-    // ——除了顺序什么信息都没有，而档案页存在的意义恰恰是在档案里找东西。
+  test('捕获列表的措辞逻辑抽成了纯函数，并且真的被用上', async () => {
+    // 那三条断言原来是对着 panel.js 做源码匹配的。逻辑抽进
+    // `src/ui/capture-label.js` 之后，源码匹配失效——**但那不是退步**：现在有
+    // `test/capture-label.test.js` 里 15 条真正跑逻辑的测试，覆盖旧档案、
+    // 作品详情页、越界终止页、offset 游标等等。
+    //
+    // 这里只钉住「面板确实用的是那个模块」，别的交给行为测试。
     const js = await readRepoFile('src/ui/panel.js');
-    const title = js.slice(js.indexOf('function captureTitle'), js.indexOf('function captureSubtitle'));
-    const sub = js.slice(js.indexOf('function captureSubtitle'), js.indexOf('function day('));
-
-    assert.match(title, /routeName/, '要有路线名');
-    assert.match(title, /cursor/, '要有第几页');
-    assert.match(sub, /item_count/, '要有条目数');
-    assert.match(sub, /item_time_range/, '要有时间区间');
-  });
-
-  test('item_count 的 0 与 null 显示得不一样', async () => {
-    // null 是「这条路线没有条目概念」，0 是「数过了，是空的」——而空页正是翻页
-    // 终点的正常形态，看到它说明这条线走完了，那是有用的信息。
-    const js = await readRepoFile('src/ui/panel.js');
-    const sub = js.slice(js.indexOf('function captureSubtitle'), js.indexOf('function day('));
-    assert.match(sub, /item_count === 0/, '0 要单独说');
-    assert.match(sub, /typeof e\.item_count === 'number'/, 'null 不能落进数字分支');
-  });
-
-  test('抓取时间只在没有内容时间时才顶上，且标明「抓于」', async () => {
-    // 它回答的是**另一个**问题（什么时候抓的，不是内容属于什么时候）。
-    const js = await readRepoFile('src/ui/panel.js');
-    const sub = js.slice(js.indexOf('function captureSubtitle'), js.indexOf('function day('));
-    assert.match(sub, /bits\.length === 0 && e\.observed_at/);
-    assert.match(sub, /抓于/);
+    assert.match(js, /from '\.\/capture-label\.js'/);
+    assert.match(js, /captureTitle\(e, routeName\)/);
+    assert.match(js, /captureSubtitle\(e\)/);
+    // 逻辑不该又被抄回面板里
+    assert.equal(js.includes('function captureSubtitle'), false);
   });
 
   test('判定只在不是 ok 时显示 —— 一整列「正常」是噪音', async () => {

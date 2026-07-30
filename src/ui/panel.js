@@ -21,6 +21,7 @@ import { SCENARIOS } from '../crawl/dry-run.js';
 import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { exportBundle, directorySink } from '../bundle/exporter.js';
 import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../storage/storage-usage.js';
+import { captureTitle, captureSubtitle } from './capture-label.js';
 import { bundleDirName, bundleIdFromDirName } from '../core/ids.js';
 
 const $ = (id) => document.getElementById(id);
@@ -775,7 +776,7 @@ function renderCaptures() {
     main.className = 'cap-main';
 
     const left = document.createElement('span');
-    left.textContent = captureTitle(e);
+    left.textContent = captureTitle(e, routeName);
     const right = document.createElement('span');
     right.className = 'v';
     // 判定只在**不是 ok** 的时候才显示。一整列「正常」是纯噪音，而那正好淹没了
@@ -801,47 +802,6 @@ function renderCaptures() {
     more.textContent = `另有 ${entries.length - 500} 条未列出`;
     el.append(more);
   }
-}
-
-/** 「广播 · 第 7 页」 @param {object} e */
-function captureTitle(e) {
-  const page = e.cursor?.kind === 'page' && e.cursor.value != null ? `第 ${e.cursor.value} 页` : null;
-  const offset = e.cursor?.kind === 'offset' && e.cursor.value != null ? `第 ${e.cursor.value} 条起` : null;
-  return [routeName(e.route_key), page ?? offset].filter(Boolean).join(' · ');
-}
-
-/**
- * 「20 条 · 2026-07-24 → 2026-07-30」
- *
- * `item_count` 的 `null` 与 `0` 不能显示成一样：null 是「这条路线没有条目概念」
- * （个人主页），0 是「数过了，是空的」——而空页正是翻页终点的正常形态，看到它
- * 说明这条线走完了，那是有用的信息。
- *
- * @param {object} e
- */
-function captureSubtitle(e) {
-  const bits = [];
-
-  if (e.item_count === 0) bits.push('0 条（到这儿就没有了）');
-  else if (typeof e.item_count === 'number') bits.push(`${e.item_count} 条`);
-
-  const r = e.item_time_range;
-  if (r?.oldest || r?.newest) {
-    const o = day(r.oldest);
-    const n = day(r.newest);
-    bits.push(o === n ? o : `${o} → ${n}`);
-  }
-
-  // 一条时间信息都没有时才退回抓取时间。它回答的是**另一个**问题（什么时候抓的，
-  // 不是内容属于什么时候），所以只在别无可说时才占这个位置，且标明是「抓于」。
-  if (bits.length === 0 && e.observed_at) bits.push(`抓于 ${day(e.observed_at)}`);
-
-  return bits.join(' · ');
-}
-
-/** 只取日期那一段。列表里精确到秒是噪音。 @param {string | null | undefined} s */
-function day(s) {
-  return s ? String(s).slice(0, 10) : '?';
 }
 
 /** @param {object} entry */
