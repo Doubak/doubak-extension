@@ -50,6 +50,13 @@ const ROUTE_NAMES = {
 };
 const routeName = (k) => ROUTE_NAMES[k] ?? k;
 
+/** 档案状态。界面上不出现 `in_progress` 这种内部标识。 */
+const STATUS_NAMES = {
+  complete: '已完成',
+  in_progress: '进行中（还没收尾）',
+  aborted: '中途停下',
+};
+
 const VERDICT_NAMES = {
   ok: '正常',
   blocked: '被限制',
@@ -552,14 +559,34 @@ async function openBundle(bundleId) {
         ['项', '值'],
         [
           ['档案编号', s.bundleId],
-          ['账号', `${s.account?.username ?? ''}（${s.account?.user_id ?? ''}）`],
-          ['状态', s.status === 'complete' ? '已完成' : '进行中'],
+          ['账号', s.account
+            ? `${s.account.username ?? ''}（${s.account.user_id ?? ''}）`
+            : { text: '要等收尾时写进 manifest', muted: true }],
+          ['状态', STATUS_NAMES[s.status] ?? s.status],
           ['捕获条数', String(s.captures)],
-          ['体积', bytes(s.totalBytes)],
-          ['判定分布', Object.entries(s.byVerdict).map(([k, v]) => `${VERDICT_NAMES[k] ?? k} ${v}`).join(' · ')],
+          // 没有 manifest 时体积是从 index 累加的下界（段文件里还有 gzip 头尾），
+          // 说清楚它是估的——否则界面只能猜着说。
+          ['体积', s.totalBytesExact ? bytes(s.totalBytes) : `约 ${bytes(s.totalBytes)}（不含压缩头尾）`],
+          ['判定分布', Object.entries(s.byVerdict).map(([k, v]) => `${VERDICT_NAMES[k] ?? k} ${v}`).join(' · ') || '—'],
         ],
       ),
     );
+
+    // 进行中的档案要主动解释一句。**「还没收尾」不是「坏了」**——它没有
+    // manifest，所以校验只能验字节数、覆盖率证据也还没攒。不说清楚的话，用户看到
+    // 一堆空字段会以为几小时的抓取白费了。
+    if (!s.hasManifest) {
+      const note = document.createElement('div');
+      note.className = 'card idle';
+      const b = document.createElement('b');
+      b.textContent = '这次抓取还没收尾';
+      note.append(b, document.createTextNode(
+        'manifest.json 是收尾时写的，所以账号、体积、覆盖率证据现在还没有——' +
+        '这不表示档案坏了。已经抓到的每一页都已落盘，现在导出也导得出来，' +
+        '只是校验只能核对字节数（没有摘要可对）。抓完之后重看这一页就完整了。',
+      ));
+      summaryEl.append(note);
+    }
     setArchiveButtons(true);
     renderCoverage(s.coverage, s.crawlState);
     renderCaptures();

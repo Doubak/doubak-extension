@@ -362,7 +362,7 @@ MV3 的实际限制：`chrome.storage.local` 默认 **10 MB**（Chrome 113 及�
 |---|---|---|---|
 | F-10a | 心跳保活 | P0 | ✅ `chrome.alarms` + offscreen document。service worker 约 30 秒空闲即被杀，对几小时的抓取是致命的。 |
 | F-10b | 无状态恢复 | P0 | ✅ 进度状态全在 IndexedDB（`IdbKvStore`），内存里不留唯一副本。**曾经用 `chrome.storage.local` 走过弯路**：offscreen document 拿不到它，而让 offscreen 借道 service worker 会形成请求/响应环（SW 正 await offscreen 的响应，offscreen 又 await SW），表现是「刚 set 完就 get 不到」。IndexedDB 是标准 DOM/Worker API，三种上下文都能直接用、看同一份数据——这条设计一开始就是对的，偏离它才是错。连带结果：`storage` 权限不再需要。 |
-| F-10c | 关标签页/重启浏览器可续 | P0 | 重开插件即从 checkpoint 继续。 |
+| F-10c | 关标签页/重启浏览器可续 | P0 | 重开插件即从 checkpoint 继续。**状态按读者分两处**：完整 checkpoint 在 bundle 目录里（规范要求，可随档案迁移，只有 offscreen 读得了）；调度需要的三个字段（`pause_reason` / `paused_at` / `rate_state`）镜像进 IDB 指针，供 service worker 判断该不该自动恢复——它读不了 OPFS。两者不一致时**以档案为准**，恢复走的是 offscreen 读档案那条路。SW 因此也不把 checkpoint 传给 offscreen：传摘要过去会静默丢掉游标，表现是「恢复之后从头重抓」。 |
 | F-10e | **自恢复，不是手动重触发** | P0 | service worker 被杀在几小时的抓取里是**常态**而非异常（一次抓取会被杀几十上百次）。心跳用 `chrome.alarms` 而非 `setTimeout`——后者活在 worker 内存里，worker 一死就没了；闹钟由浏览器持有，跨 worker 生命周期、跨浏览器重启存活，系统休眠期间挂起、醒来补发。**它是唯一一个我们死了它还在的东西。** |
 | F-10f | **自动恢复只针对意外中断** | P0 | 醒来后**不能无条件接着抓**。停下来的原因分两类：意外中断（被杀、崩溃、休眠）可以自动继续；刻意停下（风控、验证码、会话失效、用户暂停、配额）一律等人——停下来本身就是保护措施，自动恢复等于绕过它。醒来就重试软封锁正是把限流升级成封号的路径。未知的停止原因保守处理，不恢复。 |
 | F-10g | 崩溃哨兵 | P0 | worker 被杀时没有机会写任何东西，指望临终留言不现实。所以**反过来**：开工前先写一个 `pause_reason: crash` 的 checkpoint，正常暂停或结束时再改写——「没来得及改写」本身就是崩溃的证据。方向是刻意选的：宁可把正常结束误标成崩溃（代价是多做一次幂等的恢复检查），也不要把崩溃误标成正常（代价是数据对不上却无人察觉）。 |

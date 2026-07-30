@@ -263,7 +263,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         case 'resume': {
           await lock.run('恢复抓取', async () => {
             const r = getRunner();
-            if (!r.active) await r.resume(msg.checkpoint);
+            if (r.active) return; // 已经在跑了，恢复是幂等的
+            // **自己读档案里的 checkpoint。** service worker 读不了 OPFS，它手上
+            // 只有一份三个字段的调度摘要——拿那个去 resume 会丢掉游标与 frontier。
+            const cp = await getRunStore().loadCheckpoint();
+            if (!cp) throw new Error('档案里没有 checkpoint，无从恢复');
+            await r.resume(cp);
           });
           sendResponse({ ok: true });
           break;
@@ -277,7 +282,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           // **刻意不加锁。** 加了的话「暂停」会在一段 22 秒的批次期间失灵，而
           // 用户按暂停往往正是因为他看到了不对的东西。pause 只是给 frontier
           // 立一个标志，不发请求。
-          await getRunner().pause();
+          await getRunner().pause(msg.reason);
           sendResponse({ ok: true });
           break;
 

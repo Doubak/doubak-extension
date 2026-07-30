@@ -106,6 +106,29 @@ describe('执行上下文约束', () => {
     assert.match(src, /offscreen\/host\.js/);
   });
 
+  test('service worker 用 ScheduleStore，不用完整的 RunStore', async () => {
+    // `RunStore.loadCheckpoint()` 要开 bundle 目录读 `checkpoint.json`——而 SW
+    // 开不了。第一版给它一个会抛的 `openBundle`，那只是把「静默不可用」变成
+    // 「响亮不可用」：「开始抓取」照样直接失败，因为那条路径本来就要读 checkpoint。
+    //
+    // 分工必须按**需要的数据量**分：调度只要三个字段（停机原因、时间、退避），
+    // 而那三个字段已经镜像进 IDB 指针了。
+    const code = stripComments(await read('src/background.js'));
+    assert.match(code, /ScheduleStore/);
+    assert.equal(/new RunStore\(/.test(code), false, 'SW 不该构造完整的 RunStore');
+    assert.equal(code.includes('openBundle'), false, 'SW 压根不该有开档案的能力');
+  });
+
+  test('恢复时 service worker 不把 checkpoint 传过去', async () => {
+    // SW 手上只有三个字段的调度摘要，而 `runner.resume()` 要的是全本（游标、
+    // frontier、退避）。传摘要过去会静默丢掉游标——表现是「恢复之后从头重抓」。
+    const sw = stripComments(await read('src/background.js'));
+    assert.equal(/op: 'resume', checkpoint/.test(sw), false);
+
+    const off = stripComments(await read('src/offscreen/offscreen.js'));
+    assert.match(off, /loadCheckpoint\(\)/, 'offscreen 要自己去档案里读全本');
+  });
+
   test('字节绝不跨 chrome.runtime.sendMessage', async () => {
     // 那条通道只认 JSON：`Uint8Array` 过去会变成 `{"0":1,"1":2,…}`。整条抓取链
     // 之所以搬进 offscreen，就是为了让字节根本不用过这条界。

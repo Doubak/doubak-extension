@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { RunStore, buildCheckpoint, CURRENT_RUN_KEY } from '../src/crawl/run-store.js';
+import { RunStore, ScheduleStore, buildCheckpoint, CURRENT_RUN_KEY } from '../src/crawl/run-store.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
 import { kvStoreContract } from './helpers/kv-store-contract.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
@@ -34,10 +34,40 @@ describe('指针与 checkpoint 分两处放', () => {
     const fs = create(DIR);
 
     await store.setCurrentRun({ bundleId: BID, dir: DIR });
-    await store.saveCheckpoint({ bundle_id: BID, pause_reason: 'crash', routes: [], frontier: [] });
+    await store.saveCheckpoint({
+      bundle_id: BID, pause_reason: 'crash', paused_at: '2026-07-30T00:00:00Z',
+      rate_state: { backoff_level: 2 }, routes: [], frontier: [],
+    });
 
-    assert.deepEqual(await kv.get(CURRENT_RUN_KEY), { bundleId: BID, dir: DIR });
     assert.ok(await fs.exists('checkpoint.json'), 'checkpoint 随档案走');
+
+    // 指针里额外镜像了**调度需要的三个字段**：service worker 读不了 OPFS，但它
+    // 必须知道「有没有没抓完的、为什么停的」才能决定要不要自动恢复。
+    assert.deepEqual(await kv.get(CURRENT_RUN_KEY), {
+      bundleId: BID,
+      dir: DIR,
+      pause_reason: 'crash',
+      paused_at: '2026-07-30T00:00:00Z',
+      rate_state: { backoff_level: 2 },
+    });
+  });
+
+  test('镜像只放调度字段，游标与 frontier 一概不进指针', async () => {
+    // 多存一份就是多一个会不一致的地方。SW 拿到它们也没用，而**能拿到**就意味着
+    // 有人早晚会在 SW 里写抓取逻辑。
+    const { kv, store, create } = harness();
+    create(DIR);
+
+    await store.setCurrentRun({ bundleId: BID, dir: DIR });
+    await store.saveCheckpoint({
+      bundle_id: BID, pause_reason: 'blocked', paused_at: 'x',
+      routes: [{ route_key: 'broadcast.timeline', cursor: { value: 7 } }],
+      frontier: [{ url: 'https://example.com', state: 'failed' }],
+    });
+
+    const p = await kv.get(CURRENT_RUN_KEY);
+    assert.equal('routes' in p, false);
+    assert.equal('frontier' in p, false);
   });
 
   test('checkpoint 随档案走 —— 半成品换台机器也能续抓', async () => {
@@ -221,5 +251,94 @@ describe('MemoryKvStore', () => {
     // 它是 IdbKvStore 的参照，所以它自己也得
     // 过同一份契约——否则「与内存实现一致」这句话就没有基准。
     await kvStoreContract(() => new MemoryKvStore());
+  });
+});
+
+describe('ScheduleStore：service worker 那一侧', () => {
+  /** 一对共享同一个 KV 的 store：offscreen 写全本，SW 只读镜像。 */
+  function pair() {
+    const kv = new MemoryKvStore();
+    /** @type {Map<string, MemoryFileStore>} */
+    const dirs = new Map([[DIR, new MemoryFileStore()]]);
+    const full = new RunStore({ kv, openBundle: async (d) => dirs.get(d) });
+    const sched = new ScheduleStore({ kv });
+    return { kv, full, sched, dirs };
+  }
+
+  test('读不到东西时也**绝不**碰档案', async () => {
+    // 这是它存在的全部理由：service worker 里 `createSyncAccessHandle` 不可用，
+    // 所以任何试图开档案的动作都会直接抛。第一版给 SW 一个会抛的 `openBundle`，
+    // 那只是把「静默不可用」变成「响亮不可用」——「开始抓取」照样失败。
+    const kv = new MemoryKvStore();
+    const sched = new ScheduleStore({ kv });
+    // 压根没有 openBundle 可传，所以「不碰档案」是结构性的
+    assert.equal(await sched.loadCheckpoint(), null);
+  });
+
+  test('offscreen 写全本 → SW 读得到调度字段', async () => {
+    const { full, sched } = pair();
+    await full.setCurrentRun({ bundleId: BID, dir: DIR });
+    await full.saveCheckpoint({
+      bundle_id: BID, pause_reason: 'blocked', paused_at: '2026-07-30T01:00:00Z',
+      rate_state: { backoff_level: 1, interval_ms: 2000 },
+      routes: [{ route_key: 'r', cursor: { value: 3 } }], frontier: [],
+    });
+
+    const cp = await sched.loadCheckpoint();
+    assert.equal(cp.bundle_id, BID);
+    assert.equal(cp.pause_reason, 'blocked');
+    assert.equal(cp.paused_at, '2026-07-30T01:00:00Z');
+    assert.equal(cp.rate_state.backoff_level, 1);
+  });
+
+  test('形状与真 checkpoint 的同名字段一致 —— 恢复策略不必知道拿到的是摘要', async () => {
+    const { full, sched } = pair();
+    await full.setCurrentRun({ bundleId: BID, dir: DIR });
+    await full.saveCheckpoint({
+      bundle_id: BID, pause_reason: 'blocked',
+      paused_at: new Date(Date.now() - 60_000).toISOString(),
+      rate_state: { backoff_level: 1 }, routes: [], frontier: [],
+    });
+
+    const { decideResume, requiredCooldownMs } = await import('../src/crawl/resume-policy.js');
+    const cp = await sched.loadCheckpoint();
+    assert.equal(decideResume(cp).resume, false, '软封锁不自动恢复');
+    assert.ok(requiredCooldownMs(cp) > 0, '退避层级要能算出冷却');
+  });
+
+  test('刚建好指针、还没写过 checkpoint → 当成崩溃哨兵', async () => {
+    // 与 runner.start() 的做法一致：宁可把正常状态误判成崩溃（代价是多做一次
+    // 幂等的恢复检查），也不要把崩溃误判成正常（代价是数据对不上却无人察觉）。
+    const { full, sched } = pair();
+    await full.setCurrentRun({ bundleId: BID, dir: DIR });
+    const cp = await sched.loadCheckpoint();
+    assert.equal(cp.pause_reason, 'crash');
+  });
+
+  test('SW 更新原因只动镜像，不动档案', async () => {
+    // 档案里的那份由 offscreen 写，**那份才是恢复时真正被读的**。
+    const { full, sched, dirs } = pair();
+    await full.setCurrentRun({ bundleId: BID, dir: DIR });
+    await full.saveCheckpoint({ bundle_id: BID, pause_reason: 'crash', paused_at: 'a', routes: [], frontier: [] });
+
+    await sched.saveCheckpoint({ pause_reason: 'user_paused', paused_at: 'b' });
+
+    assert.equal((await sched.loadCheckpoint()).pause_reason, 'user_paused');
+    const onDisk = JSON.parse(new TextDecoder().decode(await dirs.get(DIR).read('checkpoint.json')));
+    assert.equal(onDisk.pause_reason, 'crash', '档案没被 SW 改过');
+  });
+
+  test('没有在跑的抓取时，写入是无操作', async () => {
+    const { sched, kv } = pair();
+    await sched.saveCheckpoint({ pause_reason: 'user_paused', paused_at: 'x' });
+    assert.equal(await kv.get(CURRENT_RUN_KEY), undefined, '不该凭空造出一个指针');
+  });
+
+  test('clearCheckpoint 清掉指针', async () => {
+    const { full, sched, kv } = pair();
+    await full.setCurrentRun({ bundleId: BID, dir: DIR });
+    await sched.clearCheckpoint();
+    assert.equal(await kv.get(CURRENT_RUN_KEY), undefined);
+    assert.equal(await sched.loadCheckpoint(), null);
   });
 });

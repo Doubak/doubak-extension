@@ -217,3 +217,74 @@ describe('拒绝含糊', () => {
     assert.deepEqual(await reader.index(), []);
   });
 });
+
+describe('进行中的档案（还没有 manifest）', () => {
+  test('summary 照样能给出概览，不报「不是一个 bundle」', async () => {
+    // `manifest.json` 只在 finalize() 时写一次，所以**整个抓取过程中它都不存在**
+    // ——而抓取要跑几小时，用户一定会在那期间打开档案页。
+    //
+    // 早先这里直接抛「这个目录里没有 manifest.json，不是一个 bundle」。那句话对
+    // 正在写的档案是错的，而且听起来像档案坏了——最糟的一种误报：它会让用户以为
+    // 几小时的抓取白费，甚至去删掉一份其实完好的档案。
+    const { store, writer } = await roundTrip();
+    const bundleId = writer.bundleId;
+    await store.remove('manifest.json');
+
+    const reader = new BundleReader({ store, bundleId });
+    const s = await reader.summary();
+
+    assert.equal(s.hasManifest, false);
+    assert.equal(s.status, 'in_progress');
+    assert.equal(s.bundleId, bundleId, '编号退回到构造时传入的');
+    assert.ok(s.captures > 0, 'index 每页都落盘，条数是准的');
+  });
+
+  test('拿不到的字段如实给 null，不编', async () => {
+    const { store, writer } = await roundTrip();
+    const bundleId = writer.bundleId;
+    await store.remove('manifest.json');
+    const s = await new BundleReader({ store, bundleId }).summary();
+
+    assert.equal(s.account, null);
+    assert.equal(s.createdAt, null);
+    assert.equal(s.completedAt, null);
+    // 覆盖率证据是收尾时才攒的。给空数组而不是编一个，免得界面显示出一份看起来
+    // 很完整的假证据。
+    assert.deepEqual(s.coverage, []);
+    assert.deepEqual(s.crawlState, []);
+    assert.deepEqual(s.segments, []);
+  });
+
+  test('体积是下界，且标明它不精确', async () => {
+    // 段文件里除了记录还有 gzip 头尾。宁可少报也不多报——多报会让用户以为已经
+    // 抓了更多东西。
+    const { store, writer } = await roundTrip();
+    const bundleId = writer.bundleId;
+    const withManifest = await new BundleReader({ store, bundleId }).summary();
+    await store.remove('manifest.json');
+    const without = await new BundleReader({ store, bundleId }).summary();
+
+    assert.equal(withManifest.totalBytesExact, true);
+    assert.equal(without.totalBytesExact, false);
+    assert.ok(without.totalBytes > 0);
+    assert.ok(without.totalBytes <= withManifest.totalBytes, '估值不该超过真值');
+  });
+
+  test('manifest() 本身仍然严格 —— 不完整的目录不许冒充 bundle', async () => {
+    const { store, writer } = await roundTrip();
+    const bundleId = writer.bundleId;
+    await store.remove('manifest.json');
+    await assert.rejects(() => new BundleReader({ store, bundleId }).manifest(), /不是一个 bundle/);
+  });
+
+  test('逐条取出并解压在没有 manifest 时照样能跑', async () => {
+    // 「验一验」在抓取进行中也该能用：它走的是 index → 段文件那条路，与 manifest
+    // 无关。
+    const { store, writer } = await roundTrip();
+    const bundleId = writer.bundleId;
+    await store.remove('manifest.json');
+    const v = await new BundleReader({ store, bundleId }).verify();
+    assert.equal(v.problems.length, 0);
+    assert.ok(v.checked > 0);
+  });
+});

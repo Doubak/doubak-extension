@@ -373,11 +373,20 @@ export class CrawlRunner {
   }
 
   /** 用户主动暂停。 */
-  async pause() {
+  /**
+   * 停下来，并把**真实原因**写进档案。
+   *
+   * 原因必须传进来而不是一律写 `user_paused`：权限被撤、账号被换也走这条路，
+   * 而恢复策略对它们的处理完全不同（`user_paused` 等用户点继续，
+   * `host_permission_lost` 要用户先去改设置）。写错原因等于把恢复决策带偏。
+   *
+   * @param {string} [reason]
+   */
+  async pause(reason = 'user_paused') {
     if (!this._run) return;
-    this._run.frontier.stop('user_paused');
-    await this._saveCheckpoint('user_paused');
-    this._emit({ type: 'paused' });
+    this._run.frontier.stop(reason);
+    await this._saveCheckpoint(reason);
+    this._emit({ type: 'paused', reason });
   }
 
   /** 当前进度快照，供界面读取。 */

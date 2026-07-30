@@ -53,12 +53,25 @@ export class BundleReader {
     return reader;
   }
 
-  /** @returns {Promise<object>} */
+  /**
+   * 读 manifest。**没有就抛**——严格是对的：没有 manifest 的目录不是一份完整的
+   * bundle，不能冒充。
+   *
+   * 但「还没抓完」也没有 manifest（它只在 `finalize()` 时写一次），所以想看
+   * **进行中**的档案要用 `summary()`，它会退回到只靠 index 的那条路。见那里。
+   *
+   * @returns {Promise<object>}
+   */
   async manifest() {
     if (!(await this._store.exists('manifest.json'))) {
       throw new Error('这个目录里没有 manifest.json，不是一个 bundle');
     }
     return JSON.parse(dec.decode(await this._store.read('manifest.json')));
+  }
+
+  /** manifest 在不在。抓取跑完 `finalize()` 之后才有。 */
+  hasManifest() {
+    return this._store.exists('manifest.json');
   }
 
   /**
@@ -147,9 +160,23 @@ export class BundleReader {
    *
    * 刻意**不给百分比**：豆瓣的计数不可信，完整性看的是 crawl_state 里的
    * 连续性证明，不是「抓到的条数 ÷ 声称的条数」。
+   *
+   * ## 没有 manifest 也要能看
+   *
+   * `manifest.json` 只在 `finalize()` 时写一次。所以**整个抓取过程中它都不存在**
+   * ——而抓取要跑几小时，用户一定会在那期间打开档案页。
+   *
+   * 早先这里直接 `await this.manifest()`，于是进行中的档案会得到一句
+   * 「这个目录里没有 manifest.json，不是一个 bundle」。那句话对**正在写**的档案
+   * 是错的，而且听起来像档案坏了——最糟的一种误报：它会让用户以为几小时的抓取白费，
+   * 甚至去删掉一份其实完好的档案。
+   *
+   * 所以退回到只靠 `index.ndjson`：它每页都落盘，本来就是「哪些抓过了」的权威
+   * 记录。拿不到的字段如实给 null，`status` 报 `in_progress`，让界面照实说
+   * 「还没收尾」。
    */
   async summary() {
-    const manifest = await this.manifest();
+    const manifest = (await this.hasManifest()) ? await this.manifest() : null;
     const index = await this.index();
 
     /** @type {Record<string, number>} */
@@ -163,19 +190,32 @@ export class BundleReader {
       r.bytes += e.length;
     }
 
+    // 没有 manifest 时体积从 index 累加：段文件里除了记录还有 gzip 头尾，所以
+    // 这是个**下界**而不是精确值。宁可少报也不多报——多报会让用户以为已经抓了
+    // 更多东西。
+    const totalBytes = manifest
+      ? (manifest.segments ?? []).reduce((n, s) => n + (s.bytes ?? 0), 0)
+      : index.reduce((n, e) => n + (e.length ?? 0), 0);
+
     return {
-      bundleId: manifest.bundle_id,
-      status: manifest.status,
-      account: manifest.account,
-      createdAt: manifest.created_at,
-      completedAt: manifest.completed_at,
+      bundleId: manifest?.bundle_id ?? this._bundleId,
+      // 没有 manifest 就是还没收尾。这是事实陈述，不是错误。
+      status: manifest?.status ?? 'in_progress',
+      hasManifest: Boolean(manifest),
+      account: manifest?.account ?? null,
+      createdAt: manifest?.created_at ?? null,
+      completedAt: manifest?.completed_at ?? null,
       captures: index.length,
-      segments: manifest.segments ?? [],
-      totalBytes: (manifest.segments ?? []).reduce((n, s) => n + (s.bytes ?? 0), 0),
+      segments: manifest?.segments ?? [],
+      totalBytes,
+      // 体积是估的还是准的，界面要能分辨——否则它只能猜着说。
+      totalBytesExact: Boolean(manifest),
       byVerdict,
       byRoute,
-      coverage: manifest.coverage ?? [],
-      crawlState: manifest.crawl_state ?? [],
+      // 覆盖率证据是收尾时才攒的。进行中给空数组而不是编一个，
+      // 免得界面显示出一份看起来很完整的假证据。
+      coverage: manifest?.coverage ?? [],
+      crawlState: manifest?.crawl_state ?? [],
     };
   }
 

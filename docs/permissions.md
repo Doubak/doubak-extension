@@ -91,6 +91,7 @@
 | `chrome.runtime`（消息、getURL） | ✓ | ✓ | ✓ |
 | `chrome.storage` | ✓ | **✗** | ✓ |
 | **IndexedDB**（标准 API，不是 `chrome.*`） | ✓ | ✓ | ✓ |
+| OPFS 读写（`createSyncAccessHandle`） | **✗** | **✗** | **✗**（只有专用 Worker 有） |
 | `chrome.permissions` | ✓ | **✗** | ✓ |
 | `chrome.notifications` | ✓ | **✗** | ✓ |
 | `chrome.alarms` | ✓ | ✗ | ✗ |

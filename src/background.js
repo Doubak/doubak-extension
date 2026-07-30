@@ -43,7 +43,7 @@
  */
 
 import { Supervisor, ALARM_NAME } from './crawl/supervisor.js';
-import { RunStore } from './crawl/run-store.js';
+import { ScheduleStore } from './crawl/run-store.js';
 import { IdbKvStore } from './storage/idb-kv-store.js';
 import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
 import { preflightStorage } from './storage/quota.js';
@@ -59,7 +59,7 @@ function debugLog(...args) {
 
 /** @type {Supervisor | null} */
 let supervisor = null;
-/** @type {RunStore | null} */
+/** @type {ScheduleStore | null} */
 let runStore = null;
 /** @type {IdbKvStore | null} */
 let kv = null;
@@ -81,24 +81,18 @@ function getKv() {
 }
 
 /**
- * service worker 侧的 RunStore **只读 checkpoint**。
+ * 调度状态。**只读写 IDB 指针，不碰档案。**
  *
- * 它用不上 `openBundle`——那是 offscreen 的事。这里给一个会抛的实现而不是
- * `undefined`：万一哪天有人在 service worker 里试图开 bundle，要在第一次调用
- * 就响亮地失败，而不是拿到一个「createSyncAccessHandle 不可用」的困惑错误。
+ * service worker 读不了 OPFS（`createSyncAccessHandle` 只在专用 Worker 里可用），
+ * 而完整的 checkpoint 是 bundle 目录里的一个文件。所以这里用 `ScheduleStore`，
+ * 它只看 `RunStore` 镜像进指针的那三个调度字段（停机原因、时间、退避层级）。
+ *
+ * 第一版给 SW 一个完整的 `RunStore` 加一个会抛的 `openBundle`。那只是把「静默
+ * 不可用」变成「响亮不可用」——「开始抓取」照样直接失败，因为 `loadCheckpoint()`
+ * 本来就要开档案。分工必须按**需要的数据量**来分，而不是靠一句报错提醒自己。
  */
 function getRunStore() {
-  if (!runStore) {
-    runStore = new RunStore({
-      kv: getKv(),
-      openBundle: () => {
-        throw new Error(
-          'service worker 里不能开 bundle：createSyncAccessHandle 只在专用 Worker 中可用。' +
-            '档案读写都在 offscreen document 那一侧。',
-        );
-      },
-    });
-  }
+  if (!runStore) runStore = new ScheduleStore({ kv: getKv() });
   return runStore;
 }
 
@@ -119,9 +113,13 @@ function getSupervisor() {
       onResume: async () => {
         const cp = await getRunStore().loadCheckpoint();
         if (!cp) return;
-        // 每次都先确保 offscreen 在——「我上次建过了」这个念头在 service
-        // worker 里本身就不可靠，它的内存随时清零。
-        await withOffscreen({ op: 'resume', checkpoint: cp });
+        // **不把 checkpoint 传过去。** 这里拿到的只是调度摘要（三个字段），
+        // 而 `runner.resume()` 要的是全本（游标、frontier、退避）。全本在档案里，
+        // 而只有 offscreen 读得了档案——让它自己去读。
+        //
+        // 每次都先确保 offscreen 在：「我上次建过了」这个念头在 service worker
+        // 里本身就不可靠，它的内存随时清零。
+        await withOffscreen({ op: 'resume' });
         await drive();
       },
       onBlocked: async (decision) => {
@@ -198,7 +196,7 @@ globalThis.chrome?.permissions?.onRemoved?.addListener(async (removed) => {
   try {
     const r = await checkHostAccess();
     if (!r || r.granted) return;
-    await withOffscreen({ op: 'pause' }).catch(() => {}); // 它可能已经关了
+    await withOffscreen({ op: 'pause', reason: HOST_PERMISSION_LOST }).catch(() => {}); // 它可能已经关了
     await getSupervisor().pauseRun(HOST_PERMISSION_LOST);
     await notifyNeedsAction(HOST_PERMISSION_LOST);
   } catch (e) {
@@ -281,7 +279,8 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         case 'resume': {
           const cp = await getRunStore().loadCheckpoint();
           if (!cp) throw new Error('没有可恢复的抓取');
-          await withOffscreen({ op: 'resume', checkpoint: cp });
+          // 全本 checkpoint 在档案里，offscreen 自己读（见上面 onResume 的说明）。
+          await withOffscreen({ op: 'resume' });
           await clearAttention();
           void drive();
           sendResponse({ ok: true });
@@ -289,7 +288,9 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         }
 
         case 'pause':
-          await withOffscreen({ op: 'pause' });
+          // 原因要带过去：档案里的 checkpoint 由 offscreen 写，而**那份才是**
+          // 恢复时真正被读的。SW 这边的 `pauseRun` 只更新调度镜像。
+          await withOffscreen({ op: 'pause', reason: 'user_paused' });
           await getSupervisor().pauseRun('user_paused');
           sendResponse({ ok: true });
           break;

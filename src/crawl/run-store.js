@@ -104,7 +104,23 @@ export class RunStore {
     }
   }
 
-  /** @param {object} cp */
+  /**
+   * 写 checkpoint —— 同时落两处，各有各的读者。
+   *
+   * | 写到哪 | 谁读 | 为什么 |
+   * |---|---|---|
+   * | bundle 里的 `checkpoint.json` | 恢复抓取时的 offscreen | **portable 的真相**。规范要求它随档案走，导出的半成品到别的机器上也能续抓 |
+   * | IDB 指针里的几个调度字段 | service worker 的 `Supervisor` | SW **读不了 OPFS**（`createSyncAccessHandle` 只在专用 Worker 里可用），但它必须知道「有没有没抓完的、为什么停的」才能决定要不要自动恢复 |
+   *
+   * 镜像的只有 `pause_reason` / `paused_at` / `rate_state`——调度需要的最小集合。
+   * 游标、frontier、路线状态一概不镜像：那些只有 offscreen 用得上，多存一份就是
+   * 多一个会不一致的地方。
+   *
+   * **两者不一致时以档案里的为准。** 恢复走的是 offscreen 读档案那条路；指针只是
+   * 给调度器看的缓存，删掉它顶多让下一次唤醒少一次判断依据，不丢数据。
+   *
+   * @param {object} cp
+   */
   async saveCheckpoint(cp) {
     const pointer = await this.getCurrentRun();
     if (!pointer?.dir) throw new Error('还没有 setCurrentRun，无处写 checkpoint');
@@ -115,6 +131,15 @@ export class RunStore {
       CHECKPOINT_FILE,
       new TextEncoder().encode(JSON.stringify(full, null, 2) + '\n'),
     );
+
+    // 顺序是刻意的：档案先落盘，再更新镜像。反过来的话，进程死在两次写之间会
+    // 让调度器以为已经停在某个原因上，而档案里其实还是上一个状态。
+    await this._kv.set(CURRENT_RUN_KEY, {
+      ...pointer,
+      pause_reason: full.pause_reason,
+      paused_at: full.paused_at,
+      rate_state: full.rate_state,
+    });
   }
 
   /**
@@ -189,3 +214,79 @@ export function buildCheckpoint({
     rate_state: pacer.serialize(),
   };
 }
+
+/**
+ * service worker 那一侧的调度状态：**只读写 IDB 指针，绝不碰 OPFS**。
+ *
+ * ## 为什么必须单独一个类
+ *
+ * `Supervisor` 要回答一个问题：**有没有没抓完的，为什么停的，现在该不该继续。**
+ * 而完整的 checkpoint 是 bundle 目录里的一个文件，读它要 OPFS，而 OPFS 的
+ * `createSyncAccessHandle()` **只在专用 Worker 里可用**——service worker 不是。
+ *
+ * 第一版让 SW 用完整的 `RunStore`，于是「开始抓取」直接撞上
+ * 「service worker 里不能开 bundle」。给它一个会抛的 `openBundle` 只是把错误从
+ * 「静默不可用」变成「响亮不可用」，并没有让它能工作。
+ *
+ * 正确的分工是**按需要的数据量分**：调度只需要三个字段，而那三个字段
+ * `RunStore.saveCheckpoint()` 已经镜像进指针了。SW 读镜像就够，不必也不该去
+ * 碰档案。
+ *
+ * ## 它刻意做不到的事
+ *
+ * 读不到 frontier、游标、路线状态。那是对的：SW 拿到它们也没用，而**能拿到**就
+ * 意味着有人早晚会在 SW 里写抓取逻辑。
+ *
+ * @implements {import('./supervisor.js').RunStore}
+ */
+export class ScheduleStore {
+  /** @param {object} opts @param {import('../storage/kv-store.js').KvStore} opts.kv */
+  constructor({ kv }) {
+    this._kv = kv;
+  }
+
+  /**
+   * 调度用的 checkpoint 摘要；没有未完成的抓取时返回 null。
+   *
+   * 返回的形状与真 checkpoint 的**同名字段**一致，所以 `decideResume()` /
+   * `requiredCooldownMs()` 不需要知道自己拿到的是摘要还是全本。
+   */
+  async loadCheckpoint() {
+    const p = /** @type {any} */ (await this._kv.get(CURRENT_RUN_KEY));
+    if (!p?.bundleId) return null;
+    return {
+      bundle_id: p.bundleId,
+      // 指针刚建、还没写过 checkpoint 时没有原因。当成崩溃哨兵——与
+      // `runner.start()` 的做法一致：宁可把正常状态误判成崩溃（代价是多做一次
+      // 幂等的恢复检查），也不要把崩溃误判成正常。
+      pause_reason: p.pause_reason ?? CRASH_SENTINEL,
+      paused_at: p.paused_at ?? null,
+      rate_state: p.rate_state ?? null,
+    };
+  }
+
+  /** 只更新调度字段。档案里的 checkpoint 由 offscreen 写。 */
+  async saveCheckpoint(cp) {
+    const p = /** @type {any} */ (await this._kv.get(CURRENT_RUN_KEY));
+    if (!p?.bundleId) return; // 没有在跑的抓取，没什么可记
+    await this._kv.set(CURRENT_RUN_KEY, {
+      ...p,
+      pause_reason: cp.pause_reason,
+      paused_at: cp.paused_at,
+      ...(cp.rate_state ? { rate_state: cp.rate_state } : {}),
+    });
+  }
+
+  /**
+   * 抓取结束：清掉指针。
+   *
+   * 档案里的 `checkpoint.json` 由 offscreen 的 `finish()` 删——规范要求已完成的
+   * bundle 不再有它，因为它的存在本身就意味着「这份档案没抓完」。
+   */
+  async clearCheckpoint() {
+    await this._kv.remove(CURRENT_RUN_KEY);
+  }
+}
+
+/** 与 resume-policy 的哨兵原因保持一致。 */
+const CRASH_SENTINEL = 'crash';
