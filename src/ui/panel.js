@@ -335,6 +335,57 @@ function setCell(td, text, muted = false) {
   if (td.className !== want) td.className = want;
 }
 
+/**
+ * 只在**进入**空闲态时查一次，不是每 2 秒查一次。
+ *
+ * 权限和剩余空间不会每两秒变一次，而每两秒重画一块就是用户看到的那种闪动。
+ */
+let preflightShown = false;
+
+/**
+ * 开抓前的预检：权限够不够、空间够不够。
+ *
+ * 空间要按**含目录页**的体量估。只按列表页估会给出一个乐观得离谱的数字，然后
+ * 用户在抓了几小时之后撞墙——预检的全部意义就是把那次撞墙提前到开工前。
+ *
+ * 两项都可能返回 null，那是「查不了」而不是「没问题」，界面照实说。
+ */
+async function showPreflight() {
+  const el = $('preflight');
+  const r = await send({ type: 'preflight' });
+  if (!r?.ok) return;
+
+  /** @type {Array<[string, string]>} */
+  const rows = [];
+  if (r.permissions === null) rows.push(['站点权限', '查不了（浏览器不支持权限查询）']);
+  else if (r.permissions.granted) rows.push(['站点权限', '✔ 可以访问豆瓣']);
+  else rows.push(['站点权限', `✗ 缺少 ${r.permissions.missing.join('、')}`]);
+
+  if (r.storage === null) rows.push(['存储空间', '查不了（浏览器不肯说配额）']);
+  else if (r.storage.enough) {
+    rows.push(['存储空间', `✔ 可用 ${bytes(r.storage.available)}（预计需要约 ${bytes(r.storage.need)}）`]);
+  } else {
+    rows.push(['存储空间', `✗ 只剩 ${bytes(r.storage.available)}，预计需要约 ${bytes(r.storage.need)}`]);
+  }
+
+  el.className = '';
+  el.replaceChildren(table(['开抓前检查', '结果'], rows));
+
+  const bad = (r.permissions && !r.permissions.granted) || (r.storage && !r.storage.enough);
+  if (!bad) return;
+
+  const warn = document.createElement('div');
+  warn.className = 'card warn';
+  const b = document.createElement('b');
+  b.textContent = '现在开始可能会中途停下';
+  warn.append(b, document.createTextNode(
+    r.permissions && !r.permissions.granted
+      ? '请在浏览器的扩展设置里把站点访问权限改回「在所有网站上」。'
+      : '空间可能不够。已经抓到的不会丢，但抓到一半停下来还得再来一次——建议先清理或导出。',
+  ));
+  el.append(warn);
+}
+
 // ── 覆盖率 ──────────────────────────────────────────────────
 
 /** @param {object[]} coverage @param {object[]} crawlState */

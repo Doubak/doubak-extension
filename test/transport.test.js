@@ -260,3 +260,73 @@ describe('跳转的每一跳都要限速', () => {
     assert.deepEqual(gateCalls, [1000, 1000]);
   });
 });
+
+describe('跳转模式', () => {
+  test('传给 fetch 的 redirect 一律是 follow', async () => {
+    // 这一条是拿真事换来的。文件开头写着「改成 follow」，而代码里那一行**没改
+    // 成功**（一次字符串替换静默失配），于是文档说一套、代码做一套，装进浏览器
+    // 就是 opaqueredirect。
+    //
+    // 断言 init 里的实际值，而不是去 grep 源码——源码检查只能证明某个字符串在，
+    // 证明不了它被传下去了。
+    const inits = [];
+    const t = new Transport({
+      gate: new RequestGate({ pacer: new Pacer({ intervalMs: 1, jitterRatio: 0 }) }),
+      fetchImpl: async (url, init) => {
+        inits.push(init);
+        return {
+          status: 200, url,
+          headers: new Headers({ 'content-type': 'text/html' }),
+          arrayBuffer: async () => new ArrayBuffer(0),
+        };
+      },
+    });
+
+    await t.fetch('https://www.douban.com/');
+    assert.equal(inits[0].redirect, 'follow');
+
+    // followRedirects:false 也不许把它改回 manual —— 那个开关只管手动跟随的
+    // 循环，管不着浏览器怎么跟。
+    await t.fetch('https://www.douban.com/x', { followRedirects: false });
+    assert.equal(inits[1].redirect, 'follow');
+  });
+
+  test('拿到 opaqueredirect 要响亮地抛，不许静默当成最终 URL', async () => {
+    // 静默的后果是：把跳转前的 /mine/ 当成落地页，解析不出用户名，然后报出
+    // 「请先登录豆瓣」——一个把人指向完全错误方向的提示。
+    const t = new Transport({
+      gate: new RequestGate({ pacer: new Pacer({ intervalMs: 1, jitterRatio: 0 }) }),
+      fetchImpl: async (url) => ({
+        status: 0,
+        type: 'opaqueredirect',
+        url: '',
+        headers: new Headers(),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      }),
+    });
+
+    await assert.rejects(() => t.fetch('https://www.douban.com/mine/'), (e) => {
+      assert.match(e.message, /opaqueredirect/);
+      assert.match(e.message, /follow/, '错误信息要说明怎么修');
+      return true;
+    });
+  });
+
+  test('浏览器跟完跳转后，最终 URL 取自 response.url', async () => {
+    // follow 模式下我们看不到中间跳数，只能靠 response.url。它要是空的（某些
+    // 实现会），退回到自己跟踪的 URL。
+    const t = new Transport({
+      gate: new RequestGate({ pacer: new Pacer({ intervalMs: 1, jitterRatio: 0 }) }),
+      fetchImpl: async () => ({
+        status: 200,
+        url: 'https://www.douban.com/people/mewcatcher/',
+        headers: new Headers({ 'content-type': 'text/html' }),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      }),
+    });
+
+    const r = await t.fetch('https://www.douban.com/mine/');
+    assert.equal(r.requestedUrl, 'https://www.douban.com/mine/');
+    assert.equal(r.finalUrl, 'https://www.douban.com/people/mewcatcher/');
+  });
+});

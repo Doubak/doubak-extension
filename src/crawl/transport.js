@@ -146,7 +146,9 @@ export class Transport {
    * @param {object} [opts]
    * @param {string} [opts.referer]  会被 DNR 规则改写成真正的 Referer
    * @param {boolean} [opts.withCk]  是否自动拼上 ck 令牌
-   * @param {boolean} [opts.followRedirects]
+   * @param {boolean} [opts.followRedirects]  只影响**手动**跟随（注入的 fetch 替身
+   *   会给出可读的 302）。真实浏览器里跳转由浏览器跟，这个开关管不着——
+   *   `redirect` 一律是 `follow`。
    * @returns {Promise<FetchOutcome>}
    */
   async fetch(url, { referer, withCk = false, followRedirects = true } = {}) {
@@ -180,7 +182,10 @@ export class Transport {
               // 不伪造身份：不设 User-Agent，交给浏览器
               headers: referer ? { 'X-Override-Referer': referer } : {},
               credentials: 'include',
-              redirect: followRedirects ? 'manual' : 'follow',
+              // **一律 follow。** `manual` 在浏览器里给的是 opaqueredirect：
+              // status 0、url 空、header 列表全空，读不到 Location，跟不了。
+              // 见文件开头。
+              redirect: 'follow',
             },
             { timeoutMs: this._timeoutMs, externalSignal: this._signal },
           ),

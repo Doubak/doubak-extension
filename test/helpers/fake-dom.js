@@ -1,0 +1,245 @@
+/**
+ * 一个刚够跑起界面脚本的假 DOM。
+ *
+ * ## 为什么值得写
+ *
+ * `src/ui/*.js` 一直是整个项目里唯一**没有任何执行覆盖**的部分——它们要 DOM，
+ * 而 Node 里没有。于是它们只被 `node --check` 看过一眼，也就是只验了语法。
+ *
+ * 代价是实打实的。最近两个用户可见的故障都出在这里，而且都是语法完全正确的：
+ *
+ * 1. `preflightShown is not defined` —— 改 `renderRoutes` 时，替换区间连带把
+ *    `showPreflight` 和它的变量一起删掉了，只留下引用。
+ * 2. 预检结果写进了 `#routes`，与 `renderRoutes` 抢同一个容器。
+ *
+ * 两个都会在**第一次 `refresh()`** 时暴露。所以这个假 DOM 不追求完整，只追求
+ * 一件事：**让界面脚本真的跑起来，并把 refresh 走一遍。**
+ *
+ * ## 刻意不做的
+ *
+ * 不实现布局、样式、事件冒泡、真正的选择器引擎。那些是浏览器的事，在这里做只会
+ * 得到一个假的确信。`querySelectorAll` 只认界面代码实际用到的那几种形状——多认
+ * 一种就多一处「测试里能过、浏览器里不行」的可能。
+ *
+ * DOM 元素的 id 从对应的 HTML 里**真的解析出来**：脚本里 `$('不存在的 id')` 会
+ * 拿到 `null` 然后立刻炸，而那正是要抓的一类 bug。
+ */
+
+import { readFile } from 'node:fs/promises';
+
+class FakeElement {
+  /** @param {string} tag */
+  constructor(tag) {
+    this.tagName = tag.toUpperCase();
+    this.children = [];
+    this.dataset = {};
+    this.style = { cssText: '', setProperty() {} };
+    this.className = '';
+    this._text = '';
+    this.hidden = false;
+    this.disabled = false;
+    this.onclick = null;
+    this.onchange = null;
+    this.attributes = {};
+    this.listeners = {};
+    // 用一个捕获的局部变量，不要 `this._el`：箭头函数不重绑 `this`，所以那样
+    // 写出来的 `this` 是元素本身，而元素上并没有 `_el`。
+    const self = this;
+    this.classList = {
+      add: (c) => { self.className = `${self.className} ${c}`.trim(); },
+      remove: (c) => {
+        self.className = self.className.split(/\s+/).filter((x) => x && x !== c).join(' ');
+      },
+      contains: (c) => self.className.split(/\s+/).includes(c),
+    };
+  }
+
+  get textContent() {
+    return this._text || this.children.map((c) => c.textContent).join('');
+  }
+
+  set textContent(v) {
+    this._text = String(v);
+    this.children = [];
+  }
+
+  append(...nodes) {
+    for (const n of nodes) this.children.push(n);
+  }
+
+  appendChild(n) {
+    this.children.push(n);
+    return n;
+  }
+
+  replaceChildren(...nodes) {
+    this._text = '';
+    this.children = nodes;
+  }
+
+  remove() {
+    this._removed = true;
+  }
+
+  setAttribute(k, v) {
+    this.attributes[k] = String(v);
+  }
+
+  getAttribute(k) {
+    return this.attributes[k] ?? null;
+  }
+
+  addEventListener(type, fn) {
+    (this.listeners[type] ??= []).push(fn);
+  }
+
+  /** 只支持界面代码实际用到的形状。见文件开头。 */
+  querySelectorAll(sel) {
+    const out = [];
+    const walk = (el) => {
+      for (const c of el.children ?? []) {
+        if (matches(c, sel)) out.push(c);
+        walk(c);
+      }
+    };
+    walk(this);
+    return out;
+  }
+
+  querySelector(sel) {
+    return this.querySelectorAll(sel)[0] ?? null;
+  }
+
+  closest(sel) {
+    return matches(this, sel) ? this : null;
+  }
+
+  /** 触发一个已注册的监听器。测试用来模拟点击。 */
+  dispatch(type, event = {}) {
+    for (const fn of this.listeners[type] ?? []) fn(event);
+  }
+}
+
+/** @param {FakeElement} el @param {string} sel */
+function matches(el, sel) {
+  const attr = /^(\w+)\[([\w-]+)\]$/.exec(sel);
+  if (attr) {
+    const key = attr[2].replace(/^data-/, '');
+    return el.tagName === attr[1].toUpperCase() && el.dataset[key] !== undefined;
+  }
+  return el.tagName === sel.toUpperCase();
+}
+
+class FakeTextNode {
+  constructor(text) {
+    this._text = String(text);
+    this.children = [];
+  }
+  get textContent() {
+    return this._text;
+  }
+}
+
+/**
+ * 装好一套假的浏览器全局，返回收拾现场的函数。
+ *
+ * @param {object} opts
+ * @param {string} opts.html  对应的 HTML，用来抽出真实存在的 id
+ * @param {(msg: object) => any} [opts.onMessage]  扮演 service worker
+ * @param {object} [opts.extra]  额外的全局
+ */
+export async function installFakeDom({ html, onMessage = () => ({ ok: true }), extra = {} }) {
+  const ids = [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
+
+  /** @type {Map<string, FakeElement>} */
+  const byId = new Map();
+  for (const id of ids) {
+    // 标签名尽量取对：`renderRoutes` 会往 `#routes` 里放 <table>，而
+    // `querySelector('table')` 得找得到它。
+    const el = new FakeElement('div');
+    el.id = id;
+    byId.set(id, el);
+  }
+
+  const saved = {};
+  /**
+   * 有些全局（`navigator`）在 Node 里是只有 getter 的存取器属性，直接赋值会抛。
+   * 所以走 `defineProperty`，并把原本的描述符原样收好以便还原。
+   */
+  const set = (k, v) => {
+    saved[k] = Object.getOwnPropertyDescriptor(globalThis, k) ?? null;
+    Object.defineProperty(globalThis, k, {
+      value: v, writable: true, configurable: true, enumerable: true,
+    });
+  };
+
+  const document = {
+    getElementById: (id) => byId.get(id) ?? null,
+    createElement: (tag) => new FakeElement(tag),
+    createTextNode: (t) => new FakeTextNode(t),
+    hidden: false,
+  };
+
+  /** @type {object[]} */
+  const sent = [];
+  const chrome = {
+    runtime: {
+      sendMessage: (msg, cb) => {
+        sent.push(msg);
+        const r = onMessage(msg);
+        // 界面用的是回调式；没有回调就当 promise 式。
+        if (typeof cb === 'function') {
+          Promise.resolve(r).then(cb);
+          return undefined;
+        }
+        return Promise.resolve(r);
+      },
+      getURL: (p) => `chrome-extension://fake/${p}`,
+      onMessage: { addListener: () => {} },
+      lastError: undefined,
+    },
+    tabs: { create: async () => {} },
+  };
+
+  set('document', document);
+  set('chrome', chrome);
+  set('window', { showDirectoryPicker: undefined, ...(extra.window ?? {}) });
+  set('navigator', {
+    storage: { estimate: async () => ({ usage: 0, quota: 100e9 }) },
+    ...(extra.navigator ?? {}),
+  });
+  set('Worker', class { constructor() { this.postMessage = () => {}; } addEventListener() {} });
+  set('alert', () => {});
+  set('confirm', () => false);
+  // 界面会起一个 2 秒轮询。测试里不让它自己跑（那会让断言与时间赛跑），
+  // 但把回调收下来——「第二次刷新」正是要靠它手动触发。
+  /** @type {Function[]} */
+  const timers = [];
+  set('setInterval', (fn) => {
+    timers.push(fn);
+    return timers.length;
+  });
+
+  return {
+    byId,
+    sent,
+    document,
+    chrome,
+    /** 手动跑一次界面的轮询回调，等它落定。 */
+    async tick() {
+      for (const fn of timers) await fn();
+      await new Promise((r) => setTimeout(r, 5));
+    },
+    restore() {
+      for (const [k, desc] of Object.entries(saved)) {
+        if (desc) Object.defineProperty(globalThis, k, desc);
+        else delete globalThis[k];
+      }
+    },
+  };
+}
+
+/** @param {string} rel 相对仓库根 */
+export function readRepoFile(rel) {
+  return readFile(new URL(`../../${rel}`, import.meta.url), 'utf-8');
+}
