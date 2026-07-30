@@ -244,7 +244,7 @@ async function runDryRun(scenario) {
  * service worker 发来的命令。
  *
  * 只认 `target === TARGET` 的消息，其余一概不理——`chrome.runtime.sendMessage`
- * 是广播式的，popup、面板、offscreen 都会收到同一条。不加这个判别，三方会互相
+ * 是广播式的，面板、自检页、offscreen 都会收到同一条。不加这个判别，三方会互相
  * 抢答，而先答的那个赢。
  */
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -275,7 +275,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         case 'resume': {
           await lock.run('恢复抓取', async () => {
             const r = getRunner();
-            if (r.active) return; // 已经在跑了，恢复是幂等的
+            if (r.active) {
+              // 已经在内存里，但**可能停着**（用户点过暂停）。交给 runner 去判断：
+              // 停着就清掉停机状态并把等待人工的条目放回队列；本来就在跑就是空操作。
+              //
+              // 早先这里 `if (r.active) return` 直接跳过，于是「继续」什么也没做。
+              await r.resume(null);
+              return;
+            }
             // **自己读档案里的 checkpoint。** service worker 读不了 OPFS，它手上
             // 只有一份三个字段的调度摘要——拿那个去 resume 会丢掉游标与 frontier。
             const cp = await getRunStore().loadCheckpoint();

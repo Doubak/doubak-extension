@@ -244,7 +244,21 @@ export class CrawlRunner {
    * @param {string} [opts.username] 不给则用指针里记下的
    */
   async resume(cp, { username: overrideUser } = {}) {
-    if (this._run) throw new Error('已有抓取在进行中');
+    // **已经在内存里、只是停着** —— 这是「用户点了暂停又点继续」的情形。
+    //
+    // 早先这里直接抛（或被调用方以 `if (active) return` 跳过），于是「继续」什么也
+    // 没做：frontier 还停着，下一批立刻返回 `stoppedBy: 'user_paused'`，上层看到停机
+    // 原因又弹一次「需要你处理」。用户点继续，得到的是同一条通知。
+    //
+    // `active` 是「这次抓取还在内存里」，不是「正在发请求」——同一个混淆在界面上也
+    // 咬过一次（docs/ui.md §4.4）。
+    if (this._run) {
+      const { wasStopped, resumed } = this._run.frontier.clearStop();
+      if (!wasStopped) return { bundleId: this._run.bundleId, alreadyRunning: true };
+      await this._saveCheckpoint(CRASH_SENTINEL_REASON);
+      this._emit({ type: 'resumed', bundleId: this._run.bundleId, requeued: resumed });
+      return { bundleId: this._run.bundleId, requeued: resumed };
+    }
 
     const pointer = await this._runStore.getCurrentRun();
     if (!pointer?.dir) throw new Error('没有可恢复的抓取');
@@ -493,6 +507,14 @@ export class CrawlRunner {
       active: true,
       stopped: frontier.stopped,
       stoppedBy: frontier.stopped ? frontier.stopReason : null,
+      // **正在抓哪一页。** 只显示「档案 xxx · 间隔 1 秒」的话，界面在几小时里几乎
+      // 一动不动——看不出它到底在动还是卡住了。
+      //
+      // 两批之间没有 in_flight 条目，那时候退回「刚抓完的那一页」。少了这个退路，
+      // 这一行会时有时无地闪——而「进度区每几秒闪一下」正是被报过来的老问题。
+      // `currentActive` 让界面说对话：「正在抓」和「刚抓完」不是一回事。
+      current: frontier.snapshot().find((it) => it.state === 'in_flight')?.url ?? loop.lastUrl ?? null,
+      currentActive: frontier.snapshot().some((it) => it.state === 'in_flight'),
       // 抓不下来的条目。界面要能列出来，并区分「只能重试」与「可以就这样收尾」。
       failures: frontier.failedItems().map((it) => ({
         url: it.url,

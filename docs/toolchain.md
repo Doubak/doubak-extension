@@ -94,7 +94,7 @@ src/
 ├── bundle/     bundle 写入器/读取器/导出器：段轮转、落盘顺序、崩溃恢复
 ├── crawl/      抓取：frontier、分类器、路线、节奏、会话、编排
 ├── offscreen/  抓取真正跑的地方（见下）
-├── ui/         popup 与完整面板
+├── ui/         完整面板（唯一的界面；popup 已拆，见 docs/ui.md §1.1）
 └── background.js   service worker 入口 —— **只调度，不碰数据**
 test/           与 src 平行，node --test 自动发现 *.test.js
 selftest/       浏览器里才能跑的那部分（OPFS、IndexedDB、RPC 契约）

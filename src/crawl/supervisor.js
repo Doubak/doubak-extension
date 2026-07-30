@@ -111,6 +111,35 @@ export class Supervisor {
     this._running = false;
   }
 
+  /**
+   * 用户点了「继续」：把停机原因**改回崩溃哨兵**。
+   *
+   * 少了这一步会有两个后果，都被报上来过：
+   *
+   * 1. **通知每 30 秒再弹一次。** 心跳唯一的判据就是 `pause_reason`。它还写着
+   *    `user_paused`（`autoResume: false`、`userVisible: true`），于是每一次心跳都
+   *    判定「不恢复」并再弹一条「需要你处理：你手动暂停了抓取」——而用户刚刚点的
+   *    正是继续。
+   * 2. **worker 一被杀就再也不回来了。** 心跳会认定用户不想跑，不再自恢复。
+   *
+   * 改回哨兵是对的：从这一刻起，「醒来时原因还是它」的含义又变回了「我们没来得及
+   * 改写它，也就是崩了」。
+   *
+   * @param {object} [extra]
+   */
+  async resumeRun(extra = {}) {
+    const cp = await this._store.loadCheckpoint();
+    if (!cp) return false;
+    await this._store.saveCheckpoint({
+      ...cp,
+      ...extra,
+      pause_reason: CRASH_SENTINEL_REASON,
+      paused_at: new Date(this._now()).toISOString(),
+    });
+    await this._ensureHeartbeat();
+    return true;
+  }
+
   /** 抓取干净地结束了：清掉 checkpoint 并停掉心跳。 */
   async finishRun() {
     await this._store.clearCheckpoint();
@@ -148,12 +177,25 @@ export class Supervisor {
     }
 
     if (this._running) {
-      // 已经在跑了。worker 被反复唤醒时不该重复开工。
+      // **有一段推进正在飞**，不要再开一段。worker 会被反复唤醒（心跳、启动检查、
+      // 界面命令），两段并行推进会让同一个 frontier 被两个循环消费。
       return { acted: false, decision };
     }
 
     this._running = true;
-    await this._hooks.onResume();
+    try {
+      await this._hooks.onResume();
+    } finally {
+      // **必须在 finally 里清。**
+      //
+      // 早先只有 `pauseRun()` / `finishRun()` 会把它清掉——而一段推进的**正常**结局
+      // 是「预算用完了，还没抓完」，那两个都不会被调用。于是 `_running` 永远是 true，
+      // 此后每一次心跳都直接返回「已经在跑了」，**抓取就此停住**。
+      //
+      // 真实日志里的样子：一次「推进结果 …captured:25…」，然后连续十几次
+      // 「心跳 → 未恢复」。抓取只在 service worker 被杀、内存清零之后才会再走一段。
+      this._running = false;
+    }
     return { acted: true, decision };
   }
 

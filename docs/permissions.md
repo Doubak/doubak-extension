@@ -86,7 +86,7 @@
 
 **offscreen document 虽然是扩展页面，可用的扩展 API 却只有一小部分。**
 
-| API | service worker | offscreen | 窗口（面板/popup） |
+| API | service worker | offscreen | 窗口（面板、自检页） |
 |---|---|---|---|
 | `chrome.runtime`（消息、getURL） | ✓ | ✓ | ✓ |
 | `chrome.storage` | ✓ | **✗** | ✓ |

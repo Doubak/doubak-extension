@@ -402,6 +402,27 @@ export class Frontier {
   }
 
   /**
+   * 解除停机状态。
+   *
+   * `stop()` 之后 frontier 就不再交出任何条目——那是对的（暂停、风控、掉登录都该立刻
+   * 停住）。但**没有任何地方能把它清回去**，于是「继续」按钮在 runner 还活着的情况下
+   * 什么也做不了：`run()` 立刻返回 `stoppedBy: 'user_paused'`，上层看到停机原因又弹一次
+   * 「需要你处理」。用户点继续，得到的是同一条通知。
+   *
+   * @param {object} [opts]
+   * @param {boolean} [opts.resumeHuman]  同时把 `awaiting_human` 的条目放回队列。
+   *   默认 true——会走到「继续」的路径本来就意味着人已经处理过了。
+   * @returns {{wasStopped: boolean, resumed: number}}
+   */
+  clearStop({ resumeHuman = true } = {}) {
+    const wasStopped = this._stopped;
+    this._stopped = false;
+    this._stopReason = null;
+    const resumed = resumeHuman ? this.resumeAfterHuman() : 0;
+    return { wasStopped, resumed };
+  }
+
+  /**
    * 人工处理完毕，把等待中的条目放回队列。
    *
    * 调用方**必须**先用金丝雀确认风控已解除，并降速之后再恢复。

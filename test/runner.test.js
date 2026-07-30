@@ -7,6 +7,7 @@ import { RunStore } from '../src/crawl/run-store.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { Frontier } from '../src/crawl/frontier.js';
+import { CRASH_SENTINEL_REASON } from '../src/crawl/resume-policy.js';
 import { buildRoutes } from '../src/crawl/routes.js';
 import { indexFilename } from '../src/core/ids.js';
 
@@ -233,6 +234,31 @@ describe('进度快照供界面读取', () => {
     assert.ok(!('percent' in bc), '不提供百分比');
   });
 
+  test('报出正在抓的那一页 —— 界面上除此之外几小时不变', async () => {
+    const { runner } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), { batchSize: 50 });
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+
+    const s = runner.status();
+    // 两批之间没有 in_flight 条目，这时候退回「刚抓完的那一页」——少了这个退路，
+    // 界面上那一行会时有时无地闪。
+    assert.ok(s.current, '要能说出抓到哪儿了');
+    assert.match(s.current, /^https:\/\/www\.douban\.com\//);
+    assert.equal(s.currentActive, false, '不在飞就别说「正在抓」');
+  });
+
+  test('抓取事件里带 URL —— 日志里只有 routeKey 的话，事后回答不了「停在哪一页」', async () => {
+    const { runner, events } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), {
+      batchSize: 50,
+    });
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+
+    const caps = events.filter((e) => e.type === 'capture');
+    assert.ok(caps.length > 0);
+    for (const c of caps) assert.match(c.url ?? '', /^https:\/\//, 'capture 事件必须带 url');
+  });
+
   test('没有进行中的抓取时报 active:false', () => {
     const { runner } = harness(() => PROFILE);
     assert.deepEqual(runner.status(), { active: false });
@@ -244,6 +270,55 @@ describe('进度快照供界面读取', () => {
     const s = runner.status();
     assert.ok(s.intervalMs > 0);
     assert.equal(s.backoffLevel, 0);
+  });
+});
+
+describe('暂停 → 继续', () => {
+  test('继续之后真的能接着抓 —— 这是个报上来的 bug', async () => {
+    // 症状：点暂停，再点继续，弹出来的是一条「需要你处理：user_paused」的通知。
+    //
+    // 两处叠加：① `resume()` 见到 `active` 就当成「已经在跑了」直接返回；
+    // ② frontier 还停着，于是下一批立刻又返回同一个停机原因，上层照着它再弹一次。
+    // 用户点继续，得到的是同一条通知，永远出不去。
+    const { runner } = harness(broadcastOnly([bcPage(20, 0), bcPage(20, 20), bcPage(0)]), {
+      batchSize: 2,
+    });
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+
+    await runner.pause('user_paused');
+    const stopped = await runner.runBatch();
+    assert.equal(stopped.stoppedBy, 'user_paused', '暂停之后确实不再抓');
+
+    const r = await runner.resume(null);
+    assert.equal(r.alreadyRunning, undefined, '不该被当成「已经在跑了」跳过');
+
+    const after = await runner.runBatch();
+    assert.equal(after.stoppedBy ?? null, null, '继续之后不该还报着同一个停机原因');
+    assert.ok(after.captured > 0, '继续之后必须真的抓到东西');
+  });
+
+  test('本来就在跑的时候继续 → 报 alreadyRunning，不重开一场', async () => {
+    const { runner } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), { batchSize: 50 });
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+
+    const r = await runner.resume(null);
+    assert.equal(r.alreadyRunning, true);
+  });
+
+  test('继续时重写崩溃哨兵 —— 否则心跳会拿旧的 user_paused 拦住自恢复', async () => {
+    // checkpoint 里的 pause_reason 是心跳唯一的判据。停在 user_paused 上的话，
+    // worker 被杀之后心跳会认定「用户不想跑」，再也不来了。
+    const { runner, runStore } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), {
+      batchSize: 2,
+    });
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+    await runner.pause('user_paused');
+    assert.equal((await runStore.loadCheckpoint()).pause_reason, 'user_paused');
+
+    await runner.resume(null);
+    assert.equal((await runStore.loadCheckpoint()).pause_reason, CRASH_SENTINEL_REASON);
   });
 });
 

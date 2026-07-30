@@ -55,7 +55,12 @@ const source = await allSource();
 const PERMISSION_API = {
   storage: /chrome[?.]*\.storage\b/,
   alarms: /chrome[?.]*\.alarms\b/,
-  tabs: /chrome[?.]*\.tabs\.(query|get|update|remove|captureVisibleTab|sendMessage)\b/,
+  // `tabs` 权限管的是**读**，不是写：它只决定 `tabs.Tab` 上的 url / pendingUrl /
+  // title / favIconUrl 会不会被填上。导航一个标签页（`tabs.update(id, {active})`）、
+  // 开一个标签页（`tabs.create`）都**不需要**它——见下面那条「没有 tabs 权限」。
+  //
+  // 所以这里只列真的会拿到 Tab 对象、或者按 url 过滤的那几个。
+  tabs: /chrome[?.]*\.tabs\.(query|get|getCurrent|captureVisibleTab)\b/,
   notifications: /chrome[?.]*\.notifications\b/,
   offscreen: /chrome[?.]*\.offscreen\b/,
   declarativeNetRequest: /chrome[?.]*\.declarativeNetRequest\b/,
@@ -86,11 +91,21 @@ describe('manifest 权限', () => {
   });
 
   test('没有 tabs 权限：它会换来一句「读取你的浏览历史」', () => {
-    // `chrome.tabs.create({url})` **不需要** tabs 权限——那条权限只管
-    // url/title/favIconUrl 这些敏感字段。而它换来的安装警告是「读取你的浏览
-    // 历史」，对一个主打「数据不离开本地」的扩展是致命的观感问题。
+    // `chrome.tabs.create({url})` 与 `chrome.tabs.update(id, {active: true})`
+    // **都不需要** tabs 权限——那条权限只管 url/title/favIconUrl 这些敏感字段
+    // 会不会被填上。而它换来的安装警告是「读取你的浏览历史」，对一个主打
+    // 「数据不离开本地」的扩展是致命的观感问题。
     assert.equal(manifest.permissions.includes('tabs'), false);
-    // 反过来也钉一下：真要读 tab 的敏感字段了，上面那条双向核对会红。
+  });
+
+  test('找已有面板走 runtime.getContexts，不走 tabs.query', () => {
+    // 两条路都能找到「面板是不是已经开着」，但 `tabs.query({url})` 要 tabs 权限
+    // （或者对那个 URL 的 host 权限），而 `runtime.getContexts()` 只看得见本扩展
+    // 自己的页面，**一个权限都不要**。
+    //
+    // 为了少开一个重复标签页去多要一句「读取你的浏览历史」，是笔亏本买卖。
+    assert.match(source, /runtime[?.]*\.getContexts/);
+    assert.equal(/chrome[?.]*\.tabs\.query/.test(source), false);
   });
 
   test('没有 web_accessible_resources：那会把扩展 ID 泄给任意网站', () => {

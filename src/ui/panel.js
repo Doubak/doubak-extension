@@ -1,8 +1,9 @@
 /**
  * 完整面板（docs/ui.md 的 U2/U4/U5）。
  *
- * popup 只够「瞄一眼」；长任务的观察、覆盖率对账、档案预览都在这里——popup
- * 一失焦就关，放不下这些。
+ * **这是唯一的界面。** 曾经还有一个 popup 负责「瞄一眼」，但它一失焦就关，
+ * 恰好与「盯着一个跑几小时的任务」相反，日志、覆盖率、档案预览也一个都放不下。
+ * 拆掉了——点工具栏图标直接开这一页（docs/ui.md §1.1）。
  *
  * ## 三条约束
  *
@@ -239,8 +240,13 @@ async function refresh() {
       return;
     }
 
+    // 正在抓哪一页要写出来：只有档案编号与间隔的话，界面在几小时里几乎一动不动，
+    // 看不出它到底在动还是卡住了。URL 太长，去掉协议头。
+    const where = r.current
+      ? `\n${r.currentActive ? '正在抓' : '刚抓完'} ${r.current.replace(/^https?:\/\//, '')}`
+      : '';
     setState('run', '正在抓取', `档案 ${r.bundleId} · 当前间隔 ${(r.intervalMs / 1000).toFixed(1)} 秒` +
-      (r.backoffLevel ? `（已降速 ${r.backoffLevel} 级）` : ''));
+      (r.backoffLevel ? `（已降速 ${r.backoffLevel} 级）` : '') + where);
     renderFailures(r.failures ?? []);
     setActions([['暂停', async () => {
       // 立刻给反馈。一批最长 22 秒，期间不给任何回应的话按钮看起来就是坏的。
@@ -1209,11 +1215,11 @@ function renderLog() {
 
   if (logRows.length === 0) {
     el.className = 'muted';
-    el.textContent = '还没有事件。这里只记重试、停机、错误这类——正常抓完的页面在档案的 index 里。';
+    el.textContent = '还没有事件。这里记抓过的 URL（最近 200 条）以及重试、停机、错误这类事件（最近 500 条）——完整的抓取记录在档案的 index.ndjson 里。';
   } else {
     for (const r of logRows) {
       const d = document.createElement('div');
-      const bits = [r.at?.slice(0, 19).replace('T', ' '), r.type, r.routeKey, r.reason, r.url, r.message];
+      const bits = [r.at?.slice(0, 19).replace('T', ' '), r.type, r.routeKey, r.verdict, r.reason, r.url, r.message];
       d.textContent = bits.filter(Boolean).join('  ·  ');
       el.append(d);
     }

@@ -41,6 +41,8 @@
     .good { background: #10361c; color: #a8e5b8; }
   }
   .card b { display: block; margin-bottom: 3px; }
+  /* 状态卡片里要换行显示正在抓的 URL；URL 很长，允许在任意处断开 */
+  .card { white-space: pre-wrap; word-break: break-all; }
 
   table { border-collapse: collapse; width: 100%; font-size: 13px; margin-bottom: 8px; }
   th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); }

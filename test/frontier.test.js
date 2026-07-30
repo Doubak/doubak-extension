@@ -161,6 +161,65 @@ describe('停机', () => {
   });
 });
 
+describe('clearStop：「继续」这个按钮的落点', () => {
+  test('停机之后能重新产出 —— 否则「继续」就是个假按钮', () => {
+    // 真实症状：用户点暂停，再点继续，得到的是一条「需要你处理：user_paused」的通知。
+    // 因为 frontier 还停着，下一批立刻又返回同一个停机原因。
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a' }));
+    f.stop('user_paused');
+    assert.equal(f.next(), null);
+
+    const r = f.clearStop();
+    assert.equal(r.wasStopped, true);
+    assert.equal(f.stopped, false);
+    assert.equal(f.stopReason, null, '原因也要清 —— 留着它下次会被当成还停着');
+    assert.ok(f.next(), '继续之后必须真的能继续');
+  });
+
+  test('顺手把等人处理的条目放回队列', () => {
+    // 「继续」的语义就是「我处理完了」。留在 awaiting_human 里的话，那条路线
+    // 从此永久堵死——而 awaiting_human 是**连带阻塞**整条路线的。
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a' }));
+    f.enqueue(item({ urlKey: 'b' }));
+    f.settle(f.next(), 'challenge');
+    f.stop('user_paused');
+
+    const r = f.clearStop();
+    assert.equal(r.resumed, 1);
+    assert.equal(f.counts().awaiting_human, 0);
+  });
+
+  test('可以只清停机、不动等人处理的条目', () => {
+    // 崩溃恢复走的是这条：验证码还没解决，不该假装解决了。
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a' }));
+    f.enqueue(item({ urlKey: 'b' }));
+    f.settle(f.next(), 'challenge');
+    f.stop('user_paused');
+
+    const r = f.clearStop({ resumeHuman: false });
+    assert.equal(r.resumed, 0);
+    assert.equal(f.counts().awaiting_human, 1);
+  });
+
+  test('本来就没停 → wasStopped 为 false，调用方据此区分「已经在跑了」', () => {
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a' }));
+    const r = f.clearStop();
+    assert.equal(r.wasStopped, false);
+  });
+
+  test('清完之后能重新入队 —— 停机期间 enqueue 是被拒的', () => {
+    const f = new Frontier();
+    f.stop('user_paused');
+    assert.equal(f.enqueue(item({ urlKey: 'x' })), false);
+    f.clearStop();
+    assert.equal(f.enqueue(item({ urlKey: 'x' })), true);
+  });
+});
+
 describe('去重', () => {
   test('同一个 url_key 不重复入队', () => {
     const f = new Frontier();

@@ -51,7 +51,9 @@ import { readLog, clearLog } from './crawl/event-log.js';
 import { preflightStorage } from './storage/quota.js';
 import { exportedKey } from './storage/storage-usage.js';
 import { ensureOffscreen, withOffscreen, serializeScope } from './offscreen/host.js';
-import { notifyNeedsAction, notifyDone, clearAttention, wireNotificationClicks } from './ui/notify.js';
+import {
+  notifyNeedsAction, notifyDone, clearAttention, wireNotificationClicks, openPanel,
+} from './ui/notify.js';
 
 // TODO(debug): 开发期日志。发布前把 debugLog 与所有调用一起删掉。
 const DEBUG = true;
@@ -164,6 +166,24 @@ async function drive() {
 }
 
 wireNotificationClicks();
+
+/**
+ * 点工具栏图标 → 开面板。
+ *
+ * 这里原来挂的是一个 popup：状态、开始/暂停，外加一个「完整面板」按钮。它是个多余的
+ * 中间层——**真正要看的东西一个都放不下**（日志、覆盖率、档案预览、失败页面），
+ * 而且 popup 一失焦就关，长任务根本没法在里面盯。实际用法一直是「点图标、再点一下
+ * 进面板」，那就直接去面板。
+ *
+ * 注意：只有在 manifest 里**没有** `default_popup` 时 `onClicked` 才会触发。
+ */
+globalThis.chrome?.action?.onClicked?.addListener(async () => {
+  try {
+    await openPanel();
+  } catch (e) {
+    debugLog('打开面板失败', e);
+  }
+});
 
 /** 心跳。这是自恢复的主路径。 */
 globalThis.chrome?.alarms?.onAlarm?.addListener(async (alarm) => {
@@ -298,6 +318,9 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           if (!cp) throw new Error('没有可恢复的抓取');
           // 全本 checkpoint 在档案里，offscreen 自己读（见上面 onResume 的说明）。
           await withOffscreen({ op: 'resume' });
+          // **调度镜像也要改回哨兵。** 它还写着 user_paused 的话，心跳每 30 秒就会
+          // 再弹一条「需要你处理：你手动暂停了抓取」——而用户刚点的正是继续。
+          await getSupervisor().resumeRun();
           await clearAttention({ kv: getKv() });
           void drive();
           sendResponse({ ok: true });

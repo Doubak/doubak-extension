@@ -11,38 +11,55 @@
  *
  * 而这段时间排查问题时，最想要的恰好是「上次那次抓取到底在哪一步停下的」。
  *
- * ## 只记 index.ndjson 里没有的东西
+ * ## 两个环，分开限额
  *
- * **每一次成功的捕获已经被记录了**——那就是 `index.ndjson`，而且它写在档案里、每页落盘、
- * 带着判定与偏移量。日志再抄一遍只会得到两份可能不一致的记录，而且把真正稀少的信号
- * （重试、停机、门控放开、错误）淹掉。
+ * | 环 | 记什么 | 上限 |
+ * |---|---|---|
+ * | 事件 | 重试、停机、错误、门控、暂停——**稀疏且要紧** | 500 |
+ * | 抓取 | 抓了哪个 URL、判定是什么——**每页一条** | 200 |
  *
- * 所以这里**不记 capture 事件**。剩下的都是稀疏事件，一次抓取里也就几十条，写起来毫无
- * 压力。
+ * 分开是因为它们的密度差着两个数量级。一次全量抓取有几千页，混在一个 500 条的环里，
+ * **翻页记录会把真正要紧的信号全部挤出去**——而那几条（为什么停的、哪一页反复失败）
+ * 正是事后唯一能查的东西。
  *
- * ## 有上限，丢最老的
+ * 抓取那一环的上限更小也是刻意的：它回答的是「刚才在干什么」，那是个**近期**问题。
+ * 完整的抓取记录在 `index.ndjson` 里，写在档案中、每页落盘、带着判定与偏移量——那才是
+ * 权威版本，这里只是给活人看的近期窗口。
  *
- * 环形缓冲，默认 500 条。日志是诊断用的，不是档案——它没有「不可再生」的性质，所以宁可
- * 丢最老的也不要无界增长。真正不可再生的东西都在 WARC 里。
+ * ## 都是环形，丢最老的
+ *
+ * 日志是诊断用的，不是档案——它没有「不可再生」的性质，所以宁可丢最老的也不要无界增长。
+ * 真正不可再生的东西都在 WARC 里。
  */
 
-/** 日志在 KV 里的键。 */
+/** 稀疏事件（重试、停机、错误）在 KV 里的键。 */
 export const LOG_KEY = 'doubak.eventLog';
+/** 抓取记录（每页一条）的键。与上面**分开限额**，见文件开头。 */
+export const FETCH_LOG_KEY = 'doubak.fetchLog';
 
-/** 最多留多少条。 */
+/** 稀疏事件最多留多少条。 */
 export const MAX_ENTRIES = 500;
+/** 抓取记录最多留多少条。它回答的是「刚才在干什么」，是个近期问题。 */
+export const MAX_FETCH_ENTRIES = 200;
 
 /**
- * 不进日志的事件类型。
+ * 每页一条、进抓取环的事件。
  *
- * `capture` —— `index.ndjson` 已经逐条记了，而且更权威（带偏移量与摘要）。
- * `page` —— 每页一条翻页进度，同样是 index 能推导的，而且量大。
+ * `page` 不记：它是翻页进度，与 `capture` 一一对应，记两遍没有意义。
  */
-const SKIP = new Set(['capture', 'page']);
+const FETCH_TYPES = new Set(['capture']);
+
+/** 完全不记的：`page` 与 `capture` 重复。 */
+const SKIP = new Set(['page']);
 
 /** @param {object} e */
 export function shouldLog(e) {
   return Boolean(e?.type) && !SKIP.has(e.type);
+}
+
+/** 这条该进哪个环。 @param {object} e */
+export function isFetchEvent(e) {
+  return FETCH_TYPES.has(e?.type);
 }
 
 /**
@@ -63,6 +80,7 @@ export function formatEntry(e, at) {
     ...(e.url ? { url: String(e.url).slice(0, 300) } : {}),
     // 错误信息要留，但要截断——它是排查的主要线索，也是最容易超长的字段。
     ...(e.message ? { message: String(e.message).slice(0, 500) } : {}),
+    ...(e.verdict ? { verdict: e.verdict } : {}),
     ...(typeof e.count === 'number' ? { count: e.count } : {}),
   };
 }
@@ -76,12 +94,16 @@ export function formatEntry(e, at) {
  * @param {string} [opts.at]
  * @param {number} [opts.max]
  */
-export async function appendEvent(kv, e, { at = new Date().toISOString(), max = MAX_ENTRIES } = {}) {
+export async function appendEvent(kv, e, { at = new Date().toISOString(), max } = {}) {
   if (!shouldLog(e)) return;
-  const prev = /** @type {object[]} */ ((await kv.get(LOG_KEY)) ?? []);
+  const fetchy = isFetchEvent(e);
+  const key = fetchy ? FETCH_LOG_KEY : LOG_KEY;
+  const cap = max ?? (fetchy ? MAX_FETCH_ENTRIES : MAX_ENTRIES);
+
+  const prev = /** @type {object[]} */ ((await kv.get(key)) ?? []);
   const next = [...prev, formatEntry(e, at)];
-  // 从头切，保留最近的 max 条
-  await kv.set(LOG_KEY, next.length > max ? next.slice(next.length - max) : next);
+  // 从头切，保留最近的 cap 条
+  await kv.set(key, next.length > cap ? next.slice(next.length - cap) : next);
 }
 
 /**
@@ -91,13 +113,17 @@ export async function appendEvent(kv, e, { at = new Date().toISOString(), max = 
  * @returns {Promise<object[]>}
  */
 export async function readLog(kv) {
-  const rows = /** @type {object[]} */ ((await kv.get(LOG_KEY)) ?? []);
-  return [...rows].reverse();
+  const events = /** @type {object[]} */ ((await kv.get(LOG_KEY)) ?? []);
+  const fetches = /** @type {object[]} */ ((await kv.get(FETCH_LOG_KEY)) ?? []);
+  // 两个环合并按时间排。分开存是为了不让翻页记录挤掉要紧的事件，但**看的时候是一条
+  // 时间线**——「停在哪一步」这个问题要的正是前后文。
+  return [...events, ...fetches].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 }
 
 /** @param {import('../storage/kv-store.js').KvStore} kv */
 export async function clearLog(kv) {
   await kv.remove(LOG_KEY);
+  await kv.remove(FETCH_LOG_KEY);
 }
 
 /**
@@ -112,7 +138,7 @@ export function formatLogText(rows) {
   const lines = ['豆备抓取日志', `导出时间：${new Date().toISOString()}`, `${rows.length} 条`, ''];
   lines.push('注意：下面含有 URL 与用户名，贴出去之前请自行脱敏。', '');
   for (const r of rows) {
-    const bits = [r.at, r.type, r.routeKey, r.reason, r.url, r.message].filter(Boolean);
+    const bits = [r.at, r.type, r.routeKey, r.verdict, r.reason, r.url, r.message].filter(Boolean);
     lines.push(bits.join('  ·  '));
   }
   return lines.join('\n');

@@ -29,7 +29,7 @@ let cacheBust = 0;
  * 装好假 DOM，加载界面脚本，等它跑完第一轮。
  *
  * @param {object} opts
- * @param {'panel' | 'popup'} opts.which
+ * @param {'panel'} opts.which
  * @param {(msg: object) => any} opts.onMessage
  */
 async function loadUi({ which, onMessage }) {
@@ -221,6 +221,88 @@ describe('面板脚本', () => {
     }
   });
 
+  test('抓取中要写出正在抓的那个 URL', async () => {
+    // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
+    // 看不出它是在动还是卡住了。
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return {
+            ok: true,
+            running: true,
+            runner: {
+              active: true, stopped: false, stoppedBy: null,
+              bundleId: 'b', intervalMs: 1000, backoffLevel: 0,
+              current: 'https://www.douban.com/people/example/statuses?p=7',
+              counts: { done: 5, pending: 3 }, routes: [],
+            },
+          };
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      const s = dom.byId.get('state').textContent;
+      assert.match(s, /douban\.com\/people\/example\/statuses\?p=7/);
+      assert.equal(/https:\/\//.test(s), false, '协议头是噪音，URL 本来就够长了');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('拿不到当前 URL 时不显示「正在抓 null」', async () => {
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return {
+            ok: true,
+            running: true,
+            runner: {
+              active: true, stopped: false, stoppedBy: null,
+              bundleId: 'b', intervalMs: 1000, backoffLevel: 0, current: null,
+              counts: { done: 0, pending: 3 }, routes: [],
+            },
+          };
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      const s = dom.byId.get('state').textContent;
+      assert.equal(/null|undefined|正在抓\s*$/.test(s), false);
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('断点里的停机原因也要翻译 —— 这条以前只有 popup 测过', async () => {
+    // 与上面那条不同的分支：抓取**没在跑**，原因来自持久化的 checkpoint。
+    // 用户重开浏览器后看到的就是这条。
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return {
+            ok: true,
+            running: false,
+            checkpoint: { bundle_id: 'x', pause_reason: 'host_permission_lost' },
+            runner: { active: false },
+          };
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      const s = dom.byId.get('state').textContent;
+      assert.match(s, /权限/);
+      assert.equal(/host_permission_lost/.test(s), false, '界面上不许出现内部标识');
+    } finally {
+      dom.restore();
+    }
+  });
+
   test('删除确认框把要失去的具体东西说出来', async () => {
     // 一句「确定删除吗？」等于什么都没说。确认框必须点明哪一份、多大、导出过没有
     // ——删除不可逆且没有回收站。
@@ -362,53 +444,100 @@ describe('面板脚本', () => {
   });
 });
 
-describe('popup 脚本', () => {
-  test('加载并跑完第一次 refresh，不抛任何异常', async () => {
-    const errors = [];
-    const onRejection = (e) => errors.push(e);
-    process.on('unhandledRejection', onRejection);
+describe('popup 已经拆掉了', () => {
+  // 它是个多余的中间层：真正要看的东西（日志、覆盖率、档案预览、失败页面）一个都放不下，
+  // 而且一失焦就关，长任务没法在里面盯。实际用法一直是「点图标、再点一下进面板」。
+  //
+  // 这组测试防的是「拆了一半」——那比不拆更糟：manifest 里留着 default_popup 的话，
+  // `action.onClicked` **永远不会触发**，于是点图标什么都不会发生。
 
-    const dom = await loadUi({ which: 'popup', onMessage: IDLE });
-    try {
-      assert.deepEqual(errors.map(String), []);
-      assert.match(dom.byId.get('state').textContent, /没有进行中的抓取/);
-      assert.match(dom.byId.get('primary').textContent, /开始抓取/);
-    } finally {
-      process.off('unhandledRejection', onRejection);
-      dom.restore();
-    }
+  test('manifest 里没有 default_popup', async () => {
+    const mf = JSON.parse(await readRepoFile('manifest.json'));
+    assert.equal('default_popup' in (mf.action ?? {}), false,
+      '留着它的话 action.onClicked 不会触发，点图标就没反应了');
+    assert.ok(mf.action?.default_icon, '图标还是要有的');
   });
 
-  test('停机时给出可执行的下一步，不给错误码', async () => {
-    const dom = await loadUi({
-      which: 'popup',
-      onMessage: (msg) => {
-        if (msg.type === 'status') {
-          return {
-            ok: true,
-            running: false,
-            checkpoint: { bundle_id: 'x', pause_reason: 'host_permission_lost' },
-            runner: { active: false },
-          };
-        }
-        return IDLE(msg);
+  test('background 接管了图标点击', async () => {
+    const js = await readRepoFile('src/background.js');
+    assert.match(js, /chrome\?\.action\?\.onClicked/, '没人接图标点击 = 点了没反应');
+    assert.match(js, /openPanel\(\)/);
+  });
+
+  test('源码里不再引用 popup 文件', async () => {
+    for (const f of ['src/background.js', 'src/ui/panel.js', 'src/ui/notify.js']) {
+      const js = await readRepoFile(f);
+      assert.equal(/popup\.(html|js)/.test(js), false, `${f} 还指向已删除的 popup`);
+    }
+  });
+});
+
+describe('openPanel：点图标和点通知共同的落点', () => {
+  test('已经开着就切过去，不再开一个', async () => {
+    // 一次抓取里这个会被点很多次。每次都 tabs.create 的话，一个下午能攒出十几个
+    // 同一个页面的标签页——而它们还都在轮询状态。
+    const created = [];
+    const activated = [];
+    const focused = [];
+    const chrome = {
+      runtime: {
+        getURL: (p) => `chrome-extension://abc/${p}`,
+        getContexts: async () => [
+          { contextType: 'TAB', tabId: 7, windowId: 3,
+            documentUrl: 'chrome-extension://abc/src/ui/panel.html#log' },
+        ],
       },
-    });
+      tabs: {
+        create: async (o) => created.push(o.url),
+        update: async (id, o) => activated.push([id, o.active]),
+      },
+      windows: { update: async (id, o) => focused.push([id, o.focused]) },
+    };
+    const prev = globalThis.chrome;
+    globalThis.chrome = chrome;
     try {
-      const t = dom.byId.get('state').textContent;
-      assert.match(t, /权限/);
-      assert.equal(/host_permission_lost/.test(t), false, '界面上不许出现内部标识');
+      const { openPanel } = await import('../src/ui/notify.js');
+      const r = await openPanel();
+      assert.equal(r.created, false);
+      assert.deepEqual(created, [], '不该再开一个');
+      assert.deepEqual(activated, [[7, true]]);
+      assert.deepEqual(focused, [[3, true]], '标签页可能在别的窗口里');
     } finally {
-      dom.restore();
+      globalThis.chrome = prev;
     }
   });
 
-  test('每个 $(id) 都在 HTML 里真的存在', async () => {
-    const js = await readRepoFile('src/ui/popup.js');
-    const html = await readRepoFile('src/ui/popup.html');
-    const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
-    for (const m of js.matchAll(/\$\('([^']+)'\)/g)) {
-      assert.ok(ids.has(m[1]), `popup.js 用了 #${m[1]}，但 popup.html 里没有`);
+  test('没开着就开一个', async () => {
+    const created = [];
+    const prev = globalThis.chrome;
+    globalThis.chrome = {
+      runtime: { getURL: (p) => `chrome-extension://abc/${p}`, getContexts: async () => [] },
+      tabs: { create: async (o) => created.push(o.url) },
+    };
+    try {
+      const { openPanel } = await import('../src/ui/notify.js');
+      const r = await openPanel();
+      assert.equal(r.created, true);
+      assert.deepEqual(created, ['chrome-extension://abc/src/ui/panel.html']);
+    } finally {
+      globalThis.chrome = prev;
+    }
+  });
+
+  test('getContexts 不可用时照样能开 —— 多开一个是小事，打不开是大事', async () => {
+    // getContexts 要 Chrome 116+。
+    const created = [];
+    const prev = globalThis.chrome;
+    globalThis.chrome = {
+      runtime: { getURL: (p) => `chrome-extension://abc/${p}` }, // 没有 getContexts
+      tabs: { create: async (o) => created.push(o.url) },
+    };
+    try {
+      const { openPanel } = await import('../src/ui/notify.js');
+      await openPanel();
+      assert.equal(created.length, 1);
+    } finally {
+      globalThis.chrome = prev;
     }
   });
 });

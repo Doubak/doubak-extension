@@ -198,10 +198,47 @@ export function wireNotificationClicks() {
   const chrome = globalThis.chrome;
   chrome?.notifications?.onClicked?.addListener(async (id) => {
     try {
-      await chrome.tabs.create({ url: chrome.runtime.getURL('src/ui/panel.html') });
+      await openPanel();
       await chrome.notifications.clear(id);
     } catch (e) {
       console.log('[doubak] 打开面板失败', e);
     }
   });
+}
+
+/** 面板页在扩展里的路径。 */
+export const PANEL_URL = 'src/ui/panel.html';
+
+/**
+ * 打开面板——**已经开着就切过去，不再开一个**。
+ *
+ * 这是点图标和点通知共同的落点，一次抓取里会被点很多次。每次都 `tabs.create` 的话，
+ * 一个下午下来会攒出十几个同一个页面的标签页，而它们还都在轮询状态。
+ *
+ * 用 `runtime.getContexts()` 找已有的那个：它只看得见本扩展自己的页面，所以**不需要
+ * `tabs` 权限**（`tabs.query({url})` 就需要了——为了这个去多要一个权限不值得）。
+ *
+ * @returns {Promise<{created: boolean}>}
+ */
+export async function openPanel() {
+  const chrome = globalThis.chrome;
+  const url = chrome.runtime.getURL(PANEL_URL);
+
+  // getContexts 是 Chrome 116+。拿不到就退回「直接开一个」——多开一个标签页是小事，
+  // 打不开面板是大事。
+  try {
+    const ctxs = await chrome.runtime.getContexts?.({ contextTypes: ['TAB'] });
+    const hit = ctxs?.find((c) => c.documentUrl?.startsWith(url));
+    if (hit?.tabId != null) {
+      await chrome.tabs.update(hit.tabId, { active: true });
+      // 标签页可能在另一个窗口里，把那个窗口也提到前面来
+      if (hit.windowId != null) await chrome.windows?.update(hit.windowId, { focused: true });
+      return { created: false };
+    }
+  } catch (e) {
+    console.log('[doubak] 找已有面板失败，直接开一个', e);
+  }
+
+  await chrome.tabs.create({ url });
+  return { created: true };
 }

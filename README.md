@@ -49,7 +49,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 
 ### 界面
 
-点工具栏图标是 popup（状态、开始/暂停），里面的「完整面板」按钮会开一个标签页：
+点工具栏图标直接开面板标签页（已经开着就切过去）：
 
 | 标签 | 内容 |
 |---|---|
@@ -74,7 +74,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 | **offscreen 架构** | ✅ 抓取跑在 offscreen document 里，service worker 只调度 |
 | 生命周期自恢复（心跳、崩溃哨兵） | ✅ |
 | 抓取状态持久化（IndexedDB） | ✅ |
-| popup 与完整面板 | ✅ |
+| 完整面板 | ✅ 唯一的界面；popup 已拆掉（docs/ui.md §1.1） |
 | bundle 读取器与「验一验」 | ✅ |
 | 导出（File System Access）+ 回读校验 | ✅ |
 | 存储管理（列表 / 删除 / 配额） | 🟡 在调试标签里，正式化时移到独立页面 |

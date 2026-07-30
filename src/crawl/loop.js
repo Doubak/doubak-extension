@@ -285,11 +285,18 @@ export class CrawlLoop {
       return 'stop';
     }
     this._lastCapture.set(item.routeKey, written.captureId);
+    // 界面在两批之间没有 in_flight 条目可看，那时候要有个「刚抓完 X」顶上——
+    // 否则那一行会时有时无地闪。
+    this.lastUrl = res.finalUrl ?? res.requestedUrl;
 
     this._emit({
       type: 'capture',
       captureId: written.captureId,
       routeKey: item.routeKey,
+      // **URL 要带上。** 界面上原来只显示「档案 xxx · 间隔 1 秒」，几小时里几乎一动不动，
+      // 看不出它在动还是卡住了；日志里也只有 routeKey，事后没法回答「到底停在哪一页」。
+      // 跟着重定向走完之后的那个才是真正抓到的东西。
+      url: res.finalUrl ?? res.requestedUrl,
       verdict: cls.verdict,
       itemCount: cls.itemCount,
       reasons: cls.reasons,

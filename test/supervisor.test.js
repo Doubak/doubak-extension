@@ -40,7 +40,7 @@ function harness(over = {}) {
     alarms,
     now: over.now ?? (() => Date.parse('2026-07-29T12:00:00Z')),
     hooks: {
-      onResume: async () => resumed.push(true),
+      onResume: over.onResume ?? (async () => { resumed.push(true); }),
       onBlocked: async (d) => blocked.push(d),
     },
   });
@@ -122,20 +122,72 @@ describe('心跳', () => {
 });
 
 describe('tick 必须幂等', () => {
-  test('连续多次唤醒不会重复开工', async () => {
-    // worker 会因为各种事件被反复唤醒，每次都要能安全地跑一遍。
+  test('**并发**唤醒只开工一次', async () => {
+    // 要防的是两段推进同时跑：那会让同一个 frontier 被两个循环消费。
     const store = memStore({
-      bundle_id: 'b1',
-      pause_reason: 'crash',
-      paused_at: '2026-07-29T11:00:00Z',
+      bundle_id: 'b1', pause_reason: 'crash', paused_at: '2026-07-29T11:00:00Z',
+    });
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let calls = 0;
+    const { sup } = harness({
+      store,
+      onResume: async () => {
+        calls += 1;
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 20));
+        inFlight -= 1;
+      },
+    });
+
+    await Promise.all([sup.tick(), sup.tick(), sup.tick()]);
+
+    assert.equal(maxInFlight, 1, '两段推进同时在飞');
+    assert.equal(calls, 1, '并发的那几次应当被挡掉');
+  });
+
+  test('**先后**唤醒每次都要推进一段 —— 否则抓取就停住了', async () => {
+    // 这条曾经是反的：断言「连续三次心跳只开工一次」，而那正是抓取停住的原因。
+    //
+    // `_running` 早先只有 `pauseRun()` / `finishRun()` 会清，而一段推进的**正常**结局
+    // 是「预算用完了，还没抓完」——两个都不会被调用。于是它永远是 true，此后每次心跳
+    // 都直接返回「已经在跑了」。
+    //
+    // 真实日志里的样子：一次「推进结果 …captured:25…」，然后连续十几次「心跳 → 未恢复」。
+    // 抓取只在 service worker 被杀、内存清零之后才会再走一段。
+    const store = memStore({
+      bundle_id: 'b1', pause_reason: 'crash', paused_at: '2026-07-29T11:00:00Z',
     });
     const { sup, resumed } = harness({ store });
 
-    await sup.tick();
-    await sup.tick();
-    await sup.tick();
+    const a = await sup.tick();
+    const b = await sup.tick();
+    const c = await sup.tick();
 
-    assert.equal(resumed.length, 1, '只该开工一次');
+    assert.equal(resumed.length, 3, '每一次心跳都该推进一段');
+    for (const [i, r] of [a, b, c].entries()) {
+      assert.equal(r.acted, true, `第 ${i + 1} 次心跳没有推进`);
+    }
+  });
+
+  test('一段推进抛异常之后，下一次心跳照样能推进', async () => {
+    // 不在 finally 里清的话，一次失败会把抓取永久卡死——而抓取里出错是常态。
+    const store = memStore({
+      bundle_id: 'b1', pause_reason: 'crash', paused_at: '2026-07-29T11:00:00Z',
+    });
+    let calls = 0;
+    const { sup } = harness({
+      store,
+      onResume: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('这一段炸了');
+      },
+    });
+
+    await assert.rejects(() => sup.tick());
+    await sup.tick();
+    assert.equal(calls, 2, '第二次心跳没能推进');
   });
 
   test('没有 checkpoint 时 tick 是空操作', async () => {
@@ -185,6 +237,62 @@ describe('醒来后不一定接着抓', () => {
     assert.equal(r.acted, false);
     assert.equal(resumed.length, 0, '崩溃不能当成绕过退避的后门');
     assert.ok(r.decision.cooldownMs > 0);
+  });
+});
+
+describe('继续：把停机原因改回哨兵', () => {
+  test('心跳不再弹「你手动暂停了抓取」', async () => {
+    // 真实症状：点了继续，通知每 30 秒还是弹一次，写着 `user_paused`。
+    // 心跳唯一的判据就是 pause_reason，没人改它的话它永远说「用户不想跑」。
+    const { sup, store, blocked } = harness();
+    await sup.startRun({ bundle_id: 'b1' });
+    await sup.pauseRun('user_paused');
+
+    await sup.resumeRun();
+    assert.equal(store.peek().pause_reason, 'crash');
+
+    const fresh = harness({ store });
+    await fresh.sup.tick();
+    assert.equal(fresh.blocked.length, 0, '继续之后不该再提示「需要你处理」');
+    assert.equal(blocked.length, 0);
+  });
+
+  test('继续之后 worker 被杀，心跳会自恢复', async () => {
+    // 第二个后果：停在 user_paused 上的话，心跳认定用户不想跑，再也不来了。
+    const { sup, store } = harness();
+    await sup.startRun({ bundle_id: 'b1' });
+    await sup.pauseRun('user_paused');
+    await sup.resumeRun();
+
+    const fresh = harness({ store }); // 内存清零 = worker 被杀
+    const r = await fresh.sup.tick();
+    assert.equal(r.acted, true, '继续之后就该跟正常抓取一样能自恢复');
+  });
+
+  test('继续时把心跳补回来', async () => {
+    // 暂停期间闹钟可能已经没了（浏览器重启、或者上一次是干净收尾）。
+    const store = memStore({
+      bundle_id: 'b1', pause_reason: 'user_paused', paused_at: '2026-07-29T11:00:00Z',
+    });
+    const { sup, alarms } = harness({ store });
+    await sup.resumeRun();
+    assert.ok(await alarms.get(ALARM_NAME), '没有闹钟就再也没人来叫醒了');
+  });
+
+  test('不丢 checkpoint 里的其它字段', async () => {
+    const { sup, store } = harness();
+    await sup.startRun({ bundle_id: 'b1', frontier: [{ url: 'x' }] });
+    await sup.pauseRun('blocked', { rate_state: { backoff_level: 2 } });
+    await sup.resumeRun();
+
+    assert.equal(store.peek().bundle_id, 'b1');
+    assert.deepEqual(store.peek().frontier, [{ url: 'x' }]);
+    assert.equal(store.peek().rate_state.backoff_level, 2, '降速要跟着走 —— 别一继续又回原速');
+  });
+
+  test('没有 checkpoint 时是空操作', async () => {
+    const { sup } = harness();
+    assert.equal(await sup.resumeRun(), false);
   });
 });
 

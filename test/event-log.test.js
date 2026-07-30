@@ -14,16 +14,34 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  appendEvent, readLog, clearLog, shouldLog, formatEntry, formatLogText, LOG_KEY, MAX_ENTRIES,
+  appendEvent, readLog, clearLog, shouldLog, isFetchEvent, formatEntry, formatLogText,
+  LOG_KEY, MAX_ENTRIES, MAX_FETCH_ENTRIES,
 } from '../src/crawl/event-log.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
 
 describe('只记 index.ndjson 里没有的事件', () => {
-  test('capture 与 page 不进日志', () => {
-    // 每一次成功的捕获已经逐条写在 index.ndjson 里了，而且更权威（带偏移量与摘要）。
-    // 抄一遍只会得到两份可能不一致的记录，还把真正稀少的信号淹掉。
-    assert.equal(shouldLog({ type: 'capture', verdict: 'ok' }), false);
+  test('page 不进日志 —— 它跟 capture 一一对应，记两遍没意义', () => {
     assert.equal(shouldLog({ type: 'page', routeKey: 'r' }), false);
+  });
+
+  test('capture 要记，但进的是**另一个**环', () => {
+    // 一次全量抓取有几千页。混在一个 500 条的环里，翻页记录会把真正要紧的信号
+    // （为什么停的、哪一页反复失败）全挤出去——而那几条正是事后唯一能查的东西。
+    assert.equal(shouldLog({ type: 'capture', verdict: 'ok' }), true);
+    assert.equal(isFetchEvent({ type: 'capture' }), true);
+    assert.equal(isFetchEvent({ type: 'retry' }), false);
+  });
+
+  test('抓取环装满了也不动稀疏事件那一环', async () => {
+    // 这是分成两个环的**全部理由**，所以直接测它。
+    const kv = new MemoryKvStore();
+    await appendEvent(kv, { type: 'stopped', reason: 'user_paused' }, { at: '2026-07-30T00:00:00Z' });
+    for (let i = 0; i < MAX_FETCH_ENTRIES + 50; i++) {
+      await appendEvent(kv, { type: 'capture', url: `https://x/${i}` }, { at: '2026-07-30T00:01:00Z' });
+    }
+    const rows = await readLog(kv);
+    assert.ok(rows.some((r) => r.type === 'stopped'), '停机原因被翻页记录挤掉了');
+    assert.equal(rows.filter((r) => r.type === 'capture').length, MAX_FETCH_ENTRIES);
   });
 
   test('重试、停机、错误、门控这些要记', () => {
@@ -85,21 +103,38 @@ describe('存得住、有上限、最新在前', () => {
     // 它没有「不可再生」的性质，所以宁可丢最老的也不要无界增长。真正不可再生的
     // 都在 WARC 里。
     const kv = new MemoryKvStore();
+    // 时间戳要**能按字典序排**（真实的 RFC3339 就是这样）——readLog 现在要合并两个环，
+    // 靠的就是这个。`t0…t11` 那种写法排出来是 t9 > t11。
+    const at = (i) => `2026-07-30T00:00:${String(i).padStart(2, '0')}Z`;
     for (let i = 0; i < 12; i++) {
-      await appendEvent(kv, { type: 'retry', count: i }, { at: `t${i}`, max: 10 });
+      await appendEvent(kv, { type: 'retry', count: i }, { at: at(i), max: 10 });
     }
     const rows = await readLog(kv);
     assert.equal(rows.length, 10);
-    assert.equal(rows[0].at, 't11', '最新的还在');
-    assert.equal(rows.at(-1).at, 't2', '最老的两条被丢了');
+    assert.equal(rows[0].at, at(11), '最新的还在');
+    assert.equal(rows.at(-1).at, at(2), '最老的两条被丢了');
   });
 
   test('默认上限是个合理值', () => {
     assert.ok(MAX_ENTRIES >= 100 && MAX_ENTRIES <= 2000);
+    assert.ok(MAX_FETCH_ENTRIES >= 50 && MAX_FETCH_ENTRIES <= MAX_ENTRIES);
   });
 
-  test('清空', async () => {
+  test('两个环合起来是一条按时间排的时间线', async () => {
+    // 分开存是为了不让翻页记录挤掉要紧的事件，但**看的时候**要的正是前后文：
+    // 「停之前最后抓的是哪一页」这个问题，需要两类记录交错在一起。
     const kv = new MemoryKvStore();
+    await appendEvent(kv, { type: 'capture', url: 'https://a' }, { at: '2026-07-30T00:00:01Z' });
+    await appendEvent(kv, { type: 'retry', routeKey: 'r' }, { at: '2026-07-30T00:00:02Z' });
+    await appendEvent(kv, { type: 'capture', url: 'https://b' }, { at: '2026-07-30T00:00:03Z' });
+    const rows = await readLog(kv);
+    assert.deepEqual(rows.map((r) => r.type), ['capture', 'retry', 'capture']);
+    assert.equal(rows[0].url, 'https://b', '最新在前');
+  });
+
+  test('清空两个环都清 —— 漏一个的话「清空日志」是句假话', async () => {
+    const kv = new MemoryKvStore();
+    await appendEvent(kv, { type: 'capture', url: 'https://a' });
     await appendEvent(kv, { type: 'retry' });
     await clearLog(kv);
     assert.deepEqual(await readLog(kv), []);
