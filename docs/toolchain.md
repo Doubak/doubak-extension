@@ -88,13 +88,42 @@ WARC 写入原本被列为最大的技术未知数（担心 MV3 禁用 `unsafe-e
 ```
 src/
 ├── core/       纯逻辑，不碰任何浏览器专有 API，可直接在 Node 里测
-├── storage/    存储抽象：内存实现（测试）+ OPFS 实现（浏览器）
-├── bundle/     bundle 写入器：段轮转、落盘顺序、崩溃恢复
-└── background.js   service worker 入口
+├── storage/    存储抽象：内存（测试）+ OPFS + IndexedDB + Worker RPC 客户端
+│   ├── opfs-worker.js      只读入口（面板用）
+│   └── opfs-rw-worker.js   读写入口（offscreen 用，唯一能写 OPFS 的地方）
+├── bundle/     bundle 写入器/读取器/导出器：段轮转、落盘顺序、崩溃恢复
+├── crawl/      抓取：frontier、分类器、路线、节奏、会话、编排
+├── offscreen/  抓取真正跑的地方（见下）
+├── ui/         popup 与完整面板
+└── background.js   service worker 入口 —— **只调度，不碰数据**
 test/           与 src 平行，node --test 自动发现 *.test.js
+selftest/       浏览器里才能跑的那部分（OPFS、IndexedDB、RPC 契约）
 ```
 
-**`src/core/` 里的东西一律不许 import 浏览器专有 API。** 这条纪律是为了让最需要正确性的那部分逻辑（标识符、时间、摘要、WARC 字节）能在 Node 里被彻底测试，而不必启动浏览器。碰浏览器的部分集中在 `storage/`，用接口隔开。
+**`src/core/` 里的东西一律不许 import 浏览器专有 API。** 这条纪律是为了让最需要正确性的
+那部分逻辑（标识符、时间、摘要、WARC 字节）能在 Node 里被彻底测试，而不必启动浏览器。
+
+### 三个执行上下文，边界由测试守着
+
+MV3 把代码劈成了几个能力不同的上下文，而**「哪个上下文能做什么」是这个项目踩坑最多的
+一类知识**（详见 `docs/permissions.md` 的对照表）：
+
+| | service worker | offscreen document | 专用 Worker | 窗口 |
+|---|---|---|---|---|
+| `chrome.alarms`（心跳） | ✓ | ✗ | ✗ | ✗ |
+| `chrome.storage` | ✓ | **✗** | ✗ | ✓ |
+| IndexedDB（标准 API） | ✓ | ✓ | ✓ | ✓ |
+| `createSyncAccessHandle()`（OPFS 原地写） | **✗** | **✗** | **✓** | **✗** |
+| `showDirectoryPicker()` | ✗ | ✗ | ✗ | ✓ |
+| 带 cookie 的 `fetch` | ✓ | ✓ | ✗ | ✓ |
+
+于是分工是被逼出来的、而不是选出来的：抓取跑在 **offscreen**（它能 fetch，也能起专用
+Worker 落盘），service worker 只**拿着闹钟**（唯一能跨浏览器重启存活的东西），导出在
+**窗口**（只有它有文件选择器）。
+
+`test/execution-context.test.js` 用源码约束守着这些边界——因为 Node 里**根本没有「执行
+上下文」这个概念**，这类错误单元测试永远抓不到，只会在装进浏览器时炸，而且报错常常与
+真实原因毫无关系。
 
 ## 与 `doubak-data-specs` 的关系：**不 import，也不做 submodule**
 
@@ -169,14 +198,16 @@ submodule：生成物里带一个 `SPEC_SOURCE_DIGEST`，是实际读取的那�
 代价是扩展最有价值的那个测试需要 `python3`。这个代价可以接受：python3 在开发机
 和 CI 上几乎总是有的，没有时测试会带原因跳过。
 
-### 已知缺口：JSON Schema 这一层目前没人跑
+### JSON Schema 这一层由规范仓库的 CI 跑（缺口已补）
 
-`validate.py` 的 schema 校验需要 `jsonschema` 与 `referencing`，未安装时
-它会跳过并只跑结构性检查。也就是说六份 `.schema.json` **目前不被任何自动
-化流程实际执行**——结构性检查、扩展的写入时校验、词表生成器都不经过它们。
+`validate.py` 的 schema 校验需要 `jsonschema` 与 `referencing`，未安装时它会跳过并只跑
+结构性检查。曾经有一段时间**没有任何自动化流程装它**，也就是说六份 `.schema.json` 谁都
+没执行过——「产出通过规范校验器」那句话当时的准确含义只是「通过了结构性检查那一层」。
 
-要补上这个缺口需要 CI（或本地装上 jsonschema）。在那之前，「产出通过规范
-校验器」这句话的准确含义是：**通过了结构性检查那一层**。
+现在 `doubak-data-specs` 的 CI（`.github/workflows/validate.yml`）会先
+`pip install jsonschema referencing` 再跑 `validate.py --tests`，schema 层每次 push 都
+执行。本地跑不装那两个包仍然会跳过，所以**本地全绿不等于 schema 层通过**——那一层的
+权威结论在 CI。
 
 ### 一致性测试怎么找到规范仓库
 

@@ -134,3 +134,37 @@ describe('manifest 权限', () => {
     assert.deepEqual(uses, []);
   });
 });
+
+describe('权限文档与 manifest 不许对不上', () => {
+  /**
+   * `docs/permissions.md` 是**给人看的那份权限清单**，而 manifest 是机器读的那份。
+   * 两份说的必须是同一件事。
+   *
+   * 这类文档最容易悄悄过期：加权限时改了 manifest、忘了改文档，于是文档从「解释」
+   * 变成「误导」——而权限恰恰是这个项目里最需要向用户交代清楚的东西。
+   */
+  test('文档里那张「现在声明了什么」的表与 manifest 一字不差', async () => {
+    const doc = await readFile(new URL('docs/permissions.md', root), 'utf-8');
+    const table = doc.slice(doc.indexOf('## 现在声明了什么'), doc.indexOf('## 明确不要的'));
+    assert.ok(table.length > 100, '找不到那张表，这条测试失去了意义');
+
+    const listed = new Set([...table.matchAll(/\| `([a-zA-Z]+)`/g)].map((m) => m[1]));
+    const actual = new Set(manifest.permissions);
+
+    for (const perm of actual) {
+      assert.ok(listed.has(perm), `manifest 声明了 ${perm}，但 docs/permissions.md 没写`);
+    }
+    for (const perm of listed) {
+      assert.ok(actual.has(perm), `文档说声明了 ${perm}，但 manifest 里没有`);
+    }
+  });
+
+  test('被明确否掉的权限，文档说了理由，manifest 里也确实没有', async () => {
+    // 「刻意不要」比「要了什么」更容易被后人推翻——理由不写下来，下次有人顺手就加回去了。
+    const doc = await readFile(new URL('docs/permissions.md', root), 'utf-8');
+    for (const perm of ['tabs', 'web_accessible_resources']) {
+      assert.match(doc, new RegExp(`${perm}[^\n]*已删`), `文档里要说明为什么不要 ${perm}`);
+      assert.equal(manifest.permissions.includes(perm), false);
+    }
+  });
+});
