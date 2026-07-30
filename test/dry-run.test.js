@@ -65,6 +65,7 @@ async function runScenario(key) {
   let captured = 0;
   let failed = 0;
   let stoppedBy = null;
+  let unresolved = 0;
   let batches = 0;
   for (let i = 0; i < 40; i++) {
     const b = await runner.runBatch();
@@ -72,6 +73,7 @@ async function runScenario(key) {
     captured += b.captured;
     failed += b.failed;
     stoppedBy = b.stoppedBy;
+    unresolved = b.unresolvedFailures ?? 0;
     if (b.done) break;
   }
 
@@ -81,7 +83,8 @@ async function runScenario(key) {
   // 进度是 `oldestSeen`，那是给人看的。
   const advanced = route ? Boolean(route.contiguous && route.newestSeen) : null;
   const bundleId = st.bundleId;
-  await runner.finish(stoppedBy ? 'aborted' : 'complete');
+  // 有未解决的失败也不许标 complete（见 runner.finish 的说明）。
+  await runner.finish(stoppedBy || unresolved ? 'aborted' : 'complete');
 
   // 计数器与档案是两回事。「拦截页也要进档案」这条承诺只能对着档案本身验，
   // 不能对着计数器——被停机打断的那一页根本不计入 captured。
@@ -89,7 +92,7 @@ async function runScenario(key) {
   const text = new TextDecoder().decode(await dirs.get(dir).read(indexFilename(bundleId)));
   const index = text.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
 
-  return { captured, failed, stoppedBy, byVerdict, advanced, events, batches, dirs, index };
+  return { captured, failed, stoppedBy, unresolved, byVerdict, advanced, events, batches, dirs, index };
 }
 
 describe('演练夹具', () => {

@@ -287,12 +287,25 @@ export class CrawlRunner {
     // 的职责，重复记录会带来两个可能不一致的真相来源。
     const frontier = new Frontier();
     for (const it of cp.frontier ?? []) {
+      const def = routes.get(it.route_key);
       frontier.enqueue({
         url: it.url,
         urlKey: it.url,
         routeKey: it.route_key,
         intent: it.intent,
         enqueuedBy: it.enqueued_by ?? null,
+        ordered: def ? Boolean(def.pagination) : true,
+        // **原样还原状态与已用次数。**
+        //
+        // 早先这里一律按「新条目」重建（pending、attempts 归零），于是 checkpoint 里
+        // 写下的 `failed` 被静默丢弃——持久化了却不读，等于每次恢复都偷偷给一次新的
+        // 重试预算。而恢复在崩溃路径上每 30 秒就可能发生一次：一个反复失败的页面会被
+        // 无限地撞下去，如果那面墙是风控，代价是账号。
+        //
+        // 现在失败就是失败，重试**只能由人触发**（面板上的按钮 → `retryFailed()`）。
+        // 那也让失败真的能被看见，而不是在下一次恢复里被抹掉。
+        state: it.state === 'in_flight' ? 'pending' : (it.state ?? 'pending'),
+        attempts: it.attempts ?? 0,
       });
     }
     // 每条路线按 checkpoint 里的游标续上
@@ -302,6 +315,7 @@ export class CrawlRunner {
       const url = def.entryUrl({ offset: r.cursor.value });
       frontier.enqueue({
         url, urlKey: url, routeKey: r.route_key, intent: def.intent, cursor: r.cursor,
+        ordered: Boolean(def.pagination),
       });
     }
 
@@ -355,9 +369,45 @@ export class CrawlRunner {
    *
    * @param {'complete' | 'aborted'} [status]
    */
-  async finish(status = 'complete') {
+  /**
+   * 收尾。
+   *
+   * @param {'complete' | 'aborted'} [status]
+   * @param {object} [opts]
+   * @param {boolean} [opts.acceptLeafGaps]  用户看过之后决定「叶子条目就这样，收尾」。
+   *   **只放开叶子失败**——有序路线上的失败会破坏「这条线以上全部已抓」这个前提，
+   *   而水位线正建立在那上面，不是用户点一下就能免掉的。
+   */
+  async finish(status = 'complete', { acceptLeafGaps = false } = {}) {
     if (!this._run) throw new Error('没有进行中的抓取');
-    const { loop, writer } = this._run;
+    const { loop, writer, frontier } = this._run;
+
+    // **有未解决的失败就不许标 complete。**
+    //
+    // 失败不调用 `frontier.stop()`，所以 `stoppedBy` 是 null，于是「没有可跑的了」
+    // 曾被上层当成干净跑完——档案被静默标成 complete，而 manifest 里一点痕迹都没有。
+    // 那是这个项目最不能出的错：假的完整性声明。
+    //
+    // 规范允许「带着缺口 complete」（bundle/v1 §5.0），但那是**用户的决定**，不是
+    // 代码的默认。所以要一个显式的 acceptLeafGaps。
+    if (status === 'complete') {
+      const ordered = frontier.failedItems({ orderedOnly: true });
+      if (ordered.length > 0) {
+        throw new Error(
+          `有 ${ordered.length} 个分页条目抓不下来，不能标成「已完成」——跳过它们就` +
+            '再也不能声称「这条线以上全都抓到了」，而水位线正建立在那句话上。' +
+            `请先重试（第一个：${ordered[0].url}），或者把这次抓取标成中止。`,
+        );
+      }
+      const leaves = frontier.failedItems();
+      if (leaves.length > 0 && !acceptLeafGaps) {
+        throw new Error(
+          `有 ${leaves.length} 个条目抓不下来。可以重试，也可以确认「就这样收尾」——` +
+            '后者会把每一处缺口如实写进 manifest（第一个：' +
+            `${leaves[0].url}）。`,
+        );
+      }
+    }
 
     // 必须先攒证据再 finalize——否则 manifest 里 coverage 与 crawl_state 都是空的，
     // 等于没有任何完整性依据。
@@ -370,6 +420,24 @@ export class CrawlRunner {
 
     this._emit({ type: 'finished', bundleId, status });
     return manifest;
+  }
+
+  /**
+   * 把失败条目放回队列。**只能由人触发。**
+   *
+   * 自动重试一个反复失败的页面，在最坏情况下是每次心跳都去撞同一面墙——而如果那面墙
+   * 是风控，代价是账号。所以这里没有任何自动调用者。
+   *
+   * @param {object} [opts]
+   * @param {string} [opts.routeKey]
+   * @returns {Promise<number>} 放回了几条
+   */
+  async retryFailed({ routeKey } = {}) {
+    if (!this._run) throw new Error('没有进行中的抓取');
+    const n = this._run.frontier.retryFailed({ routeKey });
+    if (n > 0) await this._saveCheckpoint(CRASH_SENTINEL_REASON);
+    this._emit({ type: 'retry_requested', count: n, routeKey: routeKey ?? null });
+    return n;
   }
 
   /** 用户主动暂停。 */
@@ -418,6 +486,14 @@ export class CrawlRunner {
       active: true,
       stopped: frontier.stopped,
       stoppedBy: frontier.stopped ? frontier.stopReason : null,
+      // 抓不下来的条目。界面要能列出来，并区分「只能重试」与「可以就这样收尾」。
+      failures: frontier.failedItems().map((it) => ({
+        url: it.url,
+        routeKey: it.routeKey,
+        attempts: it.attempts,
+        ordered: it.ordered,
+        lastError: it.lastError ?? null,
+      })),
       bundleId,
       counts: frontier.counts(),
       intervalMs: pacer.intervalMs,
@@ -472,6 +548,10 @@ export function seedFrontier(frontier, routeDefs) {
         routeKey: def.key,
         intent: def.intent,
         cursor: def.pagination ? { kind: def.pagination.kind, value: def.pagination.first } : null,
+        // 有分页就是有序：跳过抓不下来的第 7 页去抓第 8 页，就再也不能声称
+        // 「第 7 页以上全都抓到了」，而水位线正建立在那句话上。
+        // 没有分页的（作品详情页）是一个集合，条目之间互不相干。
+        ordered: Boolean(def.pagination),
       })
     ) {
       seeded += 1;

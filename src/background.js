@@ -46,6 +46,7 @@ import { Supervisor, ALARM_NAME } from './crawl/supervisor.js';
 import { ScheduleStore } from './crawl/run-store.js';
 import { IdbKvStore } from './storage/idb-kv-store.js';
 import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
+import { FAILURES_PENDING } from './crawl/resume-policy.js';
 import { preflightStorage } from './storage/quota.js';
 import { exportedKey } from './storage/storage-usage.js';
 import { ensureOffscreen, withOffscreen, serializeScope } from './offscreen/host.js';
@@ -140,10 +141,18 @@ async function drive() {
   const r = await withOffscreen({ op: 'drive' });
   debugLog('推进结果', JSON.stringify(r.result));
 
-  if (r.result.done && !r.result.stoppedBy) {
+  if (r.result.done && !r.result.stoppedBy && !r.result.unresolvedFailures) {
     await withOffscreen({ op: 'finish', status: 'complete' });
     await getSupervisor().finishRun();
     await notifyDone(r.result, { kv: getKv() });
+  } else if (r.result.done && r.result.unresolvedFailures) {
+    // 跑不动了，但**不是**干净跑完：有抓不下来的条目。
+    //
+    // 绝不自动标 complete——那是假的完整性声明，而这个项目最不能出的就是这个错。
+    // 也不自动重试：反复撞同一面墙，如果那面墙是风控，代价是账号。
+    // 交给用户：面板上会列出这些条目，可以重试，也可以确认「就这样收尾」。
+    await getSupervisor().pauseRun(FAILURES_PENDING);
+    await notifyNeedsAction(FAILURES_PENDING, { kv: getKv() });
   } else if (r.result.stoppedBy) {
     // 把真实原因记进调度镜像，否则心跳会一直把它当崩溃哨兵去自动恢复——
     // 而「醒来就重试一个软封锁」正是把限流升级成封号的路径。
@@ -305,6 +314,26 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         case 'tick':
           sendResponse({ ok: true, result: await getSupervisor().tick() });
           break;
+
+        case 'retryFailed': {
+          const r = await withOffscreen({ op: 'retryFailed', routeKey: msg.routeKey });
+          if (r.count > 0) {
+            await clearAttention({ kv: getKv() });
+            void drive();
+          }
+          sendResponse({ ok: true, count: r.count });
+          break;
+        }
+
+        case 'finishWithGaps': {
+          // 用户看过失败清单之后决定「就这样收尾」。规范允许带着缺口 complete
+          // （bundle/v1 §5.0），前提是每处缺口都如实记录、且该路线 advanced=false。
+          await withOffscreen({ op: 'finish', status: 'complete', acceptLeafGaps: true });
+          await getSupervisor().finishRun();
+          await clearAttention({ kv: getKv() });
+          sendResponse({ ok: true });
+          break;
+        }
 
         case 'deleteBundle': {
           // 删除是**不可逆**的，所以后台这一侧也守一道，不只靠界面上的确认框：

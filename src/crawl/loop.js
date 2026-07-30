@@ -159,6 +159,13 @@ export class CrawlLoop {
       captured,
       failed,
       stoppedBy: this._frontier.stopped ? this._frontier.stopReason : null,
+      // 未解决的失败。上层靠它决定这次抓取**不能**标成 complete——失败不调用
+      // `stop()`，所以 `stoppedBy` 是 null，而「没有可跑的了」曾被当成干净跑完。
+      //
+      // 分开数是因为两者的处置权不同：有序路线上的失败会破坏水位线赖以成立的前提，
+      // 只能重试；叶子失败可以由用户决定「就这样收尾」。
+      unresolvedFailures: this._frontier.failedItems().length,
+      unresolvedOrderedFailures: this._frontier.failedItems({ orderedOnly: true }).length,
     };
   }
 
@@ -320,6 +327,17 @@ export class CrawlLoop {
     if (te?.retryable) {
       const { willRetry } = this._frontier.settleNetworkError(item, te.message);
       this._emit({ type: 'retry', url: item.url, kind: te.kind, willRetry });
+      if (!willRetry) {
+        // **重试用尽也要留下痕迹。** 早先这条分支只是返回 'failed' 就完了：不记缺口，
+        // 而叶子路线又从没走过 observePage，于是 `crawl_state` 与 `coverage` 双双为空
+        // ——那一页的缺失在 manifest 里**完全不可检测**。
+        //
+        // 而 gaps 在规范里本来就是「必须显式记录，不得静默」。
+        this.stateFor(item.routeKey).recordGap(
+          'fetch_failed',
+          `${item.url}：重试 ${item.attempts} 次仍失败（${te.message}）`,
+        );
+      }
       return willRetry ? 'retry' : 'failed';
     }
 
@@ -340,6 +358,10 @@ export class CrawlLoop {
 
     // 分不清的错误：判失败并阻塞该路线，等人来看。
     this._frontier.settle(item, null);
+    this.stateFor(item.routeKey).recordGap(
+      'fetch_failed',
+      `${item.url}：${String(err?.message ?? err)}`,
+    );
     this._emit({ type: 'error', url: item.url, message: String(err?.message ?? err) });
     return 'failed';
   }
@@ -411,6 +433,8 @@ export class CrawlLoop {
       intent: route.intent ?? item.intent,
       enqueuedBy: captureId,
       cursor: { kind: route.pagination.kind, value: nextValue },
+      // 走到这儿说明这条路线有分页，也就必然是有序的。
+      ordered: true,
     });
   }
 }

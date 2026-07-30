@@ -132,6 +132,12 @@ const PAUSE_COPY = {
     '这不是错误，抓取已安全停下，进度都在。请在浏览器的扩展设置里把站点访问权限改回「在所有网站上」。',
     '我改好了，继续',
   ],
+  failures_pending: [
+    'warn',
+    '有几个页面抓不下来',
+    '其余部分都抓完了。下面列出是哪几页——可以重试，也可以确认「就这样收尾」。',
+    null, // 动作在下面的失败清单里，不用这里的通用按钮
+  ],
   write_failed: [
     'err',
     '写入档案时出错',
@@ -217,12 +223,14 @@ async function refresh() {
         ['warn', '抓取已停下', `原因：${r.stoppedBy}`, '继续'];
       setState(cls, title, why);
       setActions(action ? [[action, async () => { await send({ type: 'resume' }); refresh(); }]] : []);
+      renderFailures(r.failures ?? []);
       renderRoutes(r.routes ?? []);
       return;
     }
 
     setState('run', '正在抓取', `档案 ${r.bundleId} · 当前间隔 ${(r.intervalMs / 1000).toFixed(1)} 秒` +
       (r.backoffLevel ? `（已降速 ${r.backoffLevel} 级）` : ''));
+    renderFailures(r.failures ?? []);
     setActions([['暂停', async () => {
       // 立刻给反馈。一批最长 22 秒，期间不给任何回应的话按钮看起来就是坏的。
       setState('idle', '正在暂停…', '当前这一页抓完就停，不会丢东西。');
@@ -242,6 +250,7 @@ async function refresh() {
     return;
   }
 
+  renderFailures([]);
   setState('idle', '没有进行中的抓取', '请求全部来自你自己的浏览器和 IP。cookie 不会发送到任何地方。');
   // 只在**进入**空闲态时查一次。权限和剩余空间不会每两秒变一次，而每两秒重画
   // 一次这块，就是用户看到的那种闪动。
@@ -413,6 +422,113 @@ async function showPreflight() {
       : '空间可能不够。已经抓到的不会丢，但抓到一半停下来还得再来一次——建议先清理或导出。',
   ));
   el.append(warn);
+}
+
+/**
+ * 抓不下来的条目。
+ *
+ * ## 为什么这块必须存在
+ *
+ * 失败原来是**看不见**的：它不调用 `frontier.stop()`，所以状态里没有停机原因；
+ * 而「没有可跑的了」曾被上层当成干净跑完，于是档案被静默标成 `complete`，
+ * manifest 里一点痕迹都没有。
+ *
+ * 现在跑不动了就停在这儿等人，而这块就是那个「等人」的界面。
+ *
+ * ## 两种失败的处置权不同
+ *
+ * | | 能不能「就这样收尾」 | 为什么 |
+ * |---|---|---|
+ * | 分页条目（广播第 7 页、看过第 3 页） | **不能** | 跳过它就再也不能声称「这条线以上全都抓到了」，而水位线正建立在那句话上 |
+ * | 叶子条目（某一个作品详情页） | **能** | 条目之间没有先后关系，一个电影页与另外 1332 个无关 |
+ *
+ * 「就这样收尾」会把每一处缺口如实写进 manifest，且该路线 `advanced=false`
+ * （规范 bundle/v1 §5.0 明确允许这种组合）。
+ *
+ * @param {Array<object>} failures
+ */
+function renderFailures(failures) {
+  const el = $('failures');
+  if (!failures?.length) {
+    if (el.dataset.mode !== 'empty') {
+      el.dataset.mode = 'empty';
+      el.replaceChildren();
+    }
+    return;
+  }
+  el.dataset.mode = 'list';
+  el.replaceChildren();
+
+  const ordered = failures.filter((f) => f.ordered);
+  const leaves = failures.filter((f) => !f.ordered);
+
+  const card = document.createElement('div');
+  card.className = 'card warn';
+  const b = document.createElement('b');
+  b.textContent = `${failures.length} 个页面抓不下来`;
+  card.append(b);
+  card.append(document.createTextNode(
+    ordered.length
+      ? `其中 ${ordered.length} 个是分页条目——跳过它们就再也不能声称「这条线以上全都` +
+        '抓到了」，所以只能重试，不能就这样收尾。'
+      : '都是单个作品页，条目之间互不相干。可以重试，也可以确认就这样收尾。',
+  ));
+  el.append(card);
+
+  el.append(table(
+    ['页面', '路线', { text: '试过', num: true }, '错误'],
+    failures.slice(0, 30).map((f) => [
+      { text: f.url.replace(/^https?:\/\//, ''), muted: false },
+      routeName(f.routeKey) + (f.ordered ? '（分页）' : ''),
+      { text: String(f.attempts), num: true },
+      { text: f.lastError ?? '—', muted: true },
+    ]),
+  ));
+  if (failures.length > 30) {
+    const more = document.createElement('div');
+    more.className = 'muted';
+    more.textContent = `另有 ${failures.length - 30} 个未列出`;
+    el.append(more);
+  }
+
+  const acts = document.createElement('div');
+  const retry = document.createElement('button');
+  retry.className = 'act';
+  retry.textContent = `重试这 ${failures.length} 个`;
+  retry.onclick = async () => {
+    retry.disabled = true;
+    retry.textContent = '正在重试…';
+    const r = await send({ type: 'retryFailed' });
+    if (!r?.ok) alert(`重试失败：${r?.error ?? ''}`);
+    refresh();
+  };
+  acts.append(retry);
+
+  // **只有全是叶子失败时才给这个按钮。** 有分页失败还放开它，等于让用户点一下就
+  // 免掉水位线赖以成立的前提——那不是他能授权的事。
+  if (!ordered.length) {
+    const accept = document.createElement('button');
+    accept.className = 'act';
+    accept.textContent = '就这样收尾';
+    accept.onclick = async () => {
+      const lines = [
+        `确认收尾？${leaves.length} 个页面会作为已知缺口记进档案。`,
+        '',
+        ...leaves.slice(0, 8).map((f) => `· ${f.url}`),
+        leaves.length > 8 ? `…另有 ${leaves.length - 8} 个` : '',
+        '',
+        '档案会标成「已完成」，但每一处缺口都会如实写进 manifest，',
+        '受影响路线的水位线不会推进——下次抓取仍会从旧下界重走。',
+      ].filter(Boolean);
+      if (!confirm(lines.join('\n'))) return;
+      accept.disabled = true;
+      const r = await send({ type: 'finishWithGaps' });
+      if (!r?.ok) alert(`收尾失败：${r?.error ?? ''}`);
+      refresh();
+    };
+    acts.append(accept);
+  }
+  el.append(acts);
 }
 
 // ── 覆盖率 ──────────────────────────────────────────────────

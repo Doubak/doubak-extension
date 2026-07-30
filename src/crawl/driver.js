@@ -33,7 +33,7 @@ export const DEFAULT_BUDGET_MS = 22_000;
  * @param {number} [opts.budgetMs]
  * @param {() => number} [opts.now]
  * @param {(evt: object) => void} [opts.onEvent]
- * @returns {Promise<{batches: number, captured: number, failed: number, done: boolean, stoppedBy: string | null}>}
+ * @returns {Promise<{batches: number, captured: number, failed: number, done: boolean, stoppedBy: string | null, unresolvedFailures: number, unresolvedOrderedFailures: number}>}
  */
 export async function driveWithinBudget({
   runner,
@@ -47,6 +47,8 @@ export async function driveWithinBudget({
   let failed = 0;
   let done = false;
   let stoppedBy = null;
+  let unresolvedFailures = 0;
+  let unresolvedOrderedFailures = 0;
 
   while (true) {
     const r = await runner.runBatch();
@@ -54,6 +56,8 @@ export async function driveWithinBudget({
     captured += r.captured;
     failed += r.failed;
     stoppedBy = r.stoppedBy;
+    unresolvedFailures = r.unresolvedFailures ?? 0;
+    unresolvedOrderedFailures = r.unresolvedOrderedFailures ?? 0;
 
     if (r.done) {
       done = true;
@@ -69,5 +73,5 @@ export async function driveWithinBudget({
     }
   }
 
-  return { batches, captured, failed, done, stoppedBy };
+  return { batches, captured, failed, done, stoppedBy, unresolvedFailures, unresolvedOrderedFailures };
 }

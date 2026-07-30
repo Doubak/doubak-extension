@@ -207,12 +207,14 @@ async function runDryRun(scenario) {
   let captured = 0;
   let failed = 0;
   let stoppedBy = null;
+  let unresolved = 0;
   // 上限只是防夹具写错导致死循环的兜底。
   for (let i = 0; i < 40; i++) {
     const b = await r.runBatch();
     captured += b.captured;
     failed += b.failed;
     stoppedBy = b.stoppedBy;
+    unresolved = b.unresolvedFailures ?? 0;
     if (b.done) break;
   }
 
@@ -223,11 +225,11 @@ async function runDryRun(scenario) {
   // 进度是 `oldestSeen`，那是给人看的。
   const advanced = route ? Boolean(route.contiguous && route.newestSeen) : null;
 
-  // 中途停机的档案是 aborted，不是 complete。演练也不许在这一点上撒谎——
-  // 这正是被演练验证的规则之一。
-  await r.finish(stoppedBy ? 'aborted' : 'complete');
+  // 中途停机、**或者还有抓不下来的条目**，都不是 complete。演练也不许在这一点上
+  // 撒谎——这正是被演练验证的规则之一。
+  await r.finish(stoppedBy || unresolved ? 'aborted' : 'complete');
 
-  return { captured, failed, stoppedBy, byVerdict, advanced };
+  return { captured, failed, stoppedBy, unresolved, byVerdict, advanced };
 }
 
 /**
@@ -289,7 +291,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           break;
 
         case 'finish':
-          sendResponse({ ok: true, manifest: await getRunner().finish(msg.status) });
+          sendResponse({
+            ok: true,
+            manifest: await getRunner().finish(msg.status, {
+              acceptLeafGaps: Boolean(msg.acceptLeafGaps),
+            }),
+          });
+          break;
+
+        case 'retryFailed':
+          // 不加锁：它只是把 frontier 里的状态改回 pending，不发请求。
+          // 真正的抓取由随后的 drive() 推进，那一步是有锁的。
+          sendResponse({ ok: true, count: await getRunner().retryFailed({ routeKey: msg.routeKey }) });
           break;
 
         case 'status':

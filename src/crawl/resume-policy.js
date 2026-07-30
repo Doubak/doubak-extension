@@ -84,6 +84,19 @@ const POLICY = {
     userVisible: true,
   },
 
+  /**
+   * 有条目反复抓不下来，等用户处置。
+   *
+   * **不自动恢复**：自动重试一个反复失败的页面，在最坏情况下是每次心跳都去撞同一面墙
+   * ——如果那面墙是风控，代价是账号。而且「要不要就这样收尾」本来就该是人的决定：
+   * 代码替用户标 complete，等于代他做了一个关于自己档案完整性的声明。
+   */
+  failures_pending: {
+    autoResume: false,
+    reason: '有页面反复抓不下来，需要你决定是重试还是就这样收尾',
+    userVisible: true,
+  },
+
   /** 存储空间不足。自动继续只会再撞一次。 */
   quota: {
     autoResume: false,
@@ -207,3 +220,6 @@ export const PAUSE_REASONS = Object.keys(POLICY);
 export function policyFor(reason) {
   return POLICY[reason] ?? null;
 }
+
+/** 有未解决的失败条目，等用户处置。 */
+export const FAILURES_PENDING = 'failures_pending';

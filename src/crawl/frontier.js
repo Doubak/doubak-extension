@@ -41,6 +41,8 @@ export const MAX_NETWORK_RETRIES = 2;
  * @property {string} intent
  * @property {ItemState} state
  * @property {number} attempts
+ * @property {boolean} ordered  这条路线的条目之间**有先后关系**吗（分页列表有，
+ *   叶子条目没有）。决定一个失败条目要不要连带堵住同路线的其它条目。
  * @property {string | null} enqueuedBy  产生这个 URL 的那次捕获
  * @property {object | null} cursor
  * @property {string} [lastError]
@@ -245,7 +247,7 @@ export class Frontier {
    * @param {object | null} [item.cursor]
    * @returns {boolean} 是否真的入队了
    */
-  enqueue({ url, urlKey, routeKey, intent, enqueuedBy = null, cursor = null }) {
+  enqueue({ url, urlKey, routeKey, intent, enqueuedBy = null, cursor = null, ordered = true, state = 'pending', attempts = 0 }) {
     if (this._stopped) return false;
     if (this._enqueued.has(urlKey)) return false;
 
@@ -255,8 +257,11 @@ export class Frontier {
       urlKey,
       routeKey,
       intent,
-      state: 'pending',
-      attempts: 0,
+      // 恢复时要按 checkpoint 里的状态原样重建，所以这两个可传入。
+      // 默认值是「新入队的条目」。
+      state,
+      attempts,
+      ordered,
       enqueuedBy,
       cursor,
     });
@@ -266,22 +271,15 @@ export class Frontier {
   /**
    * 取下一个可抓的条目。
    *
-   * **失败与等待人工的条目会阻塞它们所属的路线**：那条路线上不会再取出新
-   * 条目，直到它们被解决。这是「失败页不跳过」的实现——跳过会破坏「这条线
-   * 以上全部已抓」的不变量。
+   * `in_flight`、`awaiting_human`、以及**有序路线上**的 `failed` 会阻塞整条路线。
+   * 详见 `_blockedRoutes()`——那里说明了为什么叶子路线不该被连带。
    *
    * @returns {FrontierItem | null}
    */
   next() {
     if (this._stopped) return null;
 
-    /** @type {Set<string>} */
-    const blockedRoutes = new Set();
-    for (const it of this._items) {
-      if (it.state === 'failed' || it.state === 'awaiting_human' || it.state === 'in_flight') {
-        blockedRoutes.add(it.routeKey);
-      }
-    }
+    const blockedRoutes = this._blockedRoutes();
 
     for (const it of this._items) {
       if (it.state === 'pending' && !blockedRoutes.has(it.routeKey)) {
@@ -291,6 +289,38 @@ export class Frontier {
       }
     }
     return null;
+  }
+
+  /**
+   * 哪些路线现在不许再取条目。
+   *
+   * ## 为什么「失败」要连带堵住整条路线 —— 以及为什么只对**有序**路线
+   *
+   * 分页列表是有序的：跳过抓不下来的第 7 页去抓第 8 页，就再也不能声称
+   * 「第 7 页以上全都抓到了」，而水位线正是建立在那句话上。所以有序路线上的失败
+   * 必须把整条线停住。
+   *
+   * **但叶子条目之间没有先后关系。** 作品详情页是一个集合，不是一条链——一个电影页
+   * 抓不下来，与另外 1332 个电影页毫无关系。把整条路线堵掉的后果是：
+   * **一页失败葬送九成档案**（作品详情页占真实档案 90.3% 的体积）。
+   *
+   * 这个 bug 真实存在过：造一个永远失败的电影页，三个条目里第一个成功、第二个失败、
+   * 第三个**永远停在 pending**，而 `hasReady()` 返回 false 让上层以为跑完了。
+   *
+   * `in_flight` 与 `awaiting_human` 不分有序与否，一律连带：
+   * 前者是并发控制（同路线并发恒为 1），后者是风控——那时候整条线都该停。
+   */
+  _blockedRoutes() {
+    /** @type {Set<string>} */
+    const blocked = new Set();
+    for (const it of this._items) {
+      if (it.state === 'in_flight' || it.state === 'awaiting_human') {
+        blocked.add(it.routeKey);
+      } else if (it.state === 'failed' && it.ordered) {
+        blocked.add(it.routeKey);
+      }
+    }
+    return blocked;
   }
 
   /**
@@ -369,14 +399,45 @@ export class Frontier {
    * 永远卡在 in_flight，进而**堵死整条路线**。
    */
   hasReady() {
-    /** @type {Set<string>} */
-    const blocked = new Set();
-    for (const it of this._items) {
-      if (it.state === 'failed' || it.state === 'awaiting_human' || it.state === 'in_flight') {
-        blocked.add(it.routeKey);
-      }
-    }
+    const blocked = this._blockedRoutes();
     return this._items.some((it) => it.state === 'pending' && !blocked.has(it.routeKey));
+  }
+
+  /**
+   * 未解决的失败条目。
+   *
+   * 上层靠它决定这次抓取**不能**标成 `complete`：失败不调用 `stop()`，所以
+   * `stoppedBy` 是 null，而「没有可跑的了」曾被当成干净跑完——于是档案被静默标成
+   * complete，而 manifest 里一点痕迹都没有。
+   *
+   * @param {object} [opts]
+   * @param {boolean} [opts.orderedOnly]  只数有序路线上的。叶子失败可以由用户决定
+   *   「就这样收尾」，有序失败不行（那会破坏水位线赖以成立的前提）。
+   */
+  failedItems({ orderedOnly = false } = {}) {
+    return this._items.filter((it) => it.state === 'failed' && (!orderedOnly || it.ordered));
+  }
+
+  /**
+   * 把失败条目放回队列，给一次新机会。
+   *
+   * **只能由人触发。** 自动重试一个反复失败的页面，在最坏情况下是每次心跳都去撞一次
+   * 同一面墙——而如果那面墙是风控，代价是账号。
+   *
+   * @param {object} [opts]
+   * @param {string} [opts.routeKey]  只重试这条路线的
+   * @returns {number} 放回了几条
+   */
+  retryFailed({ routeKey } = {}) {
+    let n = 0;
+    for (const it of this._items) {
+      if (it.state !== 'failed') continue;
+      if (routeKey && it.routeKey !== routeKey) continue;
+      it.state = 'pending';
+      it.attempts = 0; // 新机会就是新预算
+      n += 1;
+    }
+    return n;
   }
 
   /** 某条路线上还有没有未解决的条目（失败、等待人工、待抓、在途）。 */
