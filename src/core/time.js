@@ -26,9 +26,14 @@ export const DOUBAN_TZ_OFFSET_MINUTES = 8 * 60;
 const RFC3339_RE =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
-/** 豆瓣的裸时间：`2026-07-26 12:34:00`，也接受用 T 分隔、省略秒。 */
+/**
+ * 豆瓣的裸时间：`2026-07-26 12:34:00`，也接受用 T 分隔、省略秒。
+ *
+ * **也接受只有日期**（`2025-05-05`）——标记列表页上每条的标记日期就只有日期，
+ * 没有时刻。那不是页面截断，是豆瓣本来就只公开到天。
+ */
 const DOUBAN_NAIVE_RE =
-  /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/;
+  /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/;
 
 /** @param {string} s */
 export function isRfc3339WithOffset(s) {
@@ -80,9 +85,19 @@ export function nowRfc3339() {
  * `2026-07-26T12:34:00+08:00`——墙上时间一个数字都没动，只是补上了它
  * 本来就隐含的偏移量。这样海外时区的用户跑抓取也不会让水位线偏移。
  *
+ * ## 只有日期时补 00:00:00，但**标出精度**
+ *
+ * 标记列表页上每条只给日期（`2025-05-05`）。补成 `T00:00:00+08:00` 是为了能比较，
+ * 但那个 `00:00:00` **是我们填的，不是豆瓣说的**——所以返回值带 `precision`，
+ * 而 `raw` 永远保留页面上的原样字符串。
+ *
+ * 为什么这件事必须标出来：水位线用**闭区间**比较（`<=`），日精度的下界意味着
+ * 「那一天整天重走一遍」。那是安全的（重复免费，空洞永久），但前提是下游知道这是
+ * 日精度而不是把 `00:00:00` 当成真的时刻。
+ *
  * @param {string} raw 页面上的原样字符串
  * @param {number} [offsetMinutes]
- * @returns {{ raw: string, iso: string, epochMs: number, tz: string }}
+ * @returns {{ raw: string, iso: string, epochMs: number, tz: string, precision: 'second' | 'day' }}
  */
 export function parseDoubanTimestamp(raw, offsetMinutes = DOUBAN_TZ_OFFSET_MINUTES) {
   if (typeof raw !== 'string') throw new Error('时间字符串必须是 string');
@@ -91,10 +106,16 @@ export function parseDoubanTimestamp(raw, offsetMinutes = DOUBAN_TZ_OFFSET_MINUT
   if (!m) throw new Error(`无法解析的豆瓣时间: ${JSON.stringify(raw)}`);
 
   const [, y, mo, d, h, mi, s = '00'] = m;
-  const iso = `${y}-${mo}-${d}T${h}:${mi}:${s}${formatOffset(offsetMinutes)}`;
+  // 只有日期时补零点。**这个零点是我们填的**，所以下面要标出精度。
+  const hasTime = h !== undefined;
+  const iso = `${y}-${mo}-${d}T${hasTime ? h : '00'}:${hasTime ? mi : '00'}:${
+    hasTime ? s : '00'
+  }${formatOffset(offsetMinutes)}`;
   const epochMs =
-    Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)) -
-    offsetMinutes * 60_000;
+    Date.UTC(
+      Number(y), Number(mo) - 1, Number(d),
+      hasTime ? Number(h) : 0, hasTime ? Number(mi) : 0, hasTime ? Number(s) : 0,
+    ) - offsetMinutes * 60_000;
 
   if (Number.isNaN(epochMs)) throw new Error(`时间越界: ${JSON.stringify(raw)}`);
 
@@ -104,7 +125,7 @@ export function parseDoubanTimestamp(raw, offsetMinutes = DOUBAN_TZ_OFFSET_MINUT
     throw new Error(`日期不存在: ${JSON.stringify(raw)}`);
   }
 
-  return { raw: trimmed, iso, epochMs, tz: DOUBAN_TZ };
+  return { raw: trimmed, iso, epochMs, tz: DOUBAN_TZ, precision: hasTime ? 'second' : 'day' };
 }
 
 /**

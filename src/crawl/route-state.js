@@ -143,9 +143,36 @@ export class RouteState {
     this.gaps.push({ reason, ...(detail ? { detail } : {}) });
   }
 
-  /** 正常走到了终点：停滞检测触发，或到达下界。 */
+  /**
+   * 正常走到了终点：停滞检测触发，或到达下界。
+   *
+   * ## 一个都没看见时，「走到终点」不是证据
+   *
+   * 停滞检测靠「本页有没有新 id」判断有没有进展。**抽不到 id 就等于没有停滞检测**——
+   * 每页都算「没有进展」，于是第 3 页就触发终止，而因为没有缺口，`contiguous` 报 true。
+   *
+   * 这真的发生过：`interest.list` 的 `idAnchor` 只写了 `/subject/N`，漏了舞台剧的
+   * `/location/drama/N`。一次真实抓取把 3 条全抓到了，coverage 却写着
+   * 「声称 3 / 抓到 0 / 差值 −3 / **连续性 ✔ 已验证**」。对 89 页的电影列表，那就是
+   * 第 3 页截断 + 声称已验证。
+   *
+   * 所以这里加一道自检：抓过页面、而且页面自己声称有条目，却一个 id 都没观测到——
+   * 那不是「列表是空的」，那是**抽取器坏了**。记成缺口，让它挡住水位线并显示出来。
+   *
+   * 判据用 `claimed > 0` 而不是「抓过页面」：空列表（claimed 0、0 条目）是完全正常的，
+   * 而且那时 `contiguous` 确实成立。
+   */
   markFinished() {
     this._finished = true;
+
+    if ((this.claimed?.count ?? 0) > 0 && this.capturedCount === 0) {
+      this.recordGap(
+        'no_items_observed',
+        `页面声称有 ${this.claimed.count} 条，但一个条目 ID 都没抽到——` +
+          '停滞检测靠 ID 判断进展，抽不到就等于没有终止条件，「跑完了」不成立。' +
+          '最可能是豆瓣改版或这条路线的 idAnchor 不匹配。',
+      );
+    }
   }
 
   /** 被打断：风控、会话失效、用户放弃。 */

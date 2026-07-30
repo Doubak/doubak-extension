@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { classifyResponse, RollingSize, ROUTE_PROFILES, profileForRoute } from '../src/crawl/classifier.js';
+import { classifyResponse, RollingSize, ROUTE_PROFILES, profileForRoute, extractItemIds, extractItemTimes } from '../src/crawl/classifier.js';
 import { fixtures, stripLoginMarkers, anonymizeWithLoginPrompt } from './helpers/fixtures.js';
 
 const BROADCAST_URL = 'https://www.douban.com/people/82160871/statuses?p=1';
@@ -467,5 +467,61 @@ describe('空响应不是页面 —— 与路线无关', () => {
       assert.equal(r.verdict, null, routeKey);
       assert.ok(r.reasons.some((x) => x.includes('0 字节')), routeKey);
     }
+  });
+});
+
+describe('标记列表页：ID 与时间必须覆盖全部媒介', () => {
+  const p = ROUTE_PROFILES['interest.list'];
+
+  test('五种媒介的作品链接都能抽出 ID', () => {
+    // 原来只写 `/subject/(\d+)/`，漏掉游戏（/game/N）、应用（/app/N）、
+    // 舞台剧（/location/drama/N）。漏掉的后果远不止「进度显示 0」：
+    // 停滞检测靠 ID 判断进展，抽不到就等于没有终止条件。
+    const html = `
+      <a href="https://movie.douban.com/subject/1292052/">x</a>
+      <a href="https://book.douban.com/subject/1084336/">x</a>
+      <a href="https://music.douban.com/subject/1406522/">x</a>
+      <a href="https://www.douban.com/game/10437501/">x</a>
+      <a href="https://www.douban.com/app/26835723/">x</a>
+      <a href="https://www.douban.com/location/drama/24750414/">x</a>`;
+    assert.deepEqual(extractItemIds(html, p), [
+      '1292052', '1084336', '1406522', '10437501', '26835723', '24750414',
+    ]);
+  });
+
+  test('同一条目出现多次只算一次，且保持首次出现的顺序', () => {
+    // 列表里每个条目有图片链接与标题链接两处。不去重的话 3 部剧抽出 6 个 ID，
+    // 而 `observePage` 把 `ids[i]` 与 `times[i]` 当成同一条目——3 个时间对上 6 个 ID，
+    // `highWaterIds` 就记成了别的条目。那份清单是下次增量在边界上去重用的。
+    const html = `
+      <a href="/location/drama/34912679/"><img></a><a href="/location/drama/34912679/">标题</a>
+      <a href="/location/drama/10944608/"><img></a><a href="/location/drama/10944608/">标题</a>`;
+    assert.deepEqual(extractItemIds(html, p), ['34912679', '10944608']);
+  });
+
+  test('标记日期抽得出来 —— 这条路线原来根本没有 timeAnchor', () => {
+    // 没有 timeAnchor 意味着水位线永远是 null、canAdvance 永远 false，
+    // 增量抓取对标记列表压根不可能。
+    const html = '<span class="date">2025-05-05</span><span class="date">2023-11-29</span>';
+    assert.deepEqual(extractItemTimes(html, p), ['2025-05-05', '2023-11-29']);
+  });
+
+  test('对着真实的舞台剧列表页：3 个 ID、3 个日期、一一对上', async () => {
+    // 这是那次报告的原始数据。
+    const { gunzipSync, constants } = await import('node:zlib');
+    const { readFileSync } = await import('node:fs');
+    let body;
+    try {
+      const raw = readFileSync('/home/mewx/downloads/data-20260730T130118Z-a60b6a-00001.warc.gz');
+      const rec = gunzipSync(raw, { finishFlush: constants.Z_SYNC_FLUSH }).toString('utf8');
+      body = rec.split('\r\n\r\n').slice(2).join('\r\n\r\n');
+    } catch {
+      return; // 那份 dump 不在这台机器上
+    }
+    const ids = extractItemIds(body, p);
+    const times = extractItemTimes(body, p);
+    assert.equal(ids.length, 3);
+    assert.equal(times.length, 3);
+    assert.deepEqual(ids, ['34912679', '10944608', '35999593']);
   });
 });

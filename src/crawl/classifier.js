@@ -494,8 +494,39 @@ export const ROUTE_PROFILES = {
     // 2023-12 起电影条目的 class 变成了 item comment-item，
     // 所以按「class 包含 item」匹配而不是等值匹配
     itemAnchor: /class="item[ "]|class="subject-item"|class="common-item"/,
-    // 条目指向作品页，subject id 是稳定的去重键
-    idAnchor: /\/subject\/(\d+)\//g,
+    /**
+     * 条目指向作品页，作品 id 是稳定的去重键。
+     *
+     * **必须覆盖全部媒介的 URL 形态。** 原来只写 `/subject/(\d+)/`——那漏掉了游戏
+     * （`/game/N`）、应用（`/app/N`）与舞台剧（`/location/drama/N`）。
+     *
+     * 漏掉的后果远不止「进度显示 0」：
+     *
+     * | 依赖 id 的东西 | 抽不到 id 时 |
+     * |---|---|
+     * | 跨页去重 | 失效 |
+     * | **停滞检测** | **失效——而它是翻页的终止条件** |
+     * | `captured_count` | 恒为 0，coverage 差值恒等于 −claimed |
+     *
+     * 最严重的是停滞检测：它靠「本页有没有新 id」判断有没有进展。抽不到 id 就等于
+     * 每页都「没有进展」，于是**第 3 页就停**——然后因为没有缺口，`contiguous` 报
+     * true。实测过一次真实的舞台剧抓取：3 条全抓到了，但 coverage 写着
+     * 「声称 3 / 抓到 0 / 差值 −3 / 连续性 ✔ 已验证」。
+     *
+     * 对 89 页的电影列表，那就是**第 3 页截断 + 声称已验证**。
+     */
+    idAnchor:
+      /(?:\/subject\/|douban\.com\/(?:game|app)\/|\/location\/drama\/)(\d+)/g,
+    /**
+     * 每条的标记日期，形如 `<span class="date">2025-05-05</span>`。
+     *
+     * 原来这条路线**根本没有 timeAnchor**，于是水位线永远是 null、`canAdvance` 永远
+     * 是 false——增量抓取对标记列表压根不可能，每次都得从头重走。
+     *
+     * 注意它只有日期没有时刻：那不是页面截断，是豆瓣本来就只公开到天。
+     * `parseDoubanTimestamp` 会补零点并把 `precision` 标成 `'day'`，而 `raw` 保留原样。
+     */
+    timeAnchor: /class="date"[^>]*>\s*([\d-]{8,10})\s*</g,
     // 实测：每一张列表页上都有声明数量，不只入口页——可以逐页复读，
     // 从而发现抓取过程中总数发生了变化
     claimedCount: /<h1>\s*([^<]*?)\((\d+)\)\s*<\/h1>/,
@@ -570,8 +601,25 @@ export function extractItemIds(bodyText, route) {
   const re = new RegExp(route.idAnchor.source, 'g');
   /** @type {string[]} */
   const out = [];
+  const seen = new Set();
   let m;
-  while ((m = re.exec(bodyText)) !== null) out.push(m[1]);
+  while ((m = re.exec(bodyText)) !== null) {
+    // **按首次出现去重。**
+    //
+    // 同一个条目在页面上会出现多次：舞台剧列表里每部剧有图片链接与标题链接两处，
+    // 真实页面上 3 部剧抽出 6 个 id。
+    //
+    // 不去重的后果不是「数多了」——停滞检测用 Set，计数本来就不受影响。真正坏掉的是
+    // **与时间的配对**：`observePage` 把 `ids[i]` 和 `times[i]` 当成同一条目，
+    // 而 3 个时间对上 6 个 id，`highWaterIds` 就记成了别的条目。那份 id 清单是下次
+    // 增量在水位线边界上去重用的，记错会导致边界上重抓或漏抓。
+    //
+    // 同一张列表页上两个不同条目不可能共用一个作品 id（不能把同一部电影标记两次），
+    // 广播的 `data-sid` 也是每条唯一，所以页内去重是安全的。
+    if (seen.has(m[1])) continue;
+    seen.add(m[1]);
+    out.push(m[1]);
+  }
   return out;
 }
 

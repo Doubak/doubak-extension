@@ -210,3 +210,62 @@ describe('枚举方式决定下游能否推断删除', () => {
     assert.equal(f.toCrawlState(BID).enumeration, 'full');
   });
 });
+
+describe('一个条目都没观测到时，「跑完了」不是证据', () => {
+  /**
+   * 这一组来自一次真实抓取的报告：3 条舞台剧全抓到了，coverage 却写着
+   *
+   *     声称 3 / 抓到 0 / 差值 −3 / 连续性 ✔ 已验证
+   *
+   * 根因是 `interest.list` 的 `idAnchor` 只写了 `/subject/N`，漏掉舞台剧的
+   * `/location/drama/N`。而停滞检测靠「本页有没有新 ID」判断进展——抽不到 ID 就等于
+   * 没有终止条件，第 3 页就停，然后因为没有缺口而声称已验证。
+   *
+   * 对 89 页的电影列表，那就是**第 3 页截断 + 声称已验证**。
+   */
+  test('声称有条目却抽不到 ID → 记缺口，连续性不成立', () => {
+    const s = new RouteState({ routeKey: 'interest.drama.collect', intent: 'i', enumeration: 'full' });
+    s.observePage({ ids: [], times: [], claimed: { count: 3, raw: '(3)' }, captureId: 'c#1', observedAt: 'x' });
+    s.markFinished();
+
+    assert.equal(s.contiguous, false, '不能声称已验证');
+    assert.equal(s.gaps.length, 1);
+    assert.equal(s.gaps[0].reason, 'no_items_observed');
+    assert.match(s.gaps[0].detail, /改版|idAnchor/, '要指向最可能的原因');
+    assert.equal(s.canAdvance, false);
+  });
+
+  test('真的空列表照旧成立 —— 空不是错', () => {
+    // 判据是 `claimed > 0`，不是「抓过页面」。一个 0 条的收藏夹是完全正常的。
+    const s = new RouteState({ routeKey: 'interest.music.collect', intent: 'i', enumeration: 'full' });
+    s.observePage({ ids: [], times: [], claimed: { count: 0, raw: '(0)' }, captureId: 'c#1', observedAt: 'x' });
+    s.markFinished();
+
+    assert.equal(s.contiguous, true);
+    assert.deepEqual(s.gaps, []);
+  });
+
+  test('抽到了就正常推进', () => {
+    const s = new RouteState({ routeKey: 'interest.drama.collect', intent: 'i', enumeration: 'full' });
+    s.observePage({
+      ids: ['34912679', '10944608', '35999593'],
+      times: ['2025-05-05', '2023-11-29', '2023-02-04'],
+      claimed: { count: 3, raw: '(3)' }, captureId: 'c#1', observedAt: 'x',
+    });
+    s.markFinished();
+
+    assert.equal(s.capturedCount, 3);
+    assert.equal(s.contiguous, true);
+    assert.equal(s.canAdvance, true);
+    // 水位线是最新那条，进度是最旧那条
+    assert.equal(s.highWater.iso.slice(0, 10), '2025-05-05');
+    assert.equal(s.lowWater.iso.slice(0, 10), '2023-02-04');
+  });
+
+  test('没有声明数量时不误报 —— 有些路线没有那个数字', () => {
+    const s = new RouteState({ routeKey: 'broadcast.timeline', intent: 'i', enumeration: 'bounded' });
+    s.observePage({ ids: [], times: [], claimed: null, captureId: 'c#1', observedAt: 'x' });
+    s.markFinished();
+    assert.deepEqual(s.gaps, [], '广播没有可信总数，不能拿它来判抽取器坏了');
+  });
+});

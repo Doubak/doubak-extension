@@ -407,6 +407,17 @@ async function showPreflight() {
     rows.push(['存储空间', `✗ 只剩 ${bytes(r.storage.available)}，预计需要约 ${bytes(r.storage.need)}`]);
   }
 
+  // **说清这次是全量还是增量。** 用户问过一次「这是增量吗」——那说明界面上看不出来，
+  // 而这件事影响的是他要等多久、以及会不会重复抓已经有的东西。
+  //
+  // 现在的答案是：**永远是全量**。水位线机制齐全（每次抓取都会算出来并写进 manifest），
+  // 但没有任何代码把上一份档案的水位线读回来当下界。不说的话，用户很容易以为
+  // 「跑过一次了，下次会快」。
+  rows.push([
+    '这次抓取的范围',
+    '全量（从最新一直抓到最早）—— 增量还没接上，所以已经抓过的会再抓一遍',
+  ]);
+
   el.className = '';
   el.replaceChildren(table(['开抓前检查', '结果'], rows));
 
@@ -583,8 +594,12 @@ function renderCoverage(coverage, crawlState) {
     const b = document.createElement('b');
     b.textContent = `${routeName(cs.route_key)} · 连续性未验证`;
     g.append(b, document.createTextNode(
-      `有 ${cs.gaps.length} 处缺口（${cs.gaps.map((x) => x.reason).join('、')}）。` +
-      `这段区间的内容可能不完整，下次抓取会从上次的下界重走。`,
+      `有 ${cs.gaps.length} 处缺口。` +
+      (cs.gaps.some((x) => x.reason === 'no_items_observed')
+        ? '其中有一处是「页面声称有条目，但一个都没抽到」——那通常意味着豆瓣改版了，' +
+          '抓取的终止判断因此失效。这一页已经如实存进档案，可据此重新校准。'
+        : `原因：${cs.gaps.map((x) => x.reason).join('、')}。` +
+          '这段区间的内容可能不完整，下次抓取会从上次的下界重走。'),
     ));
     el.append(g);
   }
