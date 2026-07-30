@@ -217,11 +217,55 @@ $('run').addEventListener('click', async () => {
       worker.terminate();
     }
   };
+  /**
+   * Worker 出错。
+   *
+   * ## 为什么这里要写得这么啰嗦
+   *
+   * 模块 Worker **加载失败**时（比如某个 import 在浏览器里解析不了），
+   * `ErrorEvent` 上的字段全是空的——`message` 是 `undefined`、`filename` 是空串。
+   * 于是页面只会显示一句「Worker 出错：undefined」，没有文件名、没有行号、
+   * 没有原因。
+   *
+   * 那件事真的发生过：某个共享的契约文件里加了一行 `import 'node:assert'`，
+   * 整个 Worker 挂掉，唯一的线索是 `undefined`。代价是一整轮往返。
+   *
+   * 所以：字段有就显示，**没有就说出「没有」意味着什么**，并直接给出下一步该看
+   * 哪里。一条报不出原因的错误信息，比没有错误信息更浪费时间——它让人以为自己
+   * 已经知道了些什么。
+   */
   worker.onerror = (e) => {
     failed++;
-    addNote(`Worker 出错：${e.message}`);
+
+    const bits = [];
+    if (e.message) bits.push(e.message);
+    if (e.filename) bits.push(`${e.filename}:${e.lineno ?? '?'}:${e.colno ?? '?'}`);
+
+    if (bits.length) {
+      addNote(`Worker 出错：${bits.join('　')}`);
+    } else {
+      addNote('Worker 起不来：模块加载就失败了（ErrorEvent 上没有任何细节）。');
+      const hint = document.createElement('div');
+      hint.className = 'err';
+      hint.textContent =
+        '最常见的原因是某个 import 在浏览器里解析不了——比如 `node:assert` 这类 ' +
+        'Node 内置模块，或者路径写错了。' +
+        '打开 DevTools 的 Console，那里会有真正的解析错误与出错的文件名。' +
+        '（`npm test` 里的 no-node-builtins 那条测试专门拦这一类，可以先跑一遍。）';
+      results.append(hint);
+    }
+
     updateSummary(true);
     $('run').disabled = false;
   };
+
+  // 结构化克隆失败会走这里，而不是 onerror。不接住的话表现为「Worker 没反应」。
+  worker.onmessageerror = (e) => {
+    failed++;
+    addNote(`Worker 的消息解不开（结构化克隆失败）：${JSON.stringify(e.data ?? null)}`);
+    updateSummary(true);
+    $('run').disabled = false;
+  };
+
   worker.postMessage('run');
 });

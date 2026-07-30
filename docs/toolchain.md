@@ -212,6 +212,23 @@ submodule：生成物里带一个 `SPEC_SOURCE_DIGEST`，是实际读取的那�
 所以 `querySelectorAll` 只认界面代码实际用到的那几种形状——多认一种就多一处
 「测试里能过、浏览器里不行」。
 
+## 共享契约文件不许 import 任何东西
+
+`test/helpers/file-store-contract.js` 与 `kv-store-contract.js` 同时被两边引用：
+Node 的 `node:test`，以及**浏览器里的 `selftest/`**。所以它们必须自带断言，
+一个 `import` 都不能有。
+
+代价出现过一次：往 kv 契约里加了 `import assert from 'node:assert/strict'`，
+于是整个自检 Worker 加载失败。而模块 Worker 加载失败时 `ErrorEvent` 上**什么信息
+都没有**——页面只显示「Worker 出错：undefined」，没有文件名、没有行号、没有原因。
+Node 那侧当然全绿（那里 `node:assert` 能用），所以只能在源码层面拦：
+`test/no-node-builtins.test.js` 扫 `src/` 全部，以及 `selftest/` 的**传递依赖**
+（关键——违规文件在 `test/helpers/` 下，只扫 `selftest/` 目录扫不到）。
+
+顺带把那句报错也修了：现在拿不到细节时会直说「模块加载就失败了」并指向 DevTools
+Console。**一条报不出原因的错误信息比没有错误信息更浪费时间**——它让人以为自己已经
+知道了些什么。
+
 ## 相关文档
 
 - `docs/ui.md` —— 界面设计与文案原则
