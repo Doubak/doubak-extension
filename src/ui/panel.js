@@ -20,6 +20,7 @@ import { BundleReader } from '../bundle/bundle-reader.js';
 import { SCENARIOS } from '../crawl/dry-run.js';
 import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { exportBundle, directorySink } from '../bundle/exporter.js';
+import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../storage/storage-usage.js';
 import { bundleDirName, bundleIdFromDirName } from '../core/ids.js';
 
 const $ = (id) => document.getElementById(id);
@@ -754,6 +755,11 @@ $('export').addEventListener('click', async () => {
       r = await run(true);
     }
     showExportResult(r);
+    // 记一笔「导出过了」。派生状态，丢了不影响档案本身——只影响删除确认框说得多重。
+    // 只在**校验通过**时记：没验过就说「已导出」，等于给了一个我们没资格给的保证。
+    if (r.problems.length === 0) {
+      await send({ type: 'markExported', bundleId, at: new Date().toISOString() });
+    }
   } catch (e) {
     el.className = 'card err';
     el.textContent = `导出失败：${e.message}`;
@@ -904,6 +910,8 @@ async function loadDebug() {
   ];
   for (const [label, cfg, why] of opts) sc.append(actionRow(label, why, () => startScoped(cfg)));
 
+  await loadStorage();
+
   // 环境自检
   const env = $('env');
   const rows = [
@@ -975,6 +983,209 @@ async function startScoped(cfg) {
     $(`tab-${b.dataset.tab}`).hidden = !on;
   }
   refresh();
+}
+
+// ── 存储管理 ────────────────────────────────────────────────
+
+/** @type {import('../storage/storage-usage.js').BundleUsage[]} */
+let storageUsage = [];
+
+/**
+ * 列出所有档案，标出体积与导出状态。
+ *
+ * 列表本身是**只读**的，所以走面板自己的只读 Worker，不必把 offscreen 拉起来。
+ * 删除才需要它（那是唯一的写入路径）。
+ */
+async function loadStorage() {
+  const el = $('storage');
+  el.className = 'muted';
+  el.textContent = '正在统计…';
+
+  try {
+    const worker = getOpfsWorker();
+    const dirNames = await WorkerFileStore.listBundleDirs(worker);
+
+    /** @type {Array<{bundleId: string, dir: string, files: Array<{name: string, bytes: number}>}>} */
+    const dirs = [];
+    for (const dir of dirNames) {
+      const bundleId = bundleIdFromDirName(dir);
+      if (!bundleId) continue;
+      const store = new WorkerFileStore({ worker, dir });
+      const names = await store.list();
+      const files = [];
+      for (const name of names) files.push({ name, bytes: await store.size(name) });
+      dirs.push({ bundleId, dir, files });
+    }
+
+    const ids = dirs.map((d) => d.bundleId);
+    const rec = await send({ type: 'exportRecords', bundleIds: ids });
+    const active = lastStatus?.runner?.active ? lastStatus.runner.bundleId : null;
+
+    storageUsage = summarizeBundles({
+      dirs,
+      activeBundleId: active,
+      exportedAt: rec?.exportedAt ?? {},
+      // 记录读不出来时不许显示成「未导出」——那是替用户下一个我们没资格下的判断。
+      exportRecordsUsable: Boolean(rec?.ok),
+    });
+
+    renderStorage();
+  } catch (e) {
+    el.className = 'card err';
+    el.textContent = `统计不出来：${e.message}`;
+  }
+}
+
+const EXPORT_STATE_TEXT = {
+  exported: (at) => `✔ 已导出（${at.slice(0, 16).replace('T', ' ')}）`,
+  not_exported: () => '未导出 —— 这是唯一的副本',
+  unknown: () => '不确定（本机没有导出记录）',
+};
+
+function renderStorage() {
+  const el = $('storage');
+  el.replaceChildren();
+
+  if (storageUsage.length === 0) {
+    el.className = 'muted';
+    el.textContent = '存储里没有档案。';
+    $('storage-actions').replaceChildren();
+    return;
+  }
+
+  el.className = '';
+  el.append(
+    table(
+      ['档案', { text: '体积', num: true }, { text: '文件', num: true }, '状态', '导出', ''],
+      storageUsage.map((u) => [
+        u.bundleId,
+        { text: bytes(u.bytes), num: true },
+        { text: String(u.files), num: true },
+        u.active ? '正在抓' : (u.hasManifest ? '已完成' : '未收尾'),
+        {
+          text: EXPORT_STATE_TEXT[u.exportState](u.exportedAt ?? ''),
+          muted: u.exportState === 'exported',
+        },
+        '',
+      ]),
+    ),
+  );
+
+  // 给每行补删除按钮
+  const rows = el.querySelectorAll('tr');
+  storageUsage.forEach((u, i) => {
+    const cell = rows[i + 1]?.lastElementChild;
+    if (!cell) return;
+    const b = document.createElement('button');
+    b.className = 'act';
+    b.textContent = '删除';
+    b.disabled = !u.deletable;
+    b.title = u.blockedReason ?? '';
+    b.onclick = () => deleteBundle(u.bundleId);
+    cell.replaceChildren(b);
+    // 灰掉的按钮看起来像 bug，所以把原因也写出来。
+    if (!u.deletable && u.blockedReason) {
+      const why = document.createElement('span');
+      why.className = 'muted';
+      why.style.fontSize = '12px';
+      why.textContent = u.blockedReason;
+      cell.append(why);
+    }
+  });
+
+  const acts = $('storage-actions');
+  acts.replaceChildren();
+  const all = document.createElement('button');
+  all.className = 'act';
+  all.textContent = `清空全部（${storageUsage.length} 份 · ${bytes(totalBytes(storageUsage))}）`;
+  all.onclick = deleteAll;
+  const note = document.createElement('span');
+  note.className = 'muted';
+  note.style.fontSize = '12px';
+  note.textContent = hasUnexported(storageUsage)
+    ? '有档案没导出过 —— 清空之后不可能找回来'
+    : '所有档案都导出过了';
+  acts.append(all, note);
+}
+
+/** @param {string} bundleId */
+async function deleteBundle(bundleId) {
+  // 界面上那个确认框是给人看的，`checkDeletable` 是给代码守的。**两者都要有**——
+  // 用户可能点得很快。
+  const check = checkDeletable(storageUsage, bundleId);
+  if (!check.ok) {
+    setStorageResult('err', check.error);
+    return;
+  }
+  const u = check.target;
+
+  // 确认框要把**要失去的具体东西**说出来：哪一份、多大、导出过没有。
+  // 一句「确定删除吗？」等于什么都没说。
+  const lines = [
+    `删除档案 ${u.bundleId}？`,
+    `${bytes(u.bytes)} · ${u.files} 个文件 · ${u.hasManifest ? '已完成' : '未收尾'}`,
+    '',
+    u.exportState === 'exported'
+      ? `你在 ${u.exportedAt.slice(0, 16).replace('T', ' ')} 导出过它。`
+      : '⚠ 没有导出记录 —— 浏览器里这一份可能是唯一的副本。',
+    '',
+    '删除不可逆，没有回收站。',
+  ];
+  if (!confirm(lines.join('\n'))) return;
+
+  setStorageResult('idle', `正在删除 ${u.bundleId}…`);
+  const r = await send({ type: 'deleteBundle', bundleId: u.bundleId, dir: u.dir });
+  if (!r?.ok) {
+    setStorageResult('err', `删不掉：${r?.error ?? ''}`);
+    return;
+  }
+  setStorageResult('good', `已删除 ${u.bundleId}（释放 ${bytes(u.bytes)}）`);
+  // 档案页可能正指着刚删掉的那份
+  if (currentBundleId === u.bundleId) currentBundleId = null;
+  await loadStorage();
+}
+
+async function deleteAll() {
+  const deletable = storageUsage.filter((u) => u.deletable);
+  const blocked = storageUsage.filter((u) => !u.deletable);
+  if (deletable.length === 0) {
+    setStorageResult('err', '没有可删的档案' + (blocked.length ? '（正在抓的那份不能删）' : ''));
+    return;
+  }
+
+  const unexported = deletable.filter((u) => u.exportState !== 'exported');
+  const lines = [
+    `清空 ${deletable.length} 份档案，共 ${bytes(totalBytes(deletable))}？`,
+    '',
+    ...deletable.map((u) => `· ${u.bundleId} ${bytes(u.bytes)}`),
+    '',
+  ];
+  if (unexported.length) {
+    lines.push(`⚠ 其中 ${unexported.length} 份没有导出记录，可能是唯一的副本。`, '');
+  }
+  if (blocked.length) lines.push(`（${blocked.length} 份正在抓，会保留）`, '');
+  lines.push('删除不可逆，没有回收站。');
+  if (!confirm(lines.join('\n'))) return;
+
+  // 逐个删而不是一把梭：一份失败不该让其余的也不删，而且要说清哪些成了。
+  const failed = [];
+  for (const u of deletable) {
+    setStorageResult('idle', `正在删除 ${u.bundleId}…`);
+    const r = await send({ type: 'deleteBundle', bundleId: u.bundleId, dir: u.dir });
+    if (!r?.ok) failed.push(`${u.bundleId}（${r?.error ?? ''}）`);
+  }
+
+  currentBundleId = null;
+  if (failed.length) setStorageResult('err', `有 ${failed.length} 份删不掉：${failed.join('；')}`);
+  else setStorageResult('good', `已清空 ${deletable.length} 份档案`);
+  await loadStorage();
+}
+
+/** @param {string} cls @param {string} text */
+function setStorageResult(cls, text) {
+  const el = $('storage-result');
+  el.className = `card ${cls}`;
+  el.textContent = text;
 }
 
 $('selftest').addEventListener('click', () => {

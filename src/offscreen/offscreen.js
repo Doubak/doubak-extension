@@ -295,6 +295,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ ok: true, status: getRunner().status(), busyWith: lock.holder });
           break;
 
+        case 'deleteBundle': {
+          // 删除走**这条唯一的写入路径**，而不是让面板的只读 Worker 破例。
+          // 理由不只是洁癖：安全检查需要「现在在抓哪一份」这个知识，而它只在这里。
+          const { bundleId, dir } = msg;
+          const st = getRunner().status();
+          if (st.active && st.bundleId === bundleId) {
+            throw new Error(
+              `档案 ${bundleId} 正在抓，不能删。删了它，写入器下一次落盘就会往一个` +
+                '不存在的目录里写——请先暂停或等它结束。',
+            );
+          }
+          // 经由**可写的那个** Worker 删。offscreen 自己不 import OpfsFileStore：
+          // 那条边界（只有专用 Worker 直接碰 OPFS）有测试钉着，而且它挡住了
+          // 「反正 destroy 用不到 sync handle，破例一次也行」这种滑坡。
+          await WorkerFileStore.destroy(getOpfsWorker(), dir);
+          debugLog('已删除档案目录', dir);
+          sendResponse({ ok: true });
+          break;
+        }
+
         case 'dryRun':
           // 演练不发网络请求，但会和抓取抢 frontier / 写入器状态，所以照样要锁。
           sendResponse({

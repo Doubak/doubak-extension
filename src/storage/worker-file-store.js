@@ -104,6 +104,22 @@ export class WorkerFileStore {
     return new WorkerFileStore({ worker, dir: '' })._call({ op: 'listBundleDirs' });
   }
 
+  /**
+   * 整个档案目录删掉。
+   *
+   * **必须传可写的那个 Worker**（`opfs-rw-worker.js`）。只读那个会在 Worker 一侧
+   * 拒绝——那条边界是保证，不是约定。
+   *
+   * 静态方法而不是实例方法，是因为删的是**目录本身**，而实例的语义是「在这个目录
+   * 里操作文件」。放成实例方法容易被误当成「删目录里的某个文件」。
+   *
+   * @param {Worker} worker
+   * @param {string} dir
+   */
+  static destroy(worker, dir) {
+    return new WorkerFileStore({ worker, dir, readOnly: false })._call({ op: 'destroy' });
+  }
+
   /** @param {string} op */
   _assertWritable(op) {
     if (this._readOnly) {

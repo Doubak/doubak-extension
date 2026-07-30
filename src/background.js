@@ -47,6 +47,7 @@ import { ScheduleStore } from './crawl/run-store.js';
 import { IdbKvStore } from './storage/idb-kv-store.js';
 import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
 import { preflightStorage } from './storage/quota.js';
+import { exportedKey } from './storage/storage-usage.js';
 import { ensureOffscreen, withOffscreen, serializeScope } from './offscreen/host.js';
 import { notifyNeedsAction, notifyDone, clearAttention, wireNotificationClicks } from './ui/notify.js';
 
@@ -304,6 +305,39 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         case 'tick':
           sendResponse({ ok: true, result: await getSupervisor().tick() });
           break;
+
+        case 'deleteBundle': {
+          // 删除是**不可逆**的，所以后台这一侧也守一道，不只靠界面上的确认框：
+          // 用户可能点得很快，而消息也可能是从别处发来的。真正的检查在 offscreen
+          // 那边（只有它知道现在在抓哪一份）。
+          if (!msg.bundleId || !msg.dir) throw new Error('缺少 bundleId 或 dir');
+          await withOffscreen({ op: 'deleteBundle', bundleId: msg.bundleId, dir: msg.dir });
+          // 删掉的正好是指针指向的那一份 → 指针成了悬空的，一起清掉。
+          const cur = await getRunStore().loadCheckpoint();
+          if (cur?.bundle_id === msg.bundleId) await getRunStore().clearCheckpoint();
+          await getKv().remove(exportedKey(msg.bundleId));
+          sendResponse({ ok: true });
+          break;
+        }
+
+        case 'markExported': {
+          // 导出成功后由面板记一笔。**派生状态**——丢了不影响档案本身，只影响
+          // 删除确认框说得多重。
+          await getKv().set(exportedKey(msg.bundleId), msg.at ?? new Date().toISOString());
+          sendResponse({ ok: true });
+          break;
+        }
+
+        case 'exportRecords': {
+          /** @type {Record<string, string>} */
+          const out = {};
+          for (const id of msg.bundleIds ?? []) {
+            const at = await getKv().get(exportedKey(id));
+            if (at) out[id] = /** @type {string} */ (at);
+          }
+          sendResponse({ ok: true, exportedAt: out });
+          break;
+        }
 
         case 'dryRun': {
           const r = await withOffscreen({ op: 'dryRun', scenario: msg.scenario });

@@ -215,6 +215,40 @@ describe('面板脚本', () => {
     }
   });
 
+  test('删除确认框把要失去的具体东西说出来', async () => {
+    // 一句「确定删除吗？」等于什么都没说。确认框必须点明哪一份、多大、导出过没有
+    // ——删除不可逆且没有回收站。
+    const js = await readRepoFile('src/ui/panel.js');
+    const fn = js.slice(js.indexOf('async function deleteBundle'), js.indexOf('async function deleteAll'));
+
+    assert.match(fn, /confirm\(/, '删除必须先确认');
+    assert.match(fn, /u\.bundleId/, '要说是哪一份');
+    assert.match(fn, /bytes\(u\.bytes\)/, '要说多大');
+    assert.match(fn, /唯一的副本/, '没导出过要明确警告');
+    assert.match(fn, /不可逆/, '要说清后果');
+    // 代码那一侧的守卫也要在，不能只靠确认框
+    assert.match(fn, /checkDeletable/);
+  });
+
+  test('清空全部会跳过正在抓的那份，并逐个删', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    const fn = js.slice(js.indexOf('async function deleteAll'), js.indexOf('function setStorageResult'));
+
+    assert.match(fn, /filter\(\(u\) => u\.deletable\)/, '正在抓的那份要保留');
+    // 逐个删而不是一把梭：一份失败不该让其余的也不删
+    assert.match(fn, /for \(const u of deletable\)/);
+    assert.match(fn, /failed/, '要说清哪些没删成');
+  });
+
+  test('只在校验通过时才记「已导出」', async () => {
+    // 没验过就说「已导出」，等于给了一个我们没资格给的保证——而那个保证会被用来
+    // 决定删除确认框说得多重。
+    const js = await readRepoFile('src/ui/panel.js');
+    const i = js.indexOf('markExported');
+    const before = js.slice(Math.max(0, i - 400), i);
+    assert.match(before, /problems\.length === 0/);
+  });
+
   test('每个 $(id) 都在 HTML 里真的存在', async () => {
     // `$()` 返回 null 之后往上一步才炸，栈里看不出缺的是哪个 id。
     const js = await readRepoFile('src/ui/panel.js');
