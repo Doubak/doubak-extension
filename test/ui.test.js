@@ -311,6 +311,46 @@ describe('面板脚本', () => {
     assert.match(hint, /脱敏/, '说清里面有 URL 与用户名');
   });
 
+  test('覆盖率只有一条渲染路径 —— 不再是档案页的副作用', async () => {
+    // 两条路径就是两个真相来源：没去过档案页时覆盖率看到的可能是另一份档案；
+    // 删掉档案之后选中的 id 还指着一个不存在的目录。
+    const js = await readRepoFile('src/ui/panel.js');
+    const openBundleFn = js.slice(js.indexOf('async function openBundle'), js.indexOf('function renderCaptures'));
+    assert.equal(openBundleFn.includes('renderCoverage'), false, '档案页不该顺手渲染覆盖率');
+
+    const loadCov = js.slice(js.indexOf('async function loadCoverage'), js.indexOf('function renderCoverage'));
+    assert.match(loadCov, /loadBundleSummary/, '覆盖率要从共同来源读');
+  });
+
+  test('两个标签页共用同一处「在看哪份档案」', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /async function loadBundleSummary/);
+    assert.match(js, /summaryCache/);
+  });
+
+  test('删除档案会作废缓存并取消已失效的选中', async () => {
+    // 不取消的话，下一次读取会去开一个不存在的目录然后报「读不出来」，
+    // 而真实情况只是它被删了。
+    const js = await readRepoFile('src/ui/panel.js');
+    const inv = js.slice(js.indexOf('function invalidateBundles'), js.indexOf('async function loadBundleSummary'));
+    assert.match(inv, /summaryCache = null/);
+    assert.match(inv, /currentBundleId = null/);
+
+    // 单份删除与清空全部都要调
+    const del = js.slice(js.indexOf('async function deleteBundle'), js.indexOf('async function deleteAll'));
+    const all = js.slice(js.indexOf('async function deleteAll'), js.indexOf('function setStorageResult'));
+    assert.match(del, /invalidateBundles/);
+    assert.match(all, /invalidateBundles/);
+  });
+
+  test('存储变化之后要重画当前打开的那一页', async () => {
+    // 只作废缓存不重画的话，用户会盯着一份已经被删掉的档案的数字。
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /async function refreshOpenTab/);
+    const del = js.slice(js.indexOf('async function deleteBundle'), js.indexOf('async function deleteAll'));
+    assert.match(del, /refreshOpenTab/);
+  });
+
   test('每个 $(id) 都在 HTML 里真的存在', async () => {
     // `$()` 返回 null 之后往上一步才炸，栈里看不出缺的是哪个 id。
     const js = await readRepoFile('src/ui/panel.js');

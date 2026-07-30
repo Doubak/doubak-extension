@@ -219,6 +219,8 @@ async function refresh() {
     }
     // 上一次的结果也让位给正在进行的这一次
     lastRunShown = false;
+    // 抓取正在写档案：摘要随时在变，缓存不能留。
+    summaryCache = null;
   }
 
   if (s.runner?.active) {
@@ -266,6 +268,8 @@ async function refresh() {
   // **权威记录**（写在 manifest 里），比内存里的快照更可信。
   if (!lastRunShown) {
     lastRunShown = true;
+    // 刚从「抓取中」回到空闲：档案刚收尾，缓存里可能还是没有 manifest 的那一版。
+    summaryCache = null;
     void showLastRun();
   }
   // 只在**进入**空闲态时查一次。权限和剩余空间不会每两秒变一次，而每两秒重画
@@ -396,6 +400,19 @@ function setCell(td, text, muted = false) {
  */
 let preflightShown = false;
 let lastRunShown = false;
+
+/**
+ * 重新渲染**当前打开的那个标签页**。
+ *
+ * 存储变化之后必须做这件事：用户可能正停在覆盖率或档案页上，而那两页的内容刚刚失效。
+ * 只作废缓存不重画的话，他会盯着一份已经被删掉的档案的数字。
+ */
+async function refreshOpenTab() {
+  const on = [...$('tabs').querySelectorAll('button')]
+    .find((b) => b.getAttribute('aria-selected') === 'true')?.dataset.tab;
+  if (on === 'coverage') await loadCoverage();
+  else if (on === 'archive') await loadArchive();
+}
 
 /**
  * 空闲时显示**上一次**抓取的结果。
@@ -611,33 +628,42 @@ async function loadCoverage() {
   const el = $('coverage');
   el.className = 'muted';
   el.textContent = '正在读取档案…';
+  delete el.dataset.stale;
 
   try {
-    const dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
-    const id = currentBundleId ?? dirs.map(bundleIdFromDirName).find(Boolean);
-    if (!id) {
+    const cur = await loadBundleSummary();
+    if (!cur) {
       el.className = 'muted';
       el.textContent = '还没有档案。开始一次抓取之后这里会显示对账结果。';
       return;
     }
-    const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(id) });
-    const s = await new BundleReader({ store, bundleId: id }).summary();
-    if (!s.hasManifest) {
+    if (!cur.summary.hasManifest) {
       el.className = 'muted';
       el.textContent = '这次抓取还没收尾——覆盖率证据是收尾时才攒的，现在还没有。';
       return;
     }
-    renderCoverage(s.coverage, s.crawlState);
+    renderCoverage(cur.summary.coverage, cur.summary.crawlState, cur.id);
   } catch (e) {
     el.className = 'card err';
     el.textContent = `读不出来：${e.message}`;
   }
 }
 
-/** @param {object[]} coverage @param {object[]} crawlState */
-function renderCoverage(coverage, crawlState) {
+/** @param {object[]} coverage @param {object[]} crawlState @param {string} [bundleId] */
+function renderCoverage(coverage, crawlState, bundleId) {
   const el = $('coverage');
   el.replaceChildren();
+
+  // 说清这是**哪一份**档案的对账。档案页有个下拉可以切换，不写出来的话两页对不上时
+  // 没人知道自己在看什么。
+  if (bundleId) {
+    const which = document.createElement('div');
+    which.className = 'muted';
+    which.style.fontSize = '12px';
+    which.textContent = `档案 ${bundleId}`;
+    el.append(which);
+  }
+
   if (!coverage?.length) {
     el.className = 'muted';
     el.textContent = '还没有数据——跑完一条路线之后才会有。';
@@ -701,8 +727,71 @@ let reader = null;
 /** @type {object[]} */
 let entries = [];
 
-/** 当前正在看的档案。 */
+/**
+ * 当前在看哪份档案，以及它的摘要缓存。
+ *
+ * ## 为什么要一个共同的所有者
+ *
+ * 覆盖率原来有**两条渲染路径**：档案页 `openBundle()` 的副作用，以及覆盖率页自己的
+ * 加载器。两个真相来源，于是：
+ *
+ * - 没去过档案页时，覆盖率页看到的和档案页可能不是同一份档案
+ * - 删掉档案之后，`currentBundleId` 还指着一个已经不存在的目录
+ * - 抓完一次之后，缓存没人让它失效
+ *
+ * 现在只有这里一处知道「在看哪份、它的摘要是什么」，两个标签页都从这里读；任何会改变
+ * 存储的动作都调 `invalidateBundles()`。
+ */
 let currentBundleId = null;
+/** @type {{id: string, summary: object} | null} 摘要缓存，避免两个标签页各读一次 */
+let summaryCache = null;
+
+/**
+ * 存储变了：删了档案、抓完一次、清空。
+ *
+ * 缓存作废，并且**如果当前选中的那份已经不在了就取消选中**——不取消的话，下一次读取
+ * 会去开一个不存在的目录然后报「读不出来」，而真实情况只是它被删了。
+ *
+ * @param {string[]} [remainingIds]  还剩哪些；不给就只作废缓存
+ */
+function invalidateBundles(remainingIds) {
+  summaryCache = null;
+  if (remainingIds && currentBundleId && !remainingIds.includes(currentBundleId)) {
+    currentBundleId = null;
+  }
+  // 已经渲染出来的内容立刻标记为过期，免得用户看着旧数字以为还在
+  for (const id of ['coverage', 'archive-summary', 'captures']) {
+    const el = $(id);
+    if (el) el.dataset.stale = '1';
+  }
+}
+
+/**
+ * 读当前档案的摘要。**两个标签页共用这一处**。
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.force]
+ * @returns {Promise<{id: string, summary: object} | null>}  没有档案时返回 null
+ */
+async function loadBundleSummary({ force = false } = {}) {
+  const dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
+  const ids = dirs.map(bundleIdFromDirName).filter(Boolean);
+
+  // 选中的那份没了（被删了）就退回最新的一份
+  if (currentBundleId && !ids.includes(currentBundleId)) currentBundleId = null;
+  const id = currentBundleId ?? ids[0];
+  if (!id) {
+    summaryCache = null;
+    return null;
+  }
+
+  if (!force && summaryCache?.id === id) return summaryCache;
+
+  const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(id) });
+  const summary = await new BundleReader({ store, bundleId: id }).summary();
+  summaryCache = { id, summary };
+  return summaryCache;
+}
 
 /**
  * 读 OPFS 的专用 Worker。
@@ -793,7 +882,8 @@ async function openBundle(bundleId) {
   try {
     const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(bundleId) });
     reader = new BundleReader({ store, bundleId });
-    const s = await reader.summary();
+    const cur = await loadBundleSummary({ force: true });
+    const s = cur?.summary ?? (await reader.summary());
     entries = await reader.index();
 
     summaryEl.className = '';
@@ -831,7 +921,8 @@ async function openBundle(bundleId) {
       summaryEl.append(note);
     }
     setArchiveButtons(true);
-    renderCoverage(s.coverage, s.crawlState);
+    // **不在这里渲染覆盖率。** 那会是第二条路径，也就是第二个真相来源——覆盖率页
+    // 自己有加载器，切过去时会从同一处读。
     renderCaptures();
   } catch (e) {
     summaryEl.className = 'card err';
@@ -1480,9 +1571,12 @@ async function deleteBundle(bundleId) {
     return;
   }
   setStorageResult('good', `已删除 ${u.bundleId}（释放 ${bytes(u.bytes)}）`);
-  // 档案页可能正指着刚删掉的那份
-  if (currentBundleId === u.bundleId) currentBundleId = null;
+  // 存储变了：作废缓存，并且如果当前选中的那份就是被删的那个，取消选中。
+  // 不取消的话，下一次读取会去开一个不存在的目录然后报「读不出来」，
+  // 而真实情况只是它被删了。
+  invalidateBundles(storageUsage.filter((x) => x.bundleId !== u.bundleId).map((x) => x.bundleId));
   await loadStorage();
+  await refreshOpenTab();
 }
 
 async function deleteAll() {
@@ -1515,10 +1609,11 @@ async function deleteAll() {
     if (!r?.ok) failed.push(`${u.bundleId}（${r?.error ?? ''}）`);
   }
 
-  currentBundleId = null;
+  invalidateBundles(blocked.map((x) => x.bundleId));
   if (failed.length) setStorageResult('err', `有 ${failed.length} 份删不掉：${failed.join('；')}`);
   else setStorageResult('good', `已清空 ${deletable.length} 份档案`);
   await loadStorage();
+  await refreshOpenTab();
 }
 
 /** @param {string} cls @param {string} text */
