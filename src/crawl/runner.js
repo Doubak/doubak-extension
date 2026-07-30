@@ -159,7 +159,23 @@ export class CrawlRunner {
     const session = new SessionGuard();
     const profileUrl = `https://www.douban.com/people/${encodeURIComponent(username)}/`;
     const probe = await transport.fetch(profileUrl);
-    const account = session.preflight(probe.bodyText);
+
+    // 个人主页上不一定有数字 uid（它最常见的落脚处是广播条目的 `data-uid`，而
+    // 主页上可能压根没有广播条目）。所以留一条退路：去广播列表页再取一次。
+    //
+    // 那一页**一定**有——真实旧档案里 7353 个广播列表页全都带 `data-uid`。
+    // 代价是多一个请求，只在必要时发；而取不到 uid 就完全开不了工。
+    let account;
+    try {
+      account = session.preflight(probe.bodyText);
+    } catch (err) {
+      if (err.reason !== 'missing_user_id') throw err;
+      this._emit({ type: 'uid_fallback', from: profileUrl });
+      const alt = await transport.fetch(`${profileUrl}statuses`);
+      // 用主页判登录态、用广播页补 uid：两张页面拼一份身份。**不放松要求**——
+      // 补不到照样抛，只是错误信息里会说两处都试过了。
+      account = session.preflight(alt.bodyText, { fallbackFrom: err.message });
+    }
     this._emit({ type: 'preflight', account });
 
     const bundleId = newBundleId(this._now());

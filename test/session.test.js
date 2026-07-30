@@ -212,3 +212,69 @@ describe('身份比对', () => {
     assert.match(m, /昵称/);
   });
 });
+
+describe('数字 uid 的多路取证', () => {
+  test('data-uid（广播条目上）', () => {
+    const html = '<div class="status-item" data-uid="82160871">x</div>';
+    assert.equal(extractAccountHints(html).userId, '82160871');
+  });
+
+  test('头像 URL —— 个人主页上不一定有广播条目，但一定有自己的头像', () => {
+    // 一开始只找 data-uid，而那**只在广播条目上**。个人主页上可能压根没有任何
+    // 广播条目，于是「开始抓取」报「页面上取不到数字用户 ID」。真实旧档案里的
+    // 广播列表页全都有 data-uid，那让人误以为它到处都有。
+    for (const url of [
+      'https://img1.doubanio.com/icon/u82160871-3.jpg',
+      'https://img9.doubanio.com/icon/up82160871-8.jpg',
+    ]) {
+      assert.equal(extractAccountHints(`<img src="${url}">`).userId, '82160871', url);
+    }
+  });
+
+  test('数字形式的个人主页链接', () => {
+    assert.equal(
+      extractAccountHints('<a href="https://www.douban.com/people/82160871/">我</a>').userId,
+      '82160871',
+    );
+  });
+
+  test('查询参数与内嵌 JSON', () => {
+    assert.equal(extractAccountHints('<a href="/x?uid=82160871&p=2">').userId, '82160871');
+    assert.equal(extractAccountHints('<script>var d={"uid":82160871}</script>').userId, '82160871');
+    assert.equal(extractAccountHints('<script>var d={"uid":"82160871"}</script>').userId, '82160871');
+  });
+
+  test('优先级：data-uid 与头像都在时取 data-uid', () => {
+    // 顺序有意义——靠前的更可能是本人的 ID。
+    const html = '<img src="/icon/u111-1.jpg"><div data-uid="222"></div>';
+    assert.equal(extractAccountHints(html).userId, '222');
+  });
+
+  test('一个都没有就是 null，不猜', () => {
+    assert.equal(extractAccountHints('<html><body>什么都没有</body></html>').userId, null);
+  });
+
+  test('取不到 uid 的报错与「没登录」分开，并带上诊断信息', () => {
+    // 混成「请重新登录」会让用户反复登录去修一个改版问题。
+    const guard = new SessionGuard();
+    const html = `<li class="nav-user-account"><a href="/accounts/logout">退出</a>
+<span>某人的账号</span></li><a href="https://www.douban.com/people/someone/">主页</a>`;
+
+    assert.throws(() => guard.preflight(html), (e) => {
+      assert.equal(e.reason, 'missing_user_id');
+      assert.notEqual(e.reason, 'session_expired');
+      // 报错要带上已经找到了什么，否则无从判断是没登录还是改版
+      assert.match(e.message, /someone/);
+      assert.match(e.message, /某人/);
+      assert.match(e.message, /字节/);
+      return true;
+    });
+  });
+
+  test('退路的失败说明会被一起带出来', () => {
+    // 主页与广播页都试过了，报错里得看得出两处都试了。
+    const guard = new SessionGuard();
+    const html = '<li class="nav-user-account"><a href="/accounts/logout">退出</a></li>';
+    assert.throws(() => guard.preflight(html, { fallbackFrom: '主页上也没有' }), /此前还试过.*主页上也没有/);
+  });
+});

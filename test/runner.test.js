@@ -469,3 +469,42 @@ describe('小范围试跑：自然终止 vs 人为截断', () => {
     assert.equal(cs.advanced, true, '自然终止是干净完成');
   });
 });
+
+describe('个人主页没有数字 uid 时的退路', () => {
+  /** 一张登录态正常、但**没有任何 uid 线索**的主页。 */
+  const NO_UID = `<html><head><title>示例的账号</title></head><body>
+<li class="nav-user-account"><a href="/accounts/logout">退出</a><span>示例的账号</span></li>
+<a href="https://www.douban.com/people/example/">主页</a>
+</body></html>`;
+
+  test('退到广播页取 uid，抓取照样开得起来', async () => {
+    // 个人主页上不一定有广播条目，而 data-uid 最常见的落脚处正是广播条目。
+    // 真实旧档案里 7353 个广播列表页全都带 data-uid，所以那一页是可靠的退路。
+    const { runner, calls, events } = harness((url) =>
+      url.includes('statuses') ? bcPage(20) : NO_UID);
+
+    const r = await runner.start({ username: 'example', includeCatalog: false });
+
+    assert.equal(r.account.userId, '82160871');
+    assert.ok(calls.some((u) => u.includes('statuses')), '该去广播页补一次');
+    assert.ok(events.some((e) => e.type === 'uid_fallback'), '走了退路要留痕');
+  });
+
+  test('两处都没有才失败，且报错里说了两处都试过', async () => {
+    // **不放松要求**：uid 是档案的归属主键，取不到就不能开始。退路只是多试一处，
+    // 不是降低标准。
+    const { runner } = harness(() => NO_UID);
+    await assert.rejects(() => runner.start({ username: 'example', includeCatalog: false }), (e) => {
+      assert.equal(e.reason, 'missing_user_id');
+      assert.match(e.message, /此前还试过/);
+      return true;
+    });
+  });
+
+  test('主页上有 uid 时不发那次多余的请求', async () => {
+    // 退路只在必要时走——每个请求都算账。
+    const { runner, calls } = harness(() => PROFILE);
+    await runner.start({ username: 'example', includeCatalog: false });
+    assert.equal(calls.filter((u) => u.includes('statuses')).length, 0);
+  });
+});

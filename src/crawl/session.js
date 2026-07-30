@@ -45,8 +45,33 @@ const DISPLAY_NAME = /<span>([^<]{1,64}?)的账号<\/span>/;
 /** 导航栏/页面里指向个人主页的链接。`mine` 是 /mine/ 跳转位，不是用户名。 */
 const PEOPLE_LINK = /douban\.com\/people\/([A-Za-z0-9_-]+)\//g;
 
-/** 广播条目上的数字 uid。 */
-const DATA_UID = /data-uid="(\d+)"/;
+/**
+ * 数字 uid 可能出现的几处，按可靠性排序。
+ *
+ * 一开始只找 `data-uid`，而那**只在广播条目上**——个人主页上不一定有任何广播
+ * 条目，于是「开始抓取」会报「页面上取不到数字用户 ID」。真实旧档案里的广播列表
+ * 页全都有 `data-uid`，那让人误以为它到处都有。
+ *
+ * 所以改成多路取证：任何一处命中即可，都取不到才算失败。多找几个模式的代价接近
+ * 零，而取不到 uid 就完全开不了工。
+ *
+ * | 模式 | 哪里 |
+ * |---|---|
+ * | `data-uid="123"` | 广播条目 |
+ * | `/icon/u123-*.jpg`、`/icon/up123-*.jpg` | 头像 URL（个人主页上必有自己的头像） |
+ * | `/people/123/` | 少数以数字 ID 形式出现的个人主页链接 |
+ * | `uid=123`、`"uid":123` | 内嵌脚本与接口 URL |
+ *
+ * 顺序有意义：靠前的更可能是**本人**的 ID。头像放在第二位，是因为个人主页顶部
+ * 那张头像一定是本人的；而 `/people/<数字>/` 链接可能指向别人。
+ */
+const UID_PATTERNS = [
+  /data-uid="(\d+)"/,
+  /\/icon\/u[a-z]*(\d+)-/,
+  /douban\.com\/people\/(\d+)\//,
+  /[?&]uid=(\d+)\b/,
+  /"uid"\s*:\s*"?(\d+)"?/,
+];
 
 /** @typedef {'logged_in' | 'logged_out' | 'unknown'} LoginState */
 
@@ -78,7 +103,16 @@ export function detectLoginState(html) {
 export function extractAccountHints(html) {
   if (typeof html !== 'string') return { userId: null, username: null, displayName: null };
 
-  const uid = DATA_UID.exec(html);
+  /** @type {string | null} */
+  let userId = null;
+  for (const re of UID_PATTERNS) {
+    const m = re.exec(html);
+    if (m) {
+      userId = m[1];
+      break;
+    }
+  }
+
   const name = DISPLAY_NAME.exec(html);
 
   /** @type {string | null} */
@@ -93,7 +127,7 @@ export function extractAccountHints(html) {
   }
 
   return {
-    userId: uid ? uid[1] : null,
+    userId,
     username,
     displayName: name ? name[1] : null,
   };
@@ -101,7 +135,13 @@ export function extractAccountHints(html) {
 
 /** 会话守卫抛出的错误，带一个机器可读的原因。 */
 export class SessionError extends Error {
-  /** @param {'session_expired' | 'account_switched'} reason @param {string} message */
+  /**
+   * `missing_user_id` 与 `session_expired` 必须分开：前者是「豆瓣改版了」，
+   * 后者是「你没登录」。混成一句话会让用户反复重新登录去修一个改版问题。
+   *
+   * @param {'session_expired' | 'account_switched' | 'missing_user_id'} reason
+   * @param {string} message
+   */
   constructor(reason, message) {
     super(message);
     this.name = 'SessionError';
@@ -139,9 +179,11 @@ export class SessionGuard {
    * 一定要从个人主页这类地方专门取一次。
    *
    * @param {string} html  个人主页的 HTML
+   * @param {object} [opts]
+   * @param {string} [opts.fallbackFrom]  上一次尝试的失败说明，用来把两次都报出来
    * @returns {AccountHints}
    */
-  preflight(html) {
+  preflight(html, { fallbackFrom } = {}) {
     const state = detectLoginState(html);
     if (state !== 'logged_in') {
       throw new SessionError(
@@ -155,10 +197,14 @@ export class SessionGuard {
 
     const hints = extractAccountHints(html);
     if (!hints.userId) {
+      // 报错要带上**已经找到了什么**。少了这些，用户只能看到「取不到 ID」，
+      // 而那句话既可能意味着没登录、也可能意味着豆瓣改版——两者的下一步完全不同。
       throw new SessionError(
-        'session_expired',
-        '页面上取不到数字用户 ID。它是档案的归属主键，取不到就不能开始——' +
-          '请确认这是个人主页。',
+        'missing_user_id',
+        '这张页面上找不到数字用户 ID（它是档案的归属主键，取不到就不能开始）。' +
+          `已识别：用户名 ${hints.username ?? '未找到'}、昵称 ${hints.displayName ?? '未找到'}、` +
+          `页面 ${html.length} 字节。豆瓣可能改版了。` +
+          (fallbackFrom ? `（此前还试过：${fallbackFrom}）` : ''),
       );
     }
 

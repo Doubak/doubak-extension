@@ -258,12 +258,22 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
             );
           }
 
+          // 已经有没抓完的？那就别偷偷另起一个——新档案会把指针改掉，旧的那份
+          // 从此没人再碰，用户却以为「继续抓」了。
+          const existing = await getRunStore().loadCheckpoint();
+          if (existing) {
+            throw new Error(
+              `还有一次没抓完的抓取（档案 ${existing.bundle_id}）。` +
+                '请先「继续」把它跑完，或者在档案页确认之后再开始新的。',
+            );
+          }
+
           await ensureOffscreen();
-          // 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
-          const who = await withOffscreen({ op: 'discoverUsername' });
+          // 身份确认在 offscreen 那侧与 start 一起做——它们必须是一个临界区，
+          // 否则两个「开始抓取」会各自发一次身份确认请求。
           const started = await withOffscreen({
             op: 'start',
-            options: serializeScope({ username: who.username, ...scopeToOptions(msg?.scope) }),
+            options: serializeScope(scopeToOptions(msg?.scope)),
           });
           await getSupervisor().startRun({ bundle_id: started.bundleId });
           await clearAttention();

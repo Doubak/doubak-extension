@@ -42,6 +42,7 @@ const NEEDS_ACTION_TITLE = {
   account_switched: '账号变了',
   host_permission_lost: '豆备没有访问豆瓣的权限了',
   quota: '存储空间不足',
+  missing_user_id: '认不出你的数字用户 ID',
   write_failed: '写入档案时出错',
 };
 
@@ -52,6 +53,7 @@ const NEEDS_ACTION_BODY = {
   account_switched: '一个档案只能属于一个账号。请切回原来的账号，或另开一次抓取。',
   host_permission_lost: '请在浏览器的扩展设置里把站点访问权限改回「在所有网站上」。',
   quota: '需要先导出或清理再继续。已经抓到的都还在。',
+  missing_user_id: '豆瓣的页面结构可能变了。请到调试页跑一次演练确认其余环节正常，并把详细信息反馈给我们。',
   write_failed: '已经停下来了，以免损坏已有数据。继续之前会先自动修复段文件尾部。',
 };
 

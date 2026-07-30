@@ -70,6 +70,7 @@ import { ProxyKvStore } from '../storage/proxy-kv-store.js';
 import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { dryRunFetch } from '../crawl/dry-run.js';
 import { OFFSCREEN_TARGET } from './protocol.js';
+import { Exclusive } from '../crawl/exclusive.js';
 
 // TODO(debug): 开发期日志。发布前连同所有调用一起删掉。
 const DEBUG = true;
@@ -141,21 +142,32 @@ function relayEvent(e) {
   chrome.runtime.sendMessage({ type: 'crawl_event', event: e }).catch(() => {});
 }
 
-/** 正在推进的那一段，挡住重入。 */
+/**
+ * 同一时刻只允许一件会发请求的事在跑。
+ *
+ * 这不是并发整洁问题而是**账号安全**问题：节奏闸门是按活动建的，两件活动各自
+ * 遵守「1 秒一个请求」，合起来豆瓣看到的却是 2 秒 3 个。见 crawl/exclusive.js。
+ *
+ * 抓取全都在这一个 document 里跑，所以这一个锁就够——不需要跨上下文的协调。
+ */
+const lock = new Exclusive();
+
+/** 正在推进的那一段，挡住同一件事的重入。 */
 let driving = null;
 
 async function drive() {
+  // 心跳可能在上一段还没跑完时又来一次。这里返回**同一个** promise 而不是报错：
+  // 重复唤醒是 MV3 的常态，不该被当成冲突。
   if (driving) return driving;
-  driving = (async () => {
-    try {
-      return await driveWithinBudget({
+  driving = lock
+    .run('抓取', () =>
+      driveWithinBudget({
         runner: getRunner(),
         onEvent: (e) => debugLog('驱动', e.type),
-      });
-    } finally {
+      }))
+    .finally(() => {
       driving = null;
-    }
-  })();
+    });
   return driving;
 }
 
@@ -233,21 +245,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ ok: true });
           break;
 
-        case 'discoverUsername':
-          sendResponse({ ok: true, ...(await getRunner().discoverUsername()) });
-          break;
-
         case 'start': {
-          const r = getRunner();
-          if (r.active) throw new Error('已有抓取在进行中');
-          const started = await r.start(reviveScope(msg.options));
+          // 身份确认与开工必须是**一个**临界区。分成两条消息的话，两个「开始
+          // 抓取」会各自发一次身份确认请求，然后其中一个才在 start 处失败——
+          // 那一次多出来的请求已经发出去了。
+          const started = await lock.run('开始抓取', async () => {
+            const r = getRunner();
+            if (r.active) throw new Error('已有抓取在进行中');
+            const opts = reviveScope(msg.options);
+            // 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
+            const who = opts.username ? { username: opts.username } : await r.discoverUsername();
+            return r.start({ ...opts, username: who.username });
+          });
           sendResponse({ ok: true, bundleId: started.bundleId, account: started.account });
           break;
         }
 
         case 'resume': {
-          const r = getRunner();
-          if (!r.active) await r.resume(msg.checkpoint);
+          await lock.run('恢复抓取', async () => {
+            const r = getRunner();
+            if (!r.active) await r.resume(msg.checkpoint);
+          });
           sendResponse({ ok: true });
           break;
         }
@@ -257,6 +275,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           break;
 
         case 'pause':
+          // **刻意不加锁。** 加了的话「暂停」会在一段 22 秒的批次期间失灵，而
+          // 用户按暂停往往正是因为他看到了不对的东西。pause 只是给 frontier
+          // 立一个标志，不发请求。
           await getRunner().pause();
           sendResponse({ ok: true });
           break;
@@ -266,11 +287,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           break;
 
         case 'status':
-          sendResponse({ ok: true, status: getRunner().status() });
+          // 同样不加锁：读状态必须在抓取跑着的时候也能读到。
+          sendResponse({ ok: true, status: getRunner().status(), busyWith: lock.holder });
           break;
 
         case 'dryRun':
-          sendResponse({ ok: true, result: await runDryRun(msg.scenario) });
+          // 演练不发网络请求，但会和抓取抢 frontier / 写入器状态，所以照样要锁。
+          sendResponse({
+            ok: true,
+            result: await lock.run('演练', () => runDryRun(msg.scenario)),
+          });
           break;
 
         default:
