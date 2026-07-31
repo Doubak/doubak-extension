@@ -141,6 +141,9 @@
       </div>
       <div id="bundle-pick" style="margin-bottom:12px"></div>
       <div id="archive-summary"></div>
+      <!-- 「这是一次增量抓取」。**必须有自己的容器**：往兄弟节点里插的话没人负责
+           清，切一次档案就多留一张，而留下的那张说的还是上一份档案的上游。 -->
+      <div id="archive-incremental"></div>
       <button class="act" id="export" disabled>导出到文件夹</button>
       <button class="act" id="verify" disabled>验一验（逐条取出并解压）</button>
       <!-- 删除放在这里，是因为**这里才有上下文**：你刚看过它有多少条、多大、

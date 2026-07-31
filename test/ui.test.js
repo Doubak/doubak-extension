@@ -671,6 +671,27 @@ describe('面板脚本', () => {
     assert.match(html, /\.cap \{[^}]*gap:/);
   });
 
+  test('**不许往兄弟节点里插** —— 没人负责清，切一次档案就多留一张', async () => {
+    // 真实现象：打开一份 05:13 的全量档案，上面挂着**两张一模一样**的卡片，都写着
+    // 「接在 11:21 那份后面」。一份 05:13 的档案不可能接在 11:21 后面——那两张是
+    // 看别的档案时留下的，`.after()` 插进去之后没人管。
+    const js = await readRepoFile('src/ui/panel.js');
+    const code = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    for (const bad of ['.after(', '.before(', 'insertAdjacent']) {
+      assert.equal(code.includes(bad), false, `${bad} 插出来的节点没人负责清`);
+    }
+  });
+
+  test('「这是一次增量抓取」有自己的容器，且切档案时会清掉', async () => {
+    const html = await readRepoFile('src/ui/panel.html');
+    assert.match(html, /id="archive-incremental"/);
+    const js = await readRepoFile('src/ui/panel.js');
+    // 切档案时清掉
+    assert.match(js, /\['export-result', 'verify-result', 'archive-incremental'\]/);
+    // 每次渲染前也清掉（同一份档案刷新两次不该出现两张）
+    assert.match(js, /incEl\.replaceChildren\(\)/);
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。

@@ -1366,7 +1366,7 @@ async function openBundle(bundleId) {
   //
   // 只清 textContent 的话会留下一个**空的红框**——比留着错误信息更糟：它看起来
   // 像出了事，却什么都不说。（删「正在抓的那份」被拒之后切换档案，就是这个样子。）
-  for (const id of ['export-result', 'verify-result']) {
+  for (const id of ['export-result', 'verify-result', 'archive-incremental']) {
     const el = $(id);
     el.className = '';
     el.replaceChildren();
@@ -1401,24 +1401,31 @@ async function openBundle(bundleId) {
       ),
     );
 
+    // **全量还是增量**，单独一块。增量档案的「捕获条数」看起来会小得离谱
+    // （只有新增的那些），不说清的话像是抓漏了。
+    //
+    // 渲染进**它自己的容器**，不是 `summaryEl.after()`。后者是往兄弟节点里插，
+    // 没人负责清——切一次档案就多留一张，而留下的那张说的还是**上一份**档案的
+    // 上游。真实现象：打开一份 05:13 的全量档案，上面挂着两张一模一样的卡片，
+    // 都写着「接在 11:21 那份后面」——一份 05:13 的档案不可能接在 11:21 后面。
+    const incEl = $('archive-incremental');
+    incEl.replaceChildren();
+    if (s.previousBundleId) {
+      const c = document.createElement('div');
+      c.className = 'card idle';
+      const b = document.createElement('b');
+      b.textContent = '这是一次增量抓取';
+      c.append(b, document.createTextNode(
+        `接在档案 ${s.previousBundleId} 后面 —— 只抓了上次之后新增的部分。`
+        + '所以「捕获条数」比全量那次小是正常的；完整性要看覆盖率页的「合起来」。',
+      ));
+      incEl.append(c);
+    }
+
     // 进行中的档案要主动解释一句。**「还没收尾」不是「坏了」**——它没有
     // manifest，所以校验只能验字节数、覆盖率证据也还没攒。不说清楚的话，用户看到
     // 一堆空字段会以为几小时的抓取白费了。
-    // **全量还是增量**，说在摘要里。增量档案的「捕获条数」看起来会小得离谱
-  // （只有新增的那些），不说清的话像是抓漏了。
-  if (s.previousBundleId) {
-    const c = document.createElement('div');
-    c.className = 'card idle';
-    const b = document.createElement('b');
-    b.textContent = '这是一次增量抓取';
-    c.append(b, document.createTextNode(
-      `接在档案 ${s.previousBundleId} 后面 —— 只抓了上次之后新增的部分。`
-      + '所以「捕获条数」比全量那次小是正常的；完整性要看覆盖率页的「合起来」。',
-    ));
-    summaryEl.after(c);
-  }
-
-  if (!s.hasManifest) {
+    if (!s.hasManifest) {
       const note = document.createElement('div');
       note.className = 'card idle';
       const b = document.createElement('b');
