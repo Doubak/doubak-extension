@@ -143,6 +143,10 @@ $('tabs').addEventListener('click', (e) => {
   }
   if (btn.dataset.tab === 'archive') loadArchive();
   if (btn.dataset.tab === 'debug') loadDebug();
+  // 存储从调试页搬出来了：删档案是**日常操作**，不是调试操作。调试页里全是会改变
+  // 抓取行为的东西（演练、绕过门控、小范围试跑），把一件日常操作摆在那儿，等于
+  // 训练用户往那儿去找东西。
+  if (btn.dataset.tab === 'storage') loadStorage();
   // 覆盖率原来**没有自己的加载**——它只是 `openBundle()` 的副作用，所以第一次直接点
   // 进来是空白的（要先去过档案页才有东西）。空白看起来像「正在加载」，而它其实什么
   // 都不会发生。
@@ -1057,6 +1061,7 @@ function renderBundlePicker(ids, active) {
 function setArchiveButtons(on) {
   $('export').disabled = !on;
   $('verify').disabled = !on;
+  $('delete-this').disabled = !on;
 }
 
 /** @param {string} bundleId */
@@ -1593,8 +1598,6 @@ async function loadDebug() {
   ));
   sc.append(gateNote);
 
-  await loadStorage();
-
   // 环境自检
   const env = $('env');
   const rows = [
@@ -1792,13 +1795,28 @@ function renderStorage() {
 }
 
 /** @param {string} bundleId */
-async function deleteBundle(bundleId) {
+/**
+ * 删一份档案。
+ *
+ * `report` 让调用方决定把结果写到哪儿：存储页写自己的结果区，档案页写自己的——
+ * 否则从档案页删完之后，成功/失败的消息会出现在一个用户看不见的标签页里。
+ *
+ * @param {string} bundleId
+ * @param {object} [opts]
+ * @param {(cls: string, text: string) => void} [opts.report]
+ * @returns {Promise<boolean>} 是否真的删掉了
+ */
+async function deleteBundle(bundleId, { report = setStorageResult } = {}) {
+  // 存储页可能还没打开过，`storageUsage` 是空的——而确认框要说出「多大、导出过
+  // 没有」，那些都在里面。先读一次。
+  if (!storageUsage.length) await loadStorage();
+
   // 界面上那个确认框是给人看的，`checkDeletable` 是给代码守的。**两者都要有**——
   // 用户可能点得很快。
   const check = checkDeletable(storageUsage, bundleId);
   if (!check.ok) {
-    setStorageResult('err', check.error);
-    return;
+    report('err', check.error);
+    return false;
   }
   const u = check.target;
 
@@ -1814,22 +1832,46 @@ async function deleteBundle(bundleId) {
     '',
     '删除不可逆，没有回收站。',
   ];
-  if (!confirm(lines.join('\n'))) return;
+  if (!confirm(lines.join('\n'))) return false;
 
-  setStorageResult('idle', `正在删除 ${u.bundleId}…`);
+  report('idle', `正在删除 ${u.bundleId}…`);
   const r = await send({ type: 'deleteBundle', bundleId: u.bundleId, dir: u.dir });
   if (!r?.ok) {
-    setStorageResult('err', `删不掉：${r?.error ?? ''}`);
-    return;
+    report('err', `删不掉：${r?.error ?? ''}`);
+    return false;
   }
-  setStorageResult('good', `已删除 ${u.bundleId}（释放 ${bytes(u.bytes)}）`);
+  report('good', `已删除 ${u.bundleId}（释放 ${bytes(u.bytes)}）`);
   // 存储变了：作废缓存，并且如果当前选中的那份就是被删的那个，取消选中。
   // 不取消的话，下一次读取会去开一个不存在的目录然后报「读不出来」，
   // 而真实情况只是它被删了。
   invalidateBundles(storageUsage.filter((x) => x.bundleId !== u.bundleId).map((x) => x.bundleId));
   await loadStorage();
   await refreshOpenTab();
+  return true;
 }
+
+// 档案页的「删除这一份」。
+//
+// 放在这里是因为**这里才有上下文**：你刚看过它有多少条、多大、导出过没有。
+// 存储页那份是批量视角，两个都要——而删档案本来就不该只能在调试页里做。
+$('delete-this').addEventListener('click', async () => {
+  if (!currentBundleId) return;
+  const gone = await deleteBundle(currentBundleId, {
+    report: (cls, text) => {
+      const el = $('export-result');
+      el.className = `card ${cls}`;
+      el.textContent = text;
+    },
+  });
+  if (!gone) return;
+  // 删掉的正是当前打开的这一份：清空视图，别让用户对着一份不存在的档案的数字看。
+  currentBundleId = null;
+  entries = [];
+  $('archive-summary').replaceChildren();
+  $('vanished').replaceChildren();
+  setArchiveButtons(false);
+  await loadArchive();
+});
 
 async function deleteAll() {
   const deletable = storageUsage.filter((u) => u.deletable);

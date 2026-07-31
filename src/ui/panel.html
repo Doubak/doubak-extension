@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>豆备</title>
 <style>
-  :root { color-scheme: light dark; --line: #8883; }
+  :root { color-scheme: light dark; --line: #8883; --danger: #a50e0e; }
+  @media (prefers-color-scheme: dark) { :root { --danger: #f7b4ae; } }
   * { box-sizing: border-box; }
   body {
     font: 14px/1.6 system-ui, -apple-system, "Noto Sans CJK SC", sans-serif;
@@ -56,6 +57,9 @@
   }
   button.act { font: inherit; padding: 7px 16px; cursor: pointer; margin-right: 8px; }
   button.act:disabled { opacity: .5; cursor: default; }
+  /* 不可逆的操作要看起来不一样。用边框而不是填充色：填充的红按钮在一排按钮里
+     反而最抢眼，会把人往那儿引——而它恰恰是最不该被误点的那个。 */
+  button.act.danger { color: var(--danger); border-color: var(--danger); }
   #log { font-family: ui-monospace, monospace; font-size: 12px; max-height: 60vh; overflow: auto; }
   #log div { padding: 1px 0; border-bottom: 1px solid var(--line); }
 
@@ -87,6 +91,7 @@
       <button data-tab="overview" aria-selected="true">概览</button>
       <button data-tab="coverage" aria-selected="false">覆盖率</button>
       <button data-tab="archive" aria-selected="false">档案</button>
+      <button data-tab="storage" aria-selected="false">存储</button>
       <button data-tab="log" aria-selected="false">日志</button>
       <button data-tab="debug" aria-selected="false">调试</button>
     </nav>
@@ -122,6 +127,9 @@
       <div id="archive-summary"></div>
       <button class="act" id="export" disabled>导出到文件夹</button>
       <button class="act" id="verify" disabled>验一验（逐条取出并解压）</button>
+      <!-- 删除放在这里，是因为**这里才有上下文**：你刚看过它有多少条、多大、
+           导出过没有。存储页那份是批量视角，两个都要。 -->
+      <button class="act danger" id="delete-this" disabled>删除这一份</button>
       <div id="export-result"></div>
       <div id="verify-result"></div>
       <!-- 「豆瓣上已经没有了」的那几条。整份档案里最不可替代的信息，
@@ -157,7 +165,12 @@
       <button class="act" id="selftest">打开自检页</button>
       <div id="env"></div>
 
-      <h2>存储</h2>
+    </section>
+
+    <!-- 存储：删档案是**日常操作**，不是调试操作。
+         它原来挂在调试页下面，而调试页里全是会改变抓取行为的东西（演练、绕过门控、
+         小范围试跑）。把一件日常操作放在那里，等于训练用户往那儿去找东西。 -->
+    <section id="tab-storage" hidden>
       <div class="hint">
         删除是<b style="display:inline">不可逆</b>的，而且没有回收站。
         <b style="display:inline">没导出过的档案，浏览器里这一份就是唯一的副本</b>——

@@ -528,6 +528,31 @@ describe('面板脚本', () => {
     assert.match(js, /renderVanished\(\);[\s\S]{0,200}\$\('captures'\)/);
   });
 
+  test('删档案是日常操作 —— 有自己的标签页，不藏在调试页里', async () => {
+    // 调试页里全是**会改变抓取行为**的东西（演练、绕过门控、小范围试跑）。
+    // 把一件日常操作摆在那儿，等于训练用户往那儿去找东西。
+    const html = await readRepoFile('src/ui/panel.html');
+    assert.match(html, /data-tab="storage"/, '存储该有自己的标签页');
+    assert.match(html, /id="tab-storage"/);
+
+    // 存储那一块必须在存储页里，不在调试页里
+    const storageSection = html.slice(html.indexOf('id="tab-storage"'));
+    assert.match(storageSection.slice(0, 900), /id="storage"/);
+    const debugSection = html.slice(html.indexOf('id="tab-debug"'), html.indexOf('id="tab-storage"'));
+    assert.equal(debugSection.includes('id="storage"'), false, '存储还留在调试页里');
+  });
+
+  test('档案页能删掉当前这一份 —— 那里才有上下文', async () => {
+    const html = await readRepoFile('src/ui/panel.html');
+    assert.match(html, /id="delete-this"/);
+    // 不可逆的操作要看起来不一样
+    assert.match(html, /id="delete-this"[^>]*|class="act danger"/);
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /\$\('delete-this'\)\.addEventListener/);
+    // 结果要写在档案页自己的地方 —— 否则消息出现在用户看不见的标签页里
+    assert.match(js, /deleteBundle\(currentBundleId, \{[\s\S]{0,200}report:/);
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。
