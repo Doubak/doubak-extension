@@ -303,12 +303,22 @@ export class Frontier {
     // 而广播是唯一「可静默删除、删了就再也拿不回来」的东西。
     //
     // 同优先级内保持入队顺序（先进先出）：分页必须按页序走。
+    // 同优先级内优先继续**已经开工**的那条路线（深度优先），见 `_startedRoutes()`。
+    const started = this._startedRoutes();
+    const rank = (it) => (started.has(it.routeKey) ? 0 : 1);
+
     let best = null;
     for (const it of this._items) {
       if (it.state !== 'pending') continue;
       if (blockedRoutes.has(it.routeKey)) continue;
       if (it.gatedBy && !this._openGates.has(it.gatedBy)) continue;
-      if (!best || it.priority < best.priority) best = it;
+      if (!best) { best = it; continue; }
+      if (it.priority !== best.priority) {
+        if (it.priority < best.priority) best = it;
+      } else if (rank(it) < rank(best)) {
+        // 同优先级：先跑完手上这条。同一条路线内部仍是先进先出——分页必须按页序走。
+        best = it;
+      }
     }
     if (!best) return null;
 
@@ -364,6 +374,28 @@ export class Frontier {
       }
     }
     return blocked;
+  }
+
+  /**
+   * 已经开过工的路线（有条目跑完了）。
+   *
+   * 用来在**同优先级内**做深度优先：先把手上这条列表跑完，再开下一条。
+   *
+   * 15 条标记列表优先级完全一样，按入队顺序轮转的话，翻页会把第 2 页追加到队尾，
+   * 于是每条线各抓一页、再各抓一页……**十五条列表一起慢慢爬**。中途一停，得到的
+   * 是十五份半截列表——每一份都不完整，每一份的连续性都证明不了，覆盖率那一页
+   * 全是「进行中」。
+   *
+   * 一条一条跑完则相反：停下来的时候，跑完的那几条是**真的跑完了**，可以验证、
+   * 可以推进水位线、下次可以增量。这跟路线族之间的排序是同一条道理，只是尺度更小。
+   */
+  _startedRoutes() {
+    /** @type {Set<string>} */
+    const started = new Set();
+    for (const it of this._items) {
+      if (it.state === 'done') started.add(it.routeKey);
+    }
+    return started;
   }
 
   /**

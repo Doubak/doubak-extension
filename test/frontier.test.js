@@ -161,6 +161,55 @@ describe('停机', () => {
   });
 });
 
+describe('同优先级内深度优先：先把手上这条跑完', () => {
+  test('不在同优先级的几条路线之间来回轮转', () => {
+    // 15 条标记列表优先级完全一样。翻页会把下一页**追加到队尾**，于是按入队顺序
+    // 取的话就成了：每条各抓一页、再各抓一页……十五条一起慢慢爬。中途一停，得到
+    // 的是十五份半截列表——每一份都不完整，连续性都证明不了。
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a1', routeKey: 'A', priority: 40 }));
+    f.enqueue(item({ urlKey: 'b1', routeKey: 'B', priority: 40 }));
+
+    // 抓完 A 的第 1 页，它入队第 2 页（追加到队尾）
+    const a1 = f.next();
+    assert.equal(a1.routeKey, 'A');
+    f.settle(a1, 'ok');
+    f.enqueue(item({ urlKey: 'a2', routeKey: 'A', priority: 40 }));
+
+    const nxt = f.next();
+    assert.equal(nxt.routeKey, 'A', '该继续跑 A 的第 2 页，而不是跳去开 B');
+  });
+
+  test('一条跑完了才开下一条', () => {
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a1', routeKey: 'A', priority: 40 }));
+    f.enqueue(item({ urlKey: 'b1', routeKey: 'B', priority: 40 }));
+
+    f.settle(f.next(), 'ok'); // A 第 1 页完，没有下一页 = A 跑完了
+    const nxt = f.next();
+    assert.equal(nxt.routeKey, 'B', 'A 没活了就该开 B');
+  });
+
+  test('优先级仍然压过一切 —— 深度优先只在同一层内生效', () => {
+    // 广播（10）就算还没开工，也要排在已经开工的标记列表（40）前面。
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'i1', routeKey: 'interest', priority: 40 }));
+    f.settle(f.next(), 'ok');
+    f.enqueue(item({ urlKey: 'i2', routeKey: 'interest', priority: 40 }));
+    f.enqueue(item({ urlKey: 'b1', routeKey: 'broadcast', priority: 10 }));
+
+    assert.equal(f.next().routeKey, 'broadcast', '优先级必须压过深度优先');
+  });
+
+  test('同一条路线内部仍是先进先出 —— 分页必须按页序走', () => {
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'p1', routeKey: 'A', priority: 40 }));
+    f.enqueue(item({ urlKey: 'p2', routeKey: 'A', priority: 40 }));
+    const first = f.next();
+    assert.equal(first.urlKey, 'p1');
+  });
+});
+
 describe('clearStop：「继续」这个按钮的落点', () => {
   test('停机之后能重新产出 —— 否则「继续」就是个假按钮', () => {
     // 真实症状：用户点暂停，再点继续，得到的是一条「需要你处理：user_paused」的通知。

@@ -357,6 +357,9 @@ export class CrawlRunner {
       frontier, transport, writer, session, pacer, routes,
       onEvent: this._emit,
       bypassGates: Boolean(pointer.bypassGates),
+      // 界面上的「已抓」要接着数，不能每次恢复都归零。数字来自 index——
+      // 内存里的计数随 service worker 一起清零，index 不会。
+      priorCounts: repair.capturedByRoute,
     });
 
     this._run = {

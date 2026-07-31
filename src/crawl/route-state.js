@@ -49,8 +49,11 @@ export class RouteState {
    * @param {'bounded' | 'full'} opts.enumeration
    * @param {string | null} [opts.floorTime]      上次的水位线（RFC3339）
    * @param {number} [opts.stallThreshold]
+   * @param {number} [opts.priorCount]  恢复之前这条线已经抓了多少条（来自 index）
    */
-  constructor({ routeKey, intent, enumeration, floorTime = null, stallThreshold = 3 }) {
+  constructor({
+    routeKey, intent, enumeration, floorTime = null, stallThreshold = 3, priorCount = 0,
+  }) {
     this.routeKey = routeKey;
     this.intent = intent;
     this.enumeration = enumeration;
@@ -71,7 +74,18 @@ export class RouteState {
 
     /** @type {{count: number, raw: string, captureId: string, observedAt: string} | null} */
     this.claimed = null;
-    this.capturedCount = 0;
+    /**
+     * 这条线一共抓了多少条目——**含恢复之前的**。
+     *
+     * 从 0 起算的话，界面上的「已抓」每次崩溃恢复都归零；而一场几小时的抓取会跨越
+     * 很多次 service worker 死亡，于是那个数字显示的是「上次恢复以来」，用户读到
+     * 的却是「一共」。起点由 index 提供（唯一权威的一份）。
+     */
+    this.capturedCount = priorCount;
+    /** 起点。判断「本次会话有没有推进」时要减掉它。 */
+    this.priorCount = priorCount;
+    /** 本次会话抽到过多少个条目 ID（含重复）。见 `observePage` 与 `markFinished`。 */
+    this._idsSeenThisSession = 0;
 
     /** @type {Array<{reason: string, detail?: string}>} */
     this.gaps = [];
@@ -95,6 +109,17 @@ export class RouteState {
   observePage({ ids, times = [], claimed = null, captureId, observedAt }) {
     const progress = this.stall.observePage(ids);
     this.capturedCount += progress.newIds;
+    // **本次会话到底抽到过 ID 没有**，新的旧的都算。
+    //
+    // 下面 `markFinished()` 那道自检要的是这个，不是 `capturedCount`：
+    //
+    // - `capturedCount` 现在含恢复之前的数（否则界面上的「已抓」每次恢复都归零），
+    //   拿它判就等于恢复之后自检永远沉默；
+    // - 只数 `newIds` 也不对——一条恢复之后只读到重复页的路线，`newIds` 合法地
+    //   是 0，那会误报「抽取器坏了」。
+    //
+    // 抽到过 ID（哪怕全是重复的）就说明抽取器在工作。
+    this._idsSeenThisSession += progress.newIds + progress.duplicates;
 
     // 声明数量只记**第一次**读到的。实测每张列表页上都有这个数字，逐页复读
     // 能发现抓取过程中总数变了；但写进 coverage 的应当是开始时的那一个，
@@ -165,7 +190,7 @@ export class RouteState {
   markFinished() {
     this._finished = true;
 
-    if ((this.claimed?.count ?? 0) > 0 && this.capturedCount === 0) {
+    if ((this.claimed?.count ?? 0) > 0 && this._idsSeenThisSession === 0) {
       this.recordGap(
         'no_items_observed',
         `页面声称有 ${this.claimed.count} 条，但一个条目 ID 都没抽到——` +

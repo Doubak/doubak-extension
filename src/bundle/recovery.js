@@ -198,7 +198,38 @@ export async function recoverBundle({ store, bundleId }) {
   // 而那个文件已经存在——它会（正确地）拒绝覆盖，于是恢复完了却写不下去。
   const resume = rebuildSegmentState(entries);
 
-  return { lastSeq, lastCaptureId, indexLineCount: entries.length, repairs, resume };
+  return {
+    lastSeq, lastCaptureId, indexLineCount: entries.length, repairs, resume,
+    // 每条路线已经抓到多少条目。**这是唯一权威的数字**：index 写在档案里、每页
+    // 落盘，而内存里的计数随 service worker 一起清零。
+    //
+    // 不给它的话，界面上的「已抓」在每次崩溃恢复之后归零——而一场几小时的抓取
+    // 会跨越很多次 worker 死亡，于是那个数字实际显示的是「上次恢复以来抓了多少」，
+    // 用户看到的却是「一共抓了多少」。
+    capturedByRoute: countByRoute(entries),
+  };
+}
+
+/**
+ * 从 index 汇总每条路线的条目数。
+ *
+ * 数的是**条目**不是页：`item_count` 才是用户理解的「已抓 40 条广播」。
+ * 那个字段是可选的（旧档案没有），缺了就退回按页数——宁可少数一点，
+ * 也不要把 40 条说成 2 条。
+ *
+ * @param {Array<Record<string, any>>} entries
+ * @returns {Record<string, number>}
+ */
+function countByRoute(entries) {
+  /** @type {Record<string, number>} */
+  const out = {};
+  for (const e of entries) {
+    if (!e.route_key) continue;
+    // 只数成功的：判定不是 ok 的那些没有内容，算进去等于虚报进度。
+    if (e.verdict && e.verdict !== 'ok') continue;
+    out[e.route_key] = (out[e.route_key] ?? 0) + (typeof e.item_count === 'number' ? e.item_count : 0);
+  }
+  return out;
 }
 
 /**

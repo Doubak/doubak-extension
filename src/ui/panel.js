@@ -24,6 +24,7 @@ import { exportBundle, directorySink } from '../bundle/exporter.js';
 import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../storage/storage-usage.js';
 import { captureTitle, captureSubtitle } from './capture-label.js';
 import { shouldLog, formatEntry, formatLogText } from '../crawl/event-log.js';
+import { routeName } from './route-names.js';
 import { bundleDirName, bundleIdFromDirName } from '../core/ids.js';
 
 const $ = (id) => document.getElementById(id);
@@ -38,21 +39,7 @@ function send(msg) {
 }
 
 /** 界面上不出现内部术语。 */
-const ROUTE_NAMES = {
-  'broadcast.timeline': '广播',
-  'profile.overview': '个人主页',
-  'interest.movie.collect': '电影 · 看过',
-  'interest.movie.wish': '电影 · 想看',
-  'interest.movie.do': '电影 · 在看',
-  'interest.book.collect': '书 · 读过',
-  'interest.book.wish': '书 · 想读',
-  'interest.book.do': '书 · 在读',
-  'interest.music.collect': '音乐 · 听过',
-  'interest.game.collect': '游戏 · 玩过',
-  'interest.drama.collect': '舞台剧 · 看过',
-  'interest.item': '作品详情页',
-};
-const routeName = (k) => ROUTE_NAMES[k] ?? k;
+
 
 /** 档案状态。界面上不出现 `in_progress` 这种内部标识。 */
 const STATUS_NAMES = {

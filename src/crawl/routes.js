@@ -60,6 +60,12 @@ const enc = (u) => encodeURIComponent(u);
 const STATUS = /** @type {const} */ (['collect', 'wish', 'do']);
 
 /**
+ * 支持的媒介。**这是唯一的一份**——界面上的中文名按它逐条核对
+ * （`test/route-names.test.js`），加一种媒介测试会先红。
+ */
+export const MEDIUMS = /** @type {const} */ (['movie', 'book', 'music', 'game', 'drama']);
+
+/**
  * 各分类标记列表的 URL 构造方式。
  * 参数取自真实档案里页面自己的分页器链接，不是照抄前代的手搓模板。
  */
@@ -110,7 +116,7 @@ const CATEGORY_ENTRY = {
  */
 export function buildRoutes({
   username,
-  mediums = ['movie', 'book', 'music', 'game', 'drama'],
+  mediums = [...MEDIUMS],
   includeCatalog = true,
 }) {
   if (!username) throw new Error('缺少 username');

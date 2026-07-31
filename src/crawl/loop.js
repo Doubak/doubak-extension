@@ -63,7 +63,10 @@ export class CrawlLoop {
    * @param {LoopDeps & {floors?: Map<string, string | null>}} deps
    *   `floors`：每条路线上次的水位线，作为本次的下界。没有就是首次全量。
    */
-  constructor({ frontier, transport, writer, session, pacer, routes, onEvent, floors, bypassGates = false }) {
+  constructor({
+    frontier, transport, writer, session, pacer, routes, onEvent, floors,
+    bypassGates = false, priorCounts = null,
+  }) {
     this._frontier = frontier;
     this._transport = transport;
     this._writer = writer;
@@ -79,6 +82,27 @@ export class CrawlLoop {
     /** @type {Map<string, string>} routeKey → 最后一次 capture_id，用于 parent 链 */
     this._lastCapture = new Map();
     this._floors = floors ?? new Map();
+    /**
+     * 恢复之前这份档案里已经抓了多少条。
+     *
+     * RouteState 活在内存里，而 service worker 随时被杀——一场几小时的抓取会跨越
+     * 很多次死亡。不接上的话，界面上的「已抓」在每次恢复之后归零，实际显示的是
+     * 「上次恢复以来抓了多少」，而用户看到的是「一共抓了多少」。
+     *
+     * 数字来自 `index.ndjson`，那是唯一权威的一份（写在档案里、每页落盘）。
+     *
+     * @type {Record<string, number>}
+     */
+    this._priorCounts = priorCounts ?? {};
+
+    // **马上把这些路线的状态建出来。**
+    //
+    // `stateFor()` 是懒的：一条路线要等到处理完一页才会出现在进度表里。恢复之后
+    // 那意味着**整张表先空掉**，等抓到东西才一行行长回来——而恢复在崩溃路径上很
+    // 频繁。用户看到的是「进度没了」。
+    //
+    // 有历史计数就说明这条线之前抓过，那它本来就该在表上。
+    for (const routeKey of Object.keys(this._priorCounts)) this.stateFor(routeKey);
     /**
      * 跳过抓取顺序的门控。**只给调试用**。
      *
@@ -106,6 +130,7 @@ export class CrawlLoop {
           intent: route.intent ?? routeKey,
           enumeration: route.enumeration ?? 'bounded',
           floorTime: this._floors.get(routeKey) ?? null,
+          priorCount: this._priorCounts[routeKey] ?? 0,
         }),
       );
     }
@@ -532,6 +557,19 @@ export class CrawlLoop {
       cursor: { kind: route.pagination.kind, value: nextValue },
       // 走到这儿说明这条路线有分页，也就必然是有序的。
       ordered: true,
+      // **优先级必须继承。**
+      //
+      // `Frontier.enqueue` 的默认值是 50，而广播是 10、标记列表是 40。种子是
+      // 带着优先级入队的，翻页原先没带——于是广播第 2 页（50）输给了每一条
+      // 标记列表的种子（40）。
+      //
+      // 后果不是「顺序稍微乱一点」，而是**整个优先级设计在第一页之后就失效了**：
+      // 所有路线一律并列在 50，按入队顺序轮转，十几条线一起慢慢爬。而排序的
+      // 全部意义在于「中途被打断时，先跑完的一定是最难补的」——广播是唯一
+      // 可静默删除、删了就再也拿不回来的东西，它却成了最先被挤开的那条。
+      //
+      // 用 `item.priority` 兜底：恢复出来的条目也带着优先级，比再查一次路线表稳。
+      priority: route.priority ?? item.priority,
     });
   }
 }

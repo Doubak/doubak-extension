@@ -8,7 +8,7 @@ import { MemoryKvStore } from '../src/storage/kv-store.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { Frontier } from '../src/crawl/frontier.js';
 import { CRASH_SENTINEL_REASON } from '../src/crawl/resume-policy.js';
-import { buildRoutes } from '../src/crawl/routes.js';
+import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { indexFilename } from '../src/core/ids.js';
 
 const enc = new TextEncoder();
@@ -342,6 +342,27 @@ describe('暂停 → 继续', () => {
     assert.ok(Number.isFinite(b.captured), 'captured 不能是 NaN');
     assert.ok(calls.length > before + 1, '恢复之后必须真的发请求，而不是空转');
     assert.ok(b.captured > 0 || b.done, '一批要么抓到东西，要么说自己跑完了');
+  });
+
+  test('恢复之后「已抓」接着数，不归零', async () => {
+    // 一场几小时的抓取会跨越很多次 service worker 死亡。RouteState 活在内存里，
+    // 不接上的话界面显示的是「上次恢复以来抓了多少」，而用户读到的是「一共」。
+    //
+    // 起点取自 index.ndjson——那是唯一权威的一份（写在档案里、每页落盘）。
+    const { runner, runStore } = harness(
+      broadcastOnly([bcPage(20, 0), bcPage(20, 20), bcPage(20, 40), bcPage(0)]), { batchSize: 2 },
+    );
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+    const before = runner.status().routes.find((r) => r.routeKey === 'broadcast.timeline').captured;
+    assert.ok(before > 0, '崩溃前就该有数');
+
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null; // worker 被杀
+    await runner.resume(cp);
+
+    const after = runner.status().routes.find((r) => r.routeKey === 'broadcast.timeline')?.captured;
+    assert.equal(after, before, `恢复之后归零了：${before} → ${after}`);
   });
 
   test('本来就在跑的时候继续 → 报 alreadyRunning，不重开一场', async () => {
@@ -799,5 +820,82 @@ describe('并发恒为 1 —— 豆瓣同一时刻只会看到我们的一个请
       at[1] - at[0] >= INTERVAL - 5,
       `两发之间只隔了 ${at[1] - at[0]}ms，应当 ≥ ${INTERVAL}ms —— 它们贴在一起发出去了`,
     );
+  });
+});
+
+describe('抓取顺序：先跑完最难补的那条', () => {
+  /**
+   * 设计里的排序是 广播 → 长文 → 图片 → 标记列表 → 作品详情页，理由是
+   * 「中途被打断时，先跑完的一定是最难补的」。广播是唯一可静默删除、删了就
+   * 再也拿不回来的东西。
+   *
+   * 报上来的现象是：广播抓了 40 条还在「进行中」，电影、音乐、书、游戏、
+   * 舞台剧十几条线**同时**在推进。
+   */
+
+  test('广播没跑完之前不碰标记列表', async () => {
+    const seen = [];
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      seen.push(url);
+      if (url.includes('statuses')) {
+        const p = Number(/[?&]p=(\d+)/.exec(url)?.[1] ?? 1);
+        return p <= 4 ? bcPage(20, (p - 1) * 20) : bcPage(0);
+      }
+      return bcPage(0);
+    }, { batchSize: 3 });
+
+    await runner.start({ username: 'example', mediums: ['movie', 'book'], includeCatalog: false });
+    for (let i = 0; i < 30; i++) if ((await runner.runBatch()).done) break;
+
+    const firstInterest = seen.findIndex((u) => u.includes('/interest') || u.includes('/collect'));
+    const lastBroadcast = seen.findLastIndex((u) => u.includes('statuses'));
+    if (firstInterest >= 0) {
+      assert.ok(
+        lastBroadcast < firstInterest,
+        `广播还没抓完就去抓标记列表了：最后一页广播在第 ${lastBroadcast} 个请求，`
+          + `第一个标记列表在第 ${firstInterest} 个`,
+      );
+    }
+  });
+
+  test('翻出来的下一页继承路线优先级 —— 不继承的话第 2 页就掉到队尾了', async () => {
+    // 这是上面那个现象的成因：`enqueue` 的 priority 默认值是 50，而
+    // 广播是 10、标记列表是 40。种子是带优先级入队的，**翻页却没带**，
+    // 于是广播第 2 页（50）输给了每一条标记列表的种子（40）。
+    //
+    // 后果不只是顺序乱：整个优先级设计就此失效——第一页之后，所有路线
+    // 一律并列在 50，按入队顺序轮转。用户看到的就是十几条线一起慢慢爬。
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      return url.includes('statuses') ? bcPage(20, 0) : bcPage(0);
+    }, { batchSize: 1 });
+
+    await runner.start({ username: 'example', mediums: ['movie'], includeCatalog: false });
+
+    // 一直跑到广播第 2 页真的入队为止。**不能只跑一批就断言**：优先级 0 的
+    // 身份路线排在前面，那时候找到的还是广播的种子（它当然带着正确的优先级），
+    // 于是测试会假通过——这条测试自己先踩过一次。
+    const f = runner._run.frontier;
+    const page2 = () => f.snapshot().find(
+      (it) => it.routeKey === 'broadcast.timeline' && it.cursor?.value === 2,
+    );
+    for (let i = 0; i < 15 && !page2(); i++) await runner.runBatch();
+
+    const p2 = page2();
+    assert.ok(p2, '广播第 2 页应当已入队');
+    assert.equal(p2.priority, PRIORITY.BROADCAST, '第 2 页必须和第 1 页同一优先级');
+  });
+
+  test('派生的作品详情页也继承 —— 它必须留在最后', async () => {
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      return bcPage(0);
+    }, { batchSize: 1 });
+    await runner.start({ username: 'example', mediums: [], includeCatalog: true });
+    const f = runner._run.frontier;
+    for (const it of f.snapshot()) {
+      if (it.routeKey === 'interest.item') assert.equal(it.priority, PRIORITY.CATALOG);
+    }
   });
 });
