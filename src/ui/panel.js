@@ -20,7 +20,7 @@
 import { BundleReader } from '../bundle/bundle-reader.js';
 import { SCENARIOS } from '../crawl/dry-run.js';
 import { WorkerFileStore } from '../storage/worker-file-store.js';
-import { exportBundle, directorySink, subdirectorySink } from '../bundle/exporter.js';
+import { exportBundle, subdirectorySink } from '../bundle/exporter.js';
 import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../storage/storage-usage.js';
 import { captureTitle, captureSubtitle, subjectLabel } from './capture-label.js';
 import {
@@ -1849,7 +1849,19 @@ $('export').addEventListener('click', async () => {
   }
 
   const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(bundleId) });
-  const sink = directorySink(dir);
+
+  // **也建一个子目录**，与「导出整条链」一致。
+  //
+  // 平铺的话，每次导出的 `manifest.json` 与 `README.txt` 都会覆盖上一次的——
+  // 用户往同一个下载目录里导过几份之后，只剩最后一次那一份的 manifest，早先的
+  // 全没了，而档案编号只在文件名里、manifest 里的编号已经对不上号。
+  //
+  // 顺带解决一个噪音：目的地非空检查原来对着**整个下载目录**做，于是几乎每次
+  // 都要弹一次「已经有 N 个文件，确认覆盖吗」——而那时并没有任何东西真的会被
+  // 覆盖。现在检查的是这一份自己的子目录，弹出来就意味着**真的**要覆盖同一份
+  // 档案的上一次导出。
+  const folder = bundleDirName(bundleId);
+  const sink = await subdirectorySink(dir, folder);
   const run = (overwrite) => exportBundle({
     store, sink, overwrite,
     onProgress: (p) => {
@@ -1869,15 +1881,19 @@ $('export').addEventListener('click', async () => {
       r = await run(false);
     } catch (e) {
       if (e.code !== 'destination_not_empty') throw e;
-      // 覆盖是不可撤销的，必须用户点头。文件选择器里随手点中的可能是文档目录。
-      if (!confirm(`${e.message}\n\n继续会覆盖同名文件，且没有回收站。确定吗？`)) {
+      // 覆盖不可撤销，必须由用户点头。走到这里说明 `${folder}/` 里已经有东西，
+      // 也就是这一份档案此前导出过——覆盖的是它自己的旧副本。
+      if (!confirm(
+        `文件夹 ${folder} 里已经有这份档案的旧副本。\n\n${e.message}\n\n`
+        + '继续会覆盖同名文件，且没有回收站。确定吗？',
+      )) {
         el.className = 'card idle';
         el.textContent = '已取消，什么都没写。';
         return;
       }
       r = await run(true);
     }
-    showExportResult(r);
+    showExportResult(r, folder);
     // 记一笔「导出过了」。派生状态，丢了不影响档案本身——只影响删除确认框说得多重。
     // 只在**校验通过**时记：没验过就说「已导出」，等于给了一个我们没资格给的保证。
     if (r.problems.length === 0) {
@@ -1890,7 +1906,7 @@ $('export').addEventListener('click', async () => {
 });
 
 /** @param {object} r */
-function showExportResult(r) {
+function showExportResult(r, folder) {
   const el = $('export-result');
   el.replaceChildren();
   const b = document.createElement('b');
@@ -1899,8 +1915,8 @@ function showExportResult(r) {
     el.className = 'card err';
     b.textContent = `导出有问题：${r.problems.length} 个文件没对上`;
     el.append(b, document.createTextNode(
-      r.problems.map((p) => `${p.name}（${p.reason}）`).join('；') +
-      '。这一份别拿来当备份——原档案还在扩展里，请换个位置重导。',
+      r.problems.map((p) => `${p.name}（${p.reason}）`).join('；')
+      + '。这一份不能当作备份使用——原档案仍在扩展内，请另选位置重新导出。',
     ));
     return;
   }
@@ -1910,15 +1926,15 @@ function showExportResult(r) {
     // 只有这一句能说「已校验」：回读了目的地、逐个对上了 manifest 里的摘要。
     b.textContent = `已导出并校验：${r.files.length} 个文件，${bytes(r.bytes)}`;
     el.append(b, document.createTextNode(
-      '每个文件都从你选的文件夹里重新读了一遍，字节数与 manifest 里声明的 SHA-256 全部一致。' +
-      '现在可以安全地删掉扩展里那一份了。',
+      `已写入子文件夹 ${folder}/。每个文件都从该文件夹重新读取并核对过，`
+      + '字节数与 manifest 中声明的 SHA-256 全部一致。此时可以安全地删除扩展内的那一份。',
     ));
   } else {
     // 只验了字节数就别说「已校验」——那正是这个项目一直在躲的假安心。
-    b.textContent = `已导出：${r.files.length} 个文件，${bytes(r.bytes)}（只验了字节数）`;
+    b.textContent = `已导出：${r.files.length} 个文件，${bytes(r.bytes)}（仅核对了字节数）`;
     el.append(b, document.createTextNode(
-      '这次抓取还没收尾，没有 manifest，所以只核对了每个文件的字节数，没有摘要可对。' +
-      '抓取完成后重导一次才能做完整校验。',
+      `已写入子文件夹 ${folder}/。本次抓取尚未收尾，没有 manifest，`
+      + '因此只核对了每个文件的字节数，没有摘要可比对。抓取完成后重新导出一次才能做完整校验。',
     ));
   }
 }

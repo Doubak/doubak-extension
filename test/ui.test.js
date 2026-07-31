@@ -729,6 +729,10 @@ describe('面板脚本', () => {
     assert.match(js, /type: 'chain', bundleId: currentBundleId/);
     // 分子目录，否则 manifest.json 互相覆盖
     assert.match(js, /subdirectorySink\(parent, bundleDirName\(id\)\)/);
+    // **单份导出也要建子目录** —— 否则往同一个下载目录导几次，早先的 manifest
+    // 全被覆盖，档案编号只剩在文件名里
+    assert.equal(js.includes('directorySink(dir)'), false, '单份导出还在平铺');
+    assert.match(js, /subdirectorySink\(dir, folder\)/);
     // 一份失败不中断其余
     const fn = js.slice(js.indexOf("\$('export-chain')"));
     const body = fn.slice(0, fn.indexOf('renderChainExportResult(el, done)'));

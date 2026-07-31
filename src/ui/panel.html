@@ -144,9 +144,10 @@
       <!-- 「这是一次增量抓取」。**必须有自己的容器**：往兄弟节点里插的话没人负责
            清，切一次档案就多留一张，而留下的那张说的还是上一份档案的上游。 -->
       <div id="archive-incremental"></div>
+      <!-- 两个导出都建**各自的子目录**（doubak-bundle-<编号>）。平铺的话每份的
+           manifest.json 与 README.txt 会互相覆盖，用户的下载目录里就只剩最后一次
+           导出的那一份。 -->
       <button class="act" id="export" disabled>导出这一份</button>
-      <!-- 整条链：每份档案各占一个子目录。平铺的话 manifest.json 会互相覆盖，
-           用户的下载目录里就只剩最后一次导出的那一份。 -->
       <button class="act" id="export-chain" disabled>导出整条链</button>
       <button class="act" id="verify" disabled>验一验（逐条取出并解压）</button>
       <!-- 删除放在这里，是因为**这里才有上下文**：你刚看过它有多少条、多大、
