@@ -173,10 +173,39 @@ describe('verify：每页的廉价复核', () => {
     }
   });
 
-  test('只有用户名变了也算换账号', () => {
+  test('数字 ID 一样、页面上出现别人的用户名 —— **不算**换账号', () => {
+    // 这条测试原来是反的（「只有用户名变了也算换账号」），而它在真实数据上
+    // 直接造成了一次假停机：
+    //
+    //   抓 book.douban.com/subject/4820710/ 时，页面上第一个 /people/<x>/ 是某位
+    //   **短评作者**的，于是守卫报「用户名 mewcatcher → 163211544，账号发生了
+    //   变化」并整场停机。用户的账号一秒都没变过。
+    //
+    // 用户名与昵称是从页面**正文**扒的，而正文里到处是别人。只有数字 ID 来自
+    // 全局导航，一定是当前登录者——那也正是档案的归属主键。
     const g = ready();
     const other = loggedInPage({ uid: '82160871', username: 'renamed', display: 'MewX' });
-    assert.throws(() => g.verify(other), /用户名/);
+    assert.doesNotThrow(() => g.verify(other));
+  });
+
+  test('数字 ID 变了才算换账号', () => {
+    const g = ready();
+    const other = loggedInPage({ uid: '163211544', username: 'mewcatcher', display: 'MewX' });
+    assert.throws(() => g.verify(other), /数字 ID/);
+  });
+
+  test('作品详情页上有别人的 people 链接，照样不停机', () => {
+    // 真实形状：正文里是短评作者的链接，导航栏里才是本人。
+    const g = ready();
+    const subject = `<html><body>
+      <div id="db-global-nav"><li class="nav-user-account"><span>MewX的账号</span>
+      <a href="/accounts/logout">退出</a></li></div>
+      <script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>
+      <div id="comments">
+        <a href="https://www.douban.com/people/163211544/">某位短评作者</a>
+        <a href="https://www.douban.com/people/998877/">另一位</a>
+      </div></body></html>`;
+    assert.doesNotThrow(() => g.verify(subject));
   });
 
   test('接口响应（没有导航栏）不当作掉登录', () => {

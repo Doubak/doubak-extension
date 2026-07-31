@@ -257,8 +257,21 @@ export class SessionGuard {
     // 'unknown' 不当作失效——接口响应本来就没有导航栏。
     if (state === 'unknown') return;
 
+    // **只比数字 ID。**
+    //
+    // 那是唯一一个「一定来自全局导航、一定是当前登录者」的字段
+    // （`_GLOBAL_NAV.USER_ID`，每张登录后页面都有）。
+    //
+    // 用户名与昵称不行：它们是从页面**正文**里扒的，而正文里到处是别人。真实故障
+    // ——抓到 `book.douban.com/subject/4820710/` 时，页面上第一个 `/people/<x>/`
+    // 是某位**短评作者**的，于是守卫报「用户名 mewcatcher → 163211544，账号发生了
+    // 变化」并整场停机。用户的账号一秒都没变过。
+    //
+    // 这不是「多一层保险」，是**反过来的**：多比一个不可靠的字段，只会凭空制造停机。
+    // 而 `verify()` 要防的事（抓到一半用户在另一个标签页换了号）只需要数字 ID 就够，
+    // 那本来就是档案的归属主键。
     const hints = extractAccountHints(html);
-    const mismatch = describeMismatch(this._account, hints);
+    const mismatch = describeMismatch(this._account, hints, { fields: ['userId'] });
     if (mismatch) {
       this._state = 'logged_out';
       throw new SessionError(
@@ -279,12 +292,9 @@ export class SessionGuard {
  * @param {AccountHints} actual
  * @returns {string | null}
  */
-export function describeMismatch(expected, actual) {
-  for (const [field, label] of /** @type {const} */ ([
-    ['userId', '数字 ID'],
-    ['username', '用户名'],
-    ['displayName', '昵称'],
-  ])) {
+export function describeMismatch(expected, actual, { fields = ['userId', 'username', 'displayName'] } = {}) {
+  const LABELS = { userId: '数字 ID', username: '用户名', displayName: '昵称' };
+  for (const [field, label] of fields.map((f) => [f, LABELS[f]])) {
     const a = expected[field];
     const b = actual[field];
     if (a && b && a !== b) return `${label} ${a} → ${b}`;

@@ -476,6 +476,47 @@ describe('面板脚本', () => {
     }
   });
 
+  test('每一种停机都要给得出下一步 —— 没有按钮就是死路', async () => {
+    // `account_switched` 与 `quota` 原来一个按钮都不给：用户按提示做完了该做的事
+    // （切回账号 / 清出空间），却没有任何地方能告诉豆备「我弄好了」，只能重装扩展。
+    //
+    // 唯一的例外是 `failures_pending`——它的动作在失败清单里，逐条重试。
+    const { PAUSE_REASONS: reasons } = await import('../src/crawl/resume-policy.js');
+    for (const key of reasons) {
+      // 这两个不是「停在那里等人处理」：`failures_pending` 的动作在失败清单里逐条
+      // 重试；`crash` 是崩溃哨兵，心跳会自己接手。
+      if (key === 'failures_pending' || key === 'crash') continue;
+
+      const dom = await loadUi({
+        which: 'panel',
+        onMessage: (msg) => {
+          if (msg.type === 'status') {
+            return {
+              ok: true, running: false,
+              runner: {
+                active: true, stopped: true, stoppedBy: key, bundleId: 'b',
+                intervalMs: 1000, backoffLevel: 0, counts: { done: 1, pending: 2 }, routes: [],
+              },
+            };
+          }
+          return IDLE(msg);
+        },
+      });
+      try {
+        const buttons = [...dom.byId.get('actions').children];
+        assert.ok(buttons.length > 0, `停机原因「${key}」在界面上没有任何下一步可点`);
+        assert.ok(buttons[0].textContent.trim().length > 0, `「${key}」的按钮没有文字`);
+        // 界面上不许出现内部标识
+        assert.equal(
+          dom.byId.get('state').textContent.includes(key), false,
+          `「${key}」把内部标识打在了屏幕上`,
+        );
+      } finally {
+        dom.restore();
+      }
+    }
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。

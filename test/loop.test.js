@@ -1,5 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { CrawlLoop } from '../src/crawl/loop.js';
 import { Frontier } from '../src/crawl/frontier.js';
@@ -494,5 +495,19 @@ describe('index 里记下条目数与时间区间', () => {
       new URL('../src/crawl/loop.js', import.meta.url), 'utf-8');
     assert.equal((src.match(/extractItemTimes\(/g) ?? []).length, 1);
     assert.equal((src.match(/extractItemIds\(/g) ?? []).length, 1);
+  });
+});
+
+describe('停机事件要说清是哪一页触发的', () => {
+  test('日志里那一行必须带 URL', () => {
+    // 报上来的：日志写着「stopped · account_switched · 账号发生了变化…」，
+    // 但**没说是抓哪一页时判断的**。而那正是排查的第一个问题——这次的答案是
+    // 「一张作品详情页，页面上第一个 /people/ 链接是短评作者的」。
+    const src = readFileSync(new URL('../src/crawl/loop.js', import.meta.url), 'utf-8');
+    const emits = [...src.matchAll(/_emit\(\{\s*type: 'stopped'[^}]*\}/g)].map((m) => m[0]);
+    assert.ok(emits.length >= 4, `没找到几处停机事件：${emits.length}`);
+    for (const e of emits) {
+      assert.match(e, /url:/, `这处停机事件没带 URL：${e}`);
+    }
   });
 });

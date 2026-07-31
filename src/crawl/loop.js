@@ -400,7 +400,7 @@ export class CrawlLoop {
       const se = classifyWriteError(err);
       this.stateFor(item.routeKey).markStopped(se.reason);
       this._frontier.stop(se.reason);
-      this._emit({ type: 'stopped', reason: se.reason, message: se.message });
+      this._emit({ type: 'stopped', reason: se.reason, message: se.message, url: item.url });
       return 'stop';
     }
     this._lastCapture.set(item.routeKey, written.captureId);
@@ -430,7 +430,7 @@ export class CrawlLoop {
         // 旧下界重走。重复是免费的，空洞是永久且不可检测的。
         this.stateFor(item.routeKey).markStopped(err.reason);
         this._frontier.stop(err.reason);
-        this._emit({ type: 'stopped', reason: err.reason, message: err.message });
+        this._emit({ type: 'stopped', reason: err.reason, message: err.message, url: item.url });
         return 'stop';
       }
       throw err;
@@ -453,7 +453,7 @@ export class CrawlLoop {
     }
     if (t.stopRun) {
       this.stateFor(item.routeKey).markStopped(t.reason ?? 'terminal');
-      this._emit({ type: 'stopped', reason: t.reason });
+      this._emit({ type: 'stopped', reason: t.reason, url: item.url });
       return 'stop';
     }
     if (t.state === 'failed') {
@@ -526,7 +526,7 @@ export class CrawlLoop {
 
     if (te?.kind === 'aborted') {
       this._frontier.stop('user_paused');
-      this._emit({ type: 'stopped', reason: 'user_paused' });
+      this._emit({ type: 'stopped', reason: 'user_paused', url: item.url });
       return 'stop';
     }
 
@@ -535,7 +535,7 @@ export class CrawlLoop {
     if (err instanceof PermissionError) {
       this.stateFor(item.routeKey).markStopped(err.reason);
       this._frontier.stop(err.reason);
-      this._emit({ type: 'stopped', reason: err.reason, message: err.message });
+      this._emit({ type: 'stopped', reason: err.reason, message: err.message, url: item.url });
       return 'stop';
     }
 
