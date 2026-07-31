@@ -23,6 +23,7 @@ import assert from 'node:assert/strict';
 
 import { routeName, hasRouteName, contiguityLabel } from '../src/ui/route-names.js';
 import { buildRoutes, MEDIUMS } from '../src/crawl/routes.js';
+import { readFile } from 'node:fs/promises';
 
 describe('每一条真实路线都有中文名', () => {
   test('全量抓取里没有一条露出内部标识', () => {
@@ -100,16 +101,42 @@ describe('「连续性」那一列：进行中 ≠ 未验证', () => {
     assert.equal(contiguityLabel({ contiguous: false, settled: false }), '进行中');
   });
 
-  test('抓完了还不连续 → 未验证，并点出有缺口', () => {
+  test('抓完了有缺口 → 说结论「有 N 处缺口」，不说「未验证」', () => {
+    // 「未验证」听起来像**我们的代码没查**，而其实查了，结论就是有缺口。
+    // 这一列说的是档案怎么样，不是我们对自己的信心。
     assert.equal(
       contiguityLabel({ contiguous: false, settled: true, gaps: [{ reason: 'account_switched' }] }),
-      '未验证 · 有缺口',
+      '有 1 处缺口',
+    );
+    assert.equal(
+      contiguityLabel({ contiguous: false, settled: true, gaps: [{}, {}, {}] }),
+      '有 3 处缺口',
     );
   });
 
-  test('抓完了、不连续、但没记缺口 → 只说未验证', () => {
-    // 比如水位线为空（这条线没有时间可比）。那不是缺口，别硬说成有洞。
-    assert.equal(contiguityLabel({ contiguous: false, settled: true, gaps: [] }), '未验证');
+  test('**绝不写「已验证 · 有缺口」** —— 那是自相矛盾的', () => {
+    // 「已验证」在这个项目里有确切含义：连续性证明成立。有缺口时它不成立。
+    // 两个词并排放，读快一点就会看成「验证通过」——而假的完整性声明是这个项目
+    // 最不能出的错。
+    const s = contiguityLabel({ contiguous: false, settled: true, gaps: [{ reason: 'x' }] });
+    assert.equal(s.includes('已验证'), false);
+    assert.equal(s.includes('✔'), false);
+  });
+
+  test('抓完了、不连续、也没记缺口 → 「没走完」', () => {
+    // 那不是缺口（没有断），是这条线压根没走到终点。别硬说成有洞。
+    assert.equal(contiguityLabel({ contiguous: false, settled: true, gaps: [] }), '没走完');
+  });
+
+  test('覆盖率页与进度表用同一套说法', async () => {
+    // 同一件事在两个页面上说成两样，用户会以为是两件事。
+    const panel = await readFile(new URL('../src/ui/panel.js', import.meta.url), 'utf-8');
+    assert.equal(
+      panel.includes('连续性未验证'), false,
+      '覆盖率页还在用自己那套措辞',
+    );
+    // 两处都走同一个函数
+    assert.ok((panel.match(/contiguityLabel\(/g) ?? []).length >= 2);
   });
 
   test('抓完的档案里绝不会写「进行中」', () => {

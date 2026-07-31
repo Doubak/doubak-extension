@@ -882,7 +882,11 @@ function renderCoverage(coverage, crawlState, bundleId) {
     const g = document.createElement('div');
     g.className = 'card warn';
     const b = document.createElement('b');
-    b.textContent = `${routeName(cs.route_key)} · 连续性未验证`;
+    // 与进度表用同一套说法：说结论（有几处缺口），不说「未验证」——后者听起来像
+    // 我们的代码没查，而其实查了。见 `contiguityLabel`。
+    b.textContent = `${routeName(cs.route_key)} · ${contiguityLabel({
+      contiguous: cs.contiguous, settled: true, gaps: cs.gaps,
+    })}`;
     // 说人话，并且**把 detail 带出来**——写 detail 的地方正是那些「原因一个词说
     // 不清」的情形（比如「下一页没能入队」），而那句话原本只存在档案里没人看得到。
     const lines = [`有 ${cs.gaps.length} 处缺口。`];
