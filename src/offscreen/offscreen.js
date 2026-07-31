@@ -442,6 +442,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ ok: true });
           break;
 
+        case 'abort':
+          // 中止：收尾成 aborted 并放开指针，之后这份档案就能删了。
+          // **不加锁**：它要在抓取正跑着的时候也能按下去，跟暂停同理。
+          sendResponse({ ok: true, manifest: await getRunner().abort() });
+          break;
+
         case 'finish':
           sendResponse({
             ok: true,

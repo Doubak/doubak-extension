@@ -83,7 +83,11 @@ export function summarizeBundles({
         exportState,
         deletable: !active,
         // 说清楚为什么不能删，而不是只把按钮灰掉——灰掉的按钮看起来像 bug。
-        blockedReason: active ? '这份正在抓，先暂停或等它结束' : null,
+        // **不能只说「先暂停」**：暂停之后它依旧删不掉——档案还在写、指针还指着
+        // 它。真正能放开它的是「中止」（收尾成 aborted 并放开指针）或者跑到结束。
+        blockedReason: active
+          ? '这份正在抓。要删的话先在概览页「中止这次抓取」（已抓到的都会留下），或者等它跑完'
+          : null,
       };
     })
     // 新的在前。bundle_id 以时间戳打头，所以倒序即最新在前。

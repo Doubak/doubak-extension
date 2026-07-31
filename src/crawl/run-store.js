@@ -160,6 +160,22 @@ export class RunStore {
     }
     await this._kv.remove(CURRENT_RUN_KEY);
   }
+
+  /**
+   * 只放开「这是正在进行的那次抓取」这个指针，**保留 checkpoint.json**。
+   *
+   * 用户中止一次抓取时要的正是这个：
+   *
+   * - 指针清掉 → 这份档案不再是「正在抓的那份」，于是可以删；心跳也不会再去恢复它
+   * - `checkpoint.json` 留着 → 规范 §3.1 要求 `aborted` 的 bundle **必须**带
+   *   checkpoint（那样一份半成品档案搬到另一台机器上还能接着抓）
+   *
+   * 两者是不同的东西：checkpoint 在档案目录里，指针在我们自己的 IndexedDB 里。
+   * 用 `clearCheckpoint()` 会把前者也删掉，那就违规了。
+   */
+  async releaseCurrentRun() {
+    await this._kv.remove(CURRENT_RUN_KEY);
+  }
 }
 
 /**

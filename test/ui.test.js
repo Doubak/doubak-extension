@@ -594,6 +594,23 @@ describe('面板脚本', () => {
     assert.match(js, /send\(\{ type: 'start', mode: crawlMode \}\)/);
   });
 
+  test('中止要有额外确认，且说清不可逆的是什么', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /async function abortCrawl/);
+    assert.match(js, /confirm\(/, '必须先确认');
+    // **不可逆的是这次抓取，不是数据** —— 说反了用户要么不敢按，要么按了才发现丢东西
+    const fn = js.slice(js.indexOf('async function abortCrawl'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    assert.match(body, /都会留下|留下.*可以照常查看/, '要说清数据留着');
+    assert.match(body, /不能再继续/, '要说清这次抓取到此为止');
+    assert.match(body, /增量/, '要说清重开不会从头来');
+  });
+
+  test('中止用危险样式 —— 不可逆的动作要看起来不一样', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /abortCrawl\(r\.bundleId\), 'danger'/);
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。

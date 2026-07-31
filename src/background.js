@@ -374,6 +374,16 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           break;
         }
 
+        case 'abort': {
+          // 中止这次抓取。**不可逆**：之后不能再继续，界面上必须先确认过。
+          const m = await withOffscreen({ op: 'abort' });
+          // 调度镜像也要清掉，否则心跳会一直想去恢复一份已经收尾的档案。
+          await getSupervisor().finishRun();
+          await clearAttention({ kv: getKv() });
+          sendResponse({ ok: true, bundleId: m.manifest?.bundle_id });
+          break;
+        }
+
         case 'pause':
           // 原因要带过去：档案里的 checkpoint 由 offscreen 写，而**那份才是**
           // 恢复时真正被读的。SW 这边的 `pauseRun` 只更新调度镜像。

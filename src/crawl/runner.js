@@ -578,6 +578,37 @@ export class CrawlRunner {
   }
 
   /**
+   * 中止这次抓取：收尾成 `aborted`，并放开它。
+   *
+   * ## 与暂停的区别
+   *
+   * 暂停是「等会儿接着抓」——档案还在写，指针还指着它，所以**删不掉**。而界面上
+   * 那句「这份正在抓，先暂停或等它结束」其实是句错话：暂停之后它依旧删不掉。
+   *
+   * 中止是「这次到此为止」：写出 manifest（`status: aborted`，如实带上缺口），
+   * 放开指针。之后这份档案就是一份**普通的、已收尾的档案**——可以看、可以导出、
+   * 可以删。
+   *
+   * ## 不可逆
+   *
+   * 中止之后这次抓取**不能再继续**（指针没了，心跳也不会来）。已经抓到的都留在
+   * 档案里，但要接着抓只能重新开一次。界面上必须把这句话说清楚。
+   *
+   * `checkpoint.json` **留在档案里**：规范 §3.1 要求 `aborted` 的 bundle 必须带
+   * checkpoint——那样一份半成品搬到另一台机器上还能接着抓。清掉的只是我们自己的
+   * 「当前这次抓取」指针。
+   */
+  async abort() {
+    if (!this._run) throw new Error('没有进行中的抓取');
+    // 先停住：中止的过程中不该再发请求。
+    this._run.frontier.stop('user_aborted');
+    const manifest = await this.finish('aborted');
+    await this._runStore.releaseCurrentRun();
+    this._emit({ type: 'aborted', bundleId: manifest.bundle_id });
+    return manifest;
+  }
+
+  /**
    * 把失败条目放回队列。**只能由人触发。**
    *
    * 自动重试一个反复失败的页面，在最坏情况下是每次心跳都去撞同一面墙——而如果那面墙

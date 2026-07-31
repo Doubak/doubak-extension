@@ -9,6 +9,7 @@ import { MemoryFileStore } from '../src/storage/file-store.js';
 import { Frontier } from '../src/crawl/frontier.js';
 import { urlKey } from '../src/core/urlkey.js';
 import { CRASH_SENTINEL_REASON } from '../src/crawl/resume-policy.js';
+import { summarizeBundles } from '../src/storage/storage-usage.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { indexFilename } from '../src/core/ids.js';
 
@@ -1791,5 +1792,97 @@ describe('静默退化要被报出来 —— 书就是这么坏了很久的', ()
       events.some((x) => x.type === 'no_watermark' && x.routeKey === 'interest.movie.collect'),
       false,
     );
+  });
+});
+
+describe('中止：让一次抓取到此为止，并且能删掉', () => {
+  /**
+   * 暂停是「等会儿接着抓」——档案还在写、指针还指着它，所以**删不掉**。
+   * 存储页原来那句「先暂停或等它结束」是句错话：暂停之后它依旧删不掉。
+   *
+   * 中止是「这次到此为止」：收尾成 aborted、放开指针，之后它就是一份普通的
+   * 已收尾档案。
+   */
+
+  async function halfCrawled() {
+    const { runner, runStore } = harness(
+      broadcastOnly([bcPage(20, 0), bcPage(20, 20), bcPage(20, 40)]), { batchSize: 1 },
+    );
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+    await runner.runBatch();
+    return { runner, runStore };
+  }
+
+  test('中止之后写出 manifest，状态是 aborted', async () => {
+    const { runner } = await halfCrawled();
+    const m = await runner.abort();
+    assert.equal(m.status, 'aborted');
+    assert.equal(runner.active, false, '不再是「进行中的抓取」');
+  });
+
+  test('已经抓到的都留在档案里 —— 不可逆的是这次抓取，不是数据', async () => {
+    const { runner } = await halfCrawled();
+    const m = await runner.abort();
+    const total = m.segments.reduce((n, s) => n + s.record_count, 0);
+    assert.ok(total > 0, '抓到的记录必须还在');
+    assert.equal(m.index.line_count, total);
+  });
+
+  test('缺口如实记着 —— 中止不是「跑完了」', async () => {
+    const { runner } = await halfCrawled();
+    const m = await runner.abort();
+    const bc = m.crawl_state.find((r) => r.route_key === 'broadcast.timeline');
+    assert.ok(bc.gaps.length > 0, '半途中止就该有缺口');
+    assert.equal(bc.advanced, false, '绝不许推进水位线');
+  });
+
+  test('**放开指针** —— 于是这份档案可以删了', async () => {
+    const { runner, runStore } = await halfCrawled();
+    assert.ok(await runStore.getCurrentRun(), '中止前它是「正在抓的那份」');
+    await runner.abort();
+    assert.equal(await runStore.getCurrentRun(), undefined, '中止后不该再有当前抓取');
+  });
+
+  test('checkpoint.json **留在档案里** —— 规范 §3.1 要求 aborted 必须带', async () => {
+    // 那样一份半成品搬到另一台机器上还能接着抓。清掉的只是我们自己的指针。
+    const { runner, runStore } = await halfCrawled();
+    const dir = (await runStore.getCurrentRun()).dir;
+    await runner.abort();
+    const store = await runner._openBundle(dir);
+    assert.equal(await store.exists('checkpoint.json'), true);
+  });
+
+  test('没有进行中的抓取时中止会报错，不是静默成功', async () => {
+    const { runner } = harness(broadcastOnly([bcPage(0)]));
+    await assert.rejects(() => runner.abort(), /没有进行中的抓取/);
+  });
+});
+
+describe('中止之后的档案能删 —— 这是中止的全部意义', () => {
+  test('summarizeBundles 里它不再是 active', () => {
+    // `deletable` 只看「是不是正在抓的那份」。中止放开了指针，于是
+    // `activeBundleId` 不再是它。
+    const dirs = [{ bundleId: 'B1', dir: 'doubak-bundle-B1', files: [{ name: 'manifest.json', bytes: 10 }] }];
+    const before = summarizeBundles({ dirs, activeBundleId: 'B1' });
+    assert.equal(before[0].deletable, false);
+    assert.match(before[0].blockedReason, /中止/, '要告诉用户怎么才能删');
+
+    const after = summarizeBundles({ dirs, activeBundleId: null });
+    assert.equal(after[0].deletable, true);
+  });
+
+  test('没收尾的档案（没有 manifest）照样能删', () => {
+    // 中止会写 manifest，但历史遗留的半成品可能没有。它们也该能删掉。
+    const dirs = [{ bundleId: 'B1', dir: 'doubak-bundle-B1', files: [{ name: 'index-B1.ndjson', bytes: 10 }] }];
+    const u = summarizeBundles({ dirs, activeBundleId: null })[0];
+    assert.equal(u.hasManifest, false);
+    assert.equal(u.deletable, true, '半成品也是用户的档案，该能删');
+  });
+
+  test('不能只说「先暂停」—— 暂停之后它依旧删不掉', () => {
+    const dirs = [{ bundleId: 'B1', dir: 'd', files: [] }];
+    const reason = summarizeBundles({ dirs, activeBundleId: 'B1' })[0].blockedReason;
+    assert.equal(/^这份正在抓，先暂停或等它结束$/.test(reason), false);
   });
 });

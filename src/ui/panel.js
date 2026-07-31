@@ -99,6 +99,7 @@ const GAP_REASONS = {
   challenge: '豆瓣要求验证',
   session_expired: '登录状态失效了',
   user_paused: '你手动暂停了',
+  user_aborted: '你中止了这次抓取',
   write_failed: '写入档案时出错',
   next_page_not_queued: '抓取自己走岔了：「下一页」没能入队',
   route_unavailable: '这条线一页都没读成过',
@@ -286,9 +287,11 @@ function setActions(buttons) {
   }
   el.dataset.key = key;
   el.replaceChildren();
-  for (const [label, fn] of buttons) {
+  for (const [label, fn, kind] of buttons) {
     const b = document.createElement('button');
-    b.className = 'act';
+    // 第三个元素是**样式**：不可逆的动作要看起来不一样（用边框而不是填充色，
+    // 填充的红按钮在一排里反而最抢眼，会把人往那儿引）。
+    b.className = kind === 'danger' ? 'act danger' : 'act';
     b.textContent = label;
     b.onclick = fn;
     el.append(b);
@@ -329,17 +332,22 @@ async function refresh() {
       const [cls, title, why, action] = PAUSE_COPY[r.stoppedBy] ??
         ['warn', '抓取已停下', `原因：${r.stoppedBy}`, '继续'];
       setState(cls, title, why);
-      setActions(action ? [[action, async () => {
-        // 恢复同样要好几秒（修段尾 + 确认登录状态），同样先给个兜底状态。
-        pendingCommand = '恢复抓取';
-        refresh();
-        try {
-          await send({ type: 'resume' });
-        } finally {
-          pendingCommand = null;
-        }
-        refresh();
-      }]] : []);
+      setActions([
+        ...(action ? [[action, async () => {
+          // 恢复同样要好几秒（修段尾 + 确认登录状态），同样先给个兜底状态。
+          pendingCommand = '恢复抓取';
+          refresh();
+          try {
+            await send({ type: 'resume' });
+          } finally {
+            pendingCommand = null;
+          }
+          refresh();
+        }]] : []),
+        // 停下来之后**尤其**需要这个：不想接着抓的话，只有中止才能把这份档案
+        // 放开（暂停不行——它还挂在「正在抓的那份」上，删不掉）。
+        ['中止这次抓取', () => abortCrawl(r.bundleId), 'danger'],
+      ]);
       renderFailures(r.failures ?? []);
       renderRoutes(r.routes ?? []);
       return;
@@ -353,12 +361,15 @@ async function refresh() {
     setState('run', '正在抓取', `档案 ${r.bundleId} · 当前间隔 ${(r.intervalMs / 1000).toFixed(1)} 秒` +
       (r.backoffLevel ? `（已降速 ${r.backoffLevel} 级）` : '') + where);
     renderFailures(r.failures ?? []);
-    setActions([['暂停', async () => {
-      // 立刻给反馈。一批最长 22 秒，期间不给任何回应的话按钮看起来就是坏的。
-      setState('idle', '正在暂停…', '当前这一页抓完就停，不会丢东西。');
-      await send({ type: 'pause' });
-      refresh();
-    }]]);
+    setActions([
+      ['暂停', async () => {
+        // 立刻给反馈。一批最长 22 秒，期间不给任何回应的话按钮看起来就是坏的。
+        setState('idle', '正在暂停…', '当前这一页抓完就停，不会丢东西。');
+        await send({ type: 'pause' });
+        refresh();
+      }],
+      ['中止', () => abortCrawl(r.bundleId), 'danger'],
+    ]);
     renderRoutes(r.routes ?? []);
     return;
   }
@@ -669,6 +680,53 @@ async function showLastRun() {
   } catch {
     // 读不出来就维持「还没有开始」。这只是个便利显示，不该让概览页报错。
   }
+}
+
+/**
+ * 中止这次抓取。
+ *
+ * ## 为什么要单独一个动作
+ *
+ * 暂停是「等会儿接着抓」——档案还在写、指针还指着它，所以**删不掉**。而存储页
+ * 那句「这份正在抓，先暂停或等它结束」是句错话：暂停之后它依旧删不掉。
+ *
+ * 中止是「这次到此为止」：收尾成 `aborted`（如实带上缺口），放开指针。之后它就是
+ * 一份普通的已收尾档案——能看、能导出、能删。
+ *
+ * ## 确认要说清不可逆的是什么
+ *
+ * **不是数据**——已经抓到的每一页都留在档案里。不可逆的是**这次抓取**：之后不能
+ * 再继续，要接着抓只能重新开一次（而增量会让重开便宜很多）。
+ *
+ * 把这两件事说反了，用户要么不敢按，要么按了之后才发现丢了进度。
+ *
+ * @param {string} bundleId
+ */
+async function abortCrawl(bundleId) {
+  const st = await send({ type: 'status' });
+  const r = st?.runner ?? {};
+  const done = r.counts?.done ?? 0;
+
+  const lines = [
+    '中止这次抓取？',
+    '',
+    `档案 ${bundleId} 已经抓到的 ${done} 项都会留下，可以照常查看、导出。`,
+    '',
+    '但**这次抓取不能再继续了**——之后要接着抓只能重新开始一次',
+    '（下次会是增量，只抓新增的部分，不会从头来）。',
+    '',
+    '中止之后这份档案就可以删除了。',
+  ];
+  if (!confirm(lines.join('\n'))) return;
+
+  setState('idle', '正在中止…', '当前这一页抓完就停，然后写出档案。');
+  const res = await send({ type: 'abort' });
+  if (!res?.ok) setState('err', '中止失败', res?.error ?? '');
+  // 存储与档案页都变了
+  summaryCache = null;
+  storageUsage = [];
+  refresh();
+  await refreshOpenTab();
 }
 
 /**
