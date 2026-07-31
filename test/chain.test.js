@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 
 import {
   chainEntryFromManifest, newestFirst, pickFloors, floorsFor, findChainHoles, chainCoverage,
-  sameAccount, renamedBundles, diffAgainstChain,
+  sameAccount, renamedBundles, diffAgainstChain, chainOf, splitChains, routeChainCoverage,
 } from '../src/crawl/chain.js';
 
 const ME = '82160871';
@@ -184,6 +184,30 @@ describe('排序：没有 completed_at 时靠 bundle_id', () => {
     ]);
   });
 
+  test('**混着两种形式也要排对** —— 直接比字符串是错的', () => {
+    // 这条是拿真实数据验出来的：
+    //
+    //   '2026-07-31T05:13:33Z'    ← completed_at（带连字符）
+    //   '20260731T043423Z-d40c1d' ← bundle_id（紧凑）
+    //
+    // 逐字符比到第 5 位是 '-'(0x2D) 对 '0'(0x30)，于是带连字符的永远排前面：
+    // 一份 05:13 完成的档案被判成比 04:34 那份还旧。中止的档案没有 completed_at，
+    // 混着两种形式在真实数据里一定会出现。
+    const ids = newestFirst([
+      bundle('20260731T043423Z-d40c1d', []),                                   // 只有 id
+      bundle('20260731T051333Z-786e5c', [], { at: '2026-07-31T05:13:33Z' }),   // 有 completed_at
+    ]).map((e) => e.bundleId);
+    assert.deepEqual(ids, ['20260731T051333Z-786e5c', '20260731T043423Z-d40c1d']);
+  });
+
+  test('认不出时间的排最后，但不崩', () => {
+    const ids = newestFirst([
+      bundle('乱七八糟', []),
+      bundle('20260731T051333Z-786e5c', []),
+    ]).map((e) => e.bundleId);
+    assert.equal(ids[0], '20260731T051333Z-786e5c');
+  });
+
   test('有 completed_at 就用它', () => {
     const ids = newestFirst([
       bundle('B1', [], { at: '2026-09-01T00:00:00Z' }),
@@ -278,10 +302,47 @@ describe('合起来：链覆盖到哪儿', () => {
     assert.equal('total' in cov.get('r'), false);
   });
 
-  test('任何一份不连续，整条链就不连续', () => {
+  test('最新那份自己不连续 → 链不连续', () => {
     const cov = chainCoverage([
-      bundle('B2', [route('r', { hw: '2026-08-15T00:00:00+08:00', advanced: true })], { at: '2026-08-15T00:00:00Z' }),
+      bundle('B2', [route('r', { advanced: false, contiguous: false })], { at: '2026-08-15T00:00:00Z', prev: 'B1' }),
+      bundle('B1', [route('r', { hw: '2026-07-31T00:00:00+08:00', advanced: true })], { at: '2026-07-31T00:00:00Z' }),
+    ]);
+    assert.equal(cov.get('r').contiguous, false, '「从今天起往回」这句话不成立');
+  });
+
+  test('**基准有缺口、但新的那份从头走了一遍 → 链是连续的**', () => {
+    // 这条是「每一份都连续」那个规则错在哪儿的直接反例：B1 那条线有缺口，所以
+    // B2 用不了它当下界，于是 B2 自己从头走了一遍（floor_time 为 null）。
+    // 那时 B2 一份就覆盖了全部，B1 的缺口无关紧要。
+    const cov = chainCoverage([
+      bundle('B2', [route('r', {
+        hw: '2026-08-15T00:00:00+08:00', lw: '2014-01-10T00:00:00+08:00', advanced: true,
+      })], { at: '2026-08-15T00:00:00Z', prev: 'B1' }),
       bundle('B1', [route('r', { advanced: false, contiguous: false })], { at: '2026-07-31T00:00:00Z' }),
+    ]);
+    assert.equal(cov.get('r').contiguous, true);
+  });
+
+  test('接着上次抓 → 要求基准在场且也连续', () => {
+    const chain = [
+      bundle('B2', [route('r', {
+        hw: '2026-08-15T00:00:00+08:00', advanced: true,
+        floorTime: '2026-07-31T00:00:00+08:00', floorFrom: 'B1',
+      })], { at: '2026-08-15T00:00:00Z', prev: 'B1' }),
+      bundle('B1', [route('r', { hw: '2026-07-31T00:00:00+08:00', advanced: true })],
+        { at: '2026-07-31T00:00:00Z' }),
+    ];
+    assert.equal(chainCoverage(chain).get('r').contiguous, true);
+
+    // 基准没了 → 断
+    assert.equal(chainCoverage([chain[0]]).get('r').contiguous, false);
+  });
+
+  test('有下界却说不出来自哪一份 → 证明不了', () => {
+    const cov = chainCoverage([
+      bundle('B1', [route('r', {
+        hw: 'x', advanced: true, floorTime: '2026-07-31T00:00:00+08:00', floorFrom: null,
+      })]),
     ]);
     assert.equal(cov.get('r').contiguous, false);
   });
@@ -410,5 +471,62 @@ describe('版本历史：同一个 URL 的多次捕获', () => {
     const d = diffAgainstChain(many, [mid, old]);
     assert.equal(d.versions[0].urlKey, 'u1', 'u1 有 3 个版本，该排前面');
     assert.equal(d.versions[0].versions.length, 3);
+  });
+});
+
+describe('一堆档案不等于一条链', () => {
+  test('previous_bundle_id 为 null 的各自是一条链的起点', () => {
+    // 真实情况：增量做出来之前的每一次抓取都是独立的全量。用户屏幕上看到的是
+    // 「合起来 4 份档案，从最近的一份往回接」——那是假的，它们互不相干。
+    const entries = [
+      bundle('B4', [route('r', { hw: 'd', advanced: true })], { at: '2026-07-31T05:00:00Z' }),
+      bundle('B3', [route('r', { hw: 'c', advanced: true })], { at: '2026-07-31T04:00:00Z' }),
+      bundle('B2', [route('r', { hw: 'b', advanced: true })], { at: '2026-07-31T01:00:00Z' }),
+      bundle('B1', [route('r', { hw: 'a', advanced: true })], { at: '2026-07-30T13:00:00Z' }),
+    ];
+    const chains = splitChains(entries);
+    assert.equal(chains.length, 4, '四次互不相干的全量应当是四条链');
+    for (const c of chains) assert.equal(c.length, 1);
+  });
+
+  test('真的链起来的才算一条', () => {
+    const entries = [
+      bundle('B3', [route('r', { hw: 'c', advanced: true })], { at: '2026-09-01T00:00:00Z', prev: 'B2' }),
+      bundle('B2', [route('r', { hw: 'b', advanced: true })], { at: '2026-08-01T00:00:00Z', prev: 'B1' }),
+      bundle('B1', [route('r', { hw: 'a', advanced: true })], { at: '2026-07-01T00:00:00Z' }),
+      bundle('SOLO', [route('r', { hw: 'x', advanced: true })], { at: '2026-06-01T00:00:00Z' }),
+    ];
+    const chains = splitChains(entries);
+    assert.equal(chains.length, 2);
+    assert.deepEqual(chains[0].map((e) => e.bundleId), ['B3', 'B2', 'B1']);
+    assert.deepEqual(chains[1].map((e) => e.bundleId), ['SOLO']);
+  });
+
+  test('一份不相干的档案有缺口，不该污染另一条链', () => {
+    // 用户屏幕上每一行都写着「没走完」，包括那些各自明明验证通过的——因为把
+    // 四次独立全量当成了一条链，最差的那一份污染了全部。
+    const good = bundle('GOOD', [route('r', {
+      hw: '2026-08-15T00:00:00+08:00', lw: '2014-01-10T00:00:00+08:00', advanced: true,
+    })], { at: '2026-08-15T00:00:00Z' });
+    const bad = bundle('BAD', [route('r', { advanced: false, contiguous: false })],
+      { at: '2026-07-01T00:00:00Z' });
+
+    const chains = splitChains([good, bad]);
+    assert.equal(chainCoverage(chains[0]).get('r').contiguous, true, '好的那条不该被拖下水');
+  });
+
+  test('previous_bundle_id 指向一份不在的档案 → 链就到此为止', () => {
+    const chain = chainOf([
+      bundle('B2', [route('r')], { prev: 'GONE' }),
+    ], 'B2');
+    assert.deepEqual(chain.map((e) => e.bundleId), ['B2']);
+  });
+
+  test('环形数据不会把我们转死', () => {
+    const chain = chainOf([
+      bundle('A', [route('r')], { prev: 'B' }),
+      bundle('B', [route('r')], { prev: 'A' }),
+    ], 'A');
+    assert.equal(chain.length, 2);
   });
 });

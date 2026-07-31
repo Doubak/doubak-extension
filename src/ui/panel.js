@@ -926,7 +926,7 @@ async function renderChain() {
     el.textContent = `读不出来：${r?.error ?? ''}`;
     return;
   }
-  const { routes, bundles, holes } = r.chain;
+  const { routes, bundles, holes, others } = r.chain;
   el.className = '';
   el.replaceChildren();
 
@@ -952,6 +952,20 @@ async function renderChain() {
       r.verdict,
     ]),
   ));
+
+  // 不在这条链上的档案要说出来：用户手上可能有好几次独立的全量，而这一页只讲
+  // 最新那一条链——不提的话看起来像档案丢了。
+  if (others?.length) {
+    const c = document.createElement('div');
+    c.className = 'card idle';
+    const b = document.createElement('b');
+    b.textContent = `另外还有 ${others.length} 组档案，不在这条链上`;
+    c.append(b, document.createTextNode(
+      `${others.map((o) => o.head).join('、')} —— 它们是各自独立的抓取（没有接在别人后面），`
+      + '所以不能合起来算连续。增量做出来之前的每一次抓取都是这样。',
+    ));
+    el.append(c);
+  }
 
   // 链断了要**明说**，而且不能因此把在场的那几份说成无效。
   for (const h of holes) {

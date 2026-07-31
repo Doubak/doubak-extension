@@ -76,7 +76,7 @@ import { BundleReader } from '../bundle/bundle-reader.js';
 import { bundleIdFromDirName } from '../core/ids.js';
 import {
   chainEntryFromManifest, pickFloors, floorsFor, newestFirst, renamedBundles,
-  chainCoverage, findChainHoles, diffAgainstChain,
+  chainCoverage, findChainHoles, diffAgainstChain, splitChains,
 } from '../crawl/chain.js';
 
 // TODO(debug): 开发期日志。发布前连同所有调用一起删掉。
@@ -410,19 +410,31 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
         case 'chain': {
           // 覆盖率页「合起来」那个视角。只读档案、不发请求，所以不加锁。
+          //
+          // **先分链。** 一堆档案不等于一条链：`previous_bundle_id` 为 null 的那些
+          // 各自是一条链的起点（增量做出来之前的每一次抓取都是独立全量）。全当成
+          // 一条会让档案数虚高，而且任何一份的缺口都会污染全部。
           const entries = await readChainEntries();
-          const cov = chainCoverage(entries);
+          const chains = splitChains(entries);
+          const head = chains[0] ?? [];
+          const cov = chainCoverage(head);
           sendResponse({
             ok: true,
             chain: {
-              bundles: newestFirst(entries).map((e) => ({
+              bundles: head.map((e) => ({
                 bundleId: e.bundleId,
                 completedAt: e.completedAt,
                 previousBundleId: e.previousBundleId,
                 username: e.accountUsername,
               })),
               routes: [...cov].map(([routeKey, v]) => ({ routeKey, ...v })),
-              holes: findChainHoles(entries),
+              holes: findChainHoles(head),
+              // 不在这条链上的那些。**要说出来**：用户手上可能有好几次独立的全量，
+              // 而界面只讲最新那条链——不提的话看起来像档案丢了。
+              others: chains.slice(1).map((c) => ({
+                head: c[0]?.bundleId,
+                size: c.length,
+              })),
             },
           });
           break;

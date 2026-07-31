@@ -77,19 +77,47 @@ export function chainEntryFromManifest(manifest) {
 }
 
 /**
- * 按时间**从新到旧**排序。
+ * 这一份档案的时间，化成毫秒。
  *
- * `completed_at` 缺失时退回 `bundle_id`——它以 `YYYYMMDDTHHMMSSZ` 开头，字典序
- * 就是时间序（这正是那个命名的用意，见规范 §2.1）。
+ * `completed_at` 缺失时退回 `bundle_id`——它以 `YYYYMMDDTHHMMSSZ` 开头（规范 §2.1
+ * 那个命名的用意就在这里）。
+ *
+ * **两种形式必须先化成同一个尺度再比。** 直接拿字符串比是错的：
+ *
+ *     '2026-07-31T05:13:33Z'   ← completed_at（带连字符）
+ *     '20260731T043423Z-d40c1d' ← bundle_id（紧凑）
+ *
+ * 逐字符比到第 5 位是 `-`（0x2D）对 `0`（0x30），于是**带连字符的那个永远排在
+ * 前面**——一份 05:13 完成的档案会被判成比 04:34 那份还旧。混着两种形式的数据
+ * 一出现（比如中止的档案没有 `completed_at`），链的顺序就静默地错了。
+ *
+ * @param {ChainEntry} e
+ * @returns {number}
+ */
+function timeKeyOf(e) {
+  if (e.completedAt) {
+    const t = Date.parse(e.completedAt);
+    if (Number.isFinite(t)) return t;
+  }
+  // 20260731T043423Z → 2026-07-31T04:34:23Z
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/.exec(e.bundleId ?? '');
+  if (m) {
+    const t = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`);
+    if (Number.isFinite(t)) return t;
+  }
+  return 0; // 认不出来的排最后，但不崩
+}
+
+/**
+ * 按时间**从新到旧**排序。
  *
  * @param {ChainEntry[]} entries
  */
 export function newestFirst(entries) {
   return [...entries].sort((a, b) => {
-    const ka = a.completedAt ?? a.bundleId;
-    const kb = b.completedAt ?? b.bundleId;
-    if (ka === kb) return 0;
-    return ka < kb ? 1 : -1;
+    const d = timeKeyOf(b) - timeKeyOf(a);
+    // 时间相同就按 id，保证顺序稳定（否则同一份数据两次渲染可能不一样）
+    return d !== 0 ? d : (a.bundleId < b.bundleId ? 1 : a.bundleId > b.bundleId ? -1 : 0);
   });
 }
 
@@ -241,46 +269,128 @@ export function findChainHoles(entries) {
 }
 
 /**
- * 一条路线在整条链上覆盖到了哪儿。
+ * 从某一份档案出发，沿 `previous_bundle_id` 往回走出**一条**链。
  *
- * 这是覆盖率页「合起来」那个视角的数据来源。**刻意不算「一共抓了多少条」**：
- * 下界是闭区间，档案之间必然重叠，加出来的数只会误导。而这个项目的论点本来就是
- * 「计数不能证明完整性，连续性才能」。
+ * ## 为什么必须先分链
+ *
+ * 一堆档案不等于一条链。`previous_bundle_id` 为 null 的那些各自是一条链的**起点**
+ * ——比如增量做出来之前的每一次抓取，都是独立的全量。
+ *
+ * 把它们全当成一条链接起来，会得出两个错误结论：档案数虚高（「合起来 4 份」，
+ * 而其实是 4 次互不相干的全量），以及**任何一份的缺口都会污染全部**（真实数据里
+ * 每一行都变成了「没走完」，包括那些各自明明验证通过的）。
  *
  * @param {ChainEntry[]} entries
- * @returns {Map<string, {newest: string | null, oldest: string | null, bundles: string[], contiguous: boolean, holes: ChainHole[]}>}
+ * @param {string} headId  从哪一份开始往回走
+ * @returns {ChainEntry[]}  从新到旧；`headId` 不存在时返回空数组
  */
-export function chainCoverage(entries) {
-  const holes = findChainHoles(entries);
-  /** @type {Map<string, any>} */
-  const out = new Map();
+export function chainOf(entries, headId) {
+  const byId = new Map(entries.map((e) => [e.bundleId, e]));
+  /** @type {ChainEntry[]} */
+  const out = [];
+  const seen = new Set();
 
-  for (const e of newestFirst(entries)) {
+  let cur = byId.get(headId);
+  while (cur && !seen.has(cur.bundleId)) {
+    seen.add(cur.bundleId); // 环是坏数据，但不能让它把我们转死
+    out.push(cur);
+    cur = cur.previousBundleId ? byId.get(cur.previousBundleId) : undefined;
+  }
+  return out;
+}
+
+/**
+ * 把一堆档案分成若干条链，**最新的那条在前**。
+ *
+ * @param {ChainEntry[]} entries
+ * @returns {ChainEntry[][]}
+ */
+export function splitChains(entries) {
+  const claimed = new Set();
+  /** @type {ChainEntry[][]} */
+  const chains = [];
+
+  for (const head of newestFirst(entries)) {
+    if (claimed.has(head.bundleId)) continue;
+    const chain = chainOf(entries, head.bundleId);
+    for (const e of chain) claimed.add(e.bundleId);
+    chains.push(chain);
+  }
+  return chains;
+}
+
+/**
+ * 一条路线在**一条链**上覆盖到了哪儿。
+ *
+ * ## 连续性怎么算
+ *
+ * 不是「每一份都连续」——那个规则是错的。考虑 B2 → B1，B1 那条线有缺口所以
+ * B2 用不了它当下界，于是 B2 **从头走了一遍**（`floor_time` 为 null）。那时
+ * B2 一份就覆盖了全部，B1 的缺口无关紧要。
+ *
+ * 正确的走法是从最新那一份往回追：
+ *
+ * 1. 最新那份自己得连续，否则「从今天起往回」这句话就不成立；
+ * 2. 它的 `floor_time` 是 null → 它一路走到了最早，**到此为止，链是连续的**；
+ * 3. 否则要求基准在场、对得上（`findChainHoles` 管这件事），并对基准递归。
+ *
+ * **刻意不算「一共抓了多少条」**：下界是闭区间，相邻两份必然重叠，加出来的数
+ * 只会误导。而这个项目的论点本来就是「计数不能证明完整性，连续性才能」。
+ *
+ * @param {ChainEntry[]} chain  从新到旧的一条链
+ * @param {string} routeKey
+ */
+export function routeChainCoverage(chain, routeKey) {
+  const byId = new Map(chain.map((e) => [e.bundleId, e]));
+  const holes = findChainHoles(chain).filter((h) => h.routeKey === routeKey);
+
+  /** @type {string | null} */
+  let newest = null;
+  /** @type {string | null} */
+  let oldest = null;
+  /** @type {string[]} */
+  const bundles = [];
+
+  for (const e of chain) {
+    const cs = e.crawlState.find((x) => x.route_key === routeKey);
+    if (!cs) continue;
+    bundles.push(e.bundleId);
+    if (cs.high_water_time && (!newest || cs.high_water_time > newest)) newest = cs.high_water_time;
+    if (cs.low_water_time && (!oldest || cs.low_water_time < oldest)) oldest = cs.low_water_time;
+  }
+
+  // 从最新那份有这条线的档案开始往回追
+  let contiguous = false;
+  const walked = new Set();
+  let cur = chain.find((e) => e.crawlState.some((x) => x.route_key === routeKey));
+  while (cur && !walked.has(cur.bundleId)) {
+    walked.add(cur.bundleId);
+    const cs = cur.crawlState.find((x) => x.route_key === routeKey);
+    if (!cs?.contiguous) break; // 这一段自己就不连续
+    if (!cs.floor_time) { contiguous = true; break; } // 走到了最早，收工
+    if (!cs.floor_from_bundle_id) break; // 有下界却说不出来自哪儿 —— 证明不了
+    cur = byId.get(cs.floor_from_bundle_id);
+  }
+
+  if (holes.length) contiguous = false;
+
+  return { newest, oldest, bundles, contiguous, holes };
+}
+
+/**
+ * 一条链上每条路线的覆盖情况。
+ *
+ * @param {ChainEntry[]} chain  从新到旧的一条链
+ */
+export function chainCoverage(chain) {
+  /** @type {Map<string, ReturnType<typeof routeChainCoverage>>} */
+  const out = new Map();
+  for (const e of chain) {
     for (const cs of e.crawlState) {
-      const cur = out.get(cs.route_key) ?? {
-        newest: null, oldest: null, bundles: [], contiguous: true, holes: [],
-      };
-      cur.bundles.push(e.bundleId);
-      if (cs.high_water_time && (!cur.newest || cs.high_water_time > cur.newest)) {
-        cur.newest = cs.high_water_time;
-      }
-      if (cs.low_water_time && (!cur.oldest || cs.low_water_time < cur.oldest)) {
-        cur.oldest = cs.low_water_time;
-      }
-      // 任何一份不连续，整条链就不连续——连续性是「从最新一直到最旧没有断」，
-      // 一处断掉整句话就不成立。
-      if (!cs.contiguous) cur.contiguous = false;
-      out.set(cs.route_key, cur);
+      if (out.has(cs.route_key)) continue;
+      out.set(cs.route_key, routeChainCoverage(chain, cs.route_key));
     }
   }
-
-  for (const h of holes) {
-    const cur = out.get(h.routeKey);
-    if (!cur) continue;
-    cur.holes.push(h);
-    cur.contiguous = false;
-  }
-
   return out;
 }
 
