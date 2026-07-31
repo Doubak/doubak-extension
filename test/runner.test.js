@@ -380,6 +380,69 @@ describe('暂停 → 继续', () => {
     assert.equal(after, before, `恢复之后归零了：${before} → ${after}`);
   });
 
+  test('暂停再继续，不许跳过当前这条路线的后续页', async () => {
+    // 报上来的日志：
+    //   04:46:16 paused
+    //   04:46:18 capture interest.game.collect start=120  ← 在飞的那一页抓完了
+    //   04:46:22 resumed
+    //   04:46:22 capture interest.game.do    start=0      ← 直接换线了
+    //
+    // 暂停的语义是「当前这一页抓完就停」，所以那次「抓完了 → 入队下一页」发生在
+    // 停机标志已经立起来之后——而 `enqueue()` 当时会挡掉它，一声不响。于是
+    // **每按一次暂停，当前那条路线就被截断一次**。
+    // **必须在一页「正在飞」的时候按暂停。** 批与批之间按是复现不出来的：那时
+    // 没有在飞的条目，也就不会有「抓完了 → 入队下一页」这一步。
+    const seen = [];
+    let runnerRef = null;
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (!url.includes('statuses')) return bcPage(0);
+      seen.push(url);
+      const p = Number(/[?&]p=(\d+)/.exec(url)?.[1] ?? 1);
+      // 抓第 2 页的**过程中**用户按了暂停
+      if (p === 2) runnerRef?._run?.frontier.stop('user_paused');
+      return bcPage(20, (p - 1) * 20); // 一直有下一页
+    }, { batchSize: 1 });
+    runnerRef = runner;
+
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    for (let i = 0; i < 10 && !runner._run.frontier.stopped; i++) await runner.runBatch();
+    assert.ok(runner._run.frontier.stopped, '得先真的进入暂停状态');
+    const lastBefore = Math.max(...seen.map((u) => Number(/[?&]p=(\d+)/.exec(u)?.[1] ?? 1)));
+
+    await runner.resume(null);
+    const mark = seen.length;
+    await runner.runBatch();
+
+    const after = seen.slice(mark).map((u) => Number(/[?&]p=(\d+)/.exec(u)?.[1] ?? 1));
+    assert.ok(after.length > 0, '继续之后广播该接着翻，实际一页都没抓');
+    assert.ok(
+      Math.max(...after) > lastBefore,
+      `继续之后没有接着往后翻：暂停前到 p=${lastBefore}，之后抓的是 ${after}`,
+    );
+  });
+
+  test('暂停时在飞那一页的下一页必须留在队里', async () => {
+    // 直接钉住机制：在飞的那一页抓完时停机标志已经立起来了，它的下一页照样要入队。
+    let runnerRef = null;
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (!url.includes('statuses')) return bcPage(0);
+      const p = Number(/[?&]p=(\d+)/.exec(url)?.[1] ?? 1);
+      if (p === 2) runnerRef?._run?.frontier.stop('user_paused');
+      return bcPage(20, (p - 1) * 20);
+    }, { batchSize: 1 });
+    runnerRef = runner;
+
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    for (let i = 0; i < 10 && !runner._run.frontier.stopped; i++) await runner.runBatch();
+
+    const pending = runner._run.frontier.snapshot()
+      .filter((it) => it.routeKey === 'broadcast.timeline' && it.state === 'pending');
+    assert.ok(pending.length > 0, '暂停把这条线的下一页吞了');
+    assert.equal(pending[0].cursor?.value, 3, '留下的该是第 3 页');
+  });
+
   test('本来就在跑的时候继续 → 报 alreadyRunning，不重开一场', async () => {
     const { runner } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), { batchSize: 50 });
     await runner.start({ username: 'example', mediums: [], includeCatalog: false });

@@ -154,10 +154,39 @@ describe('停机', () => {
     assert.equal(f.next(), null, '停机后所有路线都不再产出');
   });
 
-  test('停机后不接受新入队', () => {
+  test('停机挡的是 next()，不是 enqueue() —— 挡后者会凭空制造一个洞', () => {
+    // 这条测试原来是反的：断言「停机后不接受新入队」。而暂停的语义是
+    // 「当前这一页抓完就停」，于是必然有一次「抓完了 → 入队下一页」发生在停机
+    // 标志立起来之后。挡掉它，那一页就永远没人记得。
+    //
+    // 真实日志：
+    //   04:46:16 paused
+    //   04:46:18 capture interest.game.collect start=120  ← 在飞的那一页抓完了
+    //            → 入队 start=135，被挡掉，一声不响
+    //   04:46:22 resumed → 直接跳去 interest.game.do start=0
+    // **每按一次暂停，当前那条路线就被截断一次。**
     const f = new Frontier();
-    f.stop('session_expired');
-    assert.equal(f.enqueue(item({ urlKey: 'x' })), false);
+    f.stop('user_paused');
+
+    assert.equal(f.enqueue(item({ urlKey: 'x' })), true, '停机期间也要能记下「还有这一页没抓」');
+    assert.equal(f.next(), null, '但一个都不许发出去');
+    assert.equal(f.counts().pending, 1);
+  });
+
+  test('停机期间入队的条目会进 checkpoint —— 它们确实还没抓', () => {
+    const f = new Frontier();
+    f.stop('user_paused');
+    f.enqueue(item({ urlKey: 'x' }));
+    const surviving = f.snapshot().filter((it) => it.state !== 'done');
+    assert.equal(surviving.length, 1);
+  });
+
+  test('恢复之后它就能被抓了', () => {
+    const f = new Frontier();
+    f.stop('user_paused');
+    f.enqueue(item({ urlKey: 'x' }));
+    f.clearStop();
+    assert.ok(f.next(), '恢复之后那一页必须还在队里');
   });
 });
 
@@ -260,12 +289,13 @@ describe('clearStop：「继续」这个按钮的落点', () => {
     assert.equal(r.wasStopped, false);
   });
 
-  test('清完之后能重新入队 —— 停机期间 enqueue 是被拒的', () => {
+  test('入队的去重跨停机仍然成立', () => {
+    // 停机期间入队的那一条，恢复之后不该被再排一次。
     const f = new Frontier();
     f.stop('user_paused');
-    assert.equal(f.enqueue(item({ urlKey: 'x' })), false);
-    f.clearStop();
     assert.equal(f.enqueue(item({ urlKey: 'x' })), true);
+    f.clearStop();
+    assert.equal(f.enqueue(item({ urlKey: 'x' })), false, '同一页排了两次');
   });
 });
 

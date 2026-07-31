@@ -273,13 +273,33 @@ export class Frontier {
    * @param {string} item.intent
    * @param {string | null} [item.enqueuedBy]
    * @param {object | null} [item.cursor]
-   * @returns {boolean} 是否真的入队了
+   * ## 停机**不**挡入队
+   *
+   * 挡的是 `next()`：停机之后一个条目都不再发出去。而入队只是**记下「还有这一页
+   * 没抓」**——把这个记录丢掉，等于凭空制造一个洞。
+   *
+   * 这不是理论问题。暂停的语义是「当前这一页抓完就停」，于是必然有一次
+   * 「抓完了 → 入队下一页」发生在停机标志已经立起来之后：
+   *
+   *     04:46:16  paused（用户点了暂停）
+   *     04:46:18  capture interest.game.collect start=120   ← 在飞的那一页抓完了
+   *               → 入队 start=135 —— **被这里挡掉，一声不响**
+   *     04:46:22  resumed
+   *     04:46:22  capture interest.game.do start=0          ← 直接跳到下一条线了
+   *
+   * 于是**每按一次暂停，当前那条路线就被截断一次**。而它悄悄发生：`enqueue()`
+   * 返回 false，`_enqueueNextPage()` 不看返回值。
+   *
+   * 反过来，允许入队没有坏处：停机期间 `next()` 本来就不发东西，这些条目要么在
+   * 恢复后被消费，要么原样写进 checkpoint——而「原样写进 checkpoint」正是对的，
+   * 它们确实还没抓。
+   *
+   * @returns {boolean} 是否真的入队了（false 只意味着**重复**）
    */
   enqueue({
     url, urlKey, routeKey, intent, enqueuedBy = null, cursor = null,
     ordered = true, state = 'pending', attempts = 0, priority = 50, gatedBy = null,
   }) {
-    if (this._stopped) return false;
     if (this._enqueued.has(urlKey)) return false;
 
     this._enqueued.add(urlKey);
