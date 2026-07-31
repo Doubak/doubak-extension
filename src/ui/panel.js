@@ -24,7 +24,7 @@ import { exportBundle, directorySink } from '../bundle/exporter.js';
 import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../storage/storage-usage.js';
 import { captureTitle, captureSubtitle } from './capture-label.js';
 import { shouldLog, formatEntry, formatLogText } from '../crawl/event-log.js';
-import { routeName } from './route-names.js';
+import { routeName, contiguityLabel } from './route-names.js';
 import { bundleDirName, bundleIdFromDirName } from '../core/ids.js';
 
 const $ = (id) => document.getElementById(id);
@@ -527,7 +527,7 @@ function renderRoutes(routes, note = '') {
     // 正是全局最小值，问的是另一个问题。
     const at = r.progressTime ?? r.oldestSeen;
     setCell(row.cells[2], at ? at.slice(0, 10) : '—', !at);
-    setCell(row.cells[3], r.contiguous ? '✔ 已验证' : '进行中', !r.contiguous);
+    setCell(row.cells[3], contiguityLabel(r), !r.contiguous);
   }
 
   setRoutesNote(note);
@@ -617,6 +617,9 @@ async function showLastRun() {
       oldestSeen: cs.low_water_time ?? null,
       newestSeen: cs.high_water_time ?? null,
       contiguous: cs.contiguous,
+      // 这份档案已经收尾了：不连续就是**没验证通过**，不是「还在跑」。
+      settled: true,
+      gaps: cs.gaps ?? [],
     }));
     if (rows.length === 0) return;
 

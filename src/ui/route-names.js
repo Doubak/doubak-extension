@@ -1,5 +1,5 @@
 /**
- * 路线的中文名。
+ * 路线在界面上的说法：名字，以及「连续性」那一列。
  *
  * ## 为什么不是一张手写的表
  *
@@ -87,4 +87,26 @@ export function routeName(key) {
 /** 这个 key 有没有中文名。测试用——界面上不该出现内部标识。 */
 export function hasRouteName(key) {
   return routeName(key) !== key;
+}
+
+
+/**
+ * 「连续性」那一列写什么。
+ *
+ * **「进行中」只有在真的还在跑的时候才成立。** 抓完的档案里一条不连续的路线不是
+ * 「进行中」——它是**没验证通过**。这两件事的含义天差地别：前者叫人等，后者叫人
+ * 去看为什么。
+ *
+ * 真实档案里就有这么一行：作品详情页因为一次**误判**的 `account_switched` 留下了
+ * 缺口，于是永远不连续。显示成「进行中」等于让人一直等一件已经结束的事。
+ *
+ * 埋在面板里的时候这条逻辑没法测——与 `capture-label.js` 是同一个理由。
+ *
+ * @param {{contiguous?: boolean, settled?: boolean, gaps?: Array<object>}} r
+ * @returns {string}
+ */
+export function contiguityLabel(r) {
+  if (r.contiguous) return '✔ 已验证';
+  if (!r.settled) return '进行中';
+  return r.gaps?.length ? '未验证 · 有缺口' : '未验证';
 }

@@ -21,7 +21,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { routeName, hasRouteName } from '../src/ui/route-names.js';
+import { routeName, hasRouteName, contiguityLabel } from '../src/ui/route-names.js';
 import { buildRoutes, MEDIUMS } from '../src/crawl/routes.js';
 
 describe('每一条真实路线都有中文名', () => {
@@ -81,5 +81,43 @@ describe('认不出来的原样返回', () => {
 
   test('媒介认识但状态不认识 → 不硬拼', () => {
     assert.equal(routeName('interest.movie.borrowed'), 'interest.movie.borrowed');
+  });
+});
+
+describe('「连续性」那一列：进行中 ≠ 未验证', () => {
+  /**
+   * 真实档案里有这么一行：作品详情页因为一次**误判**的 `account_switched` 留下了
+   * 缺口，于是永远不连续。抓取早就结束了，界面却写着「进行中」——等于让人一直等
+   * 一件已经结束的事。
+   */
+
+  test('连续就是已验证，不管跑没跑完', () => {
+    assert.equal(contiguityLabel({ contiguous: true, settled: false }), '✔ 已验证');
+    assert.equal(contiguityLabel({ contiguous: true, settled: true }), '✔ 已验证');
+  });
+
+  test('还在跑 → 进行中', () => {
+    assert.equal(contiguityLabel({ contiguous: false, settled: false }), '进行中');
+  });
+
+  test('抓完了还不连续 → 未验证，并点出有缺口', () => {
+    assert.equal(
+      contiguityLabel({ contiguous: false, settled: true, gaps: [{ reason: 'account_switched' }] }),
+      '未验证 · 有缺口',
+    );
+  });
+
+  test('抓完了、不连续、但没记缺口 → 只说未验证', () => {
+    // 比如水位线为空（这条线没有时间可比）。那不是缺口，别硬说成有洞。
+    assert.equal(contiguityLabel({ contiguous: false, settled: true, gaps: [] }), '未验证');
+  });
+
+  test('抓完的档案里绝不会写「进行中」', () => {
+    for (const gaps of [[], [{ reason: 'x' }]]) {
+      assert.equal(
+        contiguityLabel({ contiguous: false, settled: true, gaps }).includes('进行中'),
+        false,
+      );
+    }
   });
 });
