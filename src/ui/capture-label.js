@@ -52,7 +52,44 @@ export function captureTitle(e, routeName) {
     // （步长 15 的列表里，offset 105 是第 8 页）。
     else if (c.kind === 'start' || c.kind === 'offset') where = `第 ${c.value} 条起`;
   }
+  // 没有游标的（作品详情页）从 URL 上认。见 `subjectLabel`。
+  if (!where) where = subjectLabel(e.url);
   return [routeName(e.route_key), where].filter(Boolean).join(' · ');
+}
+
+/** URL 里认得出的媒介。路径形状见 classifier.js 的 `SUBJECT_LINK`。 */
+const SUBJECT_PATTERNS = [
+  [/movie\.douban\.com\/subject\/(\d+)/, '电影'],
+  [/book\.douban\.com\/subject\/(\d+)/, '书'],
+  [/music\.douban\.com\/subject\/(\d+)/, '音乐'],
+  [/douban\.com\/location\/drama\/(\d+)/, '舞台剧'],
+  [/douban\.com\/game\/(\d+)/, '游戏'],
+  [/douban\.com\/app\/(\d+)/, '应用'],
+];
+
+/**
+ * 从作品详情页的 URL 上认出「哪一部」。
+ *
+ * 作品详情页没有游标，于是捕获列表里几千行**长得一模一样**——全是「作品详情页」，
+ * 排在一起，没有任何一行能被认出来。而这一页的用处正是「找某一条记录」。
+ *
+ * URL 里本来就有媒介与 ID（`movie.douban.com/subject/1292052/`），那是**免费的**：
+ * index 里已经存着 URL，不用解压任何东西。
+ *
+ * 标题当然更好看，但它不在 index 里——而且**也不该在**：bundle 是个容器，
+ * 「requires knowing nothing about Douban's semantics」，标题是豆瓣的语义，
+ * 归 canonical 管。真要看标题，点开那一行就是（预览会把记录解压出来）。
+ *
+ * @param {string | undefined} url
+ * @returns {string | null}
+ */
+export function subjectLabel(url) {
+  if (!url) return null;
+  for (const [re, medium] of SUBJECT_PATTERNS) {
+    const m = re.exec(url);
+    if (m) return `${medium} ${m[1]}`;
+  }
+  return null;
 }
 
 /**

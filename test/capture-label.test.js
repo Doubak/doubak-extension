@@ -18,7 +18,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { captureTitle, captureSubtitle } from '../src/ui/capture-label.js';
+import { captureTitle, captureSubtitle, subjectLabel } from '../src/ui/capture-label.js';
 
 const rn = (k) => ({
   'broadcast.timeline': '广播',
@@ -43,9 +43,48 @@ describe('标题：哪条线的第几页', () => {
     );
   });
 
-  test('没有游标就只写路线名', () => {
+  test('作品详情页从 URL 上认出是哪一部', () => {
+    // 没有游标的话这一列有几千行**长得一模一样**，全是「作品详情页」——而这一页的
+    // 用处正是「找某一条记录」。媒介与 ID 在 URL 里本来就有，且是免费的：
+    // index 里已经存着 URL，不用解压任何东西。
+    const t = (url) => captureTitle({ route_key: 'interest.item', url }, rn);
+    assert.equal(t('https://book.douban.com/subject/4820710/'), '作品详情页 · 书 4820710');
+    assert.equal(t('https://movie.douban.com/subject/1292052/'), '作品详情页 · 电影 1292052');
+    assert.equal(t('https://music.douban.com/subject/1394999/'), '作品详情页 · 音乐 1394999');
+  });
+
+  test('游戏、应用、舞台剧的路径形状都不一样，都要认得', () => {
+    // 这三个不在 `<medium>.douban.com/subject/N` 那个形状上。舞台剧漏认过一次
+    // （`idAnchor` 少了 `/location/drama/N`），代价是覆盖率整片写错。
+    assert.equal(subjectLabel('https://www.douban.com/game/26302614/'), '游戏 26302614');
+    assert.equal(subjectLabel('https://www.douban.com/app/1234567/'), '应用 1234567');
+    assert.equal(subjectLabel('https://www.douban.com/location/drama/30462659/'), '舞台剧 30462659');
+  });
+
+  test('带跟踪参数也认得', () => {
+    assert.equal(
+      subjectLabel('https://movie.douban.com/subject/1292052/?from=mine'),
+      '电影 1292052',
+    );
+  });
+
+  test('认不出来的 URL 就只写路线名，不硬编', () => {
     assert.equal(captureTitle({ route_key: 'interest.item' }, rn), '作品详情页');
     assert.equal(captureTitle({ route_key: 'interest.item', cursor: null }, rn), '作品详情页');
+    assert.equal(subjectLabel('https://www.douban.com/something/else/'), null);
+    assert.equal(subjectLabel(undefined), null);
+  });
+
+  test('有游标的路线不受影响 —— 游标优先', () => {
+    // 列表页的 URL 里也有 `movie.douban.com`，但它该显示「第 N 条起」。
+    assert.equal(
+      captureTitle({
+        route_key: 'interest.drama.collect',
+        cursor: { kind: 'start', value: 105 },
+        url: 'https://movie.douban.com/people/x/collect?start=105',
+      }, rn),
+      '舞台剧 · 看过 · 第 105 条起',
+    );
   });
 
   test('游标值为 0 也要显示 —— 0 是合法的起点', () => {
