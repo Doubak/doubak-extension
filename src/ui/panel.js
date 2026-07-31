@@ -2118,10 +2118,15 @@ async function loadDebug() {
       '天然就很小的一条路线，能完整走完整个生命周期而不必截断'],
     ['最多 10 条（安全阀）', { maxCaptures: 10 },
       '人为截断 → 不算完成，水位线不推进，产出的是不完整的档案'],
-    ['作品详情页（约 12 次请求）',
-      { routes: ['interest.drama.collect', 'interest.item'], maxCaptures: 12, bypassGates: true },
-      '先抓一页舞台剧列表，再抓它上面的作品详情页 —— 那条路线占真实档案九成体积，' +
-      '但在全量抓取里排在最后，几小时之后才轮到。这里几十次请求就能验完'],
+    ['作品详情页与封面图（约 20 次请求）',
+      {
+        routes: ['interest.drama.collect', 'interest.item', 'asset.subject_cover'],
+        maxCaptures: 20,
+        bypassGates: true,
+      },
+      '先抓一页舞台剧列表，再抓它上面的作品详情页，最后抓这些作品的封面图 —— ' +
+      '这两条路线占真实档案九成体积，但在全量抓取里排在最后，几小时之后才轮到。' +
+      '这里几十次请求就能验完，包括「图片到底存进去了没有」'],
   ];
   for (const [label, cfg, why] of opts) sc.append(actionRow(label, why, () => startScoped(cfg)));
 
