@@ -582,6 +582,18 @@ describe('面板脚本', () => {
     assert.match(js, /previousBundleId/);
   });
 
+  test('抓取方式让用户选 —— 默认增量，但不替他做决定', async () => {
+    const html = await readRepoFile('src/ui/panel.html');
+    assert.match(html, /id="crawl-mode"/);
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /let crawlMode = 'incremental'/, '默认该是增量');
+    for (const mode of ['full', 'refresh-subjects']) {
+      assert.ok(js.includes(`'${mode}'`), `少了「${mode}」这个选项`);
+    }
+    // 选了什么要真的传下去
+    assert.match(js, /send\(\{ type: 'start', mode: crawlMode \}\)/);
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。

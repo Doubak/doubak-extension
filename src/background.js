@@ -350,6 +350,8 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           const started = await withOffscreen({
             op: 'start',
             options: serializeScope(scopeToOptions(msg?.scope)),
+            // 全量 / 增量 / 增量+重抓详情页。**默认增量，但由用户决定**。
+            mode: msg?.mode ?? 'incremental',
           });
           await getSupervisor().startRun({ bundle_id: started.bundleId });
           await clearAttention({ kv: getKv() });

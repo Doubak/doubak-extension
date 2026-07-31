@@ -1540,6 +1540,55 @@ describe('增量：下界真的省下了重抓', () => {
     assert.ok(pages.length < 10, `到了下界还在往下翻：抓了 ${pages.length} 页`);
   });
 
+  test('链上抓过的作品详情页不再抓一遍', async () => {
+    // 那条路线占真实档案九成体积，而「增量」对它不成立（没有时间序）。所以做法是
+    // 只抓这次列表里**新出现的**作品。
+    const seen = [];
+    const listPage = `<html><head><title>我看过的影视(2)</title></head><body>${NAV}
+<div id="db-usr-profile"></div><h1>我看过的影视(2)</h1><div class="grid-view">
+<div class="item"><a href="https://movie.douban.com/subject/1001/">甲</a>
+<span class="date">2025-01-01</span></div>
+<div class="item"><a href="https://movie.douban.com/subject/1002/">乙</a>
+<span class="date">2024-01-01</span></div>
+</div></body></html>`;
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('statuses')) return bcPage(0);
+      if (url.includes('/subject/')) { seen.push(url); return `<html><body>${NAV}<div id="mainpic"></div><div id="info"></div></body></html>`; }
+      return listPage;
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: ['movie'], includeCatalog: true, bypassGates: true,
+      knownSubjectUrlKeys: ['https://movie.douban.com/subject/1001/'],
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.equal(seen.some((u) => u.includes('/1001/')), false, '已经抓过的不该再抓');
+    assert.ok(seen.some((u) => u.includes('/1002/')), '新出现的必须抓');
+  });
+
+  test('不传就照旧全抓 —— 「重抓作品详情页」那个选项靠的就是这个', async () => {
+    const seen = [];
+    const listPage = `<html><head><title>我看过的影视(1)</title></head><body>${NAV}
+<div id="db-usr-profile"></div><h1>我看过的影视(1)</h1><div class="grid-view">
+<div class="item"><a href="https://movie.douban.com/subject/1001/">甲</a>
+<span class="date">2025-01-01</span></div>
+</div></body></html>`;
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('statuses')) return bcPage(0);
+      if (url.includes('/subject/')) { seen.push(url); return `<html><body>${NAV}<div id="mainpic"></div><div id="info"></div></body></html>`; }
+      return listPage;
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: ['movie'], includeCatalog: true, bypassGates: true,
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+    assert.ok(seen.some((u) => u.includes('/1001/')));
+  });
+
   test('没有下界时照旧全量 —— 判错的方向必须是多抓', async () => {
     const seen = [];
     const { runner } = harness((url) => {

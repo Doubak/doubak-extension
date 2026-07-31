@@ -663,3 +663,48 @@ describe('个人主页是**用户可自定义的**，判定不能依赖分类区
     assert.notEqual(r.verdict, 'ok');
   });
 });
+
+describe('标记日期：书的那一栏后面还跟着状态词', () => {
+  /**
+   * 拿真实档案量出来的形状差异：
+   *
+   *     电影/游戏/音乐   <span class="date">2024-02-18</span>
+   *     书              <span class="date">2024-02-18\n      读过</span>
+   *
+   * 原来的模式要求日期紧接着 `<`，于是**三条书的路线一条时间都抽不到**——
+   * 「已回溯到」永远是空的、`high_water_time` 永远是 null、`advanced` 永远是
+   * false，**书从来就没能增量过**，每次都全量重走。
+   */
+  const list = profileForRoute('interest.book.collect');
+
+  test('书：日期后面跟着「读过」也要抽得到', () => {
+    const html = '<span class="date">2024-02-18\n      读过</span>';
+    assert.deepEqual(extractItemTimes(html, list), ['2024-02-18']);
+  });
+
+  test('在读 / 想读同理', () => {
+    for (const word of ['在读', '想读']) {
+      const html = `<span class="date">2021-12-30\n      ${word}</span>`;
+      assert.deepEqual(extractItemTimes(html, list), ['2021-12-30']);
+    }
+  });
+
+  test('电影那种「日期紧接着 </span>」照旧', () => {
+    assert.deepEqual(
+      extractItemTimes('<span class="date">2026-07-19</span>', list),
+      ['2026-07-19'],
+    );
+  });
+
+  test('一页多条按出现顺序全抽出来', () => {
+    const html = `
+      <span class="date">2024-02-18\n      读过</span>
+      <span class="date">2023-10-15\n      读过</span>
+      <span class="date">2021-12-30\n      读过</span>`;
+    assert.deepEqual(extractItemTimes(html, list), ['2024-02-18', '2023-10-15', '2021-12-30']);
+  });
+
+  test('不是 class="date" 的日期不算', () => {
+    assert.deepEqual(extractItemTimes('<span class="pub">2024-02-18</span>', list), []);
+  });
+});

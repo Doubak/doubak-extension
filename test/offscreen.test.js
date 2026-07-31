@@ -312,7 +312,27 @@ describe('增量：offscreen 这一侧的接线', () => {
 
   test('开工时把挑下界的回调交给 runner', async () => {
     const src = await readRepoFile('src/offscreen/offscreen.js');
-    assert.match(src, /resolveFloors:\s*incrementalOptions/);
+    assert.match(src, /resolveFloors:\s*\(account\)\s*=>\s*incrementalOptions/);
+  });
+
+  test('用户选了全量就一个下界都不挑', async () => {
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    assert.match(src, /msg\.mode === 'full'/);
+  });
+
+  test('用户选了「重抓作品详情页」就不跳过已有的', async () => {
+    // 跳过的话完全达不到目的——他要的正是新版本（评分、短评会变）。
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    assert.match(src, /mode === 'refresh-subjects'\s*\n?\s*\?\s*\[\]/);
+  });
+
+  test('已抓过的作品详情页只按 interest.item 认', async () => {
+    // 把列表页也算进「已经抓过」会让这次一页都抓不成：列表页的 URL 每次都一样。
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    const fn = src.slice(src.indexOf('async function knownSubjects'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    assert.match(body, /route_key === 'interest\.item'/);
+    assert.match(body, /verdict === 'ok'/);
   });
 
   test('用 chain.js 的纯函数，不在这儿自己判', async () => {

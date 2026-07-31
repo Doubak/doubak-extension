@@ -73,10 +73,10 @@ import { dryRunFetch } from '../crawl/dry-run.js';
 import { OFFSCREEN_TARGET } from './protocol.js';
 import { Exclusive } from '../crawl/exclusive.js';
 import { BundleReader } from '../bundle/bundle-reader.js';
-import { bundleIdFromDirName } from '../core/ids.js';
+import { bundleIdFromDirName, bundleDirName } from '../core/ids.js';
 import {
   chainEntryFromManifest, pickFloors, floorsFor, newestFirst, renamedBundles,
-  chainCoverage, findChainHoles, diffAgainstChain, splitChains,
+  chainCoverage, findChainHoles, diffAgainstChain, splitChains, chainOf,
 } from '../crawl/chain.js';
 
 // TODO(debug): 开发期日志。发布前连同所有调用一起删掉。
@@ -119,6 +119,36 @@ function getOpfsWorker() {
  * @param {{userId: string | null}} account  preflight 确认的账号
  * @returns {Promise<{floors?: Map<string, string>, floorSources?: Map<string, string>, previousBundleId?: string | null}>}
  */
+/**
+ * 链上已经抓成功的作品详情页 url_key。
+ *
+ * **只取 `interest.item`**：列表页的 URL 每次都一样（`collect?start=0`），把它们
+ *也算进「已经抓过」会让这次一页都抓不成。
+ *
+ * 只取 `verdict: ok`：被拦下、判不出来的那些本来就该重抓。
+ *
+ * @param {import('../crawl/chain.js').ChainEntry[]} chain
+ * @returns {Promise<string[]>}
+ */
+async function knownSubjects(chain) {
+  /** @type {Set<string>} */
+  const out = new Set();
+  for (const e of chain) {
+    try {
+      const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(e.bundleId) });
+      const reader = new BundleReader({ store, bundleId: e.bundleId });
+      for (const x of await reader.index()) {
+        if (x.route_key === 'interest.item' && x.verdict === 'ok' && x.url_key) out.add(x.url_key);
+      }
+    } catch (err) {
+      // 读不出来就当没有——**多抓不可接受的相反面**：这里漏认只会让它多抓一遍，
+      // 而那是安全的方向。
+      debugLog('读不出这份索引，作品详情页会重抓', e.bundleId, err);
+    }
+  }
+  return [...out];
+}
+
 async function readChainEntries() {
   const dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
   /** @type {import('../crawl/chain.js').ChainEntry[]} */
@@ -139,7 +169,7 @@ async function readChainEntries() {
   return entries;
 }
 
-async function incrementalOptions(account) {
+async function incrementalOptions(account, mode = 'incremental') {
   try {
     const entries = await readChainEntries();
     if (entries.length === 0) return {};
@@ -176,6 +206,14 @@ async function incrementalOptions(account) {
       floors: floorsFor(picks),
       floorSources: new Map([...picks].map(([k, v]) => [k, v.fromBundleId])),
       previousBundleId: newest?.bundleId ?? null,
+      // 链上已经抓过的作品详情页。那条路线占九成体积，而「增量」对它不成立
+      // （没有时间序），所以做法是只抓这次新出现的。
+      //
+      // 用户选了「重抓作品详情页」时**不传**——那时他要的正是新版本（评分、短评
+      // 会变），跳过就完全达不到目的。
+      knownSubjectUrlKeys: mode === 'refresh-subjects'
+        ? []
+        : await knownSubjects(newest ? chainOf(entries, newest.bundleId) : []),
     };
   } catch (e) {
     // 读不出来就全量。少抓不可接受，多抓只是慢。
@@ -352,9 +390,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             const opts = reviveScope(msg.options);
             // 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
             const who = opts.username ? { username: opts.username } : await r.discoverUsername();
+            // 全量是**用户明说的**，那就一个下界都不挑——当作从来没抓过。
+            if (msg.mode === 'full') {
+              return r.start({ ...opts, username: who.username });
+            }
             // 增量：从既有档案里挑下界。**在身份确认之后**才挑（判据是数字 uid），
             // 所以交给 runner 在正确的时刻回调。小范围试跑自带 floors，那时不会调用。
-            return r.start({ ...opts, username: who.username, resolveFloors: incrementalOptions });
+            return r.start({
+              ...opts,
+              username: who.username,
+              resolveFloors: (account) => incrementalOptions(account, msg.mode),
+            });
           });
           sendResponse({ ok: true, bundleId: started.bundleId, account: started.account });
           break;

@@ -409,6 +409,7 @@ async function refresh() {
     preflightShown = true;
     void showPreflight();
   }
+  renderCrawlMode();
   setActions([['开始抓取', async () => {
     // `pendingCommand` 只是**开口那一小段**的兜底：从点下去到 offscreen 真正拿到
     // 锁之间（可能还要先把 offscreen 建起来），后端还报不出 `busyWith`。
@@ -416,7 +417,7 @@ async function refresh() {
     pendingCommand = '开始抓取';
     refresh();
     try {
-      const r = await send({ type: 'start' });
+      const r = await send({ type: 'start', mode: crawlMode });
       if (!r?.ok) {
         pendingCommand = null;
         setState('err', '无法开始', r?.error ?? '');
@@ -659,6 +660,52 @@ async function showLastRun() {
 }
 
 /**
+ * 这次要怎么抓。
+ *
+ * **默认增量，但必须能选。** 用户可能想重建一份基准（上一次有缺口、或者不信任它），
+ * 也可能想重新抓一遍作品详情页看看评分变了没有。默认帮他省时间，但不替他做决定。
+ *
+ * @type {'incremental' | 'full' | 'refresh-subjects'}
+ */
+let crawlMode = 'incremental';
+
+/** 抓取方式的三个选项。 */
+function renderCrawlMode() {
+  const el = $('crawl-mode');
+  el.replaceChildren();
+
+  const opts = /** @type {const} */ ([
+    ['incremental', '增量（推荐）',
+      '接着上次抓：列表只抓新增的部分，作品详情页只抓这次新出现的。最快。'],
+    ['full', '全量重抓',
+      '当作从来没抓过。上一次有缺口、或者你不信任它的时候用——会重新打一份基准。'],
+    ['refresh-subjects', '增量 + 重抓作品详情页',
+      '列表照旧只抓新增的，但**每个作品详情页都重抓一遍**：评分、短评这些会变的东西'
+      + '想拿到新版本时用。那条路线占档案九成体积，会慢很多。'],
+  ]);
+
+  for (const [key, label, why] of opts) {
+    const row = document.createElement('label');
+    row.style.display = 'block';
+    row.style.margin = '4px 0';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'crawl-mode';
+    radio.checked = crawlMode === key;
+    radio.onchange = () => { crawlMode = key; renderCrawlMode(); refresh(); };
+    const b = document.createElement('b');
+    b.style.display = 'inline';
+    b.textContent = ` ${label} `;
+    const note = document.createElement('span');
+    note.className = 'muted';
+    note.style.fontSize = '12px';
+    note.textContent = why;
+    row.append(radio, b, note);
+    el.append(row);
+  }
+}
+
+/**
  * 开抓前那一行「这次抓取的范围」。
  *
  * **措辞要保守。** 下界是在身份确认之后才挑的（判据是数字用户 ID，那时才知道），
@@ -668,12 +715,17 @@ async function showLastRun() {
  * @param {{routes?: string[], oldest?: string | null} | null | undefined} inc
  */
 function scopeText(inc) {
-  const n = inc?.routes?.length ?? 0;
-  if (n === 0) {
-    return '全量（从最新一直抓到最早）—— 还没有可以接着抓的档案，或者上一次没跑完';
+  if (crawlMode === 'full') {
+    return '全量（你选的）—— 当作从来没抓过，会重新打一份基准';
   }
-  return `增量：${n} 条路线可以接着上次抓（只抓新增的部分）；`
-    + '其余的仍然从头走。作品详情页没有时间水位线，只抓这次新出现的作品';
+  const n = inc?.routes?.length ?? 0;
+  const subjects = crawlMode === 'refresh-subjects'
+    ? '作品详情页**全部重抓**（你选的）'
+    : '作品详情页只抓这次新出现的';
+  if (n === 0) {
+    return `全量（从最新一直抓到最早）—— 还没有可以接着抓的档案，或者上一次没跑完。${subjects}`;
+  }
+  return `增量：${n} 条路线可以接着上次抓（只抓新增的部分）；其余的仍然从头走。${subjects}`;
 }
 
 /**

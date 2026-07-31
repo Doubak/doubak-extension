@@ -150,6 +150,9 @@ export class CrawlRunner {
    * @param {string[]} [opts.mediums]
    * @param {boolean} [opts.includeCatalog]
    * @param {Map<string, string | null>} [opts.floors]  上次的水位线
+   * @param {string[]} [opts.knownSubjectUrlKeys]  链上已经抓过的作品详情页。传了就
+   *   不再抓一遍——那条路线占档案九成体积，而「增量」对它不成立（没有时间序）。
+   *   **只能传作品详情页的 key**：列表页的 URL 每次都一样，喂进去会让这次一页都抓不成。
    * @param {(account: object) => Promise<object>} [opts.resolveFloors]  **在身份确认之后**
    *   挑下界。顺序是必须的：判据是数字用户 ID，而它只有 preflight 之后才知道。
    *   读档案不是 runner 的事，所以动作由调用方注入，这里只定顺序。
@@ -167,6 +170,7 @@ export class CrawlRunner {
   async start({
     username, mediums, includeCatalog = true, floors, floorSources, previousBundleId = null,
     onlyRoutes = null, maxCaptures = null, bypassGates = false, resolveFloors = null,
+    knownSubjectUrlKeys = null,
   }) {
     if (this._run) throw new Error('已有抓取在进行中');
 
@@ -201,6 +205,7 @@ export class CrawlRunner {
         floors = inc.floors;
         floorSources = inc.floorSources;
         previousBundleId = inc.previousBundleId ?? previousBundleId;
+        knownSubjectUrlKeys = knownSubjectUrlKeys ?? inc.knownSubjectUrlKeys;
       } catch (err) {
         // 挑不出来就全量。**少抓不可接受，多抓只是慢。**
         this._emit({ type: 'incremental_failed', message: String(err?.message ?? err) });
@@ -244,6 +249,21 @@ export class CrawlRunner {
     const routes = new Map(routeDefs.map((r) => [r.key, r]));
 
     const frontier = new Frontier();
+    // **链上已经抓过的作品详情页不再抓一遍。**
+    //
+    // 那条路线占真实档案九成体积，而它的内容不像列表那样有时间序——「增量」这个
+    // 概念对它不成立（规范 §5.5.5）。所以增量的做法是：**只抓这次列表里新出现的
+    // 作品**，已经有的跳过。
+    //
+    // 只喂作品详情页的 url_key，**不能把列表页也喂进来**：列表页的 URL 每次都一样
+    // （`collect?start=0`），喂进去会让这次一页都抓不成。
+    //
+    // 要重新抓一遍（比如想看评分变化）是**用户的决定**：界面上有单独的选项，
+    // 那时不传这个集合。与 `acceptLeafGaps` 是同一个模式。
+    if (knownSubjectUrlKeys?.length) {
+      frontier.markCaptured(knownSubjectUrlKeys);
+      this._emit({ type: 'subjects_skipped', count: knownSubjectUrlKeys.length });
+    }
     seedFrontier(frontier, routeDefs);
 
     const loop = new CrawlLoop({
