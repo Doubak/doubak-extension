@@ -310,14 +310,33 @@ async function refresh() {
     return;
   }
 
+  // **忙碌状态要在所有分支之前判。**
+  //
+  // 原来它只在空闲分支里——于是「有 checkpoint、正在恢复」时按下继续，界面照旧
+  // 渲染「抓取已停下」，什么都不变，直到几秒后恢复真的完成。用户看到的是「点了
+  // 没反应，等了五秒忽然全出来了」。
+  //
+  // 恢复本身就慢（修段尾 + 确认登录状态，都是真请求），所以这几秒必须有交代。
+  const busy = s.busyWith ?? pendingCommand;
+  if (busy && !s.runner?.active) {
+    const [title, why] = BUSY_COPY[busy] ?? ['正在处理…', ''];
+    setState('run', title, why);
+    setActions([]);
+    return;
+  }
+
   if (s.runner?.active || s.checkpoint) {
     // 离开空闲态：把预检结果收掉，下次回到空闲再查一次（那时空间已经变了）。
     if (preflightShown) {
       preflightShown = false;
       $('preflight').replaceChildren();
     }
-    // 上一次的结果也让位给正在进行的这一次
-    lastRunShown = false;
+    // 上一次的结果让位给**正在进行**的这一次。
+    //
+    // 只在 runner 真的活着时才让位：只有 checkpoint（offscreen 还没起来）时，
+    // 进度只能从上一份档案的 crawl_state 来——那时清掉标志会让它每两秒重读一次
+    // OPFS，而且中间那一瞬是空的，表格会闪。
+    if (s.runner?.active) lastRunShown = false;
     // 抓取正在写档案：摘要随时在变，缓存不能留。
     summaryCache = null;
   }
@@ -378,8 +397,10 @@ async function refresh() {
     const [cls, title, why, action] = PAUSE_COPY[s.checkpoint.pause_reason] ??
       ['warn', '抓取已停下', `原因：${s.checkpoint.pause_reason}`, '继续'];
     setState(cls, title, why);
-    setActions(action ? [[action, async () => {
-        // 恢复同样要好几秒（修段尾 + 确认登录状态），同样先给个兜底状态。
+    setActions([
+      ...(action ? [[action, async () => {
+        // 恢复要好几秒（修段尾 + 确认登录状态，都是真请求），先给个兜底状态——
+        // 否则点下去到几秒后之间界面一动不动，看起来像没反应。
         pendingCommand = '恢复抓取';
         refresh();
         try {
@@ -388,8 +409,18 @@ async function refresh() {
           pendingCommand = null;
         }
         refresh();
-      }]] : []);
-    renderRoutes([]);
+      }]] : []),
+      // **这里也要能中止。** 刚打开插件时 offscreen 还没起来，只有 checkpoint——
+      // 而那正是用户最可能想说「这次不抓了」的时刻。
+      ['中止这次抓取', () => abortCrawl(s.checkpoint.bundle_id), 'danger'],
+    ]);
+    // 进度表交给「上一次的结果」：这时候没有 runner，但档案里的 crawl_state 有。
+    // 空着一片什么都不说，比显示上一次的结果糟糕。
+    if (!lastRunShown) {
+      lastRunShown = true;
+      renderRoutes([]);
+      void showLastRun();
+    }
     return;
   }
 
@@ -406,14 +437,6 @@ async function refresh() {
   // 它也活不过面板刷新——换个标签页回来就什么都看不到了。
   //
   // 现在这个状态由**做事的那一端**报出来（全局互斥锁的持有者），界面只是读它。
-  const busy = s.busyWith ?? pendingCommand;
-  if (busy) {
-    const [title, why] = BUSY_COPY[busy] ?? ['正在处理…', ''];
-    setState('run', title, why);
-    setActions([]); // 这时候不给「开始抓取」——按了也只会撞上互斥锁
-    return;
-  }
-
   setState('idle', '没有进行中的抓取', '请求全部来自你自己的浏览器和 IP。cookie 不会发送到任何地方。');
   // **不清空进度表。** 抓完之后立刻变回「还没有开始」，等于把刚跑完那一次的结果扔了
   // ——而那正是用户此刻最想看的东西。改成显示上一份档案的 crawl_state：那是
@@ -1339,6 +1362,15 @@ function setArchiveButtons(on) {
 /** @param {string} bundleId */
 async function openBundle(bundleId) {
   currentBundleId = bundleId;
+  // **上一份档案的操作结果要清干净，class 也要清。**
+  //
+  // 只清 textContent 的话会留下一个**空的红框**——比留着错误信息更糟：它看起来
+  // 像出了事，却什么都不说。（删「正在抓的那份」被拒之后切换档案，就是这个样子。）
+  for (const id of ['export-result', 'verify-result']) {
+    const el = $(id);
+    el.className = '';
+    el.replaceChildren();
+  }
   const summaryEl = $('archive-summary');
   $('export-result').replaceChildren();
   $('verify-result').replaceChildren();
@@ -1447,7 +1479,7 @@ async function loadChainDiff() {
     markRepeated(repeated);
   }
 
-  renderVersions(r.diff.versions ?? [], r.diff.truncated);
+  renderVersions(r.diff.versionCount ?? 0);
 }
 
 /** 给捕获列表里「又抓了一次」的那些行补一个标记。 */
@@ -1461,47 +1493,29 @@ function markRepeated(repeated) {
 }
 
 /**
- * 版本历史：同一个网址在链上被抓到过几次。
+ * 版本历史：链上有多少个网址被抓到过不止一次。
  *
- * **这不是重复数据，是版本**——评分变了、短评改了、条目被删了。这正是「有意保留
- * 不同版本」的兑现处，也是 canonical 的 revision 模型的原料。
+ * **只报个数，不列清单。** 第一版把每个网址连同各版本的日期都列出来，几百行——
+ * 而这一页的读者想知道的只是「有没有、有多少」。真要看某一条的历史，那属于
+ * parser 之后的事（canonical 的 revision 模型），不是档案页该扛的。
+ *
+ * **这不是重复数据，是版本**——评分变了、短评改了、条目被删了。
+ *
+ * @param {number} count
  */
-function renderVersions(versions, truncated) {
+function renderVersions(count) {
   const el = $('versions');
-  if (!versions.length) return;
+  if (!count) return;
 
-  const head = document.createElement('div');
-  head.className = 'card idle';
+  const card = document.createElement('div');
+  card.className = 'card idle';
   const b = document.createElement('b');
-  b.textContent = `${versions.length} 个网址在链上有多个版本${truncated ? '（只列前 200 个）' : ''}`;
-  head.append(b, document.createTextNode(
+  b.textContent = `${count} 个网址在链上有多个版本`;
+  card.append(b, document.createTextNode(
     '同一个网址在不同时间抓到的内容可能不一样——评分变了、短评改了、条目被删了。'
     + '这些版本都留着，那正是备份的意义。',
   ));
-  el.append(head);
-
-  const list = document.createElement('div');
-  list.className = 'caps';
-  for (const v of versions.slice(0, 50)) {
-    const row = document.createElement('div');
-    row.className = 'cap';
-    const left = document.createElement('span');
-    left.textContent = subjectLabel(v.urlKey) ?? v.urlKey;
-    const right = document.createElement('span');
-    right.className = 'v';
-    right.textContent = `${v.versions.length} 个版本`;
-    row.append(left, right);
-
-    const when = document.createElement('div');
-    when.className = 'muted';
-    when.style.fontSize = '12px';
-    when.textContent = v.versions
-      .map((x) => String(x.observedAt ?? '').slice(0, 10))
-      .join(' · ');
-    row.append(when);
-    list.append(row);
-  }
-  el.append(list);
+  el.append(card);
 }
 
 /**
@@ -1555,10 +1569,11 @@ function renderVanished() {
     row.append(left, right);
 
     const url = document.createElement('div');
-    url.className = 'muted';
-    url.style.fontSize = '12px';
+    url.className = 'muted cap-sub';
     url.style.wordBreak = 'break-all';
-    url.textContent = `${e.url} · 抓于 ${String(e.observed_at ?? '').slice(0, 19).replace('T', ' ')}`;
+    // URL 与时间之间要有明显的分隔——挤在一起时 URL 的结尾会被读成时间的一部分。
+    url.textContent = `${e.url}\n抓于 ${String(e.observed_at ?? '').slice(0, 19).replace('T', ' ')}`;
+    url.style.whiteSpace = 'pre-wrap';
     row.append(url);
     list.append(row);
   }

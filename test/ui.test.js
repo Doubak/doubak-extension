@@ -611,6 +611,66 @@ describe('面板脚本', () => {
     assert.match(js, /abortCrawl\(r\.bundleId\), 'danger'/);
   });
 
+  test('只有 checkpoint 时（offscreen 还没起来）也要能中止', async () => {
+    // 刚打开插件就是这个状态：runner 还不存在，只有 checkpoint。而那正是用户最
+    // 可能想说「这次不抓了」的时刻——原来那里只有一个「继续」。
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return {
+            ok: true, running: false,
+            checkpoint: { bundle_id: 'b1', pause_reason: 'user_paused' },
+            runner: { active: false },
+          };
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      const labels = [...dom.byId.get('actions').children].map((b) => b.textContent);
+      assert.ok(labels.some((l) => l.includes('继续')), '要能继续');
+      assert.ok(labels.some((l) => l.includes('中止')), '也要能中止');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('恢复那几秒必须有交代 —— 不能点了没反应', async () => {
+    // 报上来的：点继续之后界面五秒一动不动，然后忽然全出来了。
+    // 成因是忙碌状态只在**空闲分支**里判，而这时走的是 checkpoint 分支。
+    const js = await readRepoFile('src/ui/panel.js');
+    const fn = js.slice(js.indexOf('async function refresh'));
+    const idxBusy = fn.indexOf('const busy =');
+    const idxActive = fn.indexOf("if (s.runner?.active || s.checkpoint)");
+    assert.ok(idxBusy >= 0 && idxBusy < idxActive, '忙碌状态要在所有分支之前判');
+  });
+
+  test('切换档案时把上一份的结果框清干净 —— 包括 class', async () => {
+    // 只清文字会留下一个**空的红框**：看起来像出了事，却什么都不说。
+    const js = await readRepoFile('src/ui/panel.js');
+    const fn = js.slice(js.indexOf('async function openBundle'));
+    const body = fn.slice(0, fn.indexOf('const summaryEl'));
+    assert.match(body, /export-result/);
+    assert.match(body, /className = ''/, 'class 也要清');
+  });
+
+  test('版本历史只报个数，且个数是真的', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /function renderVersions\(count\)/);
+    // 早先回的是截断到 200 条的清单，界面拿它的长度当总数 → 永远写着「200 个」
+    const off = await readRepoFile('src/offscreen/offscreen.js');
+    assert.match(off, /versionCount: d\.versions\.length/);
+    assert.equal(off.includes('versions.slice(0, 200)'), false, '别再截断然后拿长度当总数');
+  });
+
+  test('一行里的 URL 与右边的计数要分开', async () => {
+    // `…/games5 个版本` —— 两段直接粘在一起。
+    const html = await readRepoFile('src/ui/panel.html');
+    assert.match(html, /\.cap \{[^}]*display: flex/);
+    assert.match(html, /\.cap \{[^}]*gap:/);
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。

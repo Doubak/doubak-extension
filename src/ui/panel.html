@@ -71,6 +71,12 @@
   }
   .cap-main { display: flex; justify-content: space-between; gap: 8px; }
   .cap-sub { font-size: 11px; opacity: .6; margin-top: 1px; }
+  /* 一行里「左边一段文字 + 右边一个计数」的通用排布。
+     不给它的话两段会直接粘在一起，长成 `…/games5 个版本` 这样。 */
+  .cap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
+  .cap > span:first-child { word-break: break-all; min-width: 0; }
+  .cap > .v { white-space: nowrap; }
+  .cap > div { flex-basis: 100%; }
   .warn-text { color: #a50e0e; }
   @media (prefers-color-scheme: dark) { .warn-text { color: #f7b4ae; } }
   #captures div[aria-selected="true"] { background: #8882; }

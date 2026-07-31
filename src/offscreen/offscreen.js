@@ -530,8 +530,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           const d = diffAgainstChain(cur, slices);
           sendResponse({
             ok: true,
-            // 版本历史可能很长（重抓过很多次的话）。截断，并如实说截了。
-            diff: { repeated: d.repeated, versions: d.versions.slice(0, 200), truncated: d.versions.length > 200 },
+            // **只回个数。** 早先回的是截断到 200 条的清单，而界面拿那个清单的长度
+            // 当总数显示——于是永远写着「200 个」，那是截断后的长度，不是真实数量。
+            // 而界面本来也只需要个数（清单几百行，没人看）。
+            diff: { repeated: d.repeated, versionCount: d.versions.length },
           });
           break;
         }
