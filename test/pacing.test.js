@@ -205,6 +205,37 @@ describe('请求闸门：并发恒为 1，间隔从上次结束算起', () => {
     assert.deepEqual(slept, [1000, 1000]);
   });
 
+  test('换 Pacer 不清零计时 —— 否则每段活动的第一发都不等待', async () => {
+    // 一次抓取由好几段活动组成：先确认身份，再开工；崩溃之后又是一次恢复。
+    // 每段各建一个闸门的话，每段的第一个请求都不等待（`_lastFinishedAt` 是 null），
+    // 于是两段之间的那两发**贴在一起**发出去。不是并发，但同样违反「1 秒一个」——
+    // 而豆瓣看到的只有请求，它不关心我们内部把它们算作几段活动。
+    const { gate, slept } = harness({ intervalMs: 1000 });
+    await gate.run(async () => 'a');
+    assert.deepEqual(slept, [], '第一发不等待');
+
+    // 换一个 Pacer（真实场景：恢复时要用 checkpoint 里的退避层级重建）
+    gate.setPacer(new Pacer({ intervalMs: 1000, jitterRatio: 0 }));
+    await gate.run(async () => 'b');
+    assert.deepEqual(slept, [1000], '换了 Pacer 之后依然要等满间隔');
+  });
+
+  test('换 Pacer 也不打断排队', async () => {
+    const { gate } = harness({ intervalMs: 1000 });
+    const order = [];
+    const a = gate.run(async () => order.push('a'));
+    gate.setPacer(new Pacer({ intervalMs: 1000, jitterRatio: 0 }));
+    const b = gate.run(async () => order.push('b'));
+    await Promise.all([a, b]);
+    assert.deepEqual(order, ['a', 'b']);
+  });
+
+  test('换回来的 pacer 就是当前这个 —— 恢复时要把它写进 checkpoint', () => {
+    const { gate } = harness({ intervalMs: 1000 });
+    const p2 = new Pacer({ intervalMs: 2000, jitterRatio: 0 });
+    assert.equal(gate.setPacer(p2).pacer, p2);
+  });
+
   test('退避之后闸门也跟着变慢', async () => {
     let now = 0;
     const pacer = new Pacer({ intervalMs: 1000, jitterRatio: 0 });

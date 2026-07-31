@@ -41,7 +41,7 @@ const LOGIN = `<html><head><title>\n登录豆瓣\n</title></head><body>验证码
 /**
  * @param {(url: string, n: number) => string} respond  按 URL 与调用序号给页面
  */
-function harness(respond, { batchSize = 5 } = {}) {
+function harness(respond, { batchSize = 5, pacerOptions } = {}) {
   const kv = new MemoryKvStore();
   /** @type {Map<string, MemoryFileStore>} */
   const dirs = new Map();
@@ -68,8 +68,9 @@ function harness(respond, { batchSize = 5 } = {}) {
   const runner = new CrawlRunner({
     runStore, openBundle, fetchImpl, batchSize,
     now: () => new Date('2026-07-29T10:15:00Z'),
-    // 测试里不要真的按 1 秒节奏等——真实抓取必须用默认值
-    pacerOptions: { intervalMs: 1, jitterRatio: 0 },
+    // 测试里不要真的按 1 秒节奏等——真实抓取必须用默认值。
+    // 要验节奏本身的测试可以覆盖它（那时候等待是被测对象，不是开销）。
+    pacerOptions: pacerOptions ?? { intervalMs: 1, jitterRatio: 0 },
     onEvent: (e) => events.push(e),
   });
   return { runner, runStore, kv, dirs, calls, events, openBundle };
@@ -720,5 +721,83 @@ describe('暂停', () => {
     await runner.start({ username: 'example', includeCatalog: false });
     await runner.pause();
     assert.equal(events.filter((e) => e.type === 'paused').at(-1).checkpointSaved, true);
+  });
+});
+
+describe('并发恒为 1 —— 豆瓣同一时刻只会看到我们的一个请求', () => {
+  /**
+   * 这一组是**结果导向**的：不检查内部有几把锁、几个闸门，只检查从豆瓣那一侧
+   * 看过去是什么样。把账号搞封是不可接受的结果，而对方唯一能观察到的就是
+   * 「同一时刻有几个请求在飞」和「两个请求隔多久」。
+   */
+
+  /** 记下每一刻在飞的请求数。 */
+  function tracking(respond) {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const order = [];
+    const wrap = (url, n) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      order.push(url);
+      return respond(url, n);
+    };
+    return { wrap, peak: () => maxInFlight, order, release: () => { inFlight -= 1; } };
+  }
+
+  test('列表页与作品详情页交给同一个循环，不会同时在飞', async () => {
+    // 作品详情页是由列表页**派生**的：抓完一页列表，把里面的条目入队，
+    // 然后由同一个 frontier / 同一个循环挨个取。没有第二条执行路径。
+    const t = tracking(broadcastOnly([bcPage(20, 0), bcPage(20, 20), bcPage(0)]));
+    const { runner } = harness((url, n) => {
+      const body = t.wrap(url, n);
+      t.release();
+      return body;
+    }, { batchSize: 50 });
+
+    await runner.start({ username: 'example', mediums: [], includeCatalog: true });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.equal(t.peak(), 1, '同一时刻只能有一个请求在飞');
+  });
+
+  test('同一条路线上永远只有一个页面在飞 —— frontier 的 in_flight 会挡住整条线', async () => {
+    const { runner } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), { batchSize: 50 });
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+
+    const f = runner._run.frontier;
+    const a = f.next();
+    assert.ok(a);
+    assert.equal(a.state, 'in_flight');
+    // 同一条路线的下一页取不出来——哪怕它已经 pending
+    const others = f.snapshot().filter((it) => it.routeKey === a.routeKey && it.state === 'pending');
+    if (others.length) {
+      const b = f.next();
+      assert.notEqual(b?.routeKey, a.routeKey, '同一条路线不许并发');
+    }
+  });
+
+  test('身份确认与开工探测之间也要隔够间隔', async () => {
+    // 这两段活动早先各建一个闸门，而闸门的**第一个**请求是不等待的
+    // （`_lastFinishedAt` 是 null）。于是这两发贴在一起发出去——不是并发，
+    // 但同样违反「1 秒一个」。豆瓣看到的只有请求，它不关心我们内部把它们
+    // 算作几段活动。
+    const INTERVAL = 40;
+    const at = [];
+    const base = broadcastOnly([bcPage(0)]);
+    const { runner } = harness((url, n) => {
+      at.push(Date.now());
+      return base(url, n);
+    }, { batchSize: 5, pacerOptions: { intervalMs: INTERVAL, jitterRatio: 0 } });
+
+    const who = await runner.discoverUsername();
+    await runner.start({ username: who.username, mediums: [], includeCatalog: false });
+
+    assert.ok(at.length >= 2, '至少发了身份确认与开工探测两发');
+    // 用真实时钟测真实等待。差一点点是调度抖动，留 5ms 余量。
+    assert.ok(
+      at[1] - at[0] >= INTERVAL - 5,
+      `两发之间只隔了 ${at[1] - at[0]}ms，应当 ≥ ${INTERVAL}ms —— 它们贴在一起发出去了`,
+    );
   });
 });

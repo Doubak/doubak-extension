@@ -65,6 +65,18 @@ export class CrawlRunner {
 
     /** @type {object | null} 当前这次抓取的全部部件 */
     this._run = null;
+
+    // **整个 runner 共用一个闸门。**
+    //
+    // 间隔是「我们和豆瓣之间这条连接」的属性，不是某一次活动的属性。一次抓取由
+    // 好几段活动组成——先确认身份，再开工；崩溃之后又是一次恢复——每段各建一个
+    // 闸门的话，每段的第一个请求都不等待（`_lastFinishedAt` 是 null），于是身份
+    // 确认那一发和开工探测那一发会**贴在一起**发出去。豆瓣看到的只有请求，它不
+    // 关心我们内部把它们算作几段活动。
+    //
+    // Pacer 每段仍然可以换（它带着退避层级，要跟 checkpoint 走），换的时候计时
+    // 与排队状态留在闸门里——见 `RequestGate.setPacer`。
+    this._gate = new RequestGate({ pacer: new Pacer(this._pacerOptions) });
   }
 
   /**
@@ -89,9 +101,8 @@ export class CrawlRunner {
    * @returns {Promise<{username: string, finalUrl: string}>}
    */
   async discoverUsername() {
-    const pacer = new Pacer(this._pacerOptions);
-    const gate = new RequestGate({ pacer });
-    const transport = new Transport({ gate, fetchImpl: this._fetchImpl });
+    // 走共享闸门：身份确认与随后的开工探测之间也要隔够间隔。
+    const transport = new Transport({ gate: this._gate, fetchImpl: this._fetchImpl });
 
     const res = await transport.fetch('https://www.douban.com/mine/');
 
@@ -151,8 +162,8 @@ export class CrawlRunner {
   }) {
     if (this._run) throw new Error('已有抓取在进行中');
 
-    const pacer = new Pacer(this._pacerOptions);
-    const gate = new RequestGate({ pacer });
+    const pacer = this._gate.setPacer(new Pacer(this._pacerOptions)).pacer;
+    const gate = this._gate;
     const transport = new Transport({ gate, fetchImpl: this._fetchImpl, getCk: this._getCk });
 
     // ── 开工前的身份确认。取不到数字 ID 就不能开始。
@@ -277,8 +288,8 @@ export class CrawlRunner {
     if (repair.repairs.length) this._emit({ type: 'repaired', repairs: repair.repairs });
 
     // 降速必须跟着恢复——不能因为崩了一次就回到原速。
-    const pacer = Pacer.restore(cp.rate_state, this._pacerOptions);
-    const gate = new RequestGate({ pacer });
+    const pacer = this._gate.setPacer(Pacer.restore(cp.rate_state, this._pacerOptions)).pacer;
+    const gate = this._gate;
     const transport = new Transport({ gate, fetchImpl: this._fetchImpl, getCk: this._getCk });
 
     const session = new SessionGuard();
