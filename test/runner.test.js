@@ -1312,6 +1312,49 @@ describe('单页路线也要能「走完」', () => {
     }
   });
 
+  test('抓完那一页就当场标成走完 —— 不用等收尾', async () => {
+    // 报上来的：整场抓取期间那 6 条一直显示「进行中」，而它们在第一秒就抓完了。
+    // 用户看到 6 行永远不动的「进行中」，合理地以为卡住了。
+    //
+    // 早先只在收尾时补这一刀（`_settleUnfinished`），抓取期间没人标。
+    const { runner } = harness(broadcastOnly([bcPage(20, 0), bcPage(20, 20), bcPage(0)]), {
+      batchSize: 3,
+    });
+    await runner.start({ username: 'example', mediums: ['movie'], includeCatalog: false });
+
+    // 只跑几批——**远没到收尾**
+    for (let i = 0; i < 3; i++) await runner.runBatch();
+
+    const s = runner.status();
+    for (const key of ['profile.overview', 'profile.category_entry.movie']) {
+      const r = s.routes.find((x) => x.routeKey === key);
+      assert.ok(r, `${key} 该在进度表里`);
+      assert.equal(r.captured, 1);
+      assert.equal(r.contiguous, true, `${key} 抓完了却还显示「进行中」`);
+    }
+  });
+
+  test('「单页」判据是 entryUrl + 没有 pagination —— 作品详情页不在其中', () => {
+    // 直接钉住这条分类规则本身。
+    //
+    // 作品详情页必须排除：它是**派生集合**，条目由列表页陆续入队，队列中途空掉
+    // 是正常的——那时标成走完了就是假的完整性声明。今天的优先级排序（列表 40、
+    // 详情页 90）让这一幕暂时撞不上，但那是**排序的副作用，不是这条规则的保证**，
+    // 排序一改就会撞上。所以判据本身要被钉死。
+    const defs = buildRoutes({ username: 'example', includeCatalog: true });
+    const single = defs.filter((d) => d.entryUrl && !d.pagination).map((d) => d.key).sort();
+
+    assert.deepEqual(single, [
+      'profile.category_entry.book', 'profile.category_entry.drama',
+      'profile.category_entry.game', 'profile.category_entry.movie',
+      'profile.category_entry.music', 'profile.overview',
+    ]);
+    assert.equal(single.includes('interest.item'), false, '派生集合不是单页路线');
+
+    const item = defs.find((d) => d.key === 'interest.item');
+    assert.equal(item.entryUrl, undefined, '作品详情页一旦有了 entryUrl，就会被误判成单页');
+  });
+
   test('它们的路线定义里不该再有 pagination', () => {
     // 那个字段是假的：`entryUrl` 不收 offset，写了也翻不了页。
     const defs = buildRoutes({ username: 'example', includeCatalog: true });

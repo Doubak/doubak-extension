@@ -211,7 +211,10 @@ export class CrawlLoop {
     const outstanding = this._frontier.hasOutstanding(state.routeKey);
 
     if (!route.pagination && !outstanding) {
-      // 不分页 + 没有剩活 + 没有缺口 = 真的抓全了
+      // 不分页 + 没有剩活 + 没有缺口 = 真的抓全了。
+      //
+      // 单页路线在抓完那一页时就已经标过了（见 `_fetchOne`）；这里兜住的是
+      // **派生集合**（作品详情页）——它要等队列真的空了才算走完。
       if (state.gaps.length === 0) state.markFinished();
       return;
     }
@@ -447,6 +450,27 @@ export class CrawlLoop {
       if (!route.pagination) this.stateFor(item.routeKey).recordLeafCapture();
       this._enqueueNextPage(item, route, profile, res, written.captureId, items);
       this._enqueueSubjects(item, res, written.captureId);
+
+      // **单页路线抓到那一页就是走完了，当场标掉。**
+      //
+      // 判据是「有 entryUrl 且没有 pagination」：
+      //
+      // | 路线 | entryUrl | pagination | 是什么 |
+      // |---|---|---|---|
+      // | 个人主页 / 5 个分类入口 | 有 | 无 | **单页**——一页就是全部 |
+      // | 广播 / 15 条标记列表 | 有 | 有 | 翻页，靠停滞检测或到达下界收尾 |
+      // | 作品详情页 | 无 | 无 | **派生集合**——条目由列表页陆续入队 |
+      //
+      // 作品详情页必须排除：它的队列会**中途空掉**（列表页还没抓完，暂时没有新条目
+      // 派生出来），那时标成走完了就是假的。
+      //
+      // 早先只在收尾时（`_settleUnfinished`）补这一刀，于是整场抓取期间那 6 条
+      // 一直显示「进行中」——而它们在第一秒就抓完了。用户看到的是 6 行永远不动的
+      // 「进行中」，合理地以为它们卡住了。
+      if (route.entryUrl && !route.pagination) {
+        const st = this.stateFor(item.routeKey);
+        if (st.gaps.length === 0) st.markFinished();
+      }
     }
 
     // ── 7. 这条路线跑到终点了？放开受它门控的条目。
