@@ -25,6 +25,7 @@ import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../
 import { captureTitle, captureSubtitle } from './capture-label.js';
 import { shouldLog, formatEntry, formatLogText } from '../crawl/event-log.js';
 import { routeName, contiguityLabel } from './route-names.js';
+import { chainRow, chainHeadline, holeText } from './chain-label.js';
 import { bundleDirName, bundleIdFromDirName } from '../core/ids.js';
 
 const $ = (id) => document.getElementById(id);
@@ -842,6 +843,16 @@ function renderFailures(failures) {
  * 读 OPFS 要经过 Worker，是异步的——所以必须先说「正在读取」。空白会被当成加载中，
  * 而空白其实意味着什么都不会发生。
  */
+/**
+ * 覆盖率页看的是哪个视角。
+ *
+ * 增量之后，**单份档案的「实抓」不再有完整性含义**——它可能只有 3 条新的。
+ * 完整性是整条**链**的属性，所以默认看合起来。
+ *
+ * @type {'chain' | 'one'}
+ */
+let coverageView = 'chain';
+
 async function loadCoverage() {
   const el = $('coverage');
   el.className = 'muted';
@@ -851,10 +862,22 @@ async function loadCoverage() {
   try {
     const cur = await loadBundleSummary();
     if (!cur) {
+      $('coverage-view').replaceChildren();
+      $('chain').replaceChildren();
       el.className = 'muted';
       el.textContent = '还没有档案。开始一次抓取之后这里会显示对账结果。';
       return;
     }
+
+    renderCoverageSwitch();
+
+    if (coverageView === 'chain') {
+      $('coverage').replaceChildren();
+      await renderChain();
+      return;
+    }
+
+    $('chain').replaceChildren();
     if (!cur.summary.hasManifest) {
       el.className = 'muted';
       el.textContent = '这次抓取还没收尾——覆盖率证据是收尾时才攒的，现在还没有。';
@@ -864,6 +887,80 @@ async function loadCoverage() {
   } catch (e) {
     el.className = 'card err';
     el.textContent = `读不出来：${e.message}`;
+  }
+}
+
+/** 「合起来 / 这一份」的切换。 */
+function renderCoverageSwitch() {
+  const el = $('coverage-view');
+  el.replaceChildren();
+  for (const [key, label, why] of /** @type {const} */ ([
+    ['chain', '合起来', '整条链覆盖到哪儿 —— 完整性是链的属性'],
+    ['one', '这一份', '这一次抓取自己做了什么'],
+  ])) {
+    const b = document.createElement('button');
+    b.className = 'act';
+    b.textContent = label;
+    b.title = why;
+    b.disabled = coverageView === key;
+    b.onclick = () => { coverageView = key; loadCoverage(); };
+    el.append(b);
+  }
+}
+
+/**
+ * 「合起来」：整条链覆盖到哪儿。
+ *
+ * **主角是连续区间，不是数字。** 刻意不算「合起来一共抓了多少」再跟豆瓣声称的比：
+ * 下界是闭区间、档案之间必然重叠，那个数只会误导；而这一页存在的全部理由就是
+ * 「计数不能证明完整性，连续性才能」。
+ */
+async function renderChain() {
+  const el = $('chain');
+  el.className = 'muted';
+  el.textContent = '正在读所有档案…';
+
+  const r = await send({ type: 'chain' });
+  if (!r?.ok) {
+    el.className = 'card err';
+    el.textContent = `读不出来：${r?.error ?? ''}`;
+    return;
+  }
+  const { routes, bundles, holes } = r.chain;
+  el.className = '';
+  el.replaceChildren();
+
+  if (!routes.length) {
+    el.className = 'muted';
+    el.textContent = '还没有收尾的档案。';
+    return;
+  }
+
+  const head = document.createElement('div');
+  head.className = 'card idle';
+  const hb = document.createElement('b');
+  hb.textContent = chainHeadline(bundles);
+  head.append(hb, document.createTextNode(bundles.map((b) => b.bundleId).join(' ← ')));
+  el.append(head);
+
+  el.append(table(
+    ['路线', '覆盖区间', '跨几份', '连续性'],
+    routes.map(chainRow).map((r) => [
+      r.name,
+      r.span ?? { text: r.spanNote, muted: true },
+      String(r.bundles),
+      r.verdict,
+    ]),
+  ));
+
+  // 链断了要**明说**，而且不能因此把在场的那几份说成无效。
+  for (const h of holes) {
+    const c = document.createElement('div');
+    c.className = 'card warn';
+    const b = document.createElement('b');
+    b.textContent = holeText(h);
+    c.append(b, document.createTextNode(h.detail));
+    el.append(c);
   }
 }
 

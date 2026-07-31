@@ -112,7 +112,14 @@
         豆瓣页面上的条目数量<b style="display:inline">不能</b>用来判断备份是否完整。
         豆瓣有多套内容屏蔽机制，它的计数有时统计于屏蔽之前、有时之后。
         下表的差值是<b style="display:inline">线索</b>，不是错误——完整性看「连续性」那一列。
+        <br>
+        <b style="display:inline">「合起来」是默认视角</b>：增量抓取之后，单份档案的
+        「实抓」可能只有几条新增的，那完全正常——完整性是整条<b style="display:inline">链</b>的属性。
       </div>
+      <!-- 两个视角。增量之后，**单份档案的实抓数不再有完整性含义**——它可能只有
+           3 条新的。完整性是整条链的属性。 -->
+      <div id="coverage-view" style="margin-bottom:12px"></div>
+      <div id="chain"></div>
       <div id="coverage"></div>
     </section>
 

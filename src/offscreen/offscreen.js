@@ -76,6 +76,7 @@ import { BundleReader } from '../bundle/bundle-reader.js';
 import { bundleIdFromDirName } from '../core/ids.js';
 import {
   chainEntryFromManifest, pickFloors, floorsFor, newestFirst, renamedBundles,
+  chainCoverage, findChainHoles,
 } from '../crawl/chain.js';
 
 // TODO(debug): 开发期日志。发布前连同所有调用一起删掉。
@@ -406,6 +407,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           // 真正的抓取由随后的 drive() 推进，那一步是有锁的。
           sendResponse({ ok: true, count: await getRunner().retryFailed({ routeKey: msg.routeKey }) });
           break;
+
+        case 'chain': {
+          // 覆盖率页「合起来」那个视角。只读档案、不发请求，所以不加锁。
+          const entries = await readChainEntries();
+          const cov = chainCoverage(entries);
+          sendResponse({
+            ok: true,
+            chain: {
+              bundles: newestFirst(entries).map((e) => ({
+                bundleId: e.bundleId,
+                completedAt: e.completedAt,
+                previousBundleId: e.previousBundleId,
+                username: e.accountUsername,
+              })),
+              routes: [...cov].map(([routeKey, v]) => ({ routeKey, ...v })),
+              holes: findChainHoles(entries),
+            },
+          });
+          break;
+        }
 
         case 'peekIncremental': {
           // 开抓**之前**看一眼有没有可用的基准，纯粹为了界面上那一行。

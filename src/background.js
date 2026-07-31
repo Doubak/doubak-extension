@@ -295,6 +295,13 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           break;
         }
 
+        case 'chain': {
+          // 覆盖率页「合起来」那个视角。offscreen 读档案，这里只转发。
+          const r2 = await withOffscreen({ op: 'chain' });
+          sendResponse({ ok: true, chain: r2.chain });
+          break;
+        }
+
         case 'preflight': {
           // 三项都可能是 null——那是「查不了」，不是「没问题」，界面照实显示。
           //

@@ -559,6 +559,15 @@ describe('面板脚本', () => {
     assert.match(js, /function scopeText/);
   });
 
+  test('覆盖率页有「合起来 / 这一份」两个视角，默认合起来', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /let coverageView = 'chain'/, '默认该是合起来');
+    assert.match(js, /renderChain\(/);
+    const html = await readRepoFile('src/ui/panel.html');
+    assert.match(html, /id="chain"/);
+    assert.match(html, /id="coverage-view"/);
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。
