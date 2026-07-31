@@ -88,8 +88,8 @@ describe('词表内容', () => {
     );
   });
 
-  test('两个抓取面', () => {
-    assert.deepEqual([...constants.SURFACES].sort(), ['api', 'html']);
+  test('三个抓取面 —— asset 是 bundle/1.1 加的', () => {
+    assert.deepEqual([...constants.SURFACES].sort(), ['api', 'asset', 'html']);
   });
 
   test('三种留存等级', () => {
@@ -100,8 +100,12 @@ describe('词表内容', () => {
     assert.deepEqual([...constants.ENUMERATIONS].sort(), ['bounded', 'full']);
   });
 
-  test('spec_version 是 bundle/1.0', () => {
-    assert.equal(constants.SPEC_VERSION, 'bundle/1.0');
+  test('写入的是大版本 1 线上的某一个小版本', () => {
+    // **不钉死具体的小版本号。** 钉死的话，规范每加一个可选字段都要来改这里，
+    // 而这条测试真正该守的是别的东西：版本号不能是 undefined（生成器读错字段
+    // 就会这样，见 tools/generate-spec-constants.mjs），也不能跳到大版本 2
+    // ——那意味着旧读者会误读，不是改个常量能了事的。
+    assert.match(constants.SPEC_VERSION, /^bundle\/1\.\d+$/);
   });
 
   test('12 个必填的 index 字段', () => {

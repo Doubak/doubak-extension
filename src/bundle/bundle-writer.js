@@ -29,6 +29,7 @@ import {
   newWarcRecordId,
   SequenceAllocator,
 } from '../core/ids.js';
+import { SPEC_VERSION } from '../core/spec-constants.js';
 import { buildWarcRecord, buildHttpResponseBlock } from '../core/warc.js';
 import { sha256Hex, sha1Base32 } from '../core/digest.js';
 import { nowRfc3339, toRfc3339 } from '../core/time.js';
@@ -297,7 +298,7 @@ export function renderReadme(bundleId) {
   return `doubak 备份档案 / doubak backup bundle
 ======================================
 
-规范版本 / Spec version: bundle/1.0
+规范版本 / Spec version: ${SPEC_VERSION}
 档案编号 / Bundle ID:    ${bundleId}
 
 这是什么

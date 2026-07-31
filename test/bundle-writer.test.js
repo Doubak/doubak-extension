@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { BundleWriter, renderReadme } from '../src/bundle/bundle-writer.js';
+import { SPEC_VERSION } from '../src/core/spec-constants.js';
 import { coverageEntry, crawlStateEntry } from '../src/bundle/manifest-builder.js';
 import { gunzip } from '../src/core/warc.js';
 import { parseCaptureId, indexFilename } from '../src/core/ids.js';
@@ -193,7 +194,7 @@ describe('finalize', () => {
     await writer.writeCapture(capture());
     const manifest = await writer.finalize();
 
-    assert.equal(manifest.spec_version, 'bundle/1.0');
+    assert.equal(manifest.spec_version, SPEC_VERSION);
     assert.equal(manifest.bundle_id, writer.bundleId);
     assert.equal(manifest.status, 'complete');
     assert.ok(await store.exists('manifest.json'));
@@ -289,8 +290,17 @@ describe('README.txt', () => {
   test('中英双语且自包含 —— 它是档案的一部分，不是文档', () => {
     assert.match(text, /这是什么/);
     assert.match(text, /What this is/);
-    assert.match(text, /bundle\/1\.0/);
     assert.match(text, /20260729T101500Z-a3f9c1/);
+  });
+
+  test('README 里的版本号必须与实际写入的一致', () => {
+    // 原来这里是手写的 "bundle/1.0"，而 manifest 写的是 SPEC_VERSION。规范一升
+    // 小版本，同一份档案里的两个版本号就对不上了——**而校验器会因此判整份档案
+    // 不合格**（规范要求 README 声明的版本与 manifest 一致）。
+    //
+    // 断言写成「等于 SPEC_VERSION」而不是「等于 bundle/1.1」：钉死数字的话，
+    // 这条测试下次照样会红，而红的原因依旧不是它想守的那件事。
+    assert.match(text, new RegExp(`Spec version: ${SPEC_VERSION.replace('/', '\\/')}\\b`));
   });
 
   test('告诉读者用什么工具打开', () => {

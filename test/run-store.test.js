@@ -7,6 +7,7 @@ import { kvStoreContract } from './helpers/kv-store-contract.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { Frontier, StallDetector } from '../src/crawl/frontier.js';
 import { Pacer } from '../src/crawl/pacing.js';
+import { SPEC_VERSION } from '../src/core/spec-constants.js';
 
 const BID = '20260729T101500Z-a3f9c1';
 const DIR = `doubak-bundle-${BID}`;
@@ -79,7 +80,7 @@ describe('指针与 checkpoint 分两处放', () => {
     const cp = await store.loadCheckpoint();
     assert.equal(cp.bundle_id, BID);
     assert.equal(cp.pause_reason, 'user_paused');
-    assert.equal(cp.spec_version, 'bundle/1.0', '按规范写入');
+    assert.equal(cp.spec_version, SPEC_VERSION, '按规范写入');
   });
 });
 
@@ -208,7 +209,7 @@ describe('checkpoint 只放推导不出来的东西', () => {
 
   test('带上规范版本与停止原因', async () => {
     const cp = buildCheckpoint(parts({ pauseReason: 'blocked' }));
-    assert.equal(cp.spec_version, 'bundle/1.0');
+    assert.equal(cp.spec_version, SPEC_VERSION);
     assert.equal(cp.pause_reason, 'blocked');
     assert.equal(cp.last_capture_id, `${BID}#000042`);
   });

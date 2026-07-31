@@ -78,7 +78,14 @@ export async function renderConstants(specsDir) {
 
   const defs = common.$defs;
 
-  const specVersion = defs.spec_version.const;
+  // **读的是 current_spec_version，不是 spec_version。** 两者是不同的问题：
+  // spec_version 说的是「读者必须接受什么」（任何 1.x，所以它是 pattern 不是 const），
+  // current_spec_version 说的是「新档案该写什么」。取错了会静默地得到 undefined，
+  // 然后写出一份没有版本号的档案——所以这里显式检查。
+  const specVersion = defs.current_spec_version?.const;
+  if (!specVersion) {
+    throw new Error('common.schema.json 里缺少 $defs.current_spec_version.const');
+  }
   const verdicts = defs.verdict.enum;
   const surfaces = defs.surface.enum;
   const fidelities = defs.capture_fidelity.enum;
