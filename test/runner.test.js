@@ -443,6 +443,70 @@ describe('暂停 → 继续', () => {
     assert.equal(pending[0].cursor?.value, 3, '留下的该是第 3 页');
   });
 
+  test('恢复之后门控要重开 —— 否则几千个作品详情页就这么没了', async () => {
+    // 报上来的日志：
+    //   04:55:08 capture interest.item …   ← 正在抓作品详情页
+    //   04:55:06 paused
+    //   （重新加载扩展，内存清零）
+    //   05:01:03 resumed
+    //   05:01:03 finished                   ← 立刻「跑完了」
+    //
+    // `Frontier._openGates` 每次新建都是空的，而门控只在抓取过程中被打开（前置
+    // 路线跑完那一刻）。恢复之后没人重开，于是所有还带着 `gatedBy` 的条目一律取
+    // 不出来——`hasReady()` 报 false，上层判定「跑完了」，然后收尾写下
+    // `status: complete`。
+    const listPage = `<html><head><title>我看过的影视(2)</title></head><body>${NAV}
+<div id="db-usr-profile"></div><h1>我看过的影视(2)</h1><div class="grid-view">
+<div class="item"><a href="https://movie.douban.com/subject/1001/">甲</a>
+<span class="date">2025-01-01</span></div>
+<div class="item"><a href="https://movie.douban.com/subject/1002/">乙</a>
+<span class="date">2024-01-01</span></div>
+</div></body></html>`;
+    const subjectPage = `<html><body>${NAV}<div id="mainpic"></div><div id="info"></div></body></html>`;
+
+    const { runner, runStore } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('statuses')) {
+        // 第 1 页有内容（这样才有水位线），之后空页 → 停滞终止 → 门控打开
+        const p = Number(/[?&]p=(\d+)/.exec(url)?.[1] ?? 1);
+        return p === 1 ? bcPage(20, 0) : bcPage(0);
+      }
+      if (url.includes('/subject/')) return subjectPage;
+      return listPage;
+    }, { batchSize: 2 });
+
+    await runner.start({ username: 'example', mediums: ['movie'], includeCatalog: true });
+
+    // 跑到「只剩被门控挡着的作品详情页」——那正是用户按下暂停时的样子
+    let ready = false;
+    for (let i = 0; i < 40 && !ready; i++) {
+      const pend = runner._run.frontier.snapshot().filter((it) => it.state === 'pending');
+      if (pend.length > 0 && pend.every((it) => it.routeKey === 'interest.item')) {
+        ready = true;
+        break;
+      }
+      if ((await runner.runBatch()).done) break;
+    }
+    assert.ok(ready, '得先跑到「只剩作品详情页」，这条测试才有意义');
+    assert.equal(runner._run.frontier.isGateOpen('broadcast.timeline'), true, '门这时该是开的');
+
+    // 模拟「重新加载扩展」：内存清零，只剩磁盘上的 checkpoint
+    const cp = await runStore.loadCheckpoint();
+    assert.ok(cp.frontier.some((f) => f.gated_by), 'checkpoint 里应当有带门控的条目');
+    runner._run = null;
+    await runner.resume(cp);
+
+    assert.equal(
+      runner._run.frontier.isGateOpen('broadcast.timeline'), true,
+      '恢复之后门没重开——所有作品详情页就此取不出来',
+    );
+    // 真正的判据是**抓到了东西**。`done` 在这里会是 true——夹具只有两个作品详情页，
+    // 一批（batchSize 2）就抓完了，那是对的。坏掉时的样子是 `captured: 0` 外加
+    // 立刻 done：一页没抓就宣布跑完。
+    const b = await runner.runBatch();
+    assert.ok(b.captured > 0, `恢复之后一页都没抓就宣布跑完了：${JSON.stringify(b)}`);
+  });
+
   test('本来就在跑的时候继续 → 报 alreadyRunning，不重开一场', async () => {
     const { runner } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), { batchSize: 50 });
     await runner.start({ username: 'example', mediums: [], includeCatalog: false });

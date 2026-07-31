@@ -114,6 +114,25 @@ export class CrawlLoop {
     // 有历史计数就说明这条线之前抓过，那它本来就该在表上。
     for (const routeKey of Object.keys(this._priorCounts)) this.stateFor(routeKey);
     for (const routeKey of Object.keys(this._savedStates)) this.stateFor(routeKey);
+
+    // **门控也要重开。**
+    //
+    // `Frontier._openGates` 是每次新建都空的一个 Set，而门控**只在抓取过程中**
+    // 被打开（前置路线跑完那一刻）。恢复之后没人重开它，于是所有 `gatedBy` 还在的
+    // 条目一律取不出来——`hasReady()` 报 false，上层判定「跑完了」，然后**收尾并写
+    // 下 `status: complete`**。
+    //
+    // 真实日志：
+    //   04:55:08 capture interest.item …          ← 正在抓作品详情页
+    //   04:55:06 paused
+    //   （重新加载扩展，内存清零）
+    //   05:01:03 resumed
+    //   05:01:03 finished                          ← 几千个详情页就这么没了
+    //
+    // 不另存一份「哪些门开着」，而是**从恢复出来的路线状态重新推导**：门开不开的
+    // 判据本来就是「前置路线 canAdvance」，而那个状态现在跟着 checkpoint 走了。
+    // 多存一份就多一处会与真相分叉的地方。
+    for (const routeKey of this._states.keys()) this._maybeOpenGate(routeKey);
     /**
      * 跳过抓取顺序的门控。**只给调试用**。
      *
