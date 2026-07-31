@@ -77,6 +77,7 @@ import { bundleIdFromDirName, bundleDirName } from '../core/ids.js';
 import {
   chainEntryFromManifest, pickFloors, floorsFor, newestFirst, renamedBundles,
   chainCoverage, findChainHoles, diffAgainstChain, splitChains, bundlesWithKnownSubjects,
+  chainOf,
 } from '../crawl/chain.js';
 
 // TODO(debug): 开发期日志。发布前连同所有调用一起删掉。
@@ -542,10 +543,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           }
           const cur = slices.find((s) => s.bundleId === msg.bundleId);
           if (!cur) {
-            sendResponse({ ok: true, diff: { repeated: [], versions: [] } });
+            sendResponse({ ok: true, diff: { repeated: [], versionCount: 0 } });
             break;
           }
-          const d = diffAgainstChain(cur, slices);
+
+          // **只跟同一条链上的比。**
+          //
+          // 「新增 / 已抓取多次」问的是「这一份相对上一份多了什么」——那是**增量**
+          // 的语义，只在链内成立。拿它跟不相干的全量档案比，会把每一张列表页都
+          // 标成「已抓取多次」（那些 URL 每次全量都会抓），技术上没说错，但毫无
+          // 意义：几次独立的全量本来就是各自完整的快照，不是彼此的增量。
+          //
+          // 于是一份**基准档案**（没有上游）看到的应当是：什么都不标。
+          //
+          // 注意这与「这一页我是不是已经有了」正好相反，那个按账号跨链算——
+          // 两个问题，两种范围。
+          const entries = await readChainEntries();
+          const chainIds = new Set(chainOf(entries, msg.bundleId).map((e) => e.bundleId));
+          const d = diffAgainstChain(cur, slices.filter((s) => chainIds.has(s.bundleId)));
           sendResponse({
             ok: true,
             // **只回个数。** 早先回的是截断到 200 条的清单，而界面拿那个清单的长度

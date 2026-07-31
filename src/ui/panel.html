@@ -120,10 +120,10 @@
       <div class="hint">
         豆瓣页面上的条目数量<b style="display:inline">不能</b>用来判断备份是否完整。
         豆瓣有多套内容屏蔽机制，它的计数有时统计于屏蔽之前、有时之后。
-        下表的差值是<b style="display:inline">线索</b>，不是错误——完整性看「连续性」那一列。
+        下表的差值是<b style="display:inline">线索</b>而非错误，完整性请看「连续性」一列。
         <br>
-        <b style="display:inline">「合起来」是默认视角</b>：增量抓取之后，单份档案的
-        「实抓」可能只有几条新增的，那完全正常——完整性是整条<b style="display:inline">链</b>的属性。
+        <b style="display:inline">默认视角为「合起来」</b>：启用增量抓取后，单份档案的
+        「实抓」可能仅有若干新增条目，这属于正常现象——完整性是整条<b style="display:inline">链</b>的属性。
       </div>
       <!-- 两个视角。增量之后，**单份档案的实抓数不再有完整性含义**——它可能只有
            3 条新的。完整性是整条链的属性。 -->
@@ -135,9 +135,9 @@
     <section id="tab-archive" hidden>
       <div class="hint">
         这里读的是档案本身：顺着索引把每条记录从段文件里取出来解压。
-        这条路径就是规范承诺第三方能走的那条——不信任何声明，直接看字节。
-        <b style="display:inline">档案没导出之前不算你的</b>：它挂在扩展的存储里，
-        卸载扩展或清站点数据都会把它一次性抹掉，而且不会问你。
+        这正是规范承诺第三方可以走的那条路径：不依赖任何声明，直接核对字节。
+        <b style="display:inline">导出之前，档案并不真正属于你</b>——它存放在扩展的存储中，
+        卸载扩展或清除站点数据都会将其一并抹除，且不会另行提示。
       </div>
       <div id="bundle-pick" style="margin-bottom:12px"></div>
       <div id="archive-summary"></div>
@@ -166,9 +166,9 @@
 
     <section id="tab-debug" hidden>
       <div class="hint">
-        开发期工具。<b style="display:inline">演练</b>不发任何网络请求——它用固定夹具喂进真实的
-        分类器、队列、写入器，用来验证那些不能靠真跑来验证的路径（被风控拦截、验证码、
-        掉登录）。触发它们的唯一办法是真的去撞，而那正是要不惜代价避免的事。
+        开发期工具。<b style="display:inline">演练</b>不发出任何网络请求：它以固定夹具驱动真实的
+        分类器、队列与写入器，用于验证那些无法靠实际抓取来验证的路径（被风控拦截、要求验证、
+        登录失效）。触发这些路径的唯一途径是真的去撞，而那正是需要不惜代价避免的。
       </div>
 
       <h2>演练（零网络请求）</h2>
@@ -178,7 +178,7 @@
       <h2>小范围试跑（会真的访问豆瓣）</h2>
       <div class="hint">
         <b style="display:inline">自然终止</b>与<b style="display:inline">人为截断</b>是两回事：
-        走到终点（到达下界、或翻完最后一页）才算干净完成，水位线才会推进；
+        走到终点（到达下界，或翻完最后一页）才算完整完成，水位线才会推进；
         被条数上限截断的抓取不算完成，产出的是不完整的档案。
       </div>
       <div id="scoped"></div>
@@ -194,9 +194,9 @@
          小范围试跑）。把一件日常操作放在那里，等于训练用户往那儿去找东西。 -->
     <section id="tab-storage" hidden>
       <div class="hint">
-        删除是<b style="display:inline">不可逆</b>的，而且没有回收站。
-        <b style="display:inline">没导出过的档案，浏览器里这一份就是唯一的副本</b>——
-        卸载扩展或清站点数据都会把它抹掉。
+        删除<b style="display:inline">不可逆</b>，且没有回收站。
+        <b style="display:inline">未导出过的档案，浏览器中的这一份即是唯一副本</b>——
+        卸载扩展或清除站点数据都会将其抹除。
       </div>
       <div id="storage"></div>
       <div id="storage-actions"></div>
@@ -205,8 +205,10 @@
 
     <section id="tab-log" hidden>
       <div class="hint">
-        存在本机（IndexedDB），最多保留 1000 条事件 + 200 条抓取记录，重开也还在。**只记重试、停机、错误这类事件**——
-        每一次成功的捕获已经逐条写在档案的 index.ndjson 里了，抄一遍只会把稀少的信号淹掉。
+        存在本机（IndexedDB），最多保留 1000 条事件与 200 条抓取记录，重新打开后仍在。
+        事件与抓取记录<b style="display:inline">分开限额</b>：一次全量抓取有数千页，
+        混在一起会把重试、停机、错误这类稀少而要紧的信号挤掉。
+        完整的抓取记录在档案的 index.ndjson 中，那才是权威版本。
         不会发送到任何地方；<b style="display:inline">里面有 URL 与用户名，贴出去之前请自行脱敏</b>。
       </div>
       <div id="log-actions"></div>

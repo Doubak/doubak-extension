@@ -568,7 +568,7 @@ describe('面板脚本', () => {
     assert.match(html, /id="coverage-view"/);
   });
 
-  test('档案页标出增量、新增/又抓了一次、版本历史', async () => {
+  test('档案页标出增量、新增 / 已抓取多次、版本历史', async () => {
     const html = await readRepoFile('src/ui/panel.html');
     assert.match(html, /id="archive-chain"/);
     assert.match(html, /id="versions"/);
@@ -577,7 +577,7 @@ describe('面板脚本', () => {
     // 只读 index，不解压 —— 这两个问题的答案全在 index 里
     assert.match(js, /chainDiff/);
     assert.match(js, /function renderVersions/);
-    assert.match(js, /又抓了一次/);
+    assert.match(js, /已抓取多次/);
     // 增量档案的「捕获条数」看起来小得离谱，要说清那是正常的
     assert.match(js, /previousBundleId/);
   });
@@ -601,8 +601,8 @@ describe('面板脚本', () => {
     // **不可逆的是这次抓取，不是数据** —— 说反了用户要么不敢按，要么按了才发现丢东西
     const fn = js.slice(js.indexOf('async function abortCrawl'));
     const body = fn.slice(0, fn.indexOf('\n}\n'));
-    assert.match(body, /都会留下|留下.*可以照常查看/, '要说清数据留着');
-    assert.match(body, /不能再继续/, '要说清这次抓取到此为止');
+    assert.match(body, /全部保留|均予保留|都会留下/, '要说清数据留着');
+    assert.match(body, /无法继续|不能再继续/, '要说清这次抓取到此为止');
     assert.match(body, /增量/, '要说清重开不会从头来');
   });
 
@@ -690,6 +690,33 @@ describe('面板脚本', () => {
     assert.match(js, /\['export-result', 'verify-result', 'archive-incremental'\]/);
     // 每次渲染前也清掉（同一份档案刷新两次不该出现两张）
     assert.match(js, /incEl\.replaceChildren\(\)/);
+  });
+
+  test('界面上不许出现 Markdown 记号 —— 那不会被渲染，只会原样显示', async () => {
+    // 真实现象：卡片上出现「同一个网址的多次捕获**不是重复数据，是版本**」，
+    // 星号原封不动地印在屏幕上。这里的文字是 `textContent`，不是 Markdown。
+    // 要强调就用 <b>。
+    const html = await readRepoFile('src/ui/panel.html');
+    const visible = html.replace(/<!--[\s\S]*?-->/g, '').replace(/<script[\s\S]*?<\/script>/g, '');
+    assert.equal(visible.includes('**'), false, 'panel.html 的可见文字里有 Markdown 星号');
+
+    // JS 里那些会进 textContent / createTextNode / confirm 的中文串
+    const js = await readRepoFile('src/ui/panel.js');
+    const bad = [];
+    for (const line of js.split('\n')) {
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue; // 注释里随便写
+      for (const m of line.matchAll(/'([^']*\*\*[^']*)'/g)) {
+        if (/[\u4e00-\u9fa5]/.test(m[1])) bad.push(m[1].slice(0, 40));
+      }
+    }
+    assert.deepEqual(bad, [], '这些字符串会原样显示星号');
+  });
+
+  test('术语统一：说「已抓取多次」，不说「又抓了一次」', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    const code = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    assert.equal(code.includes('又抓了一次'), false);
+    assert.ok(code.includes('已抓取多次'));
   });
 
   test('抓取中要写出正在抓的那个 URL', async () => {

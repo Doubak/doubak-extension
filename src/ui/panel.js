@@ -195,9 +195,9 @@ $('tabs').addEventListener('click', (e) => {
 // ── 概览 ────────────────────────────────────────────────────
 
 const PAUSE_COPY = {
-  challenge: ['warn', '豆瓣要求验证', '请在新标签页里完成验证，完成后回来点继续。插件和你共用登录状态。', '我验证好了，继续'],
-  blocked: ['warn', '豆瓣暂时限制了访问', '已经停下来了，不会自动重试——继续请求可能导致账号被限制。建议等待 30 分钟以上。', '现在试试'],
-  session_expired: ['warn', '登录状态已失效', '这不是错误，抓取已安全停下，进度都在。请重新登录豆瓣后继续。', '我登录好了，继续'],
+  challenge: ['warn', '豆瓣要求验证', '请在新标签页中完成验证，完成后返回并点击「继续」。插件与浏览器共用登录状态。', '我验证好了，继续'],
+  blocked: ['warn', '豆瓣暂时限制了访问', '抓取已停止，且不会自动重试：继续请求可能导致账号受限。建议等待 30 分钟以上再继续。', '现在试试'],
+  session_expired: ['warn', '登录状态已失效', '这不是错误，抓取已安全停止，进度均已保留。请重新登录豆瓣后继续。', '我登录好了，继续'],
   // 这两条原来一个按钮都不给，于是界面成了死路：用户按提示做完了该做的事
   // （切回账号 / 清出空间），却没有任何地方能告诉豆备「我弄好了」——只能重装扩展。
   //
@@ -206,8 +206,8 @@ const PAUSE_COPY = {
   account_switched: [
     'err',
     '账号变了',
-    '一个档案只能属于一个账号。请切回原来的账号再继续，或者另开一次抓取。'
-      + '（如果你根本没换过账号，那多半是豆备认错了——日志里那一行会写明是抓哪一页时判断的。）',
+    '一个档案只能归属于一个账号。请切换回原账号后继续，或另行发起一次抓取。'
+      + '（若你并未切换过账号，则多半是豆备判断有误：日志中该条记录会写明是在抓取哪一页时作出的判断。）',
     '我切回来了，继续',
   ],
   quota: [
@@ -219,33 +219,33 @@ const PAUSE_COPY = {
   host_permission_lost: [
     'err',
     '豆备没有访问豆瓣的权限了',
-    '这不是错误，抓取已安全停下，进度都在。请在浏览器的扩展设置里把站点访问权限改回「在所有网站上」。',
+    '这不是错误，抓取已安全停止，进度均已保留。请在浏览器的扩展设置中将站点访问权限改回「在所有网站上」。',
     '我改好了，继续',
   ],
   failures_pending: [
     'warn',
     '有几个页面抓不下来',
-    '其余部分都抓完了。下面列出是哪几页——可以重试，也可以确认「就这样收尾」。',
+    '其余部分均已抓取完成。以下列出未能抓取的页面：可以重试，也可以确认按现状收尾。',
     null, // 动作在下面的失败清单里，不用这里的通用按钮
   ],
   write_failed: [
     'err',
     '写入档案时出错',
-    '已经停下来了，以免损坏已有数据。继续之前会先自动修复段文件尾部。',
+    '抓取已停止，以免损坏既有数据。继续之前会先自动修复段文件尾部。',
     '我知道了，继续',
   ],
   finalize_failed: [
     'err',
     '收尾失败',
-    '抓到的每一页都已经落盘，档案里的数据是完整的——坏的只是最后写 manifest 那一步。'
-      + '请到「日志」标签复制日志反馈；升级插件之后再点一次「继续」通常就能收尾。',
+    '已抓取的每一页均已落盘，档案中的数据是完整的，仅最后写入 manifest 的步骤失败。'
+      + '请在「日志」标签页复制日志以便反馈；升级插件后再次点击「继续」通常即可完成收尾。',
     '再试一次收尾',
   ],
   driver_stalled: [
     'err',
     '抓取空转了',
-    '连着几批什么都没推进，已经停下来了——这是插件自己的问题，不是豆瓣拦了你。'
-      + '已抓到的都在档案里，没有损坏。请到「日志」标签复制日志反馈。',
+    '连续多批未取得任何进展，抓取已停止。这是插件自身的问题，并非豆瓣的限制。'
+      + '已抓取的内容均在档案中且未受损坏。请在「日志」标签页复制日志以便反馈。',
     '再试一次',
   ],
   user_paused: ['idle', '已暂停', '进度都在，随时可以继续。', '继续'],
@@ -437,7 +437,7 @@ async function refresh() {
   // 它也活不过面板刷新——换个标签页回来就什么都看不到了。
   //
   // 现在这个状态由**做事的那一端**报出来（全局互斥锁的持有者），界面只是读它。
-  setState('idle', '没有进行中的抓取', '请求全部来自你自己的浏览器和 IP。cookie 不会发送到任何地方。');
+  setState('idle', '没有进行中的抓取', '所有请求均来自你本机的浏览器与 IP，cookie 不会发送至任何第三方。');
   // **不清空进度表。** 抓完之后立刻变回「还没有开始」，等于把刚跑完那一次的结果扔了
   // ——而那正是用户此刻最想看的东西。改成显示上一份档案的 crawl_state：那是
   // **权威记录**（写在 manifest 里），比内存里的快照更可信。
@@ -731,14 +731,14 @@ async function abortCrawl(bundleId) {
   const done = r.counts?.done ?? 0;
 
   const lines = [
-    '中止这次抓取？',
+    `中止抓取（档案 ${bundleId}）？`,
     '',
-    `档案 ${bundleId} 已经抓到的 ${done} 项都会留下，可以照常查看、导出。`,
+    `已抓取的 ${done} 项将全部保留，可正常查看与导出。`,
     '',
-    '但**这次抓取不能再继续了**——之后要接着抓只能重新开始一次',
-    '（下次会是增量，只抓新增的部分，不会从头来）。',
+    '但本次抓取将无法继续——如需接着抓，只能重新发起一次。',
+    '（下一次为增量抓取，仅抓取新增部分，不会从头开始。）',
     '',
-    '中止之后这份档案就可以删除了。',
+    '中止后，该档案即可删除。',
   ];
   if (!confirm(lines.join('\n'))) return;
 
@@ -768,13 +768,13 @@ function renderCrawlMode() {
   el.replaceChildren();
 
   const opts = /** @type {const} */ ([
-    ['incremental', '增量（推荐）',
-      '接着上次抓：列表只抓新增的部分，作品详情页只抓这次新出现的。最快。'],
-    ['full', '全量重抓',
-      '当作从来没抓过。上一次有缺口、或者你不信任它的时候用——会重新打一份基准。'],
-    ['refresh-subjects', '增量 + 重抓作品详情页',
-      '列表照旧只抓新增的，但**每个作品详情页都重抓一遍**：评分、短评这些会变的东西'
-      + '想拿到新版本时用。那条路线占档案九成体积，会慢很多。'],
+    ['incremental', '增量抓取（推荐）',
+      '接续上次的进度：列表仅抓取新增部分，作品详情页仅抓取本次新出现的条目。耗时最短。'],
+    ['full', '全量抓取',
+      '视同从未抓取过，将重新建立一份基准档案。适用于上次抓取存在缺口或结果不可信的情形。'],
+    ['refresh-subjects', '增量抓取，并重新抓取全部作品详情页',
+      '列表仍仅抓取新增部分，但会重新抓取每一个作品详情页，用于获取评分、短评等'
+      + '可变内容的最新版本。该路线占档案约九成体积，耗时显著增加。'],
   ]);
 
   for (const [key, label, why] of opts) {
@@ -809,16 +809,16 @@ function renderCrawlMode() {
  */
 function scopeText(inc) {
   if (crawlMode === 'full') {
-    return '全量（你选的）—— 当作从来没抓过，会重新打一份基准';
+    return '全量抓取（已选择）：视同从未抓取过，将重新建立一份基准档案';
   }
   const n = inc?.routes?.length ?? 0;
   const subjects = crawlMode === 'refresh-subjects'
-    ? '作品详情页**全部重抓**（你选的）'
-    : '作品详情页只抓这次新出现的';
+    ? '作品详情页将全部重新抓取（已选择）'
+    : '作品详情页仅抓取本次新出现的条目';
   if (n === 0) {
-    return `全量（从最新一直抓到最早）—— 还没有可以接着抓的档案，或者上一次没跑完。${subjects}`;
+    return `全量抓取（自最新一直抓取至最早）：尚无可供接续的档案，或上次抓取未完成。${subjects}`;
   }
-  return `增量：${n} 条路线可以接着上次抓（只抓新增的部分）；其余的仍然从头走。${subjects}`;
+  return `增量抓取：${n} 条路线可接续上次的进度（仅抓取新增部分），其余路线仍从最新开始。${subjects}`;
 }
 
 /**
@@ -1104,10 +1104,10 @@ async function renderChain() {
     const c = document.createElement('div');
     c.className = 'card idle';
     const b = document.createElement('b');
-    b.textContent = `另外还有 ${others.length} 组档案，不在这条链上`;
+    b.textContent = `另有 ${others.length} 组档案不属于此链`;
     c.append(b, document.createTextNode(
-      `${others.map((o) => o.head).join('、')} —— 它们是各自独立的抓取（没有接在别人后面），`
-      + '所以不能合起来算连续。增量做出来之前的每一次抓取都是这样。',
+      `${others.map((o) => o.head).join('、')}。它们均为独立抓取（未接续任何既有档案），`
+      + '因此不能合并计算连续性。启用增量抓取之前的每一次抓取都属于此类。',
     ));
     el.append(c);
   }
@@ -1416,8 +1416,8 @@ async function openBundle(bundleId) {
       const b = document.createElement('b');
       b.textContent = '这是一次增量抓取';
       c.append(b, document.createTextNode(
-        `接在档案 ${s.previousBundleId} 后面 —— 只抓了上次之后新增的部分。`
-        + '所以「捕获条数」比全量那次小是正常的；完整性要看覆盖率页的「合起来」。',
+        `接续档案 ${s.previousBundleId}，仅抓取了上次之后新增的部分。`
+        + '因此「捕获条数」少于全量抓取属于正常现象；完整性请查看覆盖率页的「合起来」视图。',
       ));
       incEl.append(c);
     }
@@ -1431,9 +1431,9 @@ async function openBundle(bundleId) {
       const b = document.createElement('b');
       b.textContent = '这次抓取还没收尾';
       note.append(b, document.createTextNode(
-        'manifest.json 是收尾时写的，所以账号、体积、覆盖率证据现在还没有——' +
-        '这不表示档案坏了。已经抓到的每一页都已落盘，现在导出也导得出来，' +
-        '只是校验只能核对字节数（没有摘要可对）。抓完之后重看这一页就完整了。',
+        'manifest.json 于收尾时写入，因此账号、体积、覆盖率证据目前尚不可见。'
+        + '这并不表示档案损坏：已抓取的每一页均已落盘，此时导出亦可正常进行，'
+        + '只是校验只能核对字节数（尚无摘要可比对）。抓取完成后重新查看本页即可看到完整信息。',
       ));
       summaryEl.append(note);
     }
@@ -1476,10 +1476,10 @@ async function loadChainDiff() {
     c.className = 'card idle';
     const b = document.createElement('b');
     const fresh = entries.length - repeated.size;
-    b.textContent = `这一份里 ${fresh} 条是新增的，${repeated.size} 条是又抓了一次`;
+    b.textContent = `本次新增 ${fresh} 条，已抓取多次 ${repeated.size} 条`;
     c.append(b, document.createTextNode(
-      '「又抓了一次」是正常的：增量的下界按闭区间比较（宁可重复，不可遗漏），'
-      + '所以边界那一段会重叠。同一个网址的多次捕获**不是重复数据，是版本**。',
+      '重复抓取属于预期行为：增量抓取的下界采用闭区间比较（宁可重复，不可遗漏），'
+      + '因此边界处会有重叠。同一网址的多次捕获记录的是不同时刻的版本，并非冗余数据。',
     ));
     el.append(c);
     // 就地给列表补标
@@ -1495,7 +1495,7 @@ function markRepeated(repeated) {
     if (!repeated.has(e.url_key)) continue;
     const row = $('captures').children[i];
     const tag = row?.querySelector?.('span');
-    if (tag && !tag.textContent.includes('又抓')) tag.textContent += '　·　又抓了一次';
+    if (tag && !tag.textContent.includes('已抓取多次')) tag.textContent += '　·　已抓取多次';
   }
 }
 
@@ -1519,8 +1519,8 @@ function renderVersions(count) {
   const b = document.createElement('b');
   b.textContent = `${count} 个网址在链上有多个版本`;
   card.append(b, document.createTextNode(
-    '同一个网址在不同时间抓到的内容可能不一样——评分变了、短评改了、条目被删了。'
-    + '这些版本都留着，那正是备份的意义。',
+    '同一网址在不同时间抓取到的内容可能不同：评分变动、短评修改、条目被删除。'
+    + '各个版本均予保留。',
   ));
   el.append(card);
 }
@@ -1557,9 +1557,8 @@ function renderVanished() {
     : `有 ${bad.length} 条不是正常抓到的`;
   card.append(b, document.createTextNode(
     goneCount
-      ? '豆瓣已经删除了这些条目，网上再也查不到——而档案里存着它们当时的样子。'
-        + '这正是备份的意义所在。'
-      : '这些页面没有正常抓到，原样存在档案里，可以打开看看到底是什么。',
+      ? '豆瓣已删除这些条目，公开渠道已无法查到；档案中保留了它们当时的内容。'
+      : '这些页面未能正常抓取，其原始响应已存入档案，可打开查看具体内容。',
   ));
   el.append(card);
 
