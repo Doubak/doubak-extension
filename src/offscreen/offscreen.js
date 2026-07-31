@@ -201,6 +201,7 @@ async function incrementalOptions(account, mode = 'incremental') {
     }
 
     const newest = newestFirst(entries)[0];
+    const known = await knownSubjects(newest ? chainOf(entries, newest.bundleId) : []);
     debugLog('增量：', [...picks].map(([k, v]) => `${k}←${v.fromBundleId}`).join(' '));
     return {
       floors: floorsFor(picks),
@@ -211,9 +212,11 @@ async function incrementalOptions(account, mode = 'incremental') {
       //
       // 用户选了「重抓作品详情页」时**不传**——那时他要的正是新版本（评分、短评
       // 会变），跳过就完全达不到目的。
-      knownSubjectUrlKeys: mode === 'refresh-subjects'
-        ? []
-        : await knownSubjects(newest ? chainOf(entries, newest.bundleId) : []),
+      // 选了「重抓作品详情页」时不跳过已有的，**并且**把它们直接排进队——
+      // 只做前者的话，能重抓的只有最新几页列表上派生出来的那十几个，而选项
+      // 承诺的是全部。
+      knownSubjectUrlKeys: mode === 'refresh-subjects' ? [] : known,
+      refreshSubjectUrls: mode === 'refresh-subjects' ? known : null,
     };
   } catch (e) {
     // 读不出来就全量。少抓不可接受，多抓只是慢。

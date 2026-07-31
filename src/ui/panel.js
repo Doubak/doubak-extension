@@ -23,7 +23,9 @@ import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { exportBundle, directorySink } from '../bundle/exporter.js';
 import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../storage/storage-usage.js';
 import { captureTitle, captureSubtitle, subjectLabel } from './capture-label.js';
-import { shouldLog, formatEntry, formatLogText } from '../crawl/event-log.js';
+import {
+  shouldLog, formatEntry, formatLogText, MAX_ENTRIES, MAX_FETCH_ENTRIES,
+} from '../crawl/event-log.js';
 import { routeName, contiguityLabel } from './route-names.js';
 import { chainRow, chainHeadline, holeText } from './chain-label.js';
 import { bundleDirName, bundleIdFromDirName } from '../core/ids.js';
@@ -76,6 +78,16 @@ function eventNote(e) {
   }
   if (e.type === 'incremental_failed') {
     return '没能读出上次的进度，这次按全量抓。已经有的会再抓一遍，但不会漏。';
+  }
+  if (e.type === 'no_watermark') {
+    return e.message ?? '这条线抓完了却没有水位线，下次仍然只能全量重走。';
+  }
+  if (e.type === 'subjects_skipped') {
+    return `跳过了 ${e.count} 个已经抓过的作品详情页。想重新抓一遍的话，`
+      + '开抓前选「增量 + 重抓作品详情页」。';
+  }
+  if (e.type === 'subjects_refresh') {
+    return `把 ${e.count} 个作品详情页排进了队，会重新抓一遍。`;
   }
   return null;
 }
@@ -1778,7 +1790,7 @@ function renderLog() {
 
   if (logRows.length === 0) {
     el.className = 'muted';
-    el.textContent = '还没有事件。这里记抓过的 URL（最近 200 条）以及重试、停机、错误这类事件（最近 500 条）——完整的抓取记录在档案的 index.ndjson 里。';
+    el.textContent = '还没有事件。这里记抓过的 URL（最近 200 条）以及重试、停机、错误这类事件（最近 1000 条）——完整的抓取记录在档案的 index.ndjson 里。';
   } else {
     for (const r of logRows) {
       const d = document.createElement('div');
@@ -1843,7 +1855,7 @@ chrome.runtime.onMessage?.addListener((msg) => {
   // 用户即时看到，不必等下一次读取。
   if (!shouldLog(msg.event)) return;
   logRows.unshift(formatEntry(msg.event, new Date().toISOString()));
-  if (logRows.length > 500) logRows.pop();
+  if (logRows.length > MAX_ENTRIES + MAX_FETCH_ENTRIES) logRows.pop();
   const tab = $('tabs').querySelector('button[data-tab="log"]');
   if (tab?.getAttribute('aria-selected') === 'true') renderLog();
 });

@@ -103,6 +103,8 @@ export class RouteState {
     this.priorCount = priorCount;
     /** 本次会话抽到过多少个条目 ID（含重复）。见 `observePage` 与 `markFinished`。 */
     this._idsSeenThisSession = 0;
+    /** @type {string | null} 第一个「抽得到条目、抽不到时间」的页面 */
+    this._timeExtractionFailedAt = null;
 
     /** @type {Array<{reason: string, detail?: string}>} */
     this.gaps = [];
@@ -227,6 +229,26 @@ export class RouteState {
     if (!this.progressTime || mid.epochMs < this.progressTime.epochMs) {
       this.progressTime = { iso: mid.iso, raw: mid.raw, epochMs: mid.epochMs };
     }
+  }
+
+  /**
+   * 这一页抽到了条目、却一条时间都没抽到。
+   *
+   * **不记成缺口**：数据没缺，缺的是「这条线能不能增量」这个能力。记成缺口会让
+   * `contiguous` 变成 false，而那是在说「这段区间可能不完整」——不实。
+   *
+   * 只记一次：一条线上每一页都会这样，重复报没有意义。
+   *
+   * @param {string} url
+   */
+  noteTimeExtractionFailed(url) {
+    if (this._timeExtractionFailedAt) return;
+    this._timeExtractionFailedAt = url;
+  }
+
+  /** 有没有出现过「抽得到条目、抽不到时间」。 */
+  get timeExtractionFailed() {
+    return this._timeExtractionFailedAt ?? null;
   }
 
   /** 记一处缺口。有缺口就不许推进水位线。 */

@@ -762,8 +762,12 @@ describe('面板脚本', () => {
     const html = await readRepoFile('src/ui/panel.html');
     const hint = html.slice(html.indexOf('id="tab-log"'), html.indexOf('id="log"'));
     assert.match(hint, /IndexedDB|存在本机/, '说清存在哪');
-    assert.match(hint, /500/, '说清有上限');
     assert.match(hint, /脱敏/, '说清里面有 URL 与用户名');
+
+    // **上限要与代码里的常量一致**，写死数字会跟着改一半——这条测试就是为此存在的。
+    const { MAX_ENTRIES, MAX_FETCH_ENTRIES } = await import('../src/crawl/event-log.js');
+    assert.ok(hint.includes(String(MAX_ENTRIES)), `说明里没提事件上限 ${MAX_ENTRIES}`);
+    assert.ok(hint.includes(String(MAX_FETCH_ENTRIES)), `说明里没提抓取记录上限 ${MAX_FETCH_ENTRIES}`);
   });
 
   test('覆盖率只有一条渲染路径 —— 不再是档案页的副作用', async () => {

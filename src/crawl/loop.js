@@ -207,6 +207,7 @@ export class CrawlLoop {
   flushRouteEvidence(completedAt = nowRfc3339()) {
     for (const state of this._states.values()) {
       this._settleUnfinished(state);
+      this._noteMissingWatermark(state);
       this._writer.addCoverage(state.toCoverage());
       this._writer.addCrawlState(state.toCrawlState(this._writer.bundleId, completedAt));
     }
@@ -229,6 +230,32 @@ export class CrawlLoop {
    *
    * @param {import('./route-state.js').RouteState} state
    */
+  /**
+   * 收尾时看一眼：有没有哪条线**跑完了却没有水位线**。
+   *
+   * 那不是缺口（没有东西缺失），而是**能力上的退化**：`advanced` 永远是 false，
+   * 这条线下次还是全量。界面上完全看不出来——连续性那一列照样是「✔ 已验证」。
+   *
+   * 只对**本该有时间**的路线报（判定描述里有 `timeAnchor` 的）。作品详情页、
+   * 个人主页压根没有时间概念，那是设计如此，不是坏了。
+   *
+   * @param {import('./route-state.js').RouteState} state
+   */
+  _noteMissingWatermark(state) {
+    const profile = profileForRoute(state.routeKey);
+    if (!profile?.timeAnchor) return; // 本来就没有时间概念
+    if (state.highWater) return;
+    if (state.stall.uniqueCount === 0) return; // 一条都没抓到，那是另一回事
+
+    this._emit({
+      type: 'no_watermark',
+      routeKey: state.routeKey,
+      count: state.stall.uniqueCount,
+      message: `这条线抓到了 ${state.stall.uniqueCount} 条，但一个时间都没解析出来——`
+        + '于是水位线为空，下次抓取仍然只能全量重走。多半是豆瓣改了列表页上日期的写法。',
+    });
+  }
+
   _settleUnfinished(state) {
     if (state.contiguous || state._finished || state._stopped) return;
 
@@ -372,6 +399,18 @@ export class CrawlLoop {
     const items = profile
       ? { ids: extractItemIds(res.bodyText, profile), times: extractItemTimes(res.bodyText, profile) }
       : { ids: [], times: [] };
+
+    // **抽得到条目、却一条时间都抽不到 —— 这是「抽取器坏了」的第二种样子。**
+    //
+    // 第一种（一个 ID 都抽不到）已经有自检了。这一种更隐蔽：翻页照常、连续性照常
+    // ✔ 已验证、界面上什么都不异常——只有「已回溯到」是空的。而后果是
+    // `high_water_time` 永远 null、`advanced` 永远 false，**这条线永远不能增量**。
+    //
+    // 书就是这么坏了很久的：列表页的日期后面跟着「读过」两个字，而模式要求日期
+    // 紧接着 `<`，于是三条书的路线一条时间都抽不到。没有任何地方报过。
+    if (profile?.timeAnchor && items.ids.length > 0 && items.times.length === 0) {
+      this.stateFor(item.routeKey).noteTimeExtractionFailed(item.url);
+    }
 
     // 写失败必须让**整场**抓取停下，不是只标这条路线失败然后继续。
     //

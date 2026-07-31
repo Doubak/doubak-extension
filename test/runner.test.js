@@ -1568,6 +1568,47 @@ describe('增量：下界真的省下了重抓', () => {
     assert.ok(seen.some((u) => u.includes('/1002/')), '新出现的必须抓');
   });
 
+  test('「重抓作品详情页」要把已知的直接排进队 —— 不能指望从列表页派生', async () => {
+    // 作品详情页由列表页上的链接派生，而**增量模式下列表页只抓到下界为止**。
+    // 只是「不跳过已有的」的话，能重抓的只有最新那几页上的十几个，而这个选项
+    // 承诺的是全部。说到做不到比没有这个选项更糟。
+    const seen = [];
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('statuses')) return bcPage(0);
+      if (url.includes('/subject/')) { seen.push(url); return `<html><body>${NAV}<div id="mainpic"></div><div id="info"></div></body></html>`; }
+      // 列表页这次一条新的都没有（增量的常态）
+      return `<html><head><title>我看过的影视(0)</title></head><body>${NAV}
+<div id="db-usr-profile"></div><h1>我看过的影视(0)</h1><div class="grid-view"></div></body></html>`;
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: ['movie'], includeCatalog: true, bypassGates: true,
+      refreshSubjectUrls: [
+        'https://movie.douban.com/subject/1001/',
+        'https://movie.douban.com/subject/1002/',
+      ],
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.ok(seen.some((u) => u.includes('/1001/')), '列表页派生不出来的那些也要抓');
+    assert.ok(seen.some((u) => u.includes('/1002/')));
+  });
+
+  test('重抓的作品详情页仍然受门控 —— 不能拿最不可替代的换最可替代的', async () => {
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      return bcPage(0);
+    }, { batchSize: 1 });
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: true,
+      refreshSubjectUrls: ['https://movie.douban.com/subject/1001/'],
+    });
+    const it = runner._run.frontier.snapshot().find((x) => x.routeKey === 'interest.item');
+    assert.ok(it, '该排进队了');
+    assert.equal(it.gatedBy, 'broadcast.timeline', '还是要等广播抓完');
+  });
+
   test('不传就照旧全抓 —— 「重抓作品详情页」那个选项靠的就是这个', async () => {
     const seen = [];
     const listPage = `<html><head><title>我看过的影视(1)</title></head><body>${NAV}
@@ -1665,5 +1706,90 @@ describe('增量：下界真的省下了重抓', () => {
 
     assert.ok(seen.length >= 3, '挑下界失败之后没有退回全量');
     assert.ok(events.some((e) => e.type === 'incremental_failed'), '失败要说出来，不能静默');
+  });
+});
+
+describe('静默退化要被报出来 —— 书就是这么坏了很久的', () => {
+  /**
+   * 「抽得到条目、抽不到时间」是最隐蔽的一类坏法：翻页照常、连续性照常
+   * ✔ 已验证、界面上什么都不异常——只有「已回溯到」是空的。而后果是
+   * `high_water_time` 永远 null、`advanced` 永远 false，**这条线永远不能增量**。
+   *
+   * 书的列表页日期后面跟着「读过」两个字，而模式要求日期紧接着 `<`，于是三条书的
+   * 路线一条时间都抽不到。坏了很久，没有任何地方报过。
+   */
+
+  /** 有条目链接、但**一个日期都没有**的列表页。 */
+  const noDates = (nav) => `<html><head><title>我看过的影视(2)</title></head><body>${nav}
+<div id="db-usr-profile"></div><h1>我看过的影视(2)</h1><div class="grid-view">
+<div class="item"><a href="https://movie.douban.com/subject/1001/">甲</a></div>
+<div class="item"><a href="https://movie.douban.com/subject/1002/">乙</a></div>
+</div></body></html>`;
+
+  function crawlWithoutDates() {
+    return harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('statuses')) return bcPage(0);
+      if (url.includes('/subject/')) return `<html><body>${NAV}<div id="mainpic"></div><div id="info"></div></body></html>`;
+      return noDates(NAV);
+    }, { batchSize: 50 });
+  }
+
+  test('抓到条目却一个时间都没有 → RouteState 记下来', async () => {
+    const { runner } = crawlWithoutDates();
+    await runner.start({ username: 'example', mediums: ['movie'], includeCatalog: false });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    const st = runner._run.loop.routeStates.get('interest.movie.collect');
+    assert.ok(st, '该有这条路线的状态');
+    assert.ok(st.timeExtractionFailed, '抽不到时间这件事没被记下来');
+  });
+
+  test('收尾时报 no_watermark —— 说清「下次仍然只能全量重走」', async () => {
+    const { runner, events } = crawlWithoutDates();
+    await runner.start({ username: 'example', mediums: ['movie'], includeCatalog: false });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+    await runner.finish('aborted');
+
+    const e = events.find((x) => x.type === 'no_watermark' && x.routeKey === 'interest.movie.collect');
+    assert.ok(e, `没有报出来。收到的事件类型：${[...new Set(events.map((x) => x.type))]}`);
+    assert.match(e.message, /全量/, '要说清后果');
+  });
+
+  test('本来就没有时间概念的路线**不报** —— 那是设计如此，不是坏了', async () => {
+    const { runner, events } = crawlWithoutDates();
+    await runner.start({ username: 'example', mediums: ['movie'], includeCatalog: false });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+    await runner.finish('aborted');
+
+    for (const key of ['profile.overview', 'profile.category_entry.movie']) {
+      assert.equal(
+        events.some((x) => x.type === 'no_watermark' && x.routeKey === key), false,
+        `${key} 压根没有时间概念，不该报`,
+      );
+    }
+  });
+
+  test('时间抽得到就不报', async () => {
+    const withDates = (nav) => `<html><head><title>我看过的影视(2)</title></head><body>${nav}
+<div id="db-usr-profile"></div><h1>我看过的影视(2)</h1><div class="grid-view">
+<div class="item"><a href="https://movie.douban.com/subject/1001/">甲</a>
+<span class="date">2025-01-01</span></div>
+</div></body></html>`;
+    const { runner, events } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('statuses')) return bcPage(0);
+      if (url.includes('/subject/')) return `<html><body>${NAV}<div id="mainpic"></div><div id="info"></div></body></html>`;
+      return withDates(NAV);
+    }, { batchSize: 50 });
+
+    await runner.start({ username: 'example', mediums: ['movie'], includeCatalog: false });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+    await runner.finish('aborted');
+
+    assert.equal(
+      events.some((x) => x.type === 'no_watermark' && x.routeKey === 'interest.movie.collect'),
+      false,
+    );
   });
 });

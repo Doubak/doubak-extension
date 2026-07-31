@@ -1,6 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { RouteState } from '../src/crawl/route-state.js';
 
 import { CrawlLoop } from '../src/crawl/loop.js';
 import { Frontier } from '../src/crawl/frontier.js';
@@ -509,5 +510,38 @@ describe('停机事件要说清是哪一页触发的', () => {
     for (const e of emits) {
       assert.match(e, /url:/, `这处停机事件没带 URL：${e}`);
     }
+  });
+});
+
+describe('抽得到条目、抽不到时间 —— 静默退化的第二种样子', () => {
+  /**
+   * 第一种（一个 ID 都抽不到）早就有自检了。这一种更隐蔽：翻页照常、连续性照常
+   * ✔ 已验证、界面上什么都不异常——只有「已回溯到」是空的。而后果是
+   * `high_water_time` 永远 null、`advanced` 永远 false，**这条线永远不能增量**。
+   *
+   * 书就是这么坏了很久的：列表页的日期后面跟着「读过」两个字，而模式要求日期紧接
+   * 着 `<`，于是三条书的路线一条时间都抽不到。**没有任何地方报过。**
+   */
+
+  test('RouteState 记下第一处，且只记一处', () => {
+    const s = new RouteState({ routeKey: 'r', intent: 'i', enumeration: 'full' });
+    assert.equal(s.timeExtractionFailed, null);
+    s.noteTimeExtractionFailed('https://x/1');
+    s.noteTimeExtractionFailed('https://x/2');
+    assert.equal(s.timeExtractionFailed, 'https://x/1', '每页都这样，重复报没有意义');
+  });
+
+  test('**不记成缺口** —— 数据没缺，缺的是「能不能增量」这个能力', () => {
+    // 记成缺口会让 contiguous 变 false，而那是在说「这段区间可能不完整」——不实。
+    const s = new RouteState({ routeKey: 'r', intent: 'i', enumeration: 'full' });
+    s.noteTimeExtractionFailed('https://x/1');
+    assert.deepEqual(s.gaps, []);
+  });
+
+  test('收尾时要报出来：抓完了却没有水位线', () => {
+    const src = readFileSync(new URL('../src/crawl/loop.js', import.meta.url), 'utf-8');
+    assert.match(src, /type: 'no_watermark'/);
+    // 只对**本该有时间**的路线报——作品详情页、个人主页压根没有时间概念
+    assert.match(src, /profile\?\.timeAnchor/);
   });
 });

@@ -150,6 +150,9 @@ export class CrawlRunner {
    * @param {string[]} [opts.mediums]
    * @param {boolean} [opts.includeCatalog]
    * @param {Map<string, string | null>} [opts.floors]  上次的水位线
+   * @param {string[]} [opts.refreshSubjectUrls]  要重抓的作品详情页 URL。
+   *   **不能只靠「不跳过已有的」**：作品详情页由列表页派生，而增量模式下列表页
+   *   只抓到下界为止，能派生出来的只有最新那几页上的作品。
    * @param {string[]} [opts.knownSubjectUrlKeys]  链上已经抓过的作品详情页。传了就
    *   不再抓一遍——那条路线占档案九成体积，而「增量」对它不成立（没有时间序）。
    *   **只能传作品详情页的 key**：列表页的 URL 每次都一样，喂进去会让这次一页都抓不成。
@@ -170,7 +173,7 @@ export class CrawlRunner {
   async start({
     username, mediums, includeCatalog = true, floors, floorSources, previousBundleId = null,
     onlyRoutes = null, maxCaptures = null, bypassGates = false, resolveFloors = null,
-    knownSubjectUrlKeys = null,
+    knownSubjectUrlKeys = null, refreshSubjectUrls = null,
   }) {
     if (this._run) throw new Error('已有抓取在进行中');
 
@@ -206,6 +209,7 @@ export class CrawlRunner {
         floorSources = inc.floorSources;
         previousBundleId = inc.previousBundleId ?? previousBundleId;
         knownSubjectUrlKeys = knownSubjectUrlKeys ?? inc.knownSubjectUrlKeys;
+        refreshSubjectUrls = refreshSubjectUrls ?? inc.refreshSubjectUrls;
       } catch (err) {
         // 挑不出来就全量。**少抓不可接受，多抓只是慢。**
         this._emit({ type: 'incremental_failed', message: String(err?.message ?? err) });
@@ -265,6 +269,32 @@ export class CrawlRunner {
       this._emit({ type: 'subjects_skipped', count: knownSubjectUrlKeys.length });
     }
     seedFrontier(frontier, routeDefs);
+
+    // 「重抓作品详情页」：**必须把已知的那些直接排进队**，不能指望从列表页派生。
+    //
+    // 作品详情页是由列表页上的链接派生出来的，而增量模式下列表页只抓到下界为止
+    // ——于是能派生出来的只有最新那几页上的作品。如果只是「不跳过已有的」，这个
+    // 选项实际只会重抓十几个，而它承诺的是全部。那种**说到做不到**比没有这个
+    // 选项更糟。
+    //
+    // 门控照旧：作品详情页仍然要等广播抓完（不能拿最不可替代的换最可替代的）。
+    if (refreshSubjectUrls?.length) {
+      const target = routes.get('interest.item');
+      let queued = 0;
+      for (const url of refreshSubjectUrls) {
+        const ok = frontier.enqueue({
+          url,
+          urlKey: urlKey(url),
+          routeKey: 'interest.item',
+          intent: target?.intent ?? 'interest.item',
+          ordered: false,
+          priority: target?.priority ?? 90,
+          gatedBy: bypassGates ? null : (target?.requires?.[0] ?? null),
+        });
+        if (ok) queued += 1;
+      }
+      this._emit({ type: 'subjects_refresh', count: queued });
+    }
 
     const loop = new CrawlLoop({
       frontier, transport, writer, session, pacer, routes,
