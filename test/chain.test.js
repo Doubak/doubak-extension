@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import {
   chainEntryFromManifest, newestFirst, pickFloors, floorsFor, findChainHoles, chainCoverage,
   sameAccount, renamedBundles, diffAgainstChain, chainOf, splitChains, routeChainCoverage,
+  bundlesWithKnownSubjects,
 } from '../src/crawl/chain.js';
 
 const ME = '82160871';
@@ -528,5 +529,49 @@ describe('一堆档案不等于一条链', () => {
       bundle('B', [route('r')], { prev: 'A' }),
     ], 'A');
     assert.equal(chain.length, 2);
+  });
+});
+
+describe('「这一页我是不是已经有了」按账号问，不按链问', () => {
+  /**
+   * 报上来的现象：只加了一本想读的书，增量抓取却在抓游戏详情页。
+   *
+   * 成因是把两个问题混了：
+   *
+   * | 问题 | 用什么回答 |
+   * |---|---|
+   * | 从今天往回一直到 X 有没有断 | 链 |
+   * | 这一页我是不是已经有了 | **这个账号名下的全部档案** |
+   *
+   * 作品详情页没有时间序，链对它毫无意义。按链算的话，`previous_bundle_id` 为
+   * null 的档案各自成链，「最新那条链」常常只有一份——那一份要是刚跑了一小段的
+   * 增量，此前几千个详情页就全都不认识了。
+   */
+  const me = { accountUserId: ME, accountUsername: MY_NAME };
+
+  test('不在同一条链上的档案照样算数', () => {
+    const big = bundle('BIG', [], { at: '2026-07-31T05:00:00Z' });        // 独立全量，几千个详情页
+    const small = bundle('SMALL', [], { at: '2026-07-31T12:00:00Z' });    // 独立的小增量
+    // 两份各自成链
+    assert.equal(splitChains([big, small]).length, 2);
+    // 但「已经抓过的详情页」两份都算
+    assert.deepEqual(
+      bundlesWithKnownSubjects([big, small], me).map((e) => e.bundleId).sort(),
+      ['BIG', 'SMALL'],
+    );
+  });
+
+  test('别人的档案不算', () => {
+    const mine = bundle('MINE', []);
+    const theirs = bundle('THEIRS', [], { account: '99999999', username: '别人' });
+    assert.deepEqual(
+      bundlesWithKnownSubjects([mine, theirs], me).map((e) => e.bundleId),
+      ['MINE'],
+    );
+  });
+
+  test('改过名的也不算 —— 那时 URL 里的用户名对不上', () => {
+    const renamed = bundle('OLD', [], { username: '旧名字' });
+    assert.deepEqual(bundlesWithKnownSubjects([renamed], me), []);
   });
 });

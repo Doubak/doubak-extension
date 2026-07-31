@@ -467,3 +467,29 @@ export function diffAgainstChain(current, others) {
 
   return { repeated, versions };
 }
+
+/**
+ * 哪些档案里的作品详情页算「已经抓过」。
+ *
+ * ## 按账号取，**不按链取**
+ *
+ * 这两个问题不是一回事，而混起来的代价很贵：
+ *
+ * | 问题 | 用什么回答 |
+ * |---|---|
+ * | 「从今天往回一直到 X 有没有断」 | **链**（`previous_bundle_id` 串起来的那条） |
+ * | 「这一页我是不是已经有了」 | **这个账号名下的全部档案** |
+ *
+ * 作品详情页没有时间序（规范 §5.5.5），链对它毫无意义。而按链算的后果在真实使用
+ * 里立刻就出来了：`previous_bundle_id` 为 null 的档案各自成链，于是「最新那条链」
+ * 常常只有一份档案——如果那一份恰好是刚跑了一小段的增量（只抓到十几个详情页），
+ * **此前几千个就全都不认识了**，下一次增量把它们重抓一遍。用户看到的是
+ * 「我只加了一本想读的书，它却在抓游戏」。
+ *
+ * @param {ChainEntry[]} entries  全部档案
+ * @param {{accountUserId?: string | null, accountUsername?: string | null}} me
+ * @returns {ChainEntry[]}
+ */
+export function bundlesWithKnownSubjects(entries, me) {
+  return entries.filter((e) => sameAccount(e, me));
+}

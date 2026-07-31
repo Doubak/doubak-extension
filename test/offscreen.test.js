@@ -326,6 +326,15 @@ describe('增量：offscreen 这一侧的接线', () => {
     assert.match(src, /mode === 'refresh-subjects'\s*\n?\s*\?\s*\[\]/);
   });
 
+  test('已抓过的作品详情页**按账号取，不按链取**', async () => {
+    // 按链取的话，`previous_bundle_id` 为 null 的档案各自成链，「最新那条链」常常
+    // 只有一份——那一份要是刚跑了一小段的增量，此前几千个详情页就全都不认识了。
+    // 真实现象：只加了一本想读的书，增量却在抓游戏详情页。
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    assert.match(src, /knownSubjects\(bundlesWithKnownSubjects\(entries, me\)\)/);
+    assert.equal(src.includes('knownSubjects(newest ? chainOf('), false, '别再按链取');
+  });
+
   test('已抓过的作品详情页只按 interest.item 认', async () => {
     // 把列表页也算进「已经抓过」会让这次一页都抓不成：列表页的 URL 每次都一样。
     const src = await readRepoFile('src/offscreen/offscreen.js');

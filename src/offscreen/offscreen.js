@@ -76,7 +76,7 @@ import { BundleReader } from '../bundle/bundle-reader.js';
 import { bundleIdFromDirName, bundleDirName } from '../core/ids.js';
 import {
   chainEntryFromManifest, pickFloors, floorsFor, newestFirst, renamedBundles,
-  chainCoverage, findChainHoles, diffAgainstChain, splitChains, chainOf,
+  chainCoverage, findChainHoles, diffAgainstChain, splitChains, bundlesWithKnownSubjects,
 } from '../crawl/chain.js';
 
 // TODO(debug): 开发期日志。发布前连同所有调用一起删掉。
@@ -120,20 +120,36 @@ function getOpfsWorker() {
  * @returns {Promise<{floors?: Map<string, string>, floorSources?: Map<string, string>, previousBundleId?: string | null}>}
  */
 /**
- * 链上已经抓成功的作品详情页 url_key。
+ * **这个账号名下所有档案里**已经抓成功的作品详情页 url_key。
+ *
+ * ## 为什么是「所有档案」，不是「这条链」
+ *
+ * 第一版按链算，那是错的，而且错得很贵：链回答的是**时间连续性**——「从今天往回
+ * 一直到 X 没有断」。而作品详情页没有时间序（规范 §5.5.5），链对它毫无意义。
+ *
+ * 这里要回答的是另一个问题：**这一页我是不是已经有了**。有就不必再抓。那与它是
+ * 哪一次抓的、属不属于同一条链，一点关系都没有。
+ *
+ * 按链算的后果在真实使用里立刻就出来了：`previous_bundle_id` 为 null 的档案各自
+ * 成链，于是「最新那条链」常常只有一份档案——如果那一份恰好是刚跑了一小段的增量
+ * （比如只抓到 18 个详情页），那么**此前几千个详情页全都不认识了**，下一次增量把
+ * 它们重抓一遍。用户看到的是「我只加了一本想读的书，它却在抓游戏」。
+ *
+ * ## 两个限制条件
  *
  * **只取 `interest.item`**：列表页的 URL 每次都一样（`collect?start=0`），把它们
- *也算进「已经抓过」会让这次一页都抓不成。
+ * 也算进「已经抓过」会让这次一页都抓不成。
  *
- * 只取 `verdict: ok`：被拦下、判不出来的那些本来就该重抓。
+ * **只取 `verdict: ok`**：被拦下、判不出来、`gone` 的那些本来就该重抓——尤其
+ * `gone`，条目可能又回来了。
  *
- * @param {import('../crawl/chain.js').ChainEntry[]} chain
+ * @param {import('../crawl/chain.js').ChainEntry[]} entries  同一个账号的全部档案
  * @returns {Promise<string[]>}
  */
-async function knownSubjects(chain) {
+async function knownSubjects(entries) {
   /** @type {Set<string>} */
   const out = new Set();
-  for (const e of chain) {
+  for (const e of entries) {
     try {
       const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(e.bundleId) });
       const reader = new BundleReader({ store, bundleId: e.bundleId });
@@ -201,7 +217,9 @@ async function incrementalOptions(account, mode = 'incremental') {
     }
 
     const newest = newestFirst(entries)[0];
-    const known = await knownSubjects(newest ? chainOf(entries, newest.bundleId) : []);
+    // **按账号取，不按链取。** 「这一页我是不是已经有了」与它属于哪条链无关，
+    // 见 `knownSubjects` 上的说明。
+    const known = await knownSubjects(bundlesWithKnownSubjects(entries, me));
     debugLog('增量：', [...picks].map(([k, v]) => `${k}←${v.fromBundleId}`).join(' '));
     return {
       floors: floorsFor(picks),
