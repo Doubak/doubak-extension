@@ -22,7 +22,7 @@ import { SCENARIOS } from '../crawl/dry-run.js';
 import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { exportBundle, directorySink } from '../bundle/exporter.js';
 import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../storage/storage-usage.js';
-import { captureTitle, captureSubtitle } from './capture-label.js';
+import { captureTitle, captureSubtitle, subjectLabel } from './capture-label.js';
 import { shouldLog, formatEntry, formatLogText } from '../crawl/event-log.js';
 import { routeName, contiguityLabel } from './route-names.js';
 import { chainRow, chainHeadline, holeText } from './chain-label.js';
@@ -1236,7 +1236,21 @@ async function openBundle(bundleId) {
     // 进行中的档案要主动解释一句。**「还没收尾」不是「坏了」**——它没有
     // manifest，所以校验只能验字节数、覆盖率证据也还没攒。不说清楚的话，用户看到
     // 一堆空字段会以为几小时的抓取白费了。
-    if (!s.hasManifest) {
+    // **全量还是增量**，说在摘要里。增量档案的「捕获条数」看起来会小得离谱
+  // （只有新增的那些），不说清的话像是抓漏了。
+  if (s.previousBundleId) {
+    const c = document.createElement('div');
+    c.className = 'card idle';
+    const b = document.createElement('b');
+    b.textContent = '这是一次增量抓取';
+    c.append(b, document.createTextNode(
+      `接在档案 ${s.previousBundleId} 后面 —— 只抓了上次之后新增的部分。`
+      + '所以「捕获条数」比全量那次小是正常的；完整性要看覆盖率页的「合起来」。',
+    ));
+    summaryEl.after(c);
+  }
+
+  if (!s.hasManifest) {
       const note = document.createElement('div');
       note.className = 'card idle';
       const b = document.createElement('b');
@@ -1258,6 +1272,100 @@ async function openBundle(bundleId) {
     // 读不出摘要不代表导不出去——字节还在，照样该让用户把它搬走。
     setArchiveButtons(true);
   }
+}
+
+/**
+ * 这一份在链上的位置、哪些是新增的、以及跨链的版本历史。
+ *
+ * 增量档案里混着两种东西：这次新出现的条目，和边界上被重抓的那几条（下界比较是
+ * 闭区间，宁可重复不可遗漏）。捕获列表里它们长得一模一样，而用户想知道的恰恰是
+ * 「这次到底新得到了什么」。
+ *
+ * **只读 index，不解压任何记录**——这两个问题的答案全在 index 里。
+ */
+async function loadChainDiff() {
+  const el = $('archive-chain');
+  const vEl = $('versions');
+  el.replaceChildren();
+  vEl.replaceChildren();
+  if (!currentBundleId) return;
+
+  const r = await send({ type: 'chainDiff', bundleId: currentBundleId });
+  if (!r?.ok || !r.diff) return;
+  // 用户可能在这期间切了档案
+  if (!currentBundleId) return;
+
+  const repeated = new Set(r.diff.repeated ?? []);
+  if (repeated.size) {
+    const c = document.createElement('div');
+    c.className = 'card idle';
+    const b = document.createElement('b');
+    const fresh = entries.length - repeated.size;
+    b.textContent = `这一份里 ${fresh} 条是新增的，${repeated.size} 条是又抓了一次`;
+    c.append(b, document.createTextNode(
+      '「又抓了一次」是正常的：增量的下界按闭区间比较（宁可重复，不可遗漏），'
+      + '所以边界那一段会重叠。同一个网址的多次捕获**不是重复数据，是版本**。',
+    ));
+    el.append(c);
+    // 就地给列表补标
+    markRepeated(repeated);
+  }
+
+  renderVersions(r.diff.versions ?? [], r.diff.truncated);
+}
+
+/** 给捕获列表里「又抓了一次」的那些行补一个标记。 */
+function markRepeated(repeated) {
+  for (const [i, e] of entries.slice(0, 500).entries()) {
+    if (!repeated.has(e.url_key)) continue;
+    const row = $('captures').children[i];
+    const tag = row?.querySelector?.('span');
+    if (tag && !tag.textContent.includes('又抓')) tag.textContent += '　·　又抓了一次';
+  }
+}
+
+/**
+ * 版本历史：同一个网址在链上被抓到过几次。
+ *
+ * **这不是重复数据，是版本**——评分变了、短评改了、条目被删了。这正是「有意保留
+ * 不同版本」的兑现处，也是 canonical 的 revision 模型的原料。
+ */
+function renderVersions(versions, truncated) {
+  const el = $('versions');
+  if (!versions.length) return;
+
+  const head = document.createElement('div');
+  head.className = 'card idle';
+  const b = document.createElement('b');
+  b.textContent = `${versions.length} 个网址在链上有多个版本${truncated ? '（只列前 200 个）' : ''}`;
+  head.append(b, document.createTextNode(
+    '同一个网址在不同时间抓到的内容可能不一样——评分变了、短评改了、条目被删了。'
+    + '这些版本都留着，那正是备份的意义。',
+  ));
+  el.append(head);
+
+  const list = document.createElement('div');
+  list.className = 'caps';
+  for (const v of versions.slice(0, 50)) {
+    const row = document.createElement('div');
+    row.className = 'cap';
+    const left = document.createElement('span');
+    left.textContent = subjectLabel(v.urlKey) ?? v.urlKey;
+    const right = document.createElement('span');
+    right.className = 'v';
+    right.textContent = `${v.versions.length} 个版本`;
+    row.append(left, right);
+
+    const when = document.createElement('div');
+    when.className = 'muted';
+    when.style.fontSize = '12px';
+    when.textContent = v.versions
+      .map((x) => String(x.observedAt ?? '').slice(0, 10))
+      .join(' · ');
+    row.append(when);
+    list.append(row);
+  }
+  el.append(list);
 }
 
 /**
@@ -1346,6 +1454,8 @@ function renderCaptures() {
   // 「已经没有了」的那几条单独列一块。**捕获列表只渲染前 500 行**，而真实档案有
   // 3347 条——那 8 条 gone 排在后面，在列表里根本画不出来。
   renderVanished();
+  // 链上的差异（新增 / 又抓了一次）与版本历史。异步，拿到之后就地补标。
+  void loadChainDiff();
 
   const el = $('captures');
   el.replaceChildren();

@@ -283,3 +283,77 @@ export function chainCoverage(entries) {
 
   return out;
 }
+
+/**
+ * 一份档案的索引里我们关心的东西。
+ *
+ * @typedef {object} IndexSlice
+ * @property {string} bundleId
+ * @property {string | null} completedAt
+ * @property {Array<{url_key: string, capture_id: string, observed_at: string, verdict: string}>} entries
+ */
+
+/**
+ * 跟链上更早的档案比一比：哪些是**新增**的，哪些是**又抓了一次**。
+ *
+ * ## 为什么这件事值得做
+ *
+ * 增量档案里混着两种东西：这次新出现的条目，和边界上被重抓的那几条（下界比较是
+ * 闭区间，宁可重复不可遗漏）。捕获列表里它们长得一模一样，而用户想知道的恰恰是
+ * 「这次到底新得到了什么」。
+ *
+ * ## 版本历史
+ *
+ * 同一个 URL 在不同时间被抓到多次，**那不是重复数据，是版本**——评分变了、短评
+ * 改了、条目被删了。这正是「有意保留不同版本」的兑现处，也是 canonical 的 revision
+ * 模型的原料。
+ *
+ * 只返回**有多个版本**的那些：一个版本的条目占绝大多数，全都返回等于把整份索引
+ * 再传一遍。
+ *
+ * @param {IndexSlice} current
+ * @param {IndexSlice[]} others  链上的其它档案（新旧都可以，这里自己按时间排）
+ */
+export function diffAgainstChain(current, others) {
+  const older = others.filter((o) => o.bundleId !== current.bundleId);
+
+  /** @type {Set<string>} 出现在**更早**档案里的 url_key */
+  const seenBefore = new Set();
+  const curKey = current.completedAt ?? current.bundleId;
+  for (const o of older) {
+    const k = o.completedAt ?? o.bundleId;
+    if (k >= curKey) continue; // 比当前这份新，不算「更早」
+    for (const e of o.entries) seenBefore.add(e.url_key);
+  }
+
+  const repeated = [...new Set(
+    current.entries.filter((e) => seenBefore.has(e.url_key)).map((e) => e.url_key),
+  )];
+
+  // 版本历史：跨整条链按 url_key 聚，只留有多个版本的。
+  /** @type {Map<string, Array<{bundleId: string, captureId: string, observedAt: string}>>} */
+  const byKey = new Map();
+  for (const slice of [current, ...older]) {
+    for (const e of slice.entries) {
+      const list = byKey.get(e.url_key) ?? [];
+      list.push({
+        bundleId: slice.bundleId,
+        captureId: e.capture_id,
+        observedAt: e.observed_at,
+      });
+      byKey.set(e.url_key, list);
+    }
+  }
+
+  /** @type {Array<{urlKey: string, versions: Array<object>}>} */
+  const versions = [];
+  for (const [urlKey, list] of byKey) {
+    if (list.length < 2) continue;
+    // 从新到旧：用户先想看最近那一版
+    list.sort((a, b) => (a.observedAt < b.observedAt ? 1 : a.observedAt > b.observedAt ? -1 : 0));
+    versions.push({ urlKey, versions: list });
+  }
+  versions.sort((a, b) => b.versions.length - a.versions.length);
+
+  return { repeated, versions };
+}

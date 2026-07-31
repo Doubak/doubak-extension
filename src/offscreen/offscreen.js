@@ -76,7 +76,7 @@ import { BundleReader } from '../bundle/bundle-reader.js';
 import { bundleIdFromDirName } from '../core/ids.js';
 import {
   chainEntryFromManifest, pickFloors, floorsFor, newestFirst, renamedBundles,
-  chainCoverage, findChainHoles,
+  chainCoverage, findChainHoles, diffAgainstChain,
 } from '../crawl/chain.js';
 
 // TODO(debug): 开发期日志。发布前连同所有调用一起删掉。
@@ -424,6 +424,47 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
               routes: [...cov].map(([routeKey, v]) => ({ routeKey, ...v })),
               holes: findChainHoles(entries),
             },
+          });
+          break;
+        }
+
+        case 'chainDiff': {
+          // 档案页：这一份里哪些是新增的、哪些又抓了一次，以及跨链的版本历史。
+          //
+          // **只读 index，不解压任何记录。** 一份真实档案 3347 条，解压是几秒钟的
+          // 事；而这两个问题的答案全在 index 里。
+          const slices = [];
+          for (const dir of await WorkerFileStore.listBundleDirs(getOpfsWorker())) {
+            const id = bundleIdFromDirName(dir);
+            if (!id) continue;
+            try {
+              const store = new WorkerFileStore({ worker: getOpfsWorker(), dir });
+              const reader = new BundleReader({ store, bundleId: id });
+              const m = (await reader.hasManifest()) ? await reader.manifest() : null;
+              slices.push({
+                bundleId: id,
+                completedAt: m?.completed_at ?? null,
+                entries: (await reader.index()).map((e) => ({
+                  url_key: e.url_key,
+                  capture_id: e.capture_id,
+                  observed_at: e.observed_at,
+                  verdict: e.verdict,
+                })),
+              });
+            } catch (e) {
+              debugLog('读不出这份索引，跳过', dir, e);
+            }
+          }
+          const cur = slices.find((s) => s.bundleId === msg.bundleId);
+          if (!cur) {
+            sendResponse({ ok: true, diff: { repeated: [], versions: [] } });
+            break;
+          }
+          const d = diffAgainstChain(cur, slices);
+          sendResponse({
+            ok: true,
+            // 版本历史可能很长（重抓过很多次的话）。截断，并如实说截了。
+            diff: { repeated: d.repeated, versions: d.versions.slice(0, 200), truncated: d.versions.length > 200 },
           });
           break;
         }

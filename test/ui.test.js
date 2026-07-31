@@ -568,6 +568,20 @@ describe('面板脚本', () => {
     assert.match(html, /id="coverage-view"/);
   });
 
+  test('档案页标出增量、新增/又抓了一次、版本历史', async () => {
+    const html = await readRepoFile('src/ui/panel.html');
+    assert.match(html, /id="archive-chain"/);
+    assert.match(html, /id="versions"/);
+
+    const js = await readRepoFile('src/ui/panel.js');
+    // 只读 index，不解压 —— 这两个问题的答案全在 index 里
+    assert.match(js, /chainDiff/);
+    assert.match(js, /function renderVersions/);
+    assert.match(js, /又抓了一次/);
+    // 增量档案的「捕获条数」看起来小得离谱，要说清那是正常的
+    assert.match(js, /previousBundleId/);
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。

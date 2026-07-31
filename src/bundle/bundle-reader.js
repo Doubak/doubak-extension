@@ -216,6 +216,9 @@ export class BundleReader {
       // 免得界面显示出一份看起来很完整的假证据。
       coverage: manifest?.coverage ?? [],
       crawlState: manifest?.crawl_state ?? [],
+      // 这一份接在谁后面（增量）。null = 全量。界面要靠它说清「捕获条数比上次
+      // 小是正常的」——增量档案只含新增的部分。
+      previousBundleId: manifest?.previous_bundle_id ?? null,
     };
   }
 

@@ -288,3 +288,33 @@ describe('进行中的档案（还没有 manifest）', () => {
     assert.ok(v.checked > 0);
   });
 });
+
+describe('摘要要说清这一份接在谁后面', () => {
+  test('增量档案带 previousBundleId', async () => {
+    // 增量档案的「捕获条数」只有新增的那些，看起来会小得离谱。界面要靠这个字段
+    // 说清那是正常的——否则用户会以为抓漏了。
+    const store = new MemoryFileStore();
+    const w = new BundleWriter({
+      store,
+      bundleId: '20260815T000000Z-bbbbbb',
+      previousBundleId: '20260731T000000Z-aaaaaa',
+      account: { user_id: '1', username: 'e' },
+      now: () => new Date('2026-08-15T00:00:00Z'),
+    });
+    await w.finalize();
+
+    const s = await new BundleReader({ store, bundleId: '20260815T000000Z-bbbbbb' }).summary();
+    assert.equal(s.previousBundleId, '20260731T000000Z-aaaaaa');
+  });
+
+  test('全量档案是 null，不是 undefined —— 界面要能直接判', async () => {
+    const store = new MemoryFileStore();
+    const w = new BundleWriter({
+      store, bundleId: '20260731T000000Z-aaaaaa',
+      account: { user_id: '1', username: 'e' }, now: () => new Date('2026-07-31T00:00:00Z'),
+    });
+    await w.finalize();
+    const s = await new BundleReader({ store, bundleId: '20260731T000000Z-aaaaaa' }).summary();
+    assert.equal(s.previousBundleId, null);
+  });
+});

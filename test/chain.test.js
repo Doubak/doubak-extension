@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 
 import {
   chainEntryFromManifest, newestFirst, pickFloors, floorsFor, findChainHoles, chainCoverage,
-  sameAccount, renamedBundles,
+  sameAccount, renamedBundles, diffAgainstChain,
 } from '../src/crawl/chain.js';
 
 const ME = '82160871';
@@ -327,5 +327,88 @@ describe('交给 runner 的形状', () => {
     ], { accountUserId: ME });
     const floors = floorsFor(picks);
     assert.equal(floors.get('r'), '2026-07-31T00:00:00+08:00');
+  });
+});
+
+describe('跟链上更早的档案比：新增 vs 又抓了一次', () => {
+  const cap = (urlKey, id, at, verdict = 'ok') =>
+    ({ url_key: urlKey, capture_id: id, observed_at: at, verdict });
+
+  const B1 = {
+    bundleId: 'B1', completedAt: '2026-07-31T00:00:00Z',
+    entries: [cap('https://m/1/', 'B1#1', '2026-07-31T00:00:00Z'),
+      cap('https://m/2/', 'B1#2', '2026-07-31T00:01:00Z')],
+  };
+  const B2 = {
+    bundleId: 'B2', completedAt: '2026-08-15T00:00:00Z',
+    entries: [cap('https://m/2/', 'B2#1', '2026-08-15T00:00:00Z'),
+      cap('https://m/3/', 'B2#2', '2026-08-15T00:01:00Z')],
+  };
+
+  test('更早的档案里出现过 = 又抓了一次', () => {
+    const d = diffAgainstChain(B2, [B1]);
+    assert.deepEqual(d.repeated, ['https://m/2/']);
+  });
+
+  test('只在这一份里出现 = 新增', () => {
+    const d = diffAgainstChain(B2, [B1]);
+    assert.equal(d.repeated.includes('https://m/3/'), false);
+  });
+
+  test('**比当前这份更新**的档案不算「更早」', () => {
+    // 从最新那份往回看时，更新的那些还不存在——把它们算进来会把「新增」误标成
+    // 「又抓了一次」。
+    const d = diffAgainstChain(B1, [B2]);
+    assert.deepEqual(d.repeated, []);
+  });
+
+  test('第一份档案里什么都是新增', () => {
+    assert.deepEqual(diffAgainstChain(B1, []).repeated, []);
+  });
+
+  test('自己不跟自己比', () => {
+    assert.deepEqual(diffAgainstChain(B2, [B2, B1]).repeated, ['https://m/2/']);
+  });
+});
+
+describe('版本历史：同一个 URL 的多次捕获', () => {
+  const cap = (urlKey, id, at) => ({ url_key: urlKey, capture_id: id, observed_at: at, verdict: 'ok' });
+
+  test('多次抓到的才进版本历史', () => {
+    const d = diffAgainstChain(
+      { bundleId: 'B2', completedAt: '2026-08-15T00:00:00Z', entries: [cap('u1', 'B2#1', '2026-08-15T00:00:00Z')] },
+      [{ bundleId: 'B1', completedAt: '2026-07-31T00:00:00Z',
+        entries: [cap('u1', 'B1#1', '2026-07-31T00:00:00Z'), cap('u2', 'B1#2', '2026-07-31T00:01:00Z')] }],
+    );
+    assert.equal(d.versions.length, 1);
+    assert.equal(d.versions[0].urlKey, 'u1');
+    assert.equal(d.versions[0].versions.length, 2);
+  });
+
+  test('只有一个版本的不返回 —— 否则等于把整份索引再传一遍', () => {
+    const d = diffAgainstChain(
+      { bundleId: 'B1', completedAt: 'x', entries: [cap('u1', 'B1#1', 'x')] }, [],
+    );
+    assert.deepEqual(d.versions, []);
+  });
+
+  test('版本从新到旧 —— 先想看最近那一版', () => {
+    const d = diffAgainstChain(
+      { bundleId: 'B2', completedAt: '2026-08-15T00:00:00Z', entries: [cap('u', 'B2#1', '2026-08-15T00:00:00Z')] },
+      [{ bundleId: 'B1', completedAt: '2026-07-31T00:00:00Z', entries: [cap('u', 'B1#1', '2026-07-31T00:00:00Z')] }],
+    );
+    assert.deepEqual(d.versions[0].versions.map((v) => v.bundleId), ['B2', 'B1']);
+  });
+
+  test('版本多的排前面', () => {
+    const many = { bundleId: 'B3', completedAt: '2026-09-01T00:00:00Z',
+      entries: [cap('u1', 'B3#1', '2026-09-01T00:00:00Z'), cap('u2', 'B3#2', '2026-09-01T00:01:00Z')] };
+    const mid = { bundleId: 'B2', completedAt: '2026-08-15T00:00:00Z',
+      entries: [cap('u1', 'B2#1', '2026-08-15T00:00:00Z')] };
+    const old = { bundleId: 'B1', completedAt: '2026-07-31T00:00:00Z',
+      entries: [cap('u1', 'B1#1', '2026-07-31T00:00:00Z'), cap('u2', 'B1#2', '2026-07-31T00:01:00Z')] };
+    const d = diffAgainstChain(many, [mid, old]);
+    assert.equal(d.versions[0].urlKey, 'u1', 'u1 有 3 个版本，该排前面');
+    assert.equal(d.versions[0].versions.length, 3);
   });
 });
