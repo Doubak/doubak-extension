@@ -303,7 +303,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
 
         case 'chain': {
           // 覆盖率页「合起来」那个视角。offscreen 读档案，这里只转发。
-          const r2 = await withOffscreen({ op: 'chain' });
+          const r2 = await withOffscreen({ op: 'chain', bundleId: msg.bundleId });
           sendResponse({ ok: true, chain: r2.chain });
           break;
         }

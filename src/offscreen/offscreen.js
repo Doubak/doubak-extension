@@ -490,7 +490,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           // 一条会让档案数虚高，而且任何一份的缺口都会污染全部。
           const entries = await readChainEntries();
           const chains = splitChains(entries);
-          const head = chains[0] ?? [];
+          // 指定了档案就给**它所在的那条链**（导出整条链、以及在档案页上看链时要用）；
+          // 没指定就给最新那条（覆盖率页的默认视角）。
+          const head = msg.bundleId
+            ? chainOf(entries, msg.bundleId)
+            : (chains[0] ?? []);
           const cov = chainCoverage(head);
           sendResponse({
             ok: true,
@@ -505,10 +509,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
               holes: findChainHoles(head),
               // 不在这条链上的那些。**要说出来**：用户手上可能有好几次独立的全量，
               // 而界面只讲最新那条链——不提的话看起来像档案丢了。
-              others: chains.slice(1).map((c) => ({
-                head: c[0]?.bundleId,
-                size: c.length,
-              })),
+              others: chains
+                .filter((c) => c[0]?.bundleId !== head[0]?.bundleId)
+                .map((c) => ({ head: c[0]?.bundleId, size: c.length })),
             },
           });
           break;

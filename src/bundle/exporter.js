@@ -292,6 +292,23 @@ export function fileStoreSink(store) {
  * @param {FileSystemDirectoryHandle} dir
  * @returns {ExportSink}
  */
+/**
+ * 往**子目录**里导。
+ *
+ * 导出整条链时必须这样：每份档案都有 `manifest.json` 与 `README.txt`，平铺到同一个
+ * 目录里后一份会覆盖前一份——那不是理论问题，用户的下载目录里就只剩了最后一次导出
+ * 的 manifest，早先几份的全没了。
+ *
+ * 目录名用 `doubak-bundle-<id>`，与 OPFS 里的一致：搬回来的时候不用改名。
+ *
+ * @param {FileSystemDirectoryHandle} parent
+ * @param {string} name
+ */
+export async function subdirectorySink(parent, name) {
+  const sub = await parent.getDirectoryHandle(name, { create: true });
+  return directorySink(sub);
+}
+
 export function directorySink(dir) {
   return {
     async open(name) {

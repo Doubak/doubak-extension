@@ -719,6 +719,32 @@ describe('面板脚本', () => {
     assert.ok(code.includes('已抓取多次'));
   });
 
+  test('导出整条链：按钮在、逐份导、一份失败不中断其余', async () => {
+    const html = await readRepoFile('src/ui/panel.html');
+    assert.match(html, /id="export-chain"/);
+    assert.match(html, /导出这一份/, '单份那个按钮要改名，否则两个都叫「导出」分不清');
+
+    const js = await readRepoFile('src/ui/panel.js');
+    // 按当前打开的这一份取链，不是永远取最新那条
+    assert.match(js, /type: 'chain', bundleId: currentBundleId/);
+    // 分子目录，否则 manifest.json 互相覆盖
+    assert.match(js, /subdirectorySink\(parent, bundleDirName\(id\)\)/);
+    // 一份失败不中断其余
+    const fn = js.slice(js.indexOf("\$('export-chain')"));
+    const body = fn.slice(0, fn.indexOf('renderChainExportResult(el, done)'));
+    assert.match(body, /catch \(e\)[\s\S]{0,200}done\.push/, '失败也要记下来并继续');
+  });
+
+  test('导出结果逐份说清楚，不汇总成一句「成功」', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /function renderChainExportResult/);
+    // 只在校验通过时才记「已导出」——没验过就说导出了，等于给一个我们没资格给的保证
+    const fn = js.slice(js.indexOf('export-chain'));
+    const body = fn.slice(0, fn.indexOf('renderChainExportResult'));
+    assert.match(body, /res\.problems\.length === 0/);
+    assert.match(body, /markExported/);
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。

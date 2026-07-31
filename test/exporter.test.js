@@ -2,10 +2,12 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  exportBundle, fileStoreSink, NOT_PART_OF_BUNDLE, DEFAULT_CHUNK_BYTES,
+  exportBundle, fileStoreSink, NOT_PART_OF_BUNDLE, DEFAULT_CHUNK_BYTES, subdirectorySink,
 } from '../src/bundle/exporter.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { sha256Hex } from '../src/core/digest.js';
+import { BundleWriter } from '../src/bundle/bundle-writer.js';
+import { bundleDirName } from '../src/core/ids.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -332,5 +334,92 @@ describe('导出', () => {
   test('默认块大小是个合理值', () => {
     assert.ok(DEFAULT_CHUNK_BYTES >= 1024 * 1024);
     assert.ok(DEFAULT_CHUNK_BYTES <= 32 * 1024 * 1024);
+  });
+});
+
+describe('导出整条链：每份各占一个子目录', () => {
+  /**
+   * 每份档案都有 `manifest.json` 与 `README.txt`。平铺到同一个目录里，后一份会
+   * 覆盖前一份——**这不是理论问题**：真实使用中用户的下载目录里就只剩了最后一次
+   * 导出的 manifest，早先几份的全被盖掉，以至于事后想核对哪份接在哪份后面都做不到。
+   */
+
+  /** 假的 FileSystemDirectoryHandle：只实现导出用得到的那几个方法。 */
+  function fakeDir() {
+    /** @type {Map<string, Map<string, Uint8Array>>} 子目录名 → 文件 */
+    const subs = new Map();
+    /** @type {Map<string, Uint8Array>} 本级文件 */
+    const own = new Map();
+    const mk = (files) => ({
+      async getFileHandle(name, opts) {
+        if (!files.has(name) && !opts?.create) throw new Error('没有这个文件');
+        return {
+          async createWritable() {
+            const parts = [];
+            return {
+              async write(b) { parts.push(b); },
+              async close() {
+                const n = parts.reduce((a, p) => a + p.length, 0);
+                const buf = new Uint8Array(n);
+                let o = 0;
+                for (const p of parts) { buf.set(p, o); o += p.length; }
+                files.set(name, buf);
+              },
+            };
+          },
+          async getFile() {
+            return { arrayBuffer: async () => files.get(name).buffer };
+          },
+        };
+      },
+      async *keys() { yield* files.keys(); },
+      async getDirectoryHandle(name) {
+        if (!subs.has(name)) subs.set(name, new Map());
+        return mk(subs.get(name));
+      },
+    });
+    return { handle: mk(own), subs, own };
+  }
+
+  async function bundleStore(id) {
+    const store = new MemoryFileStore();
+    const w = new BundleWriter({
+      store, bundleId: id, account: { user_id: '1', username: 'e' },
+      now: () => new Date('2026-07-31T00:00:00Z'),
+    });
+    await w.writeCapture({
+      url: 'https://www.douban.com/people/e/', intent: 'profile.overview',
+      routeKey: 'profile.overview', surface: 'html', verdict: 'ok',
+      captureFidelity: 'decoded_body+observed_headers', httpStatus: 200,
+      headers: [['Content-Type', 'text/html']], contentType: 'text/html',
+      body: new TextEncoder().encode(`<html>${id}</html>`),
+    });
+    await w.finalize();
+    return store;
+  }
+
+  test('两份档案导进两个子目录，manifest 不互相覆盖', async () => {
+    const { handle, subs } = fakeDir();
+    const ids = ['20260731T051333Z-786e5c', '20260731T122837Z-afb38b'];
+    for (const id of ids) {
+      const sink = await subdirectorySink(handle, bundleDirName(id));
+      const r = await exportBundle({ store: await bundleStore(id), sink, overwrite: true });
+      assert.equal(r.problems.length, 0, `${id} 导出有问题`);
+    }
+
+    assert.deepEqual([...subs.keys()].sort(), ids.map(bundleDirName).sort());
+    for (const id of ids) {
+      const files = subs.get(bundleDirName(id));
+      assert.ok(files.has('manifest.json'), `${id} 少了 manifest`);
+      const m = JSON.parse(new TextDecoder().decode(files.get('manifest.json')));
+      assert.equal(m.bundle_id, id, '两份的 manifest 串了');
+    }
+  });
+
+  test('子目录名与 OPFS 里一致 —— 搬回来时不用改名', async () => {
+    const { handle, subs } = fakeDir();
+    const id = '20260731T051333Z-786e5c';
+    await subdirectorySink(handle, bundleDirName(id));
+    assert.ok(subs.has(`doubak-bundle-${id}`));
   });
 });

@@ -20,7 +20,7 @@
 import { BundleReader } from '../bundle/bundle-reader.js';
 import { SCENARIOS } from '../crawl/dry-run.js';
 import { WorkerFileStore } from '../storage/worker-file-store.js';
-import { exportBundle, directorySink } from '../bundle/exporter.js';
+import { exportBundle, directorySink, subdirectorySink } from '../bundle/exporter.js';
 import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../storage/storage-usage.js';
 import { captureTitle, captureSubtitle, subjectLabel } from './capture-label.js';
 import {
@@ -1355,6 +1355,7 @@ function renderBundlePicker(ids, active) {
 /** @param {boolean} on */
 function setArchiveButtons(on) {
   $('export').disabled = !on;
+  $('export-chain').disabled = !on;
   $('verify').disabled = !on;
   $('delete-this').disabled = !on;
 }
@@ -1718,6 +1719,115 @@ async function showCapture(entry) {
 }
 
 // ── 导出 ────────────────────────────────────────────────────
+
+/**
+ * 导出整条链：每份档案各占一个子目录。
+ *
+ * ## 为什么必须分子目录
+ *
+ * 每份档案都有 `manifest.json` 与 `README.txt`。平铺到同一个目录里，后一份会
+ * 覆盖前一份——这不是理论问题：真实使用中用户的下载目录里就只剩了最后一次导出的
+ * manifest，早先几份的全被盖掉了，以至于事后想核对哪份档案接在哪份后面都做不到。
+ *
+ * 目录名与 OPFS 里一致（`doubak-bundle-<id>`），搬回来时不用改名。
+ *
+ * ## 为什么值得单独一个按钮
+ *
+ * 增量之后，**一份档案不再是一份完整的备份**——它只含新增的部分。要把「我的豆瓣」
+ * 整个搬走，需要的是整条链。让用户自己一份份导，早晚会漏掉一份，而漏掉哪一份是
+ * 事后看不出来的。
+ */
+$('export-chain').addEventListener('click', async () => {
+  const el = $('export-result');
+  if (!currentBundleId) return;
+
+  if (typeof window.showDirectoryPicker !== 'function') {
+    el.className = 'card err';
+    el.textContent = '这个浏览器不支持选择文件夹（File System Access API）。请使用 Chrome 或 Edge。';
+    return;
+  }
+
+  const r = await send({ type: 'chain', bundleId: currentBundleId });
+  const chain = r?.ok ? (r.chain?.bundles ?? []) : [];
+  if (chain.length === 0) {
+    el.className = 'card err';
+    el.textContent = '读不出这条链。';
+    return;
+  }
+
+  /** @type {FileSystemDirectoryHandle} */
+  let parent;
+  try {
+    parent = await window.showDirectoryPicker({ mode: 'readwrite', id: 'doubak-export' });
+  } catch {
+    return; // 用户取消
+  }
+
+  const ids = chain.map((b) => b.bundleId);
+  if (!confirm(
+    `将导出 ${ids.length} 份档案（整条链）：\n\n${ids.join('\n')}\n\n`
+    + '每份各占一个子目录 doubak-bundle-<编号>。已存在的同名文件会被覆盖。',
+  )) return;
+
+  /** @type {Array<{bundleId: string, result: object | null, error: string | null}>} */
+  const done = [];
+  for (const [i, id] of ids.entries()) {
+    const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(id) });
+    try {
+      const sink = await subdirectorySink(parent, bundleDirName(id));
+      const res = await exportBundle({
+        store, sink, overwrite: true,
+        onProgress: (p) => {
+          el.className = 'card run';
+          const pct = p.total ? Math.round((p.done / p.total) * 100) : 100;
+          el.textContent =
+            `（${i + 1}/${ids.length}）${id}　`
+            + `${p.phase === 'copy' ? '正在复制' : '正在校验'} ${p.file} ${pct}%`;
+        },
+      });
+      done.push({ bundleId: id, result: res, error: null });
+      // 只在**校验通过**时记「已导出」——没验过就说导出了，等于给一个我们没资格
+      // 给的保证（删除确认框会据此决定说得多重）。
+      if (res.problems.length === 0) {
+        await send({ type: 'markExported', bundleId: id, at: new Date().toISOString() });
+      }
+    } catch (e) {
+      // **一份失败不中断其余的。** 用户要的是尽可能多地搬走，而不是在第三份上
+      // 停下、前两份还留在原地不知道成没成。
+      done.push({ bundleId: id, result: null, error: e.message });
+    }
+  }
+
+  renderChainExportResult(el, done);
+  storageUsage = [];
+  await refreshOpenTab();
+});
+
+/** 整条链导出的结果：逐份说清楚，别汇总成一句「成功」。 */
+function renderChainExportResult(el, done) {
+  const failed = done.filter((d) => d.error || d.result?.problems.length);
+  el.className = `card ${failed.length ? 'err' : 'good'}`;
+  el.replaceChildren();
+
+  const b = document.createElement('b');
+  b.textContent = failed.length
+    ? `${done.length} 份中有 ${failed.length} 份没能干净导出`
+    : `${done.length} 份档案已全部导出并校验通过`;
+  el.append(b);
+
+  const total = done.reduce((n, d) => n + (d.result?.bytes ?? 0), 0);
+  el.append(document.createTextNode(`共 ${bytes(total)}，每份各占一个子目录。`));
+
+  for (const d of done) {
+    const line = document.createElement('div');
+    line.className = 'cap-sub';
+    line.textContent = d.error
+      ? `${d.bundleId}：失败 —— ${d.error}`
+      : `${d.bundleId}：${bytes(d.result.bytes)}`
+        + (d.result.problems.length ? `，${d.result.problems.length} 处校验不通过` : '，校验通过');
+    el.append(line);
+  }
+}
 
 $('export').addEventListener('click', async () => {
   const el = $('export-result');
