@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 
 import {
   appendEvent, readLog, clearLog, shouldLog, isFetchEvent, formatEntry, formatLogText,
-  LOG_KEY, MAX_ENTRIES, MAX_FETCH_ENTRIES,
+  LOG_KEY, FETCH_LOG_KEY, MAX_ENTRIES, MAX_FETCH_ENTRIES,
 } from '../src/crawl/event-log.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
 
@@ -44,8 +44,32 @@ describe('只记 index.ndjson 里没有的事件', () => {
     // 一次全量抓取有几千页。混在一个 500 条的环里，翻页记录会把真正要紧的信号
     // （为什么停的、哪一页反复失败）全挤出去——而那几条正是事后唯一能查的东西。
     assert.equal(shouldLog({ type: 'capture', verdict: 'ok' }), true);
-    assert.equal(isFetchEvent({ type: 'capture' }), true);
+    assert.equal(isFetchEvent({ type: 'capture', verdict: 'ok' }), true);
     assert.equal(isFetchEvent({ type: 'retry' }), false);
+  });
+
+  test('判定不是 ok 的捕获走稀疏环 —— 否则会被翻页记录挤掉', () => {
+    // 真实数据：一次 3347 条捕获的抓取里有 8 条 `gone`，而抓取环只有 200 条，
+    // 于是日志里**只剩最后那一条**——另外 7 条查不到了。
+    // 而 `gone` 正是「豆瓣把这个条目删了」，是这个项目存在的理由本身。
+    assert.equal(isFetchEvent({ type: 'capture', verdict: 'ok' }), true);
+    assert.equal(isFetchEvent({ type: 'capture', verdict: 'gone' }), false);
+    assert.equal(isFetchEvent({ type: 'capture', verdict: 'blocked' }), false);
+    assert.equal(isFetchEvent({ type: 'capture', verdict: null }), false, '判不出来的更要留着');
+  });
+
+  test('几千条正常捕获也挤不掉那几条 gone', async () => {
+    const kv = new MemoryKvStore();
+    const at = (i) => `2026-07-31T00:00:${String(i % 60).padStart(2, '0')}Z`;
+    for (let i = 0; i < 3000; i++) {
+      await appendEvent(kv, { type: 'capture', verdict: 'ok', url: `https://x/${i}` }, { at: at(i) });
+      if (i % 400 === 0) {
+        await appendEvent(kv, { type: 'capture', verdict: 'gone', url: `https://gone/${i}` }, { at: at(i) });
+      }
+    }
+    const rows = await readLog(kv);
+    const gone = rows.filter((r) => r.verdict === 'gone');
+    assert.equal(gone.length, 8, `8 条 gone 只剩 ${gone.length} 条`);
   });
 
   test('抓取环装满了也不动稀疏事件那一环', async () => {
@@ -53,7 +77,7 @@ describe('只记 index.ndjson 里没有的事件', () => {
     const kv = new MemoryKvStore();
     await appendEvent(kv, { type: 'stopped', reason: 'user_paused' }, { at: '2026-07-30T00:00:00Z' });
     for (let i = 0; i < MAX_FETCH_ENTRIES + 50; i++) {
-      await appendEvent(kv, { type: 'capture', url: `https://x/${i}` }, { at: '2026-07-30T00:01:00Z' });
+      await appendEvent(kv, { type: 'capture', verdict: 'ok', url: `https://x/${i}` }, { at: '2026-07-30T00:01:00Z' });
     }
     const rows = await readLog(kv);
     assert.ok(rows.some((r) => r.type === 'stopped'), '停机原因被翻页记录挤掉了');
@@ -73,8 +97,17 @@ describe('只记 index.ndjson 里没有的事件', () => {
 
   test('append 会跳过被过滤的事件', async () => {
     const kv = new MemoryKvStore();
-    await appendEvent(kv, { type: 'capture' });
+    await appendEvent(kv, { type: 'page', routeKey: 'r' });
     assert.equal(await kv.get(LOG_KEY), undefined, '一条都不该写');
+    assert.equal(await kv.get(FETCH_LOG_KEY), undefined);
+  });
+
+  test('没有 verdict 的 capture 按「判不出来」处理，进稀疏环', async () => {
+    // 判不出来是最该被看见的一种结果，不能因为字段缺失就被当成正常页丢进抓取环。
+    const kv = new MemoryKvStore();
+    await appendEvent(kv, { type: 'capture', url: 'https://x/1' });
+    assert.equal((await kv.get(LOG_KEY))?.length, 1);
+    assert.equal(await kv.get(FETCH_LOG_KEY), undefined);
   });
 });
 

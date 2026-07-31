@@ -1116,6 +1116,67 @@ async function openBundle(bundleId) {
 }
 
 /**
+ * 「豆瓣上已经没有了」的那几条，单独列出来。
+ *
+ * ## 为什么值得占一块地方
+ *
+ * 这是**整份档案里最不可替代的信息**。一份 3347 条的真实档案里有 8 条 `gone`——
+ * 那 8 部电影豆瓣已经删了，网上再也查不到，而你的档案里存着它们当时的样子。
+ * 这正是这个项目存在的理由本身。
+ *
+ * 而它原来只以「判定分布：正常 3339 · 已不存在 8」这一个数字出现，**没有任何地方
+ * 说得出是哪 8 条**。捕获列表里能看到，但要在 3347 行里翻。
+ *
+ * 顺带也列 `blocked` / `challenge` / 判不出来的：它们是风控留下的痕迹，同样稀少
+ * 同样要紧。
+ */
+function renderVanished() {
+  const el = $('vanished');
+  if (!el) return;
+  el.replaceChildren();
+
+  const bad = entries.filter((e) => e.verdict !== 'ok');
+  if (bad.length === 0) return;
+
+  const card = document.createElement('div');
+  card.className = 'card warn';
+  const b = document.createElement('b');
+  const goneCount = bad.filter((e) => e.verdict === 'gone').length;
+  b.textContent = goneCount
+    ? `有 ${goneCount} 条在豆瓣上已经没有了`
+    : `有 ${bad.length} 条不是正常抓到的`;
+  card.append(b, document.createTextNode(
+    goneCount
+      ? '豆瓣已经删除了这些条目，网上再也查不到——而档案里存着它们当时的样子。'
+        + '这正是备份的意义所在。'
+      : '这些页面没有正常抓到，原样存在档案里，可以打开看看到底是什么。',
+  ));
+  el.append(card);
+
+  const list = document.createElement('div');
+  list.className = 'caps';
+  for (const e of bad) {
+    const row = document.createElement('div');
+    row.className = 'cap';
+    const left = document.createElement('span');
+    left.textContent = captureTitle(e, routeName);
+    const right = document.createElement('span');
+    right.className = 'v warn-text';
+    right.textContent = VERDICT_NAMES[e.verdict] ?? (e.verdict ?? '判不出来');
+    row.append(left, right);
+
+    const url = document.createElement('div');
+    url.className = 'muted';
+    url.style.fontSize = '12px';
+    url.style.wordBreak = 'break-all';
+    url.textContent = `${e.url} · 抓于 ${String(e.observed_at ?? '').slice(0, 19).replace('T', ' ')}`;
+    row.append(url);
+    list.append(row);
+  }
+  el.append(list);
+}
+
+/**
  * 捕获列表。
  *
  * ## 为什么每行要说这么多
@@ -1137,6 +1198,10 @@ async function openBundle(bundleId) {
  * 可能已经对不上了。
  */
 function renderCaptures() {
+  // 「已经没有了」的那几条单独列一块。**捕获列表只渲染前 500 行**，而真实档案有
+  // 3347 条——那 8 条 gone 排在后面，在列表里根本画不出来。
+  renderVanished();
+
   const el = $('captures');
   el.replaceChildren();
   el.className = '';

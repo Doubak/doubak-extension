@@ -50,6 +50,22 @@ export const MAX_FETCH_ENTRIES = 200;
 const FETCH_TYPES = new Set(['capture']);
 
 /**
+ * **判定不是 ok 的捕获走稀疏环。**
+ *
+ * 它们稀少而且要紧：`gone` 是「豆瓣把这个条目删了」——正是这个项目存在的理由，
+ * 而且**再也查不到**；`blocked` / `challenge` 是风控留下的痕迹。
+ *
+ * 混在抓取环里会被翻页记录挤掉。真实数据：一次 3347 条捕获的抓取里有 8 条
+ * `gone`，而抓取环只有 200 条，于是日志里**只剩最后那一条**——另外 7 条查不到了。
+ * 那 8 条恰恰是最该被看见的。
+ *
+ * @param {object} e
+ */
+function isRareCapture(e) {
+  return e.type === 'capture' && e.verdict !== 'ok';
+}
+
+/**
  * 完全不记的。
  *
  * | 类型 | 为什么不记 |
@@ -74,7 +90,9 @@ export function shouldLog(e) {
 
 /** 这条该进哪个环。 @param {object} e */
 export function isFetchEvent(e) {
-  return FETCH_TYPES.has(e?.type);
+  if (!FETCH_TYPES.has(e?.type)) return false;
+  // 判定不是 ok 的捕获归稀疏环——见 `isRareCapture`。
+  return !isRareCapture(e);
 }
 
 /**

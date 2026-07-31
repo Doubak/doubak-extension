@@ -517,6 +517,17 @@ describe('面板脚本', () => {
     }
   });
 
+  test('#vanished 与 #captures 都在，且渲染时不互相顶掉', async () => {
+    // 「已经没有了」的那几条要有自己的地方：捕获列表只画前 500 行，而真实档案有
+    // 3347 条——那 8 条 gone 排在后面，在列表里根本画不出来。
+    const html = await readRepoFile('src/ui/panel.html');
+    assert.match(html, /id="vanished"/);
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /function renderVanished\(\)/);
+    // 它由 renderCaptures 调用——两者共用同一份已加载的 index，不另开一条读取路径
+    assert.match(js, /renderVanished\(\);[\s\S]{0,200}\$\('captures'\)/);
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。
