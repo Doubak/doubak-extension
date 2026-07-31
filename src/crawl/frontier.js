@@ -299,6 +299,7 @@ export class Frontier {
   enqueue({
     url, urlKey, routeKey, intent, enqueuedBy = null, cursor = null,
     ordered = true, state = 'pending', attempts = 0, priority = 50, gatedBy = null,
+    referer = null,
   }) {
     if (this._enqueued.has(urlKey)) return false;
 
@@ -317,6 +318,10 @@ export class Frontier {
       gatedBy,
       enqueuedBy,
       cursor,
+      // 大部分条目的 Referer 由路线定义给（一条路线一个值）。派生条目不行：
+      // 一张封面的 Referer 是**它所在的那个作品页**，每条都不一样，只能跟着条目走。
+      // 放进 _items 就自动进 checkpoint（snapshot 是整份展开的），恢复后不会丢。
+      referer,
     });
     return true;
   }

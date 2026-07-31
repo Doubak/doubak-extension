@@ -131,7 +131,7 @@ export class BundleWriter {
    * @param {string} cap.url                请求时的原始 URL，跟踪参数照留
    * @param {string} cap.intent
    * @param {string} cap.routeKey
-   * @param {'html' | 'api'} cap.surface
+   * @param {'html' | 'api' | 'asset'} cap.surface
    * @param {string} cap.verdict
    * @param {string} cap.captureFidelity
    * @param {Uint8Array} cap.body           响应体，逐字节原样
@@ -312,7 +312,7 @@ export function renderReadme(bundleId) {
   index-*.ndjson     每行一条抓取记录（JSON）。用 jq 即可查阅，无需专门工具。
   data-*.warc.gz     网页与接口响应，标准 WARC 格式。
   assets-*.warc.gz   你自己上传的图片。
-  catalog-*.warc.gz  作品条目详情页等目录数据。删掉它不影响你自己写的内容，
+  catalog-*.warc.gz  作品条目详情页与封面图等目录数据。删掉它不影响你自己写的内容，
                      但会失去离线重新生成完整网站的能力。
   checkpoint.json    仅在抓取未完成时存在，用于续抓。
 
@@ -349,8 +349,8 @@ Files
                      with \`jq\`; no special tooling required.
   data-*.warc.gz     Pages and API responses, standard WARC format.
   assets-*.warc.gz   Images you uploaded yourself.
-  catalog-*.warc.gz  Catalogue data such as work detail pages. Deleting these
-                     does not touch anything you wrote, but you lose the
+  catalog-*.warc.gz  Catalogue data: work detail pages and cover images. Deleting
+                     these does not touch anything you wrote, but you lose the
                      ability to regenerate a full site offline.
   checkpoint.json    Present only if the capture run is incomplete.
 

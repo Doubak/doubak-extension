@@ -45,7 +45,7 @@ const enc = (u) => encodeURIComponent(u);
  * @property {string} key
  * @property {string} intent
  * @property {'data' | 'assets' | 'catalog'} kind
- * @property {'html' | 'api'} surface
+ * @property {'html' | 'api' | 'asset'} surface
  * @property {number} priority
  * @property {'archive' | 'tofu' | 'unknown'} source
  * @property {'bounded' | 'full'} enumeration
@@ -218,6 +218,34 @@ export function buildRoutes({
       // 必须等广播抓完。不能拿最不可替代的东西去换最可替代的东西。
       requires: ['broadcast.timeline'],
       note: '生成静态站的必要输入，但占档案九成体积；单独成段以便整批丢弃',
+    });
+
+    // ── 作品封面图
+    //
+    // **不抓图正是「备份必须联网才能看」的病根**（DESIGN F-04e）——不抓的话，
+    // 档案里每一页的封面都是指向 doubanio.com 的 URL，豆瓣哪天关了就全是叉。
+    //
+    // 归 catalog 而不是 assets：判据是**谁上传的**，不是长什么样（规范 §6.6.2）。
+    // 封面是目录数据，源站还在就能重抓，所以它跟着作品详情页一起走，
+    // 一条 `rm catalog-*` 能把两者一并丢掉。
+    //
+    // 单独一条路线而不是并进 `interest.item`：并进去的话，覆盖率页上那一行的
+    // 「已抓 2915」会在一夜之间变成 5800，而那个数字的含义（抓了多少个作品）
+    // 没变——一个看起来像 bug 的正确数字。
+    routes.push({
+      key: 'asset.subject_cover',
+      intent: 'asset.image.catalog_thumbnail',
+      kind: 'catalog',
+      surface: 'asset',
+      // 比作品详情页还靠后：封面是从详情页里抽出来的，详情页没抓到就无从谈起。
+      priority: PRIORITY.CATALOG + 1,
+      source: 'archive',
+      enumeration: 'full',
+      safetyNet: 'contiguity',
+      // 与 interest.item 同理：叶子，一张图失败不该连带其余的。
+      ordered: false,
+      requires: ['broadcast.timeline'],
+      note: '作品详情页上的封面图；没有它，档案里的封面全都指向豆瓣的服务器',
     });
   }
 

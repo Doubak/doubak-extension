@@ -642,6 +642,146 @@ export function extractSubjectLinks(html) {
 }
 
 /**
+ * 作品详情页上的封面图。
+ *
+ * ## 只取一张，而且是「主图」那一张
+ *
+ * 一个作品详情页上有 20~40 个 doubanio 图片 URL：推荐区的其他作品封面、评论者
+ * 头像、界面雪碧图。它们要么是别人的东西、要么根本不是内容。**全抓下来是 30 倍
+ * 的体积换不到东西**，而其中的头像还是第三方内容——按项目的取舍，别人的头像本来
+ * 就在跳过之列。
+ *
+ * 所以判据是**位置**而不是「长得像不像封面」：
+ *
+ * | 媒介 | 标记 |
+ * |---|---|
+ * | 书 / 电影 / 音乐 | `id="mainpic"` 容器里的第一个 `<img>` |
+ * | 游戏 | 没有 `#mainpic`，用 `class="pic"` 容器里的第一个 `<img>` |
+ *
+ * 游戏那条是实测出来的：`www.douban.com/game/N/` 用的是另一套模板。**不能退回到
+ * 「页面上第一个 doubanio 图片」**——游戏页上第一个恰好是界面雪碧图
+ * （`/f/shire/.../pics/new_menu.gif`），那样每个游戏都会存下一张同样的小图标。
+ *
+ * ## 抽不到就说抽不到，但要分清是哪一种抽不到
+ *
+ * 两种情况长得一样、含义完全相反：
+ *
+ * - **`placeholder`**：豆瓣自己显示的占位图（页面上写着「上传海报图片」）。这个
+ *   作品**本来就没有封面**，什么都没坏。实测 2916 个作品详情页里有 7 个是这样。
+ * - **`not_found`**：连容器都没找到。这多半意味着**豆瓣改版了**，是要报警的那种。
+ *
+ * 混成一个「没找到封面」，那 7 条正常情况就会变成天天出现的噪音，而真正的改版
+ * 信号会淹死在里面。
+ *
+ * 无论哪种都**不猜**：猜一张回来会静默地把错误的图片存进档案。
+ *
+ * @param {string} html
+ * @returns {{url: string | null, reason: 'ok' | 'placeholder' | 'not_found'}}
+ */
+export function extractCoverImage(html) {
+  if (typeof html !== 'string') return { url: null, reason: 'not_found' };
+  let sawContainer = false;
+  for (const container of [/id="mainpic"/, /class="[^"]*\bpic\b[^"]*"/]) {
+    const at = container.exec(html);
+    if (!at) continue;
+    sawContainer = true;
+    // 只在容器后面一小段里找，避免跨过容器边界抓到下一块的图。
+    const window = html.slice(at.index, at.index + 800);
+    const img = /<img[^>]+src="(https:\/\/[^"]+)"/i.exec(window);
+    if (!img) continue;
+    if (isCatalogImage(img[1])) return { url: img[1], reason: 'ok' };
+    // 容器在、图也在，但那张图是豆瓣的静态资源 —— 占位图就长这样。
+    if (PLACEHOLDER_IMAGE.test(img[1])) return { url: null, reason: 'placeholder' };
+  }
+  return { url: null, reason: sawContainer ? 'placeholder' : 'not_found' };
+}
+
+/**
+ * 「这个作品没有海报」时豆瓣塞进来的那张图。
+ *
+ * 走 `/cuphead/`（新版界面的静态资源目录），所以 `isCatalogImage` 本来就会挡掉它
+ * ——这里只是为了把「没有海报」与「找不到海报」区分开。
+ */
+const PLACEHOLDER_IMAGE = /\/(cuphead|f)\//i;
+
+/**
+ * 这个 URL 值不值得作为目录图片存下来。
+ *
+ * 挡掉的是界面资源：雪碧图、图标、字体、CSS 里引的东西。它们不是内容，而且每页
+ * 都一样——存下来只是把同一张 `new_menu.gif` 复制几千遍。
+ *
+ * @param {string} url
+ */
+function isCatalogImage(url) {
+  if (!/^https:\/\/[a-z0-9.]*doubanio\.com\//i.test(url)) return false;
+  // /f/ 是前端静态资源，/cuphead/ 是新版界面的静态资源，/icon/ 是用户头像。
+  if (/\/(f|cuphead)\/|\/icon\//i.test(url)) return false;
+  return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(url);
+}
+
+/**
+ * 图片响应的判定。
+ *
+ * ## 为什么不能复用 classifyResponse
+ *
+ * 那套判定的核心是**结构锚点**——页面里有没有该有的东西。图片没有结构，把一份
+ * JPEG 的字节当文本去跑那些正则，得到的判断没有意义。
+ *
+ * 收窄成规范 §6.6.1 的两条：`Content-Type` 是 `image/*`，且载荷非空。
+ *
+ * ## 收到 HTML 是最要紧的那种情况
+ *
+ * 豆瓣以 HTTP 200 返回封锁页是这个项目反复处理的既有事实，图片请求没有理由被
+ * 豁免。请求一张 JPEG 却收到 `text/html`，几乎必然是封锁页或登录页穿着图片 URL
+ * 的外衣回来了——**那时候必须走 HTML 那套判定**，否则档案里会多出一堆标着 ok、
+ * 内容却是「有异常请求」的「图片」。
+ *
+ * @param {object} input
+ * @param {string} input.finalUrl
+ * @param {number} input.status
+ * @param {string | null | undefined} input.contentType
+ * @param {number} input.byteLength
+ * @param {string} [input.bodyText]  只在收到 HTML 时用得上
+ * @returns {Classification}
+ */
+export function classifyAsset({ finalUrl, status, contentType, byteLength, bodyText = '' }) {
+  const ct = (contentType ?? '').split(';')[0].trim().toLowerCase();
+
+  // 收到网页 → 交给 HTML 那套判定，它认得封锁页与登录页。
+  if (ct.startsWith('text/html')) {
+    const cls = classifyResponse({
+      finalUrl,
+      status,
+      bodyText,
+      route: { frameAnchors: [] },
+    });
+    return {
+      ...cls,
+      // 就算 HTML 那套说不出问题，也**不能**判 ok：我们要的是图片，拿回来的是网页。
+      verdict: cls.verdict === 'ok' ? null : cls.verdict,
+      reasons: [...cls.reasons, '请求图片却收到 text/html'],
+    };
+  }
+
+  /** @type {string[]} */
+  const reasons = [];
+  if (status !== 200) {
+    reasons.push(`HTTP ${status}`);
+    return { verdict: status === 404 ? 'gone' : status === 403 ? 'blocked' : null, reasons, itemCount: null };
+  }
+  if (byteLength === 0) {
+    reasons.push('载荷为零长度——0 字节的 200 不是图片');
+    return { verdict: null, reasons, itemCount: null };
+  }
+  if (!ct.startsWith('image/')) {
+    reasons.push(`Content-Type 不是图片：${ct || '（缺失）'}`);
+    return { verdict: null, reasons, itemCount: null };
+  }
+  reasons.push(`${ct}，${byteLength} 字节`);
+  return { verdict: 'ok', reasons, itemCount: null };
+}
+
+/**
  * 抽出本页所有条目 ID，供跨页去重与停滞检测。
  *
  * 这属于「为了推进抓取而必须做的结构抽取」——只进 frontier，不构成 bundle

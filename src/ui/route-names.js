@@ -52,6 +52,7 @@ const FIXED = {
   'broadcast.timeline': '广播',
   'profile.overview': '个人主页',
   'interest.item': '作品详情页',
+  'asset.subject_cover': '作品封面图',
   'diary.list': '日记',
   'review.list': '影评 / 书评',
   'photo.album_list': '相册',

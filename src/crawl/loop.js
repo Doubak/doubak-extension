@@ -25,12 +25,14 @@
 
 import {
   classifyResponse,
+  classifyAsset,
   RollingSize,
   profileForRoute,
   extractItemIds,
   extractItemTimes,
   extractClaimedCount,
   extractSubjectLinks,
+  extractCoverImage,
 } from './classifier.js';
 import { SessionError } from './session.js';
 import { TransportError } from './errors.js';
@@ -363,7 +365,8 @@ export class CrawlLoop {
     let res;
     try {
       res = await this._transport.fetch(item.url, {
-        referer: route.referer,
+        // 条目自带的优先：派生出来的条目（封面图）各有各的来源页。
+        referer: item.referer ?? route.referer,
         withCk: route.surface === 'api',
       });
     } catch (err) {
@@ -372,18 +375,34 @@ export class CrawlLoop {
 
     // ── 2. 判定
     const sizes = this._sizeFor(item.routeKey);
-    const cls = profile
-      ? classifyResponse({
-          finalUrl: res.finalUrl,
-          status: res.status,
-          bodyText: res.bodyText,
-          route: profile,
-          sizeStats: sizes.stats(),
-        })
-      : // 没有判定描述的路线（比如作品详情页）只做最基本的判断
-        { verdict: res.status === 200 ? 'ok' : null, reasons: ['该路线没有判定描述'], itemCount: null };
+    const contentType = res.headers.find(([k]) => k.toLowerCase() === 'content-type')?.[1];
 
-    if (cls.verdict === 'ok') sizes.add(res.bodyText.length);
+    let cls;
+    if (route.surface === 'asset') {
+      // 图片没有结构锚点，判定只能看 Content-Type 与字节数（规范 §6.6.1）。
+      cls = classifyAsset({
+        finalUrl: res.finalUrl,
+        status: res.status,
+        contentType,
+        byteLength: res.body.length,
+        bodyText: res.bodyText,
+      });
+    } else if (profile) {
+      cls = classifyResponse({
+        finalUrl: res.finalUrl,
+        status: res.status,
+        bodyText: res.bodyText,
+        route: profile,
+        sizeStats: sizes.stats(),
+      });
+    } else {
+      // 没有判定描述的路线（比如作品详情页）只做最基本的判断
+      cls = { verdict: res.status === 200 ? 'ok' : null, reasons: ['该路线没有判定描述'], itemCount: null };
+    }
+
+    // 图片的体积分布与页面完全不是一回事，混进同一个滚动统计会把两边都毁掉。
+    // 而图片本来也用不上这条判据（`classifyAsset` 不看 sizeStats）。
+    if (cls.verdict === 'ok' && route.surface !== 'asset') sizes.add(res.bodyText.length);
 
     // ── 3. 写档案（无论判定是什么）
     //
@@ -430,7 +449,7 @@ export class CrawlLoop {
         captureFidelity: this._transport.fidelity,
         httpStatus: res.status,
         headers: res.headers,
-        contentType: res.headers.find(([k]) => k.toLowerCase() === 'content-type')?.[1],
+        contentType,
         body: res.body,
         kind: route.kind ?? 'data',
         parentCaptureId: item.enqueuedBy ?? this._lastCapture.get(item.routeKey) ?? null,
@@ -467,8 +486,20 @@ export class CrawlLoop {
     });
 
     // ── 4. 会话复核（分类器看不出账号切换）
+    //
+    // **图片跳过这一步。** 复核的做法是在响应里找导航栏上的登录状态与用户 ID，
+    // 而图片没有导航栏——把一份 JPEG 的字节按 UTF-8 解出来去跑那几条正则，最好的
+    // 情况是白跑（判成 `unknown` 直接返回），最坏的情况是**图片自己的字节里恰好
+    // 出现了那几个模式**（EXIF、内嵌缩略图、任意元数据都可能带文本），于是一张
+    // 图片把整场抓取判成账号被换掉然后停机。
+    //
+    // 一般化地说：**档案的内容不该被当成会话状态来读。** 页面是我们请求的东西，
+    // 二进制载荷是别人给的字节。
+    //
+    // 真正的防线在别处：图片是从**刚刚复核过**的那张详情页上抽出来的，中间隔不了
+    // 几秒；而图片响应本身若变成了 HTML 登录页，`classifyAsset` 已经判掉了。
     try {
-      this._session.verify(res.bodyText);
+      if (route.surface !== 'asset') this._session.verify(res.bodyText);
     } catch (err) {
       if (err instanceof SessionError) {
         // 被打断的路线不许推进水位线：已抓到的数据留在 WARC 里，但下次仍从
@@ -514,6 +545,7 @@ export class CrawlLoop {
       if (!route.pagination) this.stateFor(item.routeKey).recordLeafCapture();
       this._enqueueNextPage(item, route, profile, res, written.captureId, items);
       this._enqueueSubjects(item, res, written.captureId);
+      this._enqueueCover(item, res, written.captureId);
 
       // **单页路线抓到那一页就是走完了，当场标掉。**
       //
@@ -649,6 +681,67 @@ export class CrawlLoop {
         gated: !this._bypassGates && Boolean(target.requires?.length),
       });
     }
+  }
+
+  /**
+   * 从作品详情页派生封面图。
+   *
+   * ## 为什么图片必须进档案
+   *
+   * 不抓的话，档案里每一页的封面都是一个指向 `doubanio.com` 的 URL——**这份备份要
+   * 联网才能看**，而且是要豆瓣还在才能看。那正是这个项目存在的理由所要否定的东西
+   * （DESIGN F-04e）。
+   *
+   * ## 只从作品详情页派生，不从列表页
+   *
+   * 列表页上的缩略图指向的是同一批作品，走详情页这一条路就够了；两边都抓等于把
+   * 同一张封面存两个尺寸。**而广播页上那些 `view/status/small` 也是作品缩略图**，
+   * 同理不在这里处理。
+   *
+   * 用户**自己上传**的图（相册、广播与日记正文内嵌）是另一回事：那是不可替代的，
+   * 该进 `assets-*`，而且它们藏在一段 `<script>` 里的 JSON 中，不是 `<img src>`，
+   * 需要另一个抽取器。目前**尚未实现**。
+   *
+   * @param {object} item      刚抓完的那个条目
+   * @param {object} res
+   * @param {string} captureId
+   */
+  _enqueueCover(item, res, captureId) {
+    if (item.routeKey !== 'interest.item') return;
+    const target = this._routes.get('asset.subject_cover');
+    if (!target) return;
+
+    const { url, reason } = extractCoverImage(res.bodyText);
+    if (!url) {
+      // **抽不到要留痕**，但要分清是哪一种抽不到：`placeholder` 是这个作品本来就
+      // 没有海报（豆瓣显示占位图，实测 2916 个里有 7 个），什么都没坏；`not_found`
+      // 是连容器都没有，多半意味着豆瓣改版了。
+      //
+      // 混成一句话的话，那几条正常情况会变成天天出现的噪音，而真正的改版信号会淹
+      // 死在里面——几年后打开档案发现一片灰框时才知道。
+      if (reason === 'not_found') {
+        this._emit({ type: 'cover_not_found', routeKey: item.routeKey, url: item.url });
+      }
+      return;
+    }
+
+    const ok = this._frontier.enqueue({
+      url,
+      urlKey: urlKey(url),
+      routeKey: 'asset.subject_cover',
+      intent: target.intent,
+      enqueuedBy: captureId,
+      // 叶子：一张图取不到不该连累其他图。
+      ordered: false,
+      priority: target.priority,
+      // **不设 gatedBy。** 它的门是它的来源：封面只可能从一张已经抓到的详情页上
+      // 抽出来，而详情页自己是被门控的。再挂一道门只会让它永远等一个已经开了的闸。
+      gatedBy: null,
+      // Referer 要设成作品页——豆瓣的图片服务对着空 Referer 有时会给别的东西，
+      // 而一个真实浏览器本来就会发这个头（见 transport.js）。
+      referer: item.url,
+    });
+    if (ok) this._emit({ type: 'cover_enqueued', url, from: item.url });
   }
 
   /**
