@@ -217,6 +217,19 @@ export class CrawlLoop {
     }
 
     if (route.pagination && !outstanding) {
+      // 一页都没读成过 ≠ 翻页走岔了。
+      //
+      // 前者是「这条线的第一页就不是 ok」——最常见的原因是这个分类这位用户压根没
+      // 用过、或者豆瓣把它下线了。把它说成「下一页没能入队、大概是被去重挡掉了」
+      // 是**编造一个错误的原因**，而这一行正是给人排查用的。
+      if (state.stall.pagesObserved === 0) {
+        state.markStopped('route_unavailable');
+        state.gaps[state.gaps.length - 1].detail =
+          '这条线一页都没读成过——第一页就不是正常内容。'
+          + '可能是这个分类你没有用过、豆瓣把它下线了，或者那一页被拦了。'
+          + '档案里存着那一页的原样，可以打开看看到底是什么。';
+        return;
+      }
       state.markStopped('next_page_not_queued');
       state.gaps[state.gaps.length - 1].detail =
         '这条线的队列空了，但从没到达停滞终止或下界——说明「下一页」没能入队，'
@@ -280,6 +293,16 @@ export class CrawlLoop {
   async _fetchOne(item) {
     const route = this._routes.get(item.routeKey) ?? {};
     const profile = profileForRoute(item.routeKey);
+
+    // **只要为这条路线发过一次请求，它就必须出现在完整性证据里。**
+    //
+    // `stateFor()` 是懒的，而建状态的那几处（观测一页、记缺口、标停止）**都要求
+    // 判定是 ok 或失败**。于是一条「唯一那页判成 gone/soft404」的路线走的是
+    // `state = 'done'` 那条路，一个状态都没建——收尾时它从 coverage 与 crawl_state
+    // 里**整条消失**，档案里看不出我们试过它。
+    //
+    // 那比写错原因更糟：错的原因至少还能被质疑，消失的路线没人会想起来去问。
+    this.stateFor(item.routeKey);
 
     // ── 1. 取页
     let res;

@@ -21,8 +21,18 @@ const NAV = `<li class="nav-user-account"><a href="/accounts/logout">退出</a>
 <span>示例的账号</span></li><a href="https://www.douban.com/people/example/">主页</a>
 <script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>`;
 
-/** 个人主页：必须能取到数字用户 ID。 */
+/**
+ * 个人主页：必须能取到数字用户 ID。
+ *
+ * `id="db-usr-profile"` 是「某人的个人页」这个外壳，真实页面上一定有（拿一份真实
+ * 档案的 6 张页面量过，个人主页与 5 个分类入口全都有）。判定描述靠它区分真页面与
+ * 封锁页——而豆瓣的封锁页返回的是 200，光看状态码是拦不住的。
+ *
+ * 注意它装的是头像与用户名，**不是**「我看过的影视」那种可增可减的模块：个人主页
+ * 是用户可自定义的，判定绝不能依赖任何分类区块的存在。
+ */
 const PROFILE = `<html><head><title>示例的账号</title></head><body>${NAV}
+<div id="db-usr-profile"><div class="info"><h1>示例</h1></div></div>
 <div class="status-item" data-sid="1" data-uid="82160871">x</div></body></html>`;
 
 function bcPage(n, from = 0) {
@@ -57,9 +67,13 @@ function harness(respond, { batchSize = 5, pacerOptions } = {}) {
   const events = [];
   const fetchImpl = async (url) => {
     calls.push(url);
-    const body = enc.encode(respond(url, n++));
+    // 应答器可以返回字符串，也可以返回 `{status, body}`——后者用于测非 200
+    // 的情形（分类不存在、被下线）。
+    const r = respond(url, n++);
+    const status = typeof r === 'object' && r !== null ? (r.status ?? 200) : 200;
+    const body = enc.encode(typeof r === 'object' && r !== null ? (r.body ?? '') : r);
     return {
-      status: 200,
+      status,
       url,
       headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
       arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
@@ -1277,6 +1291,28 @@ describe('单页路线也要能「走完」', () => {
     assert.equal(cs.gaps[0].reason, 'next_page_not_queued');
     assert.match(cs.gaps[0].detail ?? '', /去重|入队/);
     assert.equal(cs.advanced, false, '走岔了就绝不许推进水位线');
+  });
+
+  test('一页都没读成过 → 说「这条线读不到」，不是「翻页走岔了」', async () => {
+    // 最常见的成因：这个分类这位用户压根没用过，或者豆瓣把它下线了。
+    // 说成「下一页没能入队、大概是被去重挡掉了」等于**编造一个错误的原因**，
+    // 而这一行正是给人排查用的。
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('music.douban.com')) return { status: 404, body: '<html>没有这个页面</html>' };
+      return bcPage(0);
+    }, { batchSize: 50 });
+    await runner.start({ username: 'example', mediums: ['music'], includeCatalog: false });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    const m = await runner.finish('aborted');
+    const cs = m.crawl_state.find((r) => r.route_key === 'interest.music.collect');
+    assert.ok(cs, '发过请求的路线必须出现在完整性证据里，不能整条消失');
+    const reasons = cs.gaps.map((g) => g.reason);
+    assert.equal(reasons.includes('next_page_not_queued'), false, '别把「读不到」说成「走岔了」');
+    assert.ok(reasons.includes('route_unavailable'), `实际：${JSON.stringify(cs.gaps)}`);
+    assert.match(cs.gaps.find((g) => g.reason === 'route_unavailable').detail ?? '', /没有用过|下线|拦/);
+    assert.equal(cs.advanced, false, '读不到就绝不许推进水位线');
   });
 
   test('真的被打断（还有活没干完）仍然记 aborted', async () => {

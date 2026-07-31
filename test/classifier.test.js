@@ -572,3 +572,94 @@ describe('声称数量：豆瓣自己写在标题里的那个数', () => {
     assert.equal(extractClaimedCount('<h1>我的动态</h1>', bc), null);
   });
 });
+
+describe('个人主页是**用户可自定义的**，判定不能依赖分类区块', () => {
+  /**
+   * 每个人的 `douban.com/people/<id>/` 长得都不一样：有人有「我看过的影视」区块，
+   * 有人把它关了；显示哪些模块、什么顺序都能改。
+   *
+   * 拿一份真实档案的 6 张页面量过（个人主页 + 5 个分类入口，含 `location/people`
+   * 那个最不一样的舞台剧入口），这些标志每一张都有：
+   *
+   *     _GLOBAL_NAV、USER_ID、db-global-nav、nav-user-account、db-usr-profile
+   *
+   * 而「我看过的影视」这类区块**只出现在个人主页上**——那正是可自定义的部分。
+   */
+  const p = profileForRoute('profile.overview');
+
+  const shell = (inner) => `<html><body>
+    <div id="db-global-nav"><li class="nav-user-account"><span>示例的账号</span>
+    <a href="/accounts/logout">退出</a></li></div>
+    <div id="db-usr-profile"><div class="info"><h1>示例</h1></div></div>
+    ${inner}</body></html>`;
+
+  test('五个分类入口共用同一份判定描述', () => {
+    for (const m of ['movie', 'book', 'music', 'game', 'drama']) {
+      assert.equal(profileForRoute(`profile.category_entry.${m}`), p, m);
+    }
+  });
+
+  test('一个分类区块都没有的极简主页照样判 ok', () => {
+    // 这是那位「把所有模块都关掉」的用户。页面抓到了，就不该判成故障。
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/people/someone/',
+      status: 200,
+      bodyText: shell(''),
+      route: p,
+    });
+    assert.equal(r.verdict, 'ok', JSON.stringify(r.reasons));
+  });
+
+  test('有一堆分类区块的主页也判 ok', () => {
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/people/someone/',
+      status: 200,
+      bodyText: shell('<div id="movie">我看过的影视</div><div id="book">我读过的书</div>'),
+      route: p,
+    });
+    assert.equal(r.verdict, 'ok');
+  });
+
+  test('判定描述里不含任何分类区块的标志', () => {
+    // 直接钉住这条规则本身：只要有人往里加 `我看过的影视`，测试就红。
+    const src = JSON.stringify([
+      p.urlAnchor?.source, ...(p.frameAnchors ?? []).map((r) => r.source),
+      ...(p.anyFrameAnchors ?? []).map((r) => r.source),
+    ]);
+    for (const bad of ['影视', '读书', '音乐', '游戏', '舞台剧', 'id="movie"', 'id="book"']) {
+      assert.equal(src.includes(bad), false, `判定描述依赖了可自定义的区块：${bad}`);
+    }
+  });
+
+  test('舞台剧入口在 location/people 下 —— URL 判据要认得', () => {
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/location/people/someone/drama/',
+      status: 200,
+      bodyText: shell(''),
+      route: p,
+    });
+    assert.equal(r.verdict, 'ok');
+  });
+
+  test('**封锁页判不出来，绝不判 ok** —— 豆瓣的封锁页返回的是 200', () => {
+    // 没有判定描述的话走的是兜底分支「status === 200 就算 ok」，而个人主页是一次
+    // 抓取里的第一张页面：最该被拦住的那一刻反而完全没有拦截。
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/people/someone/',
+      status: 200,
+      bodyText: '<html><body>有异常请求，请稍后再试</body></html>',
+      route: p,
+    });
+    assert.notEqual(r.verdict, 'ok');
+  });
+
+  test('登录页也不判 ok', () => {
+    const r = classifyResponse({
+      finalUrl: 'https://accounts.douban.com/passport/login',
+      status: 200,
+      bodyText: '<html><head><title>登录豆瓣</title></head><body>验证码</body></html>',
+      route: p,
+    });
+    assert.notEqual(r.verdict, 'ok');
+  });
+});

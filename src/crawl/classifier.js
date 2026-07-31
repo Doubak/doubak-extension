@@ -396,6 +396,42 @@ export const ROUTE_PROFILES = {
     timeAnchor: /class="created_at"[^>]*title="([^"]+)"/g,
   },
   /**
+   * 个人主页与各分类入口页。
+   *
+   * ## 只认与版式无关的标志
+   *
+   * **个人主页是用户可自定义的**：有人有「我看过的影视」区块，有人没有；顺序、
+   * 显示哪些模块都能改。所以判定绝不能依赖任何分类区块的存在——否则一个把电影
+   * 模块关掉的用户，页面明明抓到了，却会被判成故障。
+   *
+   * 拿一份真实档案的 6 张页面量过（个人主页 + 5 个分类入口，含 `location/people`
+   * 那个最不一样的舞台剧入口），下面这些标志**每一张都有**：
+   *
+   *     _GLOBAL_NAV、USER_ID、db-global-nav、nav-user-account、db-usr-profile
+   *
+   * 而「我看过的影视」这类区块**只出现在个人主页上**——那正是可自定义的部分。
+   *
+   * 取 `db-usr-profile`：它是「某人的个人页」这个外壳，装的是头像与用户名，
+   * 不是那些可增可减的模块。
+   *
+   * ## 为什么必须有一份判定描述
+   *
+   * 没有的话走的是兜底分支——`status === 200` 就算 `ok`。而**豆瓣的封锁页返回的
+   * 就是 200**。个人主页又是一次抓取里的第一张页面，于是最该被拦住的那一刻反而
+   * 完全没有拦截：封锁页会被存成 `ok`，路线被标成「连续 ✔」，产出一份假的完整性
+   * 声明。
+   *
+   * 判错方向的代价是不对称的：判不出来只是多存一页待复核，判成 ok 是永久的谎。
+   */
+  'profile.page': {
+    urlAnchor: /douban\.com\/(?:location\/)?people\//,
+    // 一个就够，但**缺一不可**：这是「这确实是某人的个人页」的证据。
+    frameAnchors: [/id="db-usr-profile"/],
+    // 没有条目、没有时间、没有声明数量——这几张页面只为身份与存档而抓。
+    claimedCount: null,
+  },
+
+  /**
    * 作品详情页。**占真实档案九成体积，也是抓取的最后一个阶段。**
    *
    * ## 为什么必须有这份描述
@@ -547,6 +583,10 @@ export function profileForRoute(routeKey) {
   if (ROUTE_PROFILES[routeKey]) return ROUTE_PROFILES[routeKey];
   if (routeKey.startsWith('interest.') && routeKey !== 'interest.item') {
     return ROUTE_PROFILES['interest.list'];
+  }
+  // 个人主页与各分类入口页共用一份。见 `profile.page` 上的说明。
+  if (routeKey === 'profile.overview' || routeKey.startsWith('profile.category_entry.')) {
+    return ROUTE_PROFILES['profile.page'];
   }
   return null;
 }

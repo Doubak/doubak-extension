@@ -64,6 +64,7 @@ const GAP_REASONS = {
   user_paused: '你手动暂停了',
   write_failed: '写入档案时出错',
   next_page_not_queued: '抓取自己走岔了：「下一页」没能入队',
+  route_unavailable: '这条线一页都没读成过',
   no_items_observed: '页面声称有条目，但一个都没抽到',
 };
 
