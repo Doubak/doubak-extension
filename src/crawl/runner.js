@@ -437,6 +437,9 @@ export class CrawlRunner {
         // 旧 checkpoint 没记这个字段，所以要能从 URL 反推——不然一份升级前写下的
         // 半成品档案一恢复就从头重抓。
         cursor: it.cursor ?? cursorFromUrl(it.url, def),
+        // 派生条目自带的 Referer（封面图指向它所在的作品页）。恢复时算不出来——
+        // 那个作品页是谁，只有入队的那一刻知道。见 buildCheckpoint 里的说明。
+        referer: it.referer ?? null,
       });
     }
     // 每条路线按 checkpoint 里的游标续上

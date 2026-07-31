@@ -250,6 +250,15 @@ export function buildCheckpoint({
         // **静默停住**、永远等不到停滞终止、收尾时被记成 aborted），要么把已经
         // 走过的页码再走一遍。两种都坏。
         cursor: it.cursor ?? null,
+        // **Referer 也必须跟着走。**
+        //
+        // 大部分条目的 Referer 由路线定义统一给，恢复时照样能算出来。**派生条目
+        // 不行**：一张封面图的 Referer 是它所在的那个作品页，每条都不一样，而
+        // 恢复只看得到这张图自己的 URL——那个作品页是谁，只有入队的那一刻知道。
+        //
+        // 丢了它，被打断过的抓取里那些图会带着空 Referer 去取，而没被打断的不会。
+        // 也就是**同一个 URL 的行为取决于中途有没有崩过** —— 最难发现的那类差异。
+        referer: it.referer ?? null,
       })),
     rate_state: pacer.serialize(),
   };

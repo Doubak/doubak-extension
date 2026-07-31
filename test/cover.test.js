@@ -26,6 +26,7 @@ import { homedir } from 'node:os';
 import { extractCoverImage, classifyAsset } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { Frontier } from '../src/crawl/frontier.js';
+import { buildCheckpoint } from '../src/crawl/run-store.js';
 import { CrawlLoop } from '../src/crawl/loop.js';
 import { Transport } from '../src/crawl/transport.js';
 import { Pacer, RequestGate } from '../src/crawl/pacing.js';
@@ -209,22 +210,56 @@ describe('路线定义', () => {
 });
 
 describe('每个条目自己的 Referer', () => {
-  test('入队时带上，并且能挺过一次崩溃恢复', () => {
-    // 封面的 Referer 是**它所在的那个作品页**，每条都不一样，没法由路线定义统一给。
-    // 而 checkpoint 恢复若把它丢了，恢复之后取的图就带着空 Referer——一种只在
-    // 「抓了一半被打断」时才出现的差异，最难发现的那类。
+  const REFERER = 'https://movie.douban.com/subject/1292052/';
+
+  /** 一条待抓的封面图。 */
+  function pendingCover() {
     const f = new Frontier();
     f.enqueue({
       url: 'https://img1.doubanio.com/x.jpg',
       urlKey: 'https://img1.doubanio.com/x.jpg',
       routeKey: 'asset.subject_cover',
       intent: 'asset.image.catalog_thumbnail',
-      referer: 'https://movie.douban.com/subject/1292052/',
+      ordered: false,
+      referer: REFERER,
     });
-    assert.equal(f.snapshot()[0].referer, 'https://movie.douban.com/subject/1292052/');
+    return f;
+  }
 
-    const restored = Frontier.restore(f.snapshot());
-    assert.equal(restored.snapshot()[0].referer, 'https://movie.douban.com/subject/1292052/');
+  test('入队时带上', () => {
+    assert.equal(pendingCover().snapshot()[0].referer, REFERER);
+  });
+
+  test('**必须挺过 checkpoint 这一趟**，不只是内存里的 restore', () => {
+    // 这条测试原来测的是 `Frontier.restore(f.snapshot())`——**而暂停/恢复根本
+    // 不走那条路**。真实路径是 `buildCheckpoint()` 把条目逐字段摊成 JSON，
+    // `CrawlRunner.resume()` 再逐字段读回来，两处都是白名单。写完那条测试它就
+    // 绿了，而 referer 在真实路径上是**丢的**（实测确认过）。
+    //
+    // 后果：被打断过的抓取里那些图带着空 Referer 去取，没被打断的不会——同一个
+    // URL 的行为取决于中途有没有崩过。
+    const cp = buildCheckpoint({
+      bundleId: '20260801T000000Z-aaaaaa',
+      frontier: pendingCover(),
+      pacer: new Pacer({}),
+      routes: new Map(),
+      lastCaptureId: null,
+      pauseReason: 'user_paused',
+    });
+
+    // ① 写得出去
+    const onDisk = JSON.parse(JSON.stringify(cp)); // checkpoint 是要落成 JSON 的
+    assert.equal(onDisk.frontier[0].referer, REFERER, 'checkpoint 里丢了 referer');
+
+    // ② 读得回来。`CrawlRunner.resume()` 那一侧也是**白名单**——逐字段重建条目，
+    //    漏一个不会报错，只会静默地少一样东西。在这里照抄一份来断言等于测我自己的
+    //    副本，所以改成盯真正那份源码。
+    const src = readFileSync(new URL('../src/crawl/runner.js', import.meta.url), 'utf-8');
+    assert.match(
+      src,
+      /referer: it\.referer/,
+      'CrawlRunner.resume() 重建条目时没把 referer 读回来',
+    );
   });
 
   test('没给就是 null，不是 undefined', () => {
