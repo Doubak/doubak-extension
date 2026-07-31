@@ -68,6 +68,23 @@ const GAP_REASONS = {
   no_items_observed: '页面声称有条目，但一个都没抽到',
 };
 
+/**
+ * 后端正在做的那件事 → 界面上说什么。
+ *
+ * 键是全局互斥锁的持有者名字（`Exclusive` 的 `holder`）。这些状态**没有 runner
+ * 也没有 checkpoint**——开工要先确认账号，那是两次真实请求、要过节奏闸门，可能
+ * 好几秒。照着「有没有 runner」渲染的话，那几秒里只能说「没有进行中的抓取」，
+ * 而用户刚点了开始。
+ *
+ * 值：[标题, 说明]。
+ */
+const BUSY_COPY = {
+  开始抓取: ['正在确认账号…', '要先抓一次个人主页取到数字用户 ID，并确认登录状态。这一步也走正常的请求节奏，可能要几秒。'],
+  恢复抓取: ['正在恢复…', '要先修好上次没写完的段尾，再确认登录状态还在。'],
+  演练: ['正在演练…', '零网络请求，只走一遍真实链路。'],
+  抓取: ['正在抓取…', ''],
+};
+
 const VERDICT_NAMES = {
   ok: '正常',
   blocked: '被限制',
@@ -255,7 +272,17 @@ async function refresh() {
       const [cls, title, why, action] = PAUSE_COPY[r.stoppedBy] ??
         ['warn', '抓取已停下', `原因：${r.stoppedBy}`, '继续'];
       setState(cls, title, why);
-      setActions(action ? [[action, async () => { await send({ type: 'resume' }); refresh(); }]] : []);
+      setActions(action ? [[action, async () => {
+        // 恢复同样要好几秒（修段尾 + 确认登录状态），同样先给个兜底状态。
+        pendingCommand = '恢复抓取';
+        refresh();
+        try {
+          await send({ type: 'resume' });
+        } finally {
+          pendingCommand = null;
+        }
+        refresh();
+      }]] : []);
       renderFailures(r.failures ?? []);
       renderRoutes(r.routes ?? []);
       return;
@@ -283,12 +310,42 @@ async function refresh() {
     const [cls, title, why, action] = PAUSE_COPY[s.checkpoint.pause_reason] ??
       ['warn', '抓取已停下', `原因：${s.checkpoint.pause_reason}`, '继续'];
     setState(cls, title, why);
-    setActions(action ? [[action, async () => { await send({ type: 'resume' }); refresh(); }]] : []);
+    setActions(action ? [[action, async () => {
+        // 恢复同样要好几秒（修段尾 + 确认登录状态），同样先给个兜底状态。
+        pendingCommand = '恢复抓取';
+        refresh();
+        try {
+          await send({ type: 'resume' });
+        } finally {
+          pendingCommand = null;
+        }
+        refresh();
+      }]] : []);
     renderRoutes([]);
     return;
   }
 
   renderFailures([]);
+
+  // **后端正在忙，只是还没有 runner。**
+  //
+  // 开工要先确认账号（两次真实请求，过节奏闸门，好几秒）。这段时间既没有 runner
+  // 也没有 checkpoint，照着状态渲染就只能说「没有进行中的抓取」——而用户刚点了开始。
+  //
+  // 早先的做法是点下去先本地 `setState('run', '正在确认账号…')`，但那是**界面自己
+  // 编的状态**：两秒一次的轮询读到真实状态之后立刻把它盖掉，于是画面在
+  // 「正在确认账号…」→「没有进行中的抓取」→（很久之后）「正在抓取」之间跳。
+  // 它也活不过面板刷新——换个标签页回来就什么都看不到了。
+  //
+  // 现在这个状态由**做事的那一端**报出来（全局互斥锁的持有者），界面只是读它。
+  const busy = s.busyWith ?? pendingCommand;
+  if (busy) {
+    const [title, why] = BUSY_COPY[busy] ?? ['正在处理…', ''];
+    setState('run', title, why);
+    setActions([]); // 这时候不给「开始抓取」——按了也只会撞上互斥锁
+    return;
+  }
+
   setState('idle', '没有进行中的抓取', '请求全部来自你自己的浏览器和 IP。cookie 不会发送到任何地方。');
   // **不清空进度表。** 抓完之后立刻变回「还没有开始」，等于把刚跑完那一次的结果扔了
   // ——而那正是用户此刻最想看的东西。改成显示上一份档案的 crawl_state：那是
@@ -308,9 +365,21 @@ async function refresh() {
     void showPreflight();
   }
   setActions([['开始抓取', async () => {
-    setState('run', '正在确认账号…');
-    const r = await send({ type: 'start' });
-    if (!r?.ok) setState('err', '无法开始', r?.error ?? '');
+    // `pendingCommand` 只是**开口那一小段**的兜底：从点下去到 offscreen 真正拿到
+    // 锁之间（可能还要先把 offscreen 建起来），后端还报不出 `busyWith`。
+    // 一旦它报得出来，就以它为准——见上面 `busy` 那一行。
+    pendingCommand = '开始抓取';
+    refresh();
+    try {
+      const r = await send({ type: 'start' });
+      if (!r?.ok) {
+        pendingCommand = null;
+        setState('err', '无法开始', r?.error ?? '');
+        return;
+      }
+    } finally {
+      pendingCommand = null;
+    }
     refresh();
   }]]);
 
@@ -437,6 +506,17 @@ function setCell(td, text, muted = false) {
  */
 let preflightShown = false;
 let lastRunShown = false;
+
+/**
+ * 面板刚发出去、后端还没来得及报出来的那条命令。
+ *
+ * **只是开口那一小段的兜底**：从点下去到 offscreen 真正拿到互斥锁之间（可能还要先
+ * 把 offscreen 建起来），`busyWith` 还是 null。一旦后端报得出来就以后端为准——
+ * 界面自己编的状态活不过刷新，也会被轮询盖掉。
+ *
+ * @type {string | null}
+ */
+let pendingCommand = null;
 
 /**
  * 重新渲染**当前打开的那个标签页**。

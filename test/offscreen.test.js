@@ -17,6 +17,7 @@ import { serializeScope } from '../src/offscreen/host.js';
 import { handleOpfsRpc, WRITE_OPS } from '../src/storage/opfs-rpc.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { PAUSE_REASONS } from '../src/crawl/resume-policy.js';
+import { readRepoFile } from './helpers/fake-dom.js';
 
 /** offscreen 那侧的还原逻辑。与 offscreen.js 里的 reviveScope 同构。 */
 function reviveScope(options = {}) {
@@ -266,6 +267,38 @@ describe('通知去重', () => {
     } finally {
       if (saved) Object.defineProperty(globalThis, 'chrome', saved);
       else delete globalThis.chrome;
+    }
+  });
+});
+
+describe('「正在做什么」由做事的那一端报出来', () => {
+  /**
+   * 开工要先确认账号——两次真实请求、要过节奏闸门，可能好几秒。这段时间既没有
+   * runner 也没有 checkpoint，界面照着状态渲染就只能说「没有进行中的抓取」，
+   * 而用户刚点了开始。
+   *
+   * 让界面自己记一个乐观状态是行不通的：两秒一次的轮询读到真实状态之后立刻把它
+   * 盖掉（那正是报上来的现象），而且它活不过面板刷新。所以状态要从后端来。
+   */
+
+  test('offscreen 的 status 把锁的持有者带出来', async () => {
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    assert.match(src, /busyWith:\s*lock\.holder/);
+  });
+
+  test('background 把它透传给界面 —— 断在这里就等于没做', async () => {
+    // 这一层真的漏过：offscreen 报了，background 的 status 分支没带上。
+    const src = await readRepoFile('src/background.js');
+    assert.match(src, /busyWith:\s*st\?\.busyWith/);
+  });
+
+  test('每个会占锁的操作都有对应的界面说法', async () => {
+    const off = await readRepoFile('src/offscreen/offscreen.js');
+    const panel = await readRepoFile('src/ui/panel.js');
+    const holders = [...off.matchAll(/lock\s*\n?\s*\.?run\(\s*'([^']+)'/g)].map((m) => m[1]);
+    assert.ok(holders.length >= 3, `没找到几个锁的持有者：${holders}`);
+    for (const h of new Set(holders)) {
+      assert.ok(panel.includes(`${h}:`), `锁「${h}」在界面上没有说法，会退回「没有进行中的抓取」`);
     }
   });
 });

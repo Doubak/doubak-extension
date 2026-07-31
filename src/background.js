@@ -282,6 +282,15 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
             running: sup.running,
             checkpoint: cp,
             runner: st?.status ?? { active: false },
+            // **正在做什么**（全局互斥锁的持有者）。
+            //
+            // 开工要先确认账号，那是两次真实请求、要过节奏闸门，可能好几秒。这段
+            // 时间里既没有 runner 也没有 checkpoint——界面照着状态渲染的话只能说
+            // 「没有进行中的抓取」，而用户刚点了开始。
+            //
+            // 让它从**做事的那一端**报出来，而不是让界面自己记一个乐观状态：
+            // 后者会被两秒一次的轮询覆盖掉（那正是报上来的现象），也活不过面板刷新。
+            busyWith: st?.busyWith ?? null,
           });
           break;
         }

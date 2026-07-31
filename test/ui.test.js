@@ -285,6 +285,146 @@ describe('面板脚本', () => {
     }
   });
 
+  test('确认账号那几秒不许显示成「没有进行中的抓取」', async () => {
+    // 报上来的：点开始 → 「正在确认账号」→ 退回「没有进行中的抓取」→ 很久之后
+    // 才变成「正在抓取」。中间那一跳是两秒一次的轮询读到真实状态之后盖掉了界面
+    // 自己编的乐观状态。
+    //
+    // 开工要先抓一次个人主页确认账号，那是两次真实请求、要过节奏闸门。
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          // 既没有 runner 也没有 checkpoint——但锁被「开始抓取」占着
+          return { ok: true, running: false, checkpoint: null,
+            runner: { active: false }, busyWith: '开始抓取' };
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      const s = dom.byId.get('state').textContent;
+      assert.match(s, /确认账号/);
+      assert.equal(/没有进行中的抓取/.test(s), false);
+
+      // 轮询再来一次也不许跳回去
+      await dom.tick();
+      assert.match(dom.byId.get('state').textContent, /确认账号/);
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('后端忙着的时候不给「开始抓取」按钮 —— 按了也只会撞上互斥锁', async () => {
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return { ok: true, running: false, checkpoint: null,
+            runner: { active: false }, busyWith: '开始抓取' };
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      assert.equal(dom.byId.get('actions').textContent.includes('开始抓取'), false);
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('界面上不出现锁的内部名字', async () => {
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return { ok: true, running: false, checkpoint: null,
+            runner: { active: false }, busyWith: '演练' };
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      // 演练有自己的说法，不该直接把锁的名字打上去
+      assert.match(dom.byId.get('state').textContent, /演练/);
+      assert.match(dom.byId.get('state').textContent, /零网络请求/);
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('认不出来的忙碌状态也不许退回「没有进行中的抓取」', async () => {
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return { ok: true, running: false, checkpoint: null,
+            runner: { active: false }, busyWith: '将来加的某件事' };
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      assert.equal(/没有进行中的抓取/.test(dom.byId.get('state').textContent), false);
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('点下去到后端报出忙碌之间的那一小段也不许跳', async () => {
+    // 这是完整的时间线：点开始 → offscreen 还没建起来、锁还没被占（busyWith 是
+    // null）→ 轮询来了一次 → 之后后端才开始报忙。
+    //
+    // 那一小段由 `pendingCommand` 兜底；一旦后端报得出来就以后端为准。
+    let started = false;
+    let releaseStart;
+    const startDone = new Promise((r) => { releaseStart = r; });
+
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: async (msg) => {
+        if (msg.type === 'start') {
+          started = true;
+          await startDone;            // 模拟「确认账号」那几秒
+          return { ok: true, bundleId: 'b' };
+        }
+        if (msg.type === 'status') {
+          // **后端还什么都不知道**：没有 runner、没有 checkpoint、锁也还没占上
+          return { ok: true, running: false, checkpoint: null,
+            runner: { active: false }, busyWith: null };
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      assert.match(dom.byId.get('state').textContent, /没有进行中的抓取/);
+
+      // 点「开始抓取」，不等它完成
+      const btn = [...dom.byId.get('actions').children].find((b) => b.textContent === '开始抓取');
+      assert.ok(btn, '空闲时该有开始按钮');
+      const clicked = btn.onclick();
+      await new Promise((r) => setTimeout(r, 5));
+      assert.ok(started, '命令应当已经发出去了');
+      assert.equal(/没有进行中的抓取/.test(dom.byId.get('state').textContent), false);
+
+      // 轮询在命令还没回来时插进来一次 —— 这正是把状态盖掉的那一下
+      await dom.tick();
+      assert.equal(
+        /没有进行中的抓取/.test(dom.byId.get('state').textContent),
+        false,
+        '轮询把「正在确认账号」盖回了「没有进行中的抓取」',
+      );
+
+      releaseStart();
+      await clicked;
+      // 点击处理器末尾那次 `refresh()` 是不带 await 的，等它落定再拆假 DOM，
+      // 否则它会在全局被还原之后才跑，报 `document is not defined`。
+      await new Promise((r) => setTimeout(r, 20));
+    } finally {
+      dom.restore();
+    }
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。
