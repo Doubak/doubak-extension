@@ -181,13 +181,52 @@ export class CrawlLoop {
    */
   flushRouteEvidence(completedAt = nowRfc3339()) {
     for (const state of this._states.values()) {
-      // 还没结束的路线记为被打断——不许推进水位线。
-      if (!state.contiguous && !state._finished && !state._stopped) {
-        state.markStopped('aborted');
-      }
+      this._settleUnfinished(state);
       this._writer.addCoverage(state.toCoverage());
       this._writer.addCrawlState(state.toCrawlState(this._writer.bundleId, completedAt));
     }
+  }
+
+  /**
+   * 收尾时给还没有结论的路线定性。
+   *
+   * ## 不分页的路线：队列空了就是走完了
+   *
+   * 它没有「下一页」，也就永远等不到停滞检测或到达下界——而那是分页路线仅有的两个
+   * 完成信号。原来一律记成「有 1 处缺口，原因：aborted」，真实档案里 6 条这样的
+   * 路线（个人主页 + 5 个分类入口）全是如此，而它们其实**一次就抓全了**。
+   *
+   * ## 分页的路线：队列空了反而可疑
+   *
+   * 它本该靠停滞检测收尾。队列悄悄空掉说明「下一页」没入成队——最常见的原因是算出
+   * 来的页码早就抓过、被去重挡掉了。那时候记一个**说得出原因**的缺口，而不是笼统的
+   * 「aborted」：后者看起来像被风控打断，会把排查引向完全错误的方向。
+   *
+   * @param {import('./route-state.js').RouteState} state
+   */
+  _settleUnfinished(state) {
+    if (state.contiguous || state._finished || state._stopped) return;
+
+    const route = this._routes.get(state.routeKey) ?? {};
+    const outstanding = this._frontier.hasOutstanding(state.routeKey);
+
+    if (!route.pagination && !outstanding) {
+      // 不分页 + 没有剩活 + 没有缺口 = 真的抓全了
+      if (state.gaps.length === 0) state.markFinished();
+      return;
+    }
+
+    if (route.pagination && !outstanding) {
+      state.markStopped('next_page_not_queued');
+      state.gaps[state.gaps.length - 1].detail =
+        '这条线的队列空了，但从没到达停滞终止或下界——说明「下一页」没能入队，'
+        + '最常见的原因是算出来的页码早就抓过、被去重挡掉了。'
+        + '这不是被风控打断，是抓取自己走岔了。';
+      return;
+    }
+
+    // 还有没做完的活，那就是真的被打断了
+    state.markStopped('aborted');
   }
 
   /** @param {string} routeKey */

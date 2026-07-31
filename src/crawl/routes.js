@@ -133,7 +133,12 @@ export function buildRoutes({
     source: 'archive',
     enumeration: 'full',
     safetyNet: 'contiguity',
-    pagination: { kind: 'page', step: 1, first: 1 },
+    // **没有 pagination。** 个人主页只有一页——注意 `entryUrl` 压根不收 offset。
+    //
+    // 原来这里写着 `{kind:'page', step:1, first:1}`，是假的，而且有实际后果：翻页
+    // 路线只能靠**停滞检测**或**到达下界**才算走完，而这两件事在一张不翻页的页面上
+    // 永远不会发生。于是它抓完唯一那一页之后既没有下一页、也从没被标成走完，收尾时
+    // 被记成「有 1 处缺口，原因：aborted」——真实档案里 6 条这样的路线全是如此。
     entryUrl: () => `https://www.douban.com/people/${enc(username)}/`,
     note: '身份确认（数字用户 ID）必须从这里取——多数页面上没有它',
   });
@@ -149,7 +154,7 @@ export function buildRoutes({
       source: 'archive',
       enumeration: 'full',
       safetyNet: 'contiguity',
-      pagination: { kind: 'page', step: 1, first: 1 },
+      // 同上：分类入口页只有一页，`entryUrl` 也不收 offset。
       entryUrl: () => CATEGORY_ENTRY[medium](username),
     });
   }

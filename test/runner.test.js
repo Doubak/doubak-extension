@@ -1205,3 +1205,88 @@ describe('恢复之后不许倒着翻页 —— 那会伪造出一次「跑完�
     assert.equal(st.contiguous, false);
   });
 });
+
+describe('单页路线也要能「走完」', () => {
+  /**
+   * 真实档案里 6 条路线（个人主页 + 5 个分类入口）全都写着
+   *
+   *     有 1 处缺口。原因：aborted。
+   *
+   * 而它们**一次就抓全了**——那些页面本来就只有一页。
+   *
+   * 成因：路线定义里写着 `pagination: {kind:'page', step:1, first:1}`，而
+   * `entryUrl` 压根不收 offset。分页路线只能靠**停滞检测**或**到达下界**才算走完，
+   * 这两件事在一张不翻页的页面上永远不会发生。
+   */
+
+  test('个人主页与分类入口抓完就是走完了', async () => {
+    const { runner } = harness(broadcastOnly([bcPage(0)]), { batchSize: 50 });
+    await runner.start({ username: 'example', mediums: ['movie'], includeCatalog: false });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    // 这个夹具不给标记列表页，那条线会失败——**无所谓**：连续性证明是逐路线的，
+    // 整场抓取中止不代表每条路线都没跑完。这条测试要的正是这个区分。
+    const m = await runner.finish('aborted');
+    for (const key of ['profile.overview', 'profile.category_entry.movie']) {
+      const cs = m.crawl_state.find((r) => r.route_key === key);
+      assert.ok(cs, `${key} 应当在 crawl_state 里`);
+      assert.deepEqual(cs.gaps, [], `${key} 凭空多出缺口：${JSON.stringify(cs.gaps)}`);
+      assert.equal(cs.contiguous, true, `${key} 抓全了却没被标成连续`);
+    }
+  });
+
+  test('它们的路线定义里不该再有 pagination', () => {
+    // 那个字段是假的：`entryUrl` 不收 offset，写了也翻不了页。
+    const defs = buildRoutes({ username: 'example', includeCatalog: true });
+    for (const d of defs) {
+      if (d.key === 'profile.overview' || d.key.startsWith('profile.category_entry.')) {
+        assert.equal(d.pagination, undefined, `${d.key} 还带着假的 pagination`);
+      }
+    }
+  });
+
+  test('分页路线的队列悄悄空掉 → 说得出原因的缺口，不是笼统的 aborted', async () => {
+    // 「aborted」看起来像被风控打断，会把排查引向完全错误的方向。真实成因通常是
+    // 算出来的下一页早就抓过、被去重挡掉了。
+    //
+    // batchSize 1 + 只跑一批：广播刚抓完第 1 页，第 2 页还在队里、还没停滞终止。
+    const { runner } = harness(broadcastOnly([bcPage(20, 0), bcPage(20, 20)]), { batchSize: 1 });
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    for (let i = 0; i < 10; i++) {
+      await runner.runBatch();
+      const st = runner._run.loop.routeStates.get('broadcast.timeline');
+      if (st && !st._finished) break;
+    }
+
+    // 手动把广播的队列清空，模拟「下一页没入成队」。
+    // `snapshot()` 给的是副本，改它没用——要走真实的 API。
+    const f = runner._run.frontier;
+    let cleared = 0;
+    for (let i = 0; i < 20; i++) {
+      const it = f.next();
+      if (!it) break;
+      f.settle(it, 'ok');
+      if (it.routeKey === 'broadcast.timeline') cleared += 1;
+    }
+    assert.ok(cleared > 0, '得先有待抓的页，这条测试才有意义');
+    assert.equal(f.hasOutstanding('broadcast.timeline'), false);
+
+    const m = await runner.finish('aborted');
+    const cs = m.crawl_state.find((r) => r.route_key === 'broadcast.timeline');
+    assert.equal(cs.gaps.length, 1);
+    assert.equal(cs.gaps[0].reason, 'next_page_not_queued');
+    assert.match(cs.gaps[0].detail ?? '', /去重|入队/);
+    assert.equal(cs.advanced, false, '走岔了就绝不许推进水位线');
+  });
+
+  test('真的被打断（还有活没干完）仍然记 aborted', async () => {
+    const { runner } = harness(broadcastOnly([bcPage(20, 0), bcPage(20, 20)]), { batchSize: 1 });
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+    await runner.runBatch();
+
+    const m = await runner.finish('aborted');
+    const cs = m.crawl_state.find((r) => r.route_key === 'broadcast.timeline');
+    assert.equal(cs.gaps[0].reason, 'aborted');
+  });
+});

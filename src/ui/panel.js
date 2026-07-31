@@ -48,6 +48,25 @@ const STATUS_NAMES = {
   aborted: '中途停下',
 };
 
+/**
+ * 缺口原因的中文说法。
+ *
+ * 这一行原来直接把内部标识打在屏幕上（`aborted`、`fetch_failed`）——界面上不出现
+ * 内部术语是这个项目的明规矩，而这里恰恰是最需要说人话的地方：用户看到「连续性
+ * 未验证」时唯一想知道的就是「为什么」。
+ */
+const GAP_REASONS = {
+  aborted: '抓取中途停下了，这条线还有没抓完的页',
+  fetch_failed: '有页面反复抓不下来',
+  blocked: '被豆瓣限制了',
+  challenge: '豆瓣要求验证',
+  session_expired: '登录状态失效了',
+  user_paused: '你手动暂停了',
+  write_failed: '写入档案时出错',
+  next_page_not_queued: '抓取自己走岔了：「下一页」没能入队',
+  no_items_observed: '页面声称有条目，但一个都没抽到',
+};
+
 const VERDICT_NAMES = {
   ok: '正常',
   blocked: '被限制',
@@ -715,14 +734,22 @@ function renderCoverage(coverage, crawlState, bundleId) {
     g.className = 'card warn';
     const b = document.createElement('b');
     b.textContent = `${routeName(cs.route_key)} · 连续性未验证`;
-    g.append(b, document.createTextNode(
-      `有 ${cs.gaps.length} 处缺口。` +
-      (cs.gaps.some((x) => x.reason === 'no_items_observed')
-        ? '其中有一处是「页面声称有条目，但一个都没抽到」——那通常意味着豆瓣改版了，' +
-          '抓取的终止判断因此失效。这一页已经如实存进档案，可据此重新校准。'
-        : `原因：${cs.gaps.map((x) => x.reason).join('、')}。` +
-          '这段区间的内容可能不完整，下次抓取会从上次的下界重走。'),
-    ));
+    // 说人话，并且**把 detail 带出来**——写 detail 的地方正是那些「原因一个词说
+    // 不清」的情形（比如「下一页没能入队」），而那句话原本只存在档案里没人看得到。
+    const lines = [`有 ${cs.gaps.length} 处缺口。`];
+    if (cs.gaps.some((x) => x.reason === 'no_items_observed')) {
+      lines.push(
+        '其中有一处是「页面声称有条目，但一个都没抽到」——那通常意味着豆瓣改版了，'
+        + '抓取的终止判断因此失效。这一页已经如实存进档案，可据此重新校准。',
+      );
+    } else {
+      const why = [...new Set(cs.gaps.map((x) => GAP_REASONS[x.reason] ?? x.reason))];
+      lines.push(`原因：${why.join('；')}。`);
+      const detail = cs.gaps.find((x) => x.detail)?.detail;
+      if (detail) lines.push(detail);
+      lines.push('这段区间的内容可能不完整，下次抓取会从上次的下界重走。');
+    }
+    g.append(b, document.createTextNode(lines.join('')));
     el.append(g);
   }
 }

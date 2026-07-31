@@ -302,6 +302,20 @@ export class Frontier {
   }
 
   /**
+   * 这条路线还有没有没做完的活（pending / in_flight / failed / awaiting_human）。
+   *
+   * 用来判断**不分页**的路线走完了没有：它没有「下一页」，也就永远等不到停滞检测，
+   * 队列空了就是走完了。
+   *
+   * @param {string} routeKey
+   */
+  hasOutstanding(routeKey) {
+    return this._items.some(
+      (it) => it.routeKey === routeKey && it.state !== 'done' && it.state !== 'terminal_stop',
+    );
+  }
+
+  /**
    * 把「已经抓成功过」的 url_key 记进去重集合，但**不入队**。
    *
    * ## 为什么需要
