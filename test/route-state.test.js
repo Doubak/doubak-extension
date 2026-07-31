@@ -320,3 +320,82 @@ describe('抽取器自检看的是「本次会话抽到过 ID 没有」', () => 
     assert.equal(s.gaps.some((g) => g.reason === 'no_items_observed'), false);
   });
 });
+
+describe('「已回溯到」不能被一条离群的旧条目钉死', () => {
+  /**
+   * 真实数据（20260731T015446Z-d8e1b2 的广播列表，20 页，严格新→旧）：
+   *
+   *     第 9 页  → 2025-12-09
+   *     第 10 页 → 2018-08-18   ← 离群，整页只有这一条这么旧
+   *     第 11 页 → 2025-08-29
+   *
+   * `lowWater` 是全局最小值，从第 10 页起就永远是 2018-08-18。界面上那一列
+   * 于是**再也不动**——而抓取还有一大半没跑完，用户合理地怀疑它卡住了。
+   *
+   * 那个值本身没说谎（我们确实抓到了一条 2018 的），只是它回答的不是
+   * 「抓到哪儿了」。
+   */
+
+  /** 造一页：20 条，都在 `day` 那天，外加 `outlier`（若给）。 */
+  function page(day, outlier) {
+    const times = Array.from({ length: 20 }, (_, i) => `${day} 1${i % 9}:00:00`);
+    if (outlier) times.push(outlier);
+    return times;
+  }
+
+  function crawl(pages) {
+    const s = new RouteState({ routeKey: 'broadcast.timeline', intent: 'b', enumeration: 'bounded' });
+    let n = 0;
+    for (const times of pages) {
+      s.observePage({
+        ids: times.map(() => `id${n++}`), times, captureId: `c${n}`, observedAt: 'x',
+      });
+    }
+    return s;
+  }
+
+  test('离群值钉死 lowWater —— 那是事实，保持原样', () => {
+    const s = crawl([
+      page('2026-01-10'), page('2025-12-09', '2018-08-18 19:13:23'), page('2025-08-29'),
+    ]);
+    assert.match(s.lowWater.iso, /^2018-08-18/, 'lowWater 就该是全局最小值');
+  });
+
+  test('但进度要继续往前走', () => {
+    const s = crawl([
+      page('2026-01-10'), page('2025-12-09', '2018-08-18 19:13:23'), page('2025-08-29'),
+    ]);
+    assert.match(s.progressTime.iso, /^2025-08-29/, `进度被离群值钉住了：${s.progressTime?.iso}`);
+  });
+
+  test('进度只往前不回头 —— 来回跳比不动更让人不安', () => {
+    const s = crawl([page('2026-01-10'), page('2025-08-29'), page('2025-12-09')]);
+    assert.match(s.progressTime.iso, /^2025-08-29/, '进度回头了');
+  });
+
+  test('没有离群值时，进度与最旧那条大致同步', () => {
+    const s = crawl([page('2026-01-10'), page('2025-12-09')]);
+    assert.match(s.progressTime.iso, /^2025-12-09/);
+  });
+
+  test('一页里全是同一天也不出岔子', () => {
+    const s = crawl([page('2026-01-10')]);
+    assert.match(s.progressTime.iso, /^2026-01-10/);
+  });
+
+  test('没有时间的页面不动进度', () => {
+    const s = new RouteState({ routeKey: 'r', intent: 'i', enumeration: 'full' });
+    s.observePage({ ids: ['a'], times: [], captureId: 'c', observedAt: 'x' });
+    assert.equal(s.progressTime, null);
+  });
+
+  test('进度跟着 checkpoint 走 —— 恢复之后不该退回去重数', () => {
+    const s = crawl([page('2026-01-10'), page('2025-12-09')]);
+    const back = RouteState.restore(
+      { routeKey: 'broadcast.timeline', intent: 'b', enumeration: 'bounded' },
+      s.serialize(),
+    );
+    assert.equal(back.progressTime?.iso, s.progressTime.iso);
+    assert.equal(back.lowWater?.iso, s.lowWater.iso);
+  });
+});

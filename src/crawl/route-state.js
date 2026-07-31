@@ -69,6 +69,14 @@ export class RouteState {
      * @type {{iso: string, raw: string, epochMs: number} | null}
      */
     this.lowWater = null;
+    /**
+     * 给人看的**进度**：抓到哪一段时间了。
+     *
+     * 与 `lowWater`（全局最小值）分开，因为一条离群的旧条目就能把后者永久钉死。
+     * 见 `_advanceProgress()`。
+     * @type {{iso: string, raw: string, epochMs: number} | null}
+     */
+    this.progressTime = null;
     /** @type {string[]} 处于水位线那一刻的条目 ID，同秒多条时用于去重 */
     this.highWaterIds = [];
 
@@ -129,6 +137,8 @@ export class RouteState {
     }
 
     let reachedFloor = false;
+    /** @type {Array<{iso: string, raw: string, epochMs: number}>} 本页解析成功的时间 */
+    const parsedTimes = [];
     for (const [i, raw] of times.entries()) {
       let parsed;
       try {
@@ -150,17 +160,64 @@ export class RouteState {
         if (ids[i] && !this.highWaterIds.includes(ids[i])) this.highWaterIds.push(ids[i]);
       }
 
-      // 另一头：本次见过的最旧一条。它是**进度**，每往回翻一页就前进一点。
-      // 同样不假设顺序，取最小值。
+      // 另一头：本次见过的**最旧一条**。这是一句关于档案的事实
+      // （「这份档案往回覆盖到了哪儿」），进 manifest。同样不假设顺序，取最小值。
+      //
+      // **它不适合当进度看**——见下面 `progressTime`。
       if (!this.lowWater || parsed.epochMs < this.lowWater.epochMs) {
         this.lowWater = { iso: parsed.iso, raw: parsed.raw, epochMs: parsed.epochMs };
       }
+
+      parsedTimes.push(parsed);
 
       // 闭区间比较：正好等于下界也算到达。用严格小于会漏掉边界上那一秒的条目。
       if (hasReachedFloor(parsed.epochMs, this._floorEpochMs)) reachedFloor = true;
     }
 
+    this._advanceProgress(parsedTimes);
+
     return { ...progress, reachedFloor };
+  }
+
+  /**
+   * 推进给人看的**进度**：`progressTime`。
+   *
+   * ## 为什么不能直接用 `lowWater`
+   *
+   * `lowWater` 是全局最小值，而**一条离群的旧条目就能把它永久钉死**。真实数据里
+   * 就有：一份 20 页的广播列表严格新→旧，唯独第 10 页里混着一条 2018 年的：
+   *
+   *     第 9 页  → 2025-12-09
+   *     第 10 页 → 2018-08-18   ← 离群
+   *     第 11 页 → 2025-08-29
+   *
+   * 从第 10 页起，界面上的「已回溯到」就一直是 2018-08-18，**再也不动**——而抓取
+   * 还有一大半没跑完。用户看到的是一个卡住的进度，并且合理地怀疑抓取本身卡住了。
+   *
+   * 那个值本身没说谎（我们确实抓到了一条 2018 的），只是它回答的不是「抓到哪儿了」。
+   *
+   * ## 用每页的中位数
+   *
+   * 一条离群值动不了中位数，而页与页之间的中位数仍然稳定递减。再对它取累计最小值，
+   * 保证进度**只往前不回头**——进度条来回跳比不动更让人不安。
+   *
+   * `lowWater` 保持原样进 manifest：抓完之后「这份档案往回覆盖到 X」正是那个全局
+   * 最小值，那时它是对的。两个量回答两个问题，不该合成一个。
+   *
+   * @param {Array<{iso: string, raw: string, epochMs: number}>} times  本页**已解析**的时间
+   */
+  _advanceProgress(times) {
+    // 用主循环解析好的结果，不在这里重新解析：`parseDoubanTimestamp` 解析不了会抛，
+    // 而「解析不了」有它自己的处置（记缺口），不该在这儿被吞掉或炸掉。
+    const parsed = times.filter((t) => t && Number.isFinite(t.epochMs));
+    if (parsed.length === 0) return;
+
+    parsed.sort((a, b) => a.epochMs - b.epochMs);
+    const mid = parsed[Math.floor(parsed.length / 2)];
+
+    if (!this.progressTime || mid.epochMs < this.progressTime.epochMs) {
+      this.progressTime = { iso: mid.iso, raw: mid.raw, epochMs: mid.epochMs };
+    }
   }
 
   /** 记一处缺口。有缺口就不许推进水位线。 */
@@ -249,6 +306,8 @@ export class RouteState {
       high_water_ids: this.highWaterIds,
       low_water_time: this.lowWater?.iso ?? null,
       low_water_raw: this.lowWater?.raw ?? null,
+      progress_time: this.progressTime?.iso ?? null,
+      progress_raw: this.progressTime?.raw ?? null,
       claimed: this.claimed,
       captured_count: this.capturedCount,
       // **缺口一定要交还。** 丢了就等于恢复之后重新声称自己是连续的——
@@ -276,6 +335,7 @@ export class RouteState {
     const mark = (iso, raw) => (iso ? { iso, raw: raw ?? iso, epochMs: Date.parse(iso) } : null);
     s.highWater = mark(saved.high_water_time, saved.high_water_raw);
     s.lowWater = mark(saved.low_water_time, saved.low_water_raw);
+    s.progressTime = mark(saved.progress_time, saved.progress_raw);
     s.highWaterIds = saved.high_water_ids ?? [];
     s.claimed = saved.claimed ?? null;
     // 计数以 checkpoint 为准；它比从 index 汇总更精确（index 里没有「唯一条目」的概念）。

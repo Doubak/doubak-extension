@@ -425,6 +425,57 @@ describe('面板脚本', () => {
     }
   });
 
+  test('新抓取开始时，「上一次抓取」那行小字必须消失', async () => {
+    // 报上来的：抓着新档案 d40c1d，表格下面还挂着
+    // 「以上是上一次抓取（档案 …d8e1b2）的结果」。关掉标签页再打开就好了——
+    // 那正是这类残留最典型的样子。
+    //
+    // 成因：那行小字原来是 `showLastRun()` 自己 append 的，而 `renderRoutes()`
+    // 为了不闪只在**模式变化**时才重建，同模式下只改单元格，碰不到它。
+    let running = false;
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return running
+            ? {
+                ok: true, running: true,
+                runner: {
+                  active: true, stopped: false, stoppedBy: null, bundleId: 'd40c1d',
+                  intervalMs: 1000, backoffLevel: 0, counts: { done: 1, pending: 0 },
+                  routes: [{ routeKey: 'broadcast.timeline', captured: 581, contiguous: false }],
+                },
+              }
+            : IDLE(msg);
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      // 手工造出 `showLastRun()` 填完之后的样子：表 + 那行小字
+      const routes = dom.byId.get('routes');
+      routes.dataset.mode = 'table';
+      const tbl = dom.document.createElement('table');
+      routes.replaceChildren(tbl);
+      const note = dom.document.createElement('div');
+      note.dataset.role = 'routes-note';
+      note.textContent = '以上是上一次抓取（档案 d8e1b2）的结果，来自它的 manifest。';
+      routes.append(note);
+
+      running = true;
+      await dom.tick();
+
+      assert.ok(routes.textContent.includes('581'), '新抓取的进度该显示出来');
+      assert.equal(
+        routes.textContent.includes('上一次抓取'),
+        false,
+        '还挂着上一份档案的说明，而表格里已经是另一次抓取了',
+      );
+    } finally {
+      dom.restore();
+    }
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。

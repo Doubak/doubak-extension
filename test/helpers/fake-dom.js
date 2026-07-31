@@ -32,6 +32,8 @@ class FakeElement {
   constructor(tag) {
     this.tagName = tag.toUpperCase();
     this.children = [];
+    /** @type {FakeElement | null} `remove()` 要靠它把自己摘下来。 */
+    this.parentNode = null;
     this.dataset = {};
     this.style = { cssText: '', setProperty() {} };
     this.className = '';
@@ -64,21 +66,38 @@ class FakeElement {
   }
 
   append(...nodes) {
-    for (const n of nodes) this.children.push(n);
+    for (const n of nodes) {
+      n.parentNode = this;
+      this.children.push(n);
+    }
   }
 
   appendChild(n) {
+    n.parentNode = this;
     this.children.push(n);
     return n;
   }
 
   replaceChildren(...nodes) {
     this._text = '';
+    for (const c of this.children) if (c.parentNode === this) c.parentNode = null;
+    for (const n of nodes) n.parentNode = this;
     this.children = nodes;
   }
 
+  /**
+   * **真的从父节点上摘下来。**
+   *
+   * 原来只置了一个 `_removed` 标志，谁都没读——于是 `remove()` 之后节点还挂在
+   * 树上，`textContent` 里照样有它。真实 DOM 不是这样，而这种「假的假 DOM」比
+   * 没有测试更坏：它让一条真实存在的 bug 在测试里显得已经修好了。
+   */
   remove() {
-    this._removed = true;
+    const p = this.parentNode;
+    if (!p) return;
+    const i = p.children.indexOf(this);
+    if (i >= 0) p.children.splice(i, 1);
+    this.parentNode = null;
   }
 
   setAttribute(k, v) {
@@ -122,12 +141,27 @@ class FakeElement {
 
 /** @param {FakeElement} el @param {string} sel */
 function matches(el, sel) {
+  // `tag[data-x]`
   const attr = /^(\w+)\[([\w-]+)\]$/.exec(sel);
   if (attr) {
-    const key = attr[2].replace(/^data-/, '');
+    const key = dataKey(attr[2]);
     return el.tagName === attr[1].toUpperCase() && el.dataset[key] !== undefined;
   }
+  // `[data-x="y"]`，可带标签名前缀。界面用它找「表格下面那行小字」。
+  const eq = /^(\w*)\[([\w-]+)=["']?([^"'\]]*)["']?\]$/.exec(sel);
+  if (eq) {
+    // 文本节点没有 tagName / dataset。不带标签名前缀的选择器会走到这里，
+    // 所以要先挡住——真实 DOM 里 querySelector 本来就只看元素。
+    if (!el.dataset) return false;
+    if (eq[1] && el.tagName !== eq[1].toUpperCase()) return false;
+    return el.dataset[dataKey(eq[2])] === eq[3];
+  }
   return el.tagName === sel.toUpperCase();
+}
+
+/** `data-role` → `role`，并把连字符转成驼峰，与真实 `dataset` 一致。 */
+function dataKey(name) {
+  return name.replace(/^data-/, '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 }
 
 class FakeTextNode {

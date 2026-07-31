@@ -394,6 +394,37 @@ async function refresh() {
 }
 
 /**
+ * 表格下面那行小字（「以上是上一次抓取…」）。
+ *
+ * **必须由 `renderRoutes()` 统一管**。原来是 `showLastRun()` 自己往 `#routes` 上
+ * `append` 一个 div——而 `renderRoutes()` 为了不闪，只在**模式变化**时才
+ * `replaceChildren`，同模式下只改单元格。于是新抓取开始、表格从「上一次的结果」
+ * 换成实时数据时，那行小字**原封不动地留在下面**，对着一份完全不同的档案说
+ * 「以上是上一次抓取（档案 …d8e1b2）的结果」。
+ *
+ * 关掉标签页再打开就恢复正常——因为那时 `dataset.mode` 是空的，走了重建那条路。
+ * 「刷新一下就好」正是这类残留最典型的样子。
+ *
+ * @param {string} text  空字符串表示清掉
+ */
+function setRoutesNote(text) {
+  const el = $('routes');
+  let note = el.querySelector('[data-role="routes-note"]');
+  if (!text) {
+    note?.remove();
+    return;
+  }
+  if (!note) {
+    note = document.createElement('div');
+    note.dataset.role = 'routes-note';
+    note.className = 'muted';
+    note.style.fontSize = '12px';
+    el.append(note);
+  }
+  if (note.textContent !== text) note.textContent = text;
+}
+
+/**
  * 各路线进度。
  *
  * ## 为什么不能每次都重建整张表
@@ -409,8 +440,9 @@ async function refresh() {
  * 恰恰是抓取期间唯一的观察窗口。
  *
  * @param {Array<object>} routes
+ * @param {string} [note]  表格下面那行小字。**不传就清掉**——见下。
  */
-function renderRoutes(routes) {
+function renderRoutes(routes, note = '') {
   const el = $('routes');
 
   if (!routes.length) {
@@ -421,6 +453,7 @@ function renderRoutes(routes) {
       el.replaceChildren(document.createTextNode('还没有开始'));
       routeRows.clear();
     }
+    setRoutesNote(note);
     return;
   }
 
@@ -466,11 +499,22 @@ function renderRoutes(routes) {
     // 进度用「已回溯到某日」而不是百分比——豆瓣的计数不可信，拿它当分母会给出
     // 一个看起来特别可信的假数字。
     //
-    // 用 `oldestSeen`（本次最旧的一条）。原来用的是水位线（最新的一条），而列表
-    // 是新→旧，那个值在第一页就定住了——抓了十页日期一动不动，看起来像卡住了。
-    setCell(row.cells[2], r.oldestSeen ? r.oldestSeen.slice(0, 10) : '—', !r.oldestSeen);
+    // 优先用 `progressTime`，退回 `oldestSeen`。
+    //
+    // 原来用的是水位线（最新的一条），而列表是新→旧，那个值在第一页就定住了——
+    // 抓了十页日期一动不动，看起来像卡住了。改用「本次最旧的一条」之后，撞上了
+    // 第二个坑：**一条离群的旧条目就能把它永久钉死**。真实数据里第 10 页混着一条
+    // 2018 年的广播，从那一页起这一列再也不动，而抓取还有一大半没跑完。
+    //
+    // `progressTime` 取每页的中位数再累计取最小：离群值动不了中位数，而它仍然
+    // 只往前不回头。抓完的档案则用 `oldestSeen`——那时「这份档案往回覆盖到 X」
+    // 正是全局最小值，问的是另一个问题。
+    const at = r.progressTime ?? r.oldestSeen;
+    setCell(row.cells[2], at ? at.slice(0, 10) : '—', !at);
     setCell(row.cells[3], r.contiguous ? '✔ 已验证' : '进行中', !r.contiguous);
   }
+
+  setRoutesNote(note);
 
   // 路线只会新增不会消失，但恢复到另一次抓取时整套 key 会换。
   for (const [key, row] of routeRows) {
@@ -560,12 +604,7 @@ async function showLastRun() {
     }));
     if (rows.length === 0) return;
 
-    renderRoutes(rows);
-    const note = document.createElement('div');
-    note.className = 'muted';
-    note.style.fontSize = '12px';
-    note.textContent = `以上是上一次抓取（档案 ${id}）的结果，来自它的 manifest。`;
-    $('routes').append(note);
+    renderRoutes(rows, `以上是上一次抓取（档案 ${id}）的结果，来自它的 manifest。`);
   } catch {
     // 读不出来就维持「还没有开始」。这只是个便利显示，不该让概览页报错。
   }

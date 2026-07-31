@@ -588,6 +588,13 @@ export class CrawlRunner {
         // 像卡住了。两个都报出去，名字直说各自是什么。
         oldestSeen: s.lowWater?.iso ?? null,
         newestSeen: s.highWater?.iso ?? null,
+        // **界面上的「已回溯到」用这个，不用 `oldestSeen`。**
+        //
+        // 后者是全局最小值，一条离群的旧条目就能把它永久钉死——真实数据里第 10 页
+        // 混着一条 2018 年的广播，从那一页起「已回溯到」再也不动，而抓取还有一大半
+        // 没跑完。`progressTime` 取每页的中位数再累计取最小，离群值动不了它。
+        // 见 `RouteState._advanceProgress()`。
+        progressTime: s.progressTime?.iso ?? null,
         contiguous: s.contiguous,
       })),
     };
