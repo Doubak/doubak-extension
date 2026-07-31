@@ -55,6 +55,30 @@ const STATUS_NAMES = {
  * 内部术语是这个项目的明规矩，而这里恰恰是最需要说人话的地方：用户看到「连续性
  * 未验证」时唯一想知道的就是「为什么」。
  */
+/**
+ * 抓取事件在日志里怎么说人话。
+ *
+ * 只翻译那些**用户会问「这是什么」**的。其余的原样显示——内部类型名对排查有用，
+ * 而胡乱翻译反而让人对不上代码。
+ *
+ * @param {object} e
+ * @returns {string | null}
+ */
+function eventNote(e) {
+  if (e.type === 'incremental_rebased' && e.reason === 'renamed') {
+    return `豆瓣用户名从「${e.was}」改成了「${e.now}」，所以这次要重新抓一份完整的基准。`
+      + '不是出错——每条路线的网址里都嵌着用户名，改名之后新旧档案的网址对不上，'
+      + '接着抓会让两边拼不起来。这一次之后就又能增量了。';
+  }
+  if (e.type === 'incremental' && e.routes?.length) {
+    return `${e.routes.length} 条路线接着上次抓（只抓新增的部分）。`;
+  }
+  if (e.type === 'incremental_failed') {
+    return '没能读出上次的进度，这次按全量抓。已经有的会再抓一遍，但不会漏。';
+  }
+  return null;
+}
+
 const GAP_REASONS = {
   aborted: '抓取中途停下了，这条线还有没抓完的页',
   fetch_failed: '有页面反复抓不下来',
@@ -1487,6 +1511,16 @@ function renderLog() {
       const d = document.createElement('div');
       const bits = [r.at?.slice(0, 19).replace('T', ' '), r.type, r.routeKey, r.verdict, r.reason, r.url, r.message];
       d.textContent = bits.filter(Boolean).join('  ·  ');
+      // 少数几种事件用户会问「这是什么」——把人话补一行。其余原样：内部类型名
+      // 对排查有用，胡乱翻译反而让人对不上代码。
+      const note = eventNote(r);
+      if (note) {
+        const n = document.createElement('div');
+        n.className = 'muted';
+        n.style.paddingLeft = '16px';
+        n.textContent = note;
+        d.append(n);
+      }
       el.append(d);
     }
   }

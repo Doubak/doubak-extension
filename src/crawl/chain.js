@@ -18,9 +18,23 @@
  * 而没能推进水位线，那时这条线要继续往回找，找不到就没有下界（从头重走）。于是
  * 同一次抓取里不同路线的下界可能来自**不同的档案**。
  *
- * **② 只认同一个账号。** 一份属于别人的档案不能给你当基准——那会让你以为某段
- * 时间已经抓过了，而实际上抓的是别人的。这一条比它看起来重要：账号切换在真实
- * 使用里是会发生的（多个豆瓣号），而错误的方向是**漏抓**。
+ * **② 只认同一个账号，而且用户名也要一样。**
+ *
+ * 数字 ID 不同 = 是别人 —— 那会让你以为某段时间已经抓过了，而实际上抓的是别人的。
+ * 账号切换在真实使用里会发生（多个豆瓣号），错误的方向是**漏抓**。
+ *
+ * 数字 ID 相同但**用户名改了**，也不接着抓。这一条需要解释，因为下界本身是没问题
+ * 的（它是个**时间**，不是 URL，改名不影响它）。真正断掉的是别的东西：
+ *
+ *     https://www.douban.com/people/<用户名>/statuses?p=1
+ *     https://movie.douban.com/people/<用户名>/collect
+ *
+ * **每一条路线的 URL 里都嵌着用户名。** 改名之后新抓取的 `url_key` 与旧档案里的
+ * 全都对不上，于是跨档案去重（`Frontier.markCaptured`）失效、「同一页的历史版本」
+ * 也拼不起来——而那两件事正是链存在的意义。
+ *
+ * 所以：**改名之后要重新打一份全量基准**。代价是一次全量，而改名是罕见事件；
+ * 换来的是链上每一条 URL 都对得上。判错的方向也是安全的那一侧（多抓）。
  *
  * **③ 缺一环要说出来，不许当作连着。** 用户会删档案、会只搬走一部分。
  */
@@ -40,6 +54,7 @@
  * @property {string} bundleId
  * @property {string | null} completedAt
  * @property {string | null} accountUserId
+ * @property {string | null} accountUsername
  * @property {string | null} previousBundleId
  * @property {Array<Record<string, any>>} crawlState
  */
@@ -55,6 +70,7 @@ export function chainEntryFromManifest(manifest) {
     bundleId: manifest.bundle_id,
     completedAt: manifest.completed_at ?? null,
     accountUserId: manifest.account?.user_id ?? null,
+    accountUsername: manifest.account?.username ?? null,
     previousBundleId: manifest.previous_bundle_id ?? null,
     crawlState: manifest.crawl_state ?? [],
   };
@@ -88,16 +104,15 @@ export function newestFirst(entries) {
  * @param {ChainEntry[]} entries  已有的档案（顺序无所谓）
  * @param {object} [opts]
  * @param {string | null} [opts.accountUserId]  只认这个账号的档案。**强烈建议传**。
+ * @param {string | null} [opts.accountUsername]  用户名也要一样，理由见文件开头②。
  * @returns {Map<string, FloorPick>}
  */
-export function pickFloors(entries, { accountUserId = null } = {}) {
+export function pickFloors(entries, { accountUserId = null, accountUsername = null } = {}) {
   /** @type {Map<string, FloorPick>} */
   const out = new Map();
 
   for (const e of newestFirst(entries)) {
-    // 别人的档案不能当基准：那会让你以为某段时间已经抓过了，而抓的是别人的。
-    // 账号不明的也不认——「不知道」不是「是同一个」。
-    if (accountUserId && e.accountUserId !== accountUserId) continue;
+    if (!sameAccount(e, { accountUserId, accountUsername })) continue;
 
     for (const cs of e.crawlState) {
       if (out.has(cs.route_key)) continue; // 更新的那一份已经给过下界了
@@ -116,6 +131,41 @@ export function pickFloors(entries, { accountUserId = null } = {}) {
   }
 
   return out;
+}
+
+/**
+ * 这份档案是不是「同一个我」抓的。
+ *
+ * 数字 ID 与用户名**都要**一样，理由见文件开头②：ID 不同是别人；ID 相同而用户名
+ * 变了，下界本身没问题（它是个时间），但每一条路线的 URL 里都嵌着用户名，跨档案
+ * 去重与版本历史全都对不上。
+ *
+ * 判据缺失时一律不认——「不知道」不是「是同一个」。
+ *
+ * @param {ChainEntry} e
+ * @param {{accountUserId?: string | null, accountUsername?: string | null}} me
+ */
+export function sameAccount(e, { accountUserId = null, accountUsername = null } = {}) {
+  if (accountUserId && e.accountUserId !== accountUserId) return false;
+  if (accountUsername && e.accountUsername !== accountUsername) return false;
+  return true;
+}
+
+/**
+ * 找出「同一个人，但改过名」的那些档案。
+ *
+ * 单独一个函数，是因为这件事**必须说给用户听**：它会让一次抓取从增量退回全量，
+ * 而用户看到的现象是「明明抓过了，怎么又从头来」。不解释的话那看起来就是个 bug。
+ *
+ * @param {ChainEntry[]} entries
+ * @param {{accountUserId?: string | null, accountUsername?: string | null}} me
+ * @returns {Array<{bundleId: string, was: string | null}>}
+ */
+export function renamedBundles(entries, { accountUserId = null, accountUsername = null } = {}) {
+  if (!accountUserId || !accountUsername) return [];
+  return entries
+    .filter((e) => e.accountUserId === accountUserId && e.accountUsername !== accountUsername)
+    .map((e) => ({ bundleId: e.bundleId, was: e.accountUsername }));
 }
 
 /**

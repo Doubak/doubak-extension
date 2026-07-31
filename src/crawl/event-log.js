@@ -115,6 +115,11 @@ export function formatEntry(e, at) {
     ...(e.message ? { message: String(e.message).slice(0, 500) } : {}),
     ...(e.verdict ? { verdict: e.verdict } : {}),
     ...(typeof e.count === 'number' ? { count: e.count } : {}),
+    // 增量相关：改名、接着抓了几条路线。这几个是**给人看的**，日志里那一行会据此
+    // 补一句人话（见 panel.js 的 `eventNote`）。
+    ...(e.was ? { was: e.was } : {}),
+    ...(e.now ? { now: e.now } : {}),
+    ...(Array.isArray(e.routes) ? { routes: e.routes.slice(0, 40) } : {}),
   };
 }
 

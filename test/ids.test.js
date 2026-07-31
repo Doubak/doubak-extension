@@ -33,10 +33,31 @@ describe('bundle_id', () => {
     assert.ok(early < late);
   });
 
-  test('同一时刻的两次调用也不会撞', () => {
+  test('同一秒里的两次调用不会撞', () => {
+    // 时间戳只精确到秒，所以同一秒里开两次抓取时，区分它们的只有随机后缀。
     const at = new Date('2026-07-28T10:15:00Z');
-    const ids = new Set(Array.from({ length: 200 }, () => newBundleId(at)));
-    assert.equal(ids.size, 200);
+    assert.notEqual(newBundleId(at), newBundleId(at));
+  });
+
+  test('随机后缀有 24 位熵 —— 这条比「200 个不重复」更该测', () => {
+    // **这条测试原来是 flaky 的**：它生成 200 个 id 断言全不重复，而 3 字节 =
+    // 24 位 = 1670 万个取值，按生日问题 200 个样本的碰撞率约
+    //
+    //     200² / 2 / 16777216 ≈ 0.12%
+    //
+    // 也就是每跑八百多次红一次。**flaky 的测试比没有测试更坏**——它训练人去重跑，
+    // 于是真红的那次也会被当成噪音。
+    //
+    // 而它本来想守的性质其实是结构性的：后缀取自 `crypto.getRandomValues`，
+    // 长度固定 6 个十六进制字符。碰撞还要求**同一秒**，两者叠加才是真实概率。
+    const at = new Date('2026-07-28T10:15:00Z');
+    const suffix = newBundleId(at).split('-')[1];
+    assert.match(suffix, /^[0-9a-f]{6}$/);
+
+    // 顺带看一眼分布没有明显退化（比如常量后缀）。用 64 个样本，碰撞率约 0.012%，
+    // 而这里只要求「大部分不同」，不要求全不同。
+    const ids = new Set(Array.from({ length: 64 }, () => newBundleId(at)));
+    assert.ok(ids.size >= 60, `后缀随机性不对：64 个只生成了 ${ids.size} 个不同的 id`);
   });
 
   test('拒绝格式不对的 id', () => {

@@ -74,7 +74,9 @@ import { OFFSCREEN_TARGET } from './protocol.js';
 import { Exclusive } from '../crawl/exclusive.js';
 import { BundleReader } from '../bundle/bundle-reader.js';
 import { bundleIdFromDirName } from '../core/ids.js';
-import { chainEntryFromManifest, pickFloors, floorsFor, newestFirst } from '../crawl/chain.js';
+import {
+  chainEntryFromManifest, pickFloors, floorsFor, newestFirst, renamedBundles,
+} from '../crawl/chain.js';
 
 // TODO(debug): 开发期日志。发布前连同所有调用一起删掉。
 const DEBUG = true;
@@ -143,7 +145,25 @@ async function incrementalOptions(account) {
 
     // **账号必须对得上。** 别人的档案不能给你当基准：那会让你以为某段时间已经
     // 抓过了，而实际上抓的是别人的。数字 uid 是档案的归属主键。
-    const picks = pickFloors(entries, { accountUserId: account?.userId ?? null });
+    const me = {
+      accountUserId: account?.userId ?? null,
+      accountUsername: account?.username ?? null,
+    };
+    const picks = pickFloors(entries, me);
+
+    // **改名要说给用户听。** 它会让一次抓取从增量退回全量，而用户看到的现象是
+    // 「明明抓过了，怎么又从头来」——不解释的话那看起来就是个 bug。
+    const renamed = renamedBundles(entries, me);
+    if (renamed.length) {
+      relayEvent({
+        type: 'incremental_rebased',
+        reason: 'renamed',
+        was: renamed[0].was,
+        now: me.accountUsername,
+        count: renamed.length,
+      });
+    }
+
     if (picks.size === 0) {
       debugLog('增量：没有可用的下界，这次是全量');
       return {};

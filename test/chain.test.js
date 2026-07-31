@@ -10,9 +10,11 @@ import assert from 'node:assert/strict';
 
 import {
   chainEntryFromManifest, newestFirst, pickFloors, floorsFor, findChainHoles, chainCoverage,
+  sameAccount, renamedBundles,
 } from '../src/crawl/chain.js';
 
 const ME = '82160871';
+const MY_NAME = 'mewcatcher';
 
 /** 造一条路线的 crawl_state。 */
 function route(key, { hw = null, lw = null, advanced = false, contiguous = advanced,
@@ -34,11 +36,12 @@ function route(key, { hw = null, lw = null, advanced = false, contiguous = advan
 }
 
 /** 造一份档案。 */
-function bundle(id, routes, { at = null, account = ME, prev = null } = {}) {
+function bundle(id, routes, { at = null, account = ME, username = MY_NAME, prev = null } = {}) {
   return {
     bundleId: id,
     completedAt: at,
     accountUserId: account,
+    accountUsername: username,
     previousBundleId: prev,
     crawlState: routes,
   };
@@ -118,6 +121,38 @@ describe('只认同一个账号 —— 错的方向是漏抓', () => {
     ], { accountUserId: ME });
 
     assert.equal(picks.get('broadcast.timeline').fromBundleId, 'MINE');
+  });
+
+  test('**改过名就不接着抓** —— 每条路线的 URL 里都嵌着用户名', () => {
+    // 下界本身是没问题的（它是个时间，改名不影响）。断掉的是别的东西：
+    //
+    //   https://www.douban.com/people/<用户名>/statuses?p=1
+    //   https://movie.douban.com/people/<用户名>/collect
+    //
+    // 改名之后新抓取的 url_key 与旧档案里的全都对不上，跨档案去重与版本历史
+    // 都拼不起来——而那两件事正是链存在的意义。所以要重新打一份全量基准。
+    const picks = pickFloors([
+      bundle('OLD', [route('r', { hw: '2026-09-01T00:00:00+08:00', advanced: true })],
+        { username: '旧名字' }),
+    ], { accountUserId: ME, accountUsername: MY_NAME });
+    assert.equal(picks.size, 0, '改名之后不该接着上次抓');
+  });
+
+  test('改名这件事要能说给用户听', () => {
+    // 不解释的话，用户看到的现象是「明明抓过了，怎么又从头来」——那看起来就是个 bug。
+    const entries = [
+      bundle('OLD', [route('r', { hw: 'x', advanced: true })], { username: '旧名字' }),
+      bundle('OTHER', [route('r', { hw: 'x', advanced: true })], { account: '999', username: '别人' }),
+    ];
+    const renamed = renamedBundles(entries, { accountUserId: ME, accountUsername: MY_NAME });
+    assert.deepEqual(renamed, [{ bundleId: 'OLD', was: '旧名字' }]);
+  });
+
+  test('同一个人、同一个名字 → 认', () => {
+    assert.equal(
+      sameAccount(bundle('B', []), { accountUserId: ME, accountUsername: MY_NAME }),
+      true,
+    );
   });
 
   test('账号不明的也不认 —— 「不知道」不是「是同一个」', () => {
