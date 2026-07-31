@@ -1496,3 +1496,125 @@ describe('单页路线也要能「走完」', () => {
     assert.equal(cs.gaps[0].reason, 'aborted');
   });
 });
+
+describe('增量：下界真的省下了重抓', () => {
+  /**
+   * 这是整件事的验收条件。水位线一直算得出来、也写进了 manifest，但**没有代码把它
+   * 读回来当下界**——于是每次都是全量。这几条测试守住「读回来了」。
+   *
+   * 判错的方向必须是**多抓**：少抓漏掉的东西事后无从发现。
+   */
+
+  /** 广播页：时间逐页递减，一直有下一页。 */
+  function page(pageNo, n = 20) {
+    let items = '';
+    for (let i = 0; i < n; i++) {
+      const day = 28 - (pageNo - 1) * 2 - (i % 2);
+      items += `<div class="status-item" data-sid="${pageNo * 100 + i}" data-uid="82160871">`
+        + `<span class="created_at" title="2026-07-${String(day).padStart(2, '0')} `
+        + `${String(20 - (i % 10)).padStart(2, '0')}:00:00">x</span></div>`;
+    }
+    return `<html><head><title>\n我的动态\n</title></head><body>${NAV}
+<div id="db-usr-profile"></div><div class="stream-items">${items}</div></body></html>`;
+  }
+
+  test('下界之下的页面不再抓', async () => {
+    const seen = [];
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (!url.includes('statuses')) return bcPage(0);
+      seen.push(url);
+      const p = Number(/[?&]p=(\d+)/.exec(url)?.[1] ?? 1);
+      return page(p);
+    }, { batchSize: 50 });
+
+    // 下界定在第 2 页那一带：第 3 页往后就该停
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      floors: new Map([['broadcast.timeline', '2026-07-25T00:00:00+08:00']]),
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    const pages = seen.map((u) => Number(/[?&]p=(\d+)/.exec(u)?.[1] ?? 1));
+    assert.ok(pages.length > 0);
+    assert.ok(pages.length < 10, `到了下界还在往下翻：抓了 ${pages.length} 页`);
+  });
+
+  test('没有下界时照旧全量 —— 判错的方向必须是多抓', async () => {
+    const seen = [];
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (!url.includes('statuses')) return bcPage(0);
+      seen.push(url);
+      const p = Number(/[?&]p=(\d+)/.exec(url)?.[1] ?? 1);
+      return p <= 6 ? page(p) : bcPage(0);
+    }, { batchSize: 50 });
+
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    for (let i = 0; i < 30; i++) if ((await runner.runBatch()).done) break;
+    assert.ok(seen.length >= 6, `没有下界就该一直抓到底，实际只抓了 ${seen.length} 页`);
+  });
+
+  test('下界写进 manifest，并记下它取自哪一份', async () => {
+    // 规范 §5.5.1：不能用顶层的 previous_bundle_id 代替——下界是按路线选的。
+    const { runner } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), { batchSize: 50 });
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      floors: new Map([['broadcast.timeline', '2026-07-01T00:00:00+08:00']]),
+      floorSources: new Map([['broadcast.timeline', '20260701T000000Z-aaaaaa']]),
+    });
+    for (let i = 0; i < 10; i++) if ((await runner.runBatch()).done) break;
+
+    const m = await runner.finish('aborted');
+    const cs = m.crawl_state.find((r) => r.route_key === 'broadcast.timeline');
+    assert.equal(cs.floor_time, '2026-07-01T00:00:00+08:00');
+    assert.equal(cs.floor_from_bundle_id, '20260701T000000Z-aaaaaa');
+  });
+
+  test('下界在**身份确认之后**才挑 —— 判据是数字 uid', async () => {
+    // 顺序是必须的：账号是档案的归属主键，而它只有 preflight 之后才知道。
+    // 用用户名代替不行（会改），而「别人的档案当了我的基准」判错的方向是漏抓。
+    let sawAccount = null;
+    const { runner } = harness(broadcastOnly([bcPage(0)]), { batchSize: 5 });
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      resolveFloors: async (account) => {
+        sawAccount = account;
+        return {};
+      },
+    });
+    assert.ok(sawAccount?.userId, `回调没拿到账号：${JSON.stringify(sawAccount)}`);
+    assert.equal(sawAccount.userId, '82160871');
+  });
+
+  test('显式给了 floors（小范围试跑）就不再回调', async () => {
+    let called = false;
+    const { runner } = harness(broadcastOnly([bcPage(0)]), { batchSize: 5 });
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      floors: new Map([['broadcast.timeline', '2026-07-01T00:00:00+08:00']]),
+      resolveFloors: async () => { called = true; return {}; },
+    });
+    assert.equal(called, false, '调试用的下界被增量覆盖了');
+  });
+
+  test('挑下界失败 → 退回全量，不让一次抓取因此开不了工', async () => {
+    const seen = [];
+    const { runner, events } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (!url.includes('statuses')) return bcPage(0);
+      seen.push(url);
+      const p = Number(/[?&]p=(\d+)/.exec(url)?.[1] ?? 1);
+      return p <= 3 ? page(p) : bcPage(0);
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      resolveFloors: async () => { throw new Error('OPFS 读不了'); },
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.ok(seen.length >= 3, '挑下界失败之后没有退回全量');
+    assert.ok(events.some((e) => e.type === 'incremental_failed'), '失败要说出来，不能静默');
+  });
+});

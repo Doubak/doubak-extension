@@ -53,6 +53,7 @@ export class RouteState {
    */
   constructor({
     routeKey, intent, enumeration, floorTime = null, stallThreshold = 3, priorCount = 0,
+    floorFromBundleId = null,
   }) {
     this.routeKey = routeKey;
     this.intent = intent;
@@ -60,6 +61,14 @@ export class RouteState {
     this.stall = new StallDetector(stallThreshold);
 
     this.floorTime = floorTime;
+    /**
+     * 这个下界取自哪一份档案。规范 §5.5.1。
+     *
+     * 记它是为了让「基准不在了」**可检测**：校验方按路线核对
+     * `floor_time == 上一份的 high_water_time`，且那一份在场。
+     * @type {string | null}
+     */
+    this.floorFromBundleId = floorFromBundleId;
     this._floorEpochMs = floorTime ? Date.parse(floorTime) : null;
 
     /** @type {{iso: string, raw: string, epochMs: number} | null} 本次见过的最新时间 */
@@ -380,6 +389,7 @@ export class RouteState {
       lowWaterTime: this.lowWater?.iso ?? null,
       lowWaterRaw: this.lowWater?.raw ?? null,
       floorTime: this.floorTime,
+      floorFromBundleId: this.floorFromBundleId,
       enumeration: this.enumeration,
       contiguous: this.contiguous,
       gaps: this.gaps,

@@ -72,6 +72,9 @@ import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { dryRunFetch } from '../crawl/dry-run.js';
 import { OFFSCREEN_TARGET } from './protocol.js';
 import { Exclusive } from '../crawl/exclusive.js';
+import { BundleReader } from '../bundle/bundle-reader.js';
+import { bundleIdFromDirName } from '../core/ids.js';
+import { chainEntryFromManifest, pickFloors, floorsFor, newestFirst } from '../crawl/chain.js';
 
 // TODO(debug): 开发期日志。发布前连同所有调用一起删掉。
 const DEBUG = true;
@@ -96,6 +99,68 @@ function getOpfsWorker() {
     });
   }
   return opfsWorker;
+}
+
+/**
+ * 增量抓取：从既有档案里挑每条路线的下界。
+ *
+ * 规范 §5.5，判断逻辑全在 `src/crawl/chain.js`（纯函数，可测）。这里只负责把
+ * manifest 读进来。
+ *
+ * **由 runner 在身份确认之后回调**：判据是数字用户 ID（档案的归属主键），而它只有
+ * preflight 之后才知道。
+ *
+ * **读不出来就退回全量。** 少抓是不可接受的，多抓只是慢——所以这一路上任何一处
+ * 出问题（目录没了、manifest 坏了、账号对不上），结论都是「没有下界」。
+ *
+ * @param {{userId: string | null}} account  preflight 确认的账号
+ * @returns {Promise<{floors?: Map<string, string>, floorSources?: Map<string, string>, previousBundleId?: string | null}>}
+ */
+async function readChainEntries() {
+  const dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
+  /** @type {import('../crawl/chain.js').ChainEntry[]} */
+  const entries = [];
+  for (const dir of dirs) {
+    const id = bundleIdFromDirName(dir);
+    if (!id) continue;
+    try {
+      const store = new WorkerFileStore({ worker: getOpfsWorker(), dir });
+      const reader = new BundleReader({ store, bundleId: id });
+      // 没收尾的没有 manifest，也就没有连续性证明——它不能当基准。
+      if (!(await reader.hasManifest())) continue;
+      entries.push(chainEntryFromManifest(await reader.manifest()));
+    } catch (e) {
+      debugLog('读不出这份档案，跳过', dir, e);
+    }
+  }
+  return entries;
+}
+
+async function incrementalOptions(account) {
+  try {
+    const entries = await readChainEntries();
+    if (entries.length === 0) return {};
+
+    // **账号必须对得上。** 别人的档案不能给你当基准：那会让你以为某段时间已经
+    // 抓过了，而实际上抓的是别人的。数字 uid 是档案的归属主键。
+    const picks = pickFloors(entries, { accountUserId: account?.userId ?? null });
+    if (picks.size === 0) {
+      debugLog('增量：没有可用的下界，这次是全量');
+      return {};
+    }
+
+    const newest = newestFirst(entries)[0];
+    debugLog('增量：', [...picks].map(([k, v]) => `${k}←${v.fromBundleId}`).join(' '));
+    return {
+      floors: floorsFor(picks),
+      floorSources: new Map([...picks].map(([k, v]) => [k, v.fromBundleId])),
+      previousBundleId: newest?.bundleId ?? null,
+    };
+  } catch (e) {
+    // 读不出来就全量。少抓不可接受，多抓只是慢。
+    debugLog('增量：挑下界失败，退回全量', e);
+    return {};
+  }
 }
 
 /** @param {string} dir */
@@ -266,7 +331,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             const opts = reviveScope(msg.options);
             // 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
             const who = opts.username ? { username: opts.username } : await r.discoverUsername();
-            return r.start({ ...opts, username: who.username });
+            // 增量：从既有档案里挑下界。**在身份确认之后**才挑（判据是数字 uid），
+            // 所以交给 runner 在正确的时刻回调。小范围试跑自带 floors，那时不会调用。
+            return r.start({ ...opts, username: who.username, resolveFloors: incrementalOptions });
           });
           sendResponse({ ok: true, bundleId: started.bundleId, account: started.account });
           break;
@@ -319,6 +386,28 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           // 真正的抓取由随后的 drive() 推进，那一步是有锁的。
           sendResponse({ ok: true, count: await getRunner().retryFailed({ routeKey: msg.routeKey }) });
           break;
+
+        case 'peekIncremental': {
+          // 开抓**之前**看一眼有没有可用的基准，纯粹为了界面上那一行。
+          //
+          // 这里拿不到数字 uid（还没 preflight），所以**不按账号过滤**——于是它可能
+          // 比真实结果乐观。措辞因此写成「有没有可用的基准」而不是「这次一定增量」。
+          // 不加锁：只读档案，不发请求。
+          try {
+            const entries = await readChainEntries();
+            const picks = pickFloors(entries);
+            sendResponse({
+              ok: true,
+              result: {
+                routes: [...picks.keys()],
+                bundles: entries.length,
+              },
+            });
+          } catch {
+            sendResponse({ ok: true, result: null });
+          }
+          break;
+        }
 
         case 'status':
           // 同样不加锁：读状态必须在抓取跑着的时候也能读到。

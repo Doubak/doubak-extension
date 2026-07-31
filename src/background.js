@@ -295,14 +295,21 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           break;
         }
 
-        case 'preflight':
-          // 两项都可能是 null——那是「查不了」，不是「没问题」，界面照实显示。
+        case 'preflight': {
+          // 三项都可能是 null——那是「查不了」，不是「没问题」，界面照实显示。
+          //
+          // `incremental` 只是**预告**：真正的下界要等身份确认之后才挑（判据是数字
+          // uid，那时才知道）。所以这里问的是「有没有可用的基准」，界面措辞也照这个
+          // 保守程度写。
+          const inc = await withOffscreen({ op: 'peekIncremental' }).catch(() => null);
           sendResponse({
             ok: true,
             permissions: await checkHostAccess(),
             storage: await preflightStorage(),
+            incremental: inc?.result ?? null,
           });
           break;
+        }
 
         case 'start': {
           // 权限没了就别开始——第一页就会失败，而失败的样子像网络问题。

@@ -553,6 +553,12 @@ describe('面板脚本', () => {
     assert.match(js, /deleteBundle\(currentBundleId, \{[\s\S]{0,200}report:/);
   });
 
+  test('开抓前那一行不再说「增量还没接上」', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.equal(js.includes('增量还没接上'), false);
+    assert.match(js, /function scopeText/);
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。

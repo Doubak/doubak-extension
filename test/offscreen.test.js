@@ -302,3 +302,37 @@ describe('「正在做什么」由做事的那一端报出来', () => {
     }
   });
 });
+
+describe('增量：offscreen 这一侧的接线', () => {
+  /**
+   * 判断逻辑全在 `src/crawl/chain.js`（纯函数，有 22 条测试）。offscreen 只负责
+   * 把 manifest 读进来、在正确的时刻交给 runner——而**接线断了不会有任何报错**，
+   * 只会静默地每次都全量。所以在源码层面钉住。
+   */
+
+  test('开工时把挑下界的回调交给 runner', async () => {
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    assert.match(src, /resolveFloors:\s*incrementalOptions/);
+  });
+
+  test('用 chain.js 的纯函数，不在这儿自己判', async () => {
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    assert.match(src, /from '\.\.\/crawl\/chain\.js'/);
+    assert.match(src, /pickFloors\(/);
+    // 账号必须传进去：别人的档案不能当基准，而判错的方向是**漏抓**
+    assert.match(src, /accountUserId:\s*account\?\.userId/);
+  });
+
+  test('没收尾的档案不当基准 —— 它没有连续性证明', async () => {
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    assert.match(src, /hasManifest\(\)/);
+  });
+
+  test('读不出来就退回全量 —— 少抓不可接受，多抓只是慢', async () => {
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    const fn = src.slice(src.indexOf('async function incrementalOptions'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    assert.match(body, /catch/, '整段要有兜底');
+    assert.match(body, /return \{\}/, '兜底的结论是「没有下界」');
+  });
+});

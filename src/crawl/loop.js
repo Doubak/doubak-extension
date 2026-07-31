@@ -65,7 +65,7 @@ export class CrawlLoop {
    */
   constructor({
     frontier, transport, writer, session, pacer, routes, onEvent, floors,
-    bypassGates = false, priorCounts = null, savedStates = null,
+    bypassGates = false, priorCounts = null, savedStates = null, floorSources = null,
   }) {
     this._frontier = frontier;
     this._transport = transport;
@@ -82,6 +82,11 @@ export class CrawlLoop {
     /** @type {Map<string, string>} routeKey → 最后一次 capture_id，用于 parent 链 */
     this._lastCapture = new Map();
     this._floors = floors ?? new Map();
+    /**
+     * 每条路线的下界取自哪一份档案（规范 §5.5.1）。
+     * @type {Map<string, string>}
+     */
+    this._floorSources = floorSources ?? new Map();
     /**
      * 恢复之前这份档案里已经抓了多少条。
      *
@@ -158,6 +163,7 @@ export class CrawlLoop {
         intent: route.intent ?? routeKey,
         enumeration: route.enumeration ?? 'bounded',
         floorTime: this._floors.get(routeKey) ?? null,
+        floorFromBundleId: this._floorSources.get(routeKey) ?? null,
         priorCount: this._priorCounts[routeKey] ?? 0,
       };
       const saved = this._savedStates[routeKey];

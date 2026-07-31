@@ -150,6 +150,13 @@ export class CrawlRunner {
    * @param {string[]} [opts.mediums]
    * @param {boolean} [opts.includeCatalog]
    * @param {Map<string, string | null>} [opts.floors]  上次的水位线
+   * @param {(account: object) => Promise<object>} [opts.resolveFloors]  **在身份确认之后**
+   *   挑下界。顺序是必须的：判据是数字用户 ID，而它只有 preflight 之后才知道。
+   *   读档案不是 runner 的事，所以动作由调用方注入，这里只定顺序。
+   *   显式传了 `floors`（小范围试跑）时不会调用它。
+   * @param {Map<string, string>} [opts.floorSources]  每条路线的下界取自哪一份档案。
+   *   与 `floors` 分开传是因为它们回答不同的问题：前者是「抓到哪儿为止」，后者是
+   *   「这个下界凭什么」——后者要写进 manifest，好让「基准不在了」可检测（规范 §5.5）。
    * @param {string | null} [opts.previousBundleId]
    * @param {string[]} [opts.onlyRoutes]  只抓这几条路线。用于小范围试跑——
    *   挑一条**天然很小**的路线（比如舞台剧只有一两条），就能完整走完整个
@@ -158,8 +165,8 @@ export class CrawlRunner {
    *   被它截断的抓取不算干净完成，水位线不会推进，产出的是不完整的档案。
    */
   async start({
-    username, mediums, includeCatalog = true, floors, previousBundleId = null,
-    onlyRoutes = null, maxCaptures = null, bypassGates = false,
+    username, mediums, includeCatalog = true, floors, floorSources, previousBundleId = null,
+    onlyRoutes = null, maxCaptures = null, bypassGates = false, resolveFloors = null,
   }) {
     if (this._run) throw new Error('已有抓取在进行中');
 
@@ -180,6 +187,32 @@ export class CrawlRunner {
     // **评论者**的 ID。见 session.js 里 UID_PATTERNS 的说明。
     const account = session.preflight(probe.bodyText);
     this._emit({ type: 'preflight', account });
+
+    // ── 增量的下界，**在身份确认之后**才挑。
+    //
+    // 顺序是必须的：判据是数字用户 ID（档案的归属主键），而它只有 preflight 之后
+    // 才知道。用用户名代替不行——用户名会改，而且「别人的档案不能当我的基准」这条
+    // 判错的方向是**漏抓**，漏掉的东西事后无从发现。
+    //
+    // 挑的动作由调用方注入（它要读 OPFS，那不是 runner 的事），这里只定顺序。
+    if (resolveFloors && !floors) {
+      try {
+        const inc = (await resolveFloors(account)) ?? {};
+        floors = inc.floors;
+        floorSources = inc.floorSources;
+        previousBundleId = inc.previousBundleId ?? previousBundleId;
+      } catch (err) {
+        // 挑不出来就全量。**少抓不可接受，多抓只是慢。**
+        this._emit({ type: 'incremental_failed', message: String(err?.message ?? err) });
+      }
+    }
+    if (floors?.size) {
+      this._emit({
+        type: 'incremental',
+        routes: [...floors.keys()],
+        floors: Object.fromEntries(floors),
+      });
+    }
 
     const bundleId = newBundleId(this._now());
     const dir = bundleDirName(bundleId);
@@ -216,6 +249,7 @@ export class CrawlRunner {
     const loop = new CrawlLoop({
       frontier, transport, writer, session, pacer, routes,
       floors: floors ?? new Map(),
+      floorSources: floorSources ?? new Map(),
       onEvent: this._emit,
       bypassGates,
     });

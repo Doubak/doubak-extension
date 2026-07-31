@@ -78,6 +78,10 @@ export function coverageEntry({
  * @param {string | null} [opts.highWaterRaw]
  * @param {string[]} [opts.highWaterIds]
  * @param {string | null} opts.floorTime
+ * @param {string | null} [opts.floorFromBundleId]  这个下界取自哪一份。
+ *   **不能用 manifest 顶层的 `previous_bundle_id` 代替**：下界是按路线选的，
+ *   某条线上一次可能没能推进水位线，于是要沿链继续往回找——同一次抓取里不同路线的
+ *   下界可能来自不同的 bundle（规范 §5.5.1）。
  * @param {'full' | 'bounded'} opts.enumeration
  * @param {boolean} opts.contiguous
  * @param {Array<object>} [opts.gaps]
@@ -94,6 +98,7 @@ export function crawlStateEntry({
   lowWaterTime = null,
   lowWaterRaw = null,
   floorTime,
+  floorFromBundleId = null,
   enumeration,
   contiguous,
   gaps = [],
@@ -144,6 +149,7 @@ export function crawlStateEntry({
     low_water_time: lowWaterTime,
     low_water_raw: lowWaterRaw,
     floor_time: floorTime,
+    floor_from_bundle_id: floorFromBundleId,
     enumeration,
     contiguous,
     gaps,
