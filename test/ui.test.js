@@ -221,6 +221,70 @@ describe('面板脚本', () => {
     }
   });
 
+  test('空闲时的「上一次结果」不能被两秒后的轮询抹掉', async () => {
+    // 报上来的：打开插件先看到完整的上次结果，几秒之后整块空了。
+    //
+    // 成因是空闲分支末尾无条件 `renderRoutes([])`。第一次进空闲时它先清空、
+    // 随后异步的 `showLastRun()` 把表填上——看起来对；但轮询每两秒来一次，
+    // 而 `lastRunShown` 已经是 true，`showLastRun()` 不再跑，这一句却照常执行。
+    const dom = await loadUi({ which: 'panel', onMessage: IDLE });
+    try {
+      // `showLastRun()` 要读 OPFS，假 DOM 里读不到——手工造出它填完之后的样子。
+      // **`dataset.mode` 必须设成 'table'**：`renderRoutes([])` 只有在模式不是
+      // 'empty' 时才会真的重建，模式不对的话这条测试无论修没修都绿。
+      const routes = dom.byId.get('routes');
+      routes.dataset.mode = 'table';
+      const marker = dom.document.createElement('div');
+      marker.textContent = '上一次抓取的结果';
+      routes.replaceChildren(marker);
+      assert.ok(routes.textContent.includes('上一次抓取的结果'));
+
+      await dom.tick();
+      assert.ok(
+        routes.textContent.includes('上一次抓取的结果'),
+        '轮询把上一次的结果抹掉了',
+      );
+
+      await dom.tick();
+      assert.ok(routes.textContent.includes('上一次抓取的结果'), '第二次轮询也不许抹');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('从「抓取中」回到空闲时，先清掉旧表再让位给上一次的结果', async () => {
+    // 反向的那一半：不能因为「不许动这张表」就把抓取期间的残留一直挂着。
+    let running = true;
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return running
+            ? {
+                ok: true, running: true,
+                runner: {
+                  active: true, stopped: false, stoppedBy: null, bundleId: 'b',
+                  intervalMs: 1000, backoffLevel: 0, counts: { done: 1, pending: 0 },
+                  routes: [{ routeKey: 'broadcast.timeline', captured: 7, contiguous: false }],
+                },
+              }
+            : IDLE(msg);
+        }
+        return IDLE(msg);
+      },
+    });
+    try {
+      const routes = dom.byId.get('routes');
+      assert.ok(routes.textContent.includes('广播'), '抓取期间该显示进度');
+
+      running = false;
+      await dom.tick();
+      assert.equal(routes.textContent.includes('7'), false, '抓取期间的残留该让位');
+    } finally {
+      dom.restore();
+    }
+  });
+
   test('抓取中要写出正在抓的那个 URL', async () => {
     // 原来只有「档案 xxx · 当前间隔 1.0 秒」，一次抓取几个小时里几乎一动不动——
     // 看不出它是在动还是卡住了。

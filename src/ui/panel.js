@@ -297,6 +297,8 @@ async function refresh() {
     lastRunShown = true;
     // 刚从「抓取中」回到空闲：档案刚收尾，缓存里可能还是没有 manifest 的那一版。
     summaryCache = null;
+    // 先清一次：可能还留着上一个状态（抓取中）的表。
+    renderRoutes([]);
     void showLastRun();
   }
   // 只在**进入**空闲态时查一次。权限和剩余空间不会每两秒变一次，而每两秒重画
@@ -311,7 +313,15 @@ async function refresh() {
     if (!r?.ok) setState('err', '无法开始', r?.error ?? '');
     refresh();
   }]]);
-  renderRoutes([]);
+
+  // **空闲态下这张表归 `showLastRun()` 管，这里不许再动它。**
+  //
+  // 原来这儿无条件 `renderRoutes([])`。第一次进空闲时它先清空，随后异步的
+  // `showLastRun()` 把上一次的结果填上——看起来是对的；但刷新每两秒来一次，
+  // 而 `lastRunShown` 已经是 true，`showLastRun()` 不再跑，这一句却照常执行，
+  // **于是刚显示出来的表在几秒后被抹掉**。
+  //
+  // 用户看到的正是这个：打开插件先看到完整的上次结果，几秒后整块空了。
 }
 
 /**
