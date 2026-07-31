@@ -29,7 +29,8 @@ function day(s) {
  * 一条路线在链上的那一行。
  *
  * @param {{routeKey: string, oldest?: string | null, newest?: string | null,
- *          bundles?: string[], contiguous?: boolean, holes?: Array<object>}} r
+ *          bundles?: string[], contiguous?: boolean, holes?: Array<object>,
+ *          gaps?: Array<object>}} r
  */
 export function chainRow(r) {
   const o = day(r.oldest);
@@ -44,7 +45,10 @@ export function chainRow(r) {
     verdict: contiguityLabel({
       contiguous: Boolean(r.contiguous),
       settled: true,
-      gaps: r.holes ?? [],
+      // **链上的洞与各份自己的缺口都要算。** 只看前者的话，一条因为某一份有
+      // `account_switched` 缺口而不连续的路线会显示成「没走完」——而它其实是
+      // 「有缺口」，断在哪儿是有记录的。
+      gaps: [...(r.holes ?? []), ...(r.gaps ?? [])],
     }),
   };
 }

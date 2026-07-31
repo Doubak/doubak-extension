@@ -35,6 +35,17 @@ describe('一条路线在链上的那一行', () => {
     assert.match(r.spanNote, /没有时间水位线/);
   });
 
+  test('某一份自己的缺口也要算 —— 否则会说成「没走完」', () => {
+    // 两者含义差很远：「有缺口」是「中间断过，断在哪儿有记录」，「没走完」是
+    // 「这条线压根没走到终点」。把前者说成后者，等于把一条有据可查的事实
+    // 说成一句含糊的话。
+    const r = chainRow({
+      routeKey: 'interest.item', bundles: ['NEW', 'BASE'], contiguous: false,
+      holes: [], gaps: [{ reason: 'account_switched', bundleId: 'BASE' }],
+    });
+    assert.equal(r.verdict, '有 1 处缺口');
+  });
+
   test('链上有洞 → 说「有 N 处缺口」，不说「未验证」', () => {
     const r = chainRow({
       routeKey: 'broadcast.timeline',

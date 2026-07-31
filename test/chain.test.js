@@ -475,6 +475,58 @@ describe('版本历史：同一个 URL 的多次捕获', () => {
   });
 });
 
+describe('没有时间水位线的路线：链的连续性不能靠「往回追」', () => {
+  /**
+   * 往回追的终止条件是「`floor_time` 为 null ⇒ 它一路走到了最早」。那句推理只对
+   * **有时间序**的路线成立。作品详情页没有时间序，`floor_time` 永远是 null——
+   * 于是会在最新那一份上立刻收工，**更早的档案一眼都不看**。
+   *
+   * 真实数据里的后果：786e5c 的作品详情页带着一处 `account_switched` 缺口，
+   * 而链视图照样报「✔ 已验证」。**假的完整性声明**，这个项目最不能出的错。
+   */
+
+  test('更早那份有缺口 → 链不能报已验证', () => {
+    const cov = chainCoverage([
+      // 新的这份自己是干净的，但它只抓了 1 个条目
+      bundle('NEW', [route('interest.item', { contiguous: true })],
+        { at: '2026-07-31T12:28:00Z', prev: 'BASE' }),
+      // 大头在这份里，而它有一处缺口
+      bundle('BASE', [{
+        route_key: 'interest.item', intent: 'interest.item',
+        high_water_time: null, low_water_time: null, floor_time: null,
+        floor_from_bundle_id: null, enumeration: 'full',
+        contiguous: false, gaps: [{ reason: 'account_switched' }], advanced: false,
+      }], { at: '2026-07-31T05:13:00Z' }),
+    ]);
+    assert.equal(cov.get('interest.item').contiguous, false,
+      '更早那份的缺口被无视了 —— 这是假的完整性声明');
+  });
+
+  test('链上每一份都干净 → 可以报已验证', () => {
+    const cov = chainCoverage([
+      bundle('NEW', [route('interest.item', { contiguous: true })],
+        { at: '2026-07-31T12:28:00Z', prev: 'BASE' }),
+      bundle('BASE', [route('interest.item', { contiguous: true })],
+        { at: '2026-07-31T05:13:00Z' }),
+    ]);
+    assert.equal(cov.get('interest.item').contiguous, true);
+  });
+
+  test('有时间序的路线照旧走「往回追」 —— 那条推理对它成立', () => {
+    // 反向保护：别为了修上面那条把正确的逻辑一起改坏。
+    // BASE 有缺口，但 NEW 自己从头走了一遍（floor_time 为 null 且有水位线）。
+    const cov = chainCoverage([
+      bundle('NEW', [route('broadcast.timeline', {
+        hw: '2026-07-31T00:00:00+08:00', lw: '2014-01-10T00:00:00+08:00', advanced: true,
+      })], { at: '2026-07-31T12:28:00Z', prev: 'BASE' }),
+      bundle('BASE', [route('broadcast.timeline', { advanced: false, contiguous: false })],
+        { at: '2026-07-31T05:13:00Z' }),
+    ]);
+    assert.equal(cov.get('broadcast.timeline').contiguous, true,
+      '新的那份从头走了一遍，旧的缺口无关紧要');
+  });
+});
+
 describe('一堆档案不等于一条链', () => {
   test('previous_bundle_id 为 null 的各自是一条链的起点', () => {
     // 真实情况：增量做出来之前的每一次抓取都是独立的全量。用户屏幕上看到的是

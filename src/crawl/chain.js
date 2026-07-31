@@ -359,22 +359,58 @@ export function routeChainCoverage(chain, routeKey) {
     if (cs.low_water_time && (!oldest || cs.low_water_time < oldest)) oldest = cs.low_water_time;
   }
 
-  // 从最新那份有这条线的档案开始往回追
-  let contiguous = false;
-  const walked = new Set();
-  let cur = chain.find((e) => e.crawlState.some((x) => x.route_key === routeKey));
-  while (cur && !walked.has(cur.bundleId)) {
-    walked.add(cur.bundleId);
-    const cs = cur.crawlState.find((x) => x.route_key === routeKey);
-    if (!cs?.contiguous) break; // 这一段自己就不连续
-    if (!cs.floor_time) { contiguous = true; break; } // 走到了最早，收工
-    if (!cs.floor_from_bundle_id) break; // 有下界却说不出来自哪儿 —— 证明不了
-    cur = byId.get(cs.floor_from_bundle_id);
+  // **没有时间水位线的路线不能走「往回追」那一套。**
+  //
+  // 往回追的终止条件是「`floor_time` 为 null ⇒ 它一路走到了最早」。那句推理只对
+  // **有时间序**的路线成立。作品详情页、个人主页、分类入口页没有时间序，
+  // `floor_time` **永远**是 null——于是那一步会在最新那一份上立刻收工，
+  // **older 的档案一眼都不看**。
+  //
+  // 后果是一次真实的假完整性声明：真实数据里 786e5c 的作品详情页带着一处
+  // `account_switched` 缺口，而链视图照样报「✔ 已验证」。这正是这个项目最不能
+  // 出的那种错。
+  //
+  // 对这类路线，能诚实说出口的只有一句：**链上每一份自己都没有缺口**。它不等于
+  // 「这个集合是完整的」（那件事从 crawl_state 里根本推不出来），但它不撒谎。
+  const hasWatermark = chain.some((e) => {
+    const cs = e.crawlState.find((x) => x.route_key === routeKey);
+    return Boolean(cs?.high_water_time);
+  });
+
+  let contiguous;
+  if (!hasWatermark) {
+    contiguous = chain.every((e) => {
+      const cs = e.crawlState.find((x) => x.route_key === routeKey);
+      return !cs || cs.contiguous;
+    });
+  } else {
+    // 从最新那份有这条线的档案开始往回追
+    contiguous = false;
+    const walked = new Set();
+    let cur = chain.find((e) => e.crawlState.some((x) => x.route_key === routeKey));
+    while (cur && !walked.has(cur.bundleId)) {
+      walked.add(cur.bundleId);
+      const cs = cur.crawlState.find((x) => x.route_key === routeKey);
+      if (!cs?.contiguous) break; // 这一段自己就不连续
+      if (!cs.floor_time) { contiguous = true; break; } // 走到了最早，收工
+      if (!cs.floor_from_bundle_id) break; // 有下界却说不出来自哪儿 —— 证明不了
+      cur = byId.get(cs.floor_from_bundle_id);
+    }
   }
 
   if (holes.length) contiguous = false;
 
-  return { newest, oldest, bundles, contiguous, holes };
+  // 链上各份自己记下的缺口，汇总起来。
+  //
+  // 界面要靠它把「有缺口」和「没走完」分开——两者的含义差得很远：前者是「中间断过，
+  // 断在哪儿有记录」，后者是「这条线压根没走到终点」。混成一句话等于把一条有据可查
+  // 的事实说成一句含糊的话。
+  const gaps = chain.flatMap((e) => {
+    const cs = e.crawlState.find((x) => x.route_key === routeKey);
+    return (cs?.gaps ?? []).map((g) => ({ ...g, bundleId: e.bundleId }));
+  });
+
+  return { newest, oldest, bundles, contiguous, holes, gaps };
 }
 
 /**
