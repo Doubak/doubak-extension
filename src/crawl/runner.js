@@ -303,6 +303,10 @@ export class CrawlRunner {
       account: { user_id: session.account.userId, username: session.account.username ?? username },
       startSeq: repair.lastSeq,
       resume: repair.resume,
+      // **不传这个，被恢复过的抓取就永远收不了尾**：段的 record_count 从磁盘恢复了，
+      // 而 index 的计数器从零开始，`finalize()` 的交叉核对必然失败。而一场几小时的
+      // 抓取必然跨越很多次 worker 死亡，也就是说正常的完整抓取一次都收不了尾。
+      indexStats: repair.indexStats,
       now: this._now,
     });
 

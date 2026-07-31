@@ -124,6 +124,20 @@ const POLICY = {
    * 让同一个死循环每 30 秒重来一次，而它一个请求都不发，所以豆瓣那边什么都
    * 看不到，永远不会有外力把它撞停。
    */
+  /**
+   * 收尾（写 manifest）失败。
+   *
+   * **绝不自动重试。** 收尾是确定性的——同样的档案、同样的代码，下一次会以同样的
+   * 方式失败。心跳每 30 秒重试一次只会刷屏，而抓取既不继续也不结束。
+   *
+   * 抓到的数据本身是安全的：每页都落盘了，坏的只是最后写 manifest 那一步。
+   */
+  finalize_failed: {
+    autoResume: false,
+    reason: '收尾失败：抓到的数据都在，但 manifest 没写成',
+    userVisible: true,
+  },
+
   driver_stalled: {
     autoResume: false,
     reason: '抓取空转了：连着几批什么都没推进，已经停下',
@@ -235,4 +249,6 @@ export function policyFor(reason) {
 }
 
 /** 有未解决的失败条目，等用户处置。 */
+export const FINALIZE_FAILED = 'finalize_failed';
+
 export const FAILURES_PENDING = 'failures_pending';

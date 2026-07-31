@@ -46,6 +46,7 @@ const NEEDS_ACTION_TITLE = {
   failures_pending: '有几个页面抓不下来',
   write_failed: '写入档案时出错',
   driver_stalled: '抓取空转了，已停下',
+  finalize_failed: '收尾失败，数据都在',
 };
 
 const NEEDS_ACTION_BODY = {
@@ -59,6 +60,7 @@ const NEEDS_ACTION_BODY = {
   failures_pending: '其余部分都抓完了。打开面板看看是哪几页——可以重试，也可以确认「就这样收尾」。',
   write_failed: '已经停下来了，以免损坏已有数据。继续之前会先自动修复段文件尾部。',
   driver_stalled: '连着几批什么都没推进。这是插件自己的问题，不是豆瓣拦了你——已抓到的都在档案里。',
+  finalize_failed: '抓到的每一页都已经落盘，坏的只是最后写 manifest 那一步。请到「日志」标签复制日志反馈。',
 };
 
 /** @param {string} reason */

@@ -899,3 +899,62 @@ describe('抓取顺序：先跑完最难补的那条', () => {
     }
   });
 });
+
+describe('被恢复过的抓取必须收得了尾', () => {
+  test('崩溃 → 恢复 → 收尾，不报「段与索引已失去对应关系」', async () => {
+    // 报上来的原样：
+    //
+    //   data-20260730T131755Z-74f5dc-00001.warc.gz: record_count 为 219，
+    //   但 index 中指向本段的行数为 0。段与索引已失去对应关系。
+    //
+    // 而那份 index 文件里**确实有 219 行**指向那一段。坏的不是档案，是
+    // `IndexWriter` 压根没有恢复路径：段那边从磁盘恢复了 record_count，
+    // index 这边三个计数器从零开始，收尾时交叉核对必然失败。
+    //
+    // 影响面是「全部」：一场几小时的抓取必然跨越很多次 service worker 死亡，
+    // 也就是说**正常的完整抓取一次都收不了尾**。
+    const { runner, runStore } = harness(
+      broadcastOnly([bcPage(20, 0), bcPage(20, 20), bcPage(20, 40), bcPage(0)]), { batchSize: 2 },
+    );
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null; // worker 被杀
+    await runner.resume(cp);
+    for (let i = 0; i < 30; i++) if ((await runner.runBatch()).done) break;
+
+    const manifest = await runner.finish('complete');
+    assert.ok(manifest, '收尾必须成功');
+
+    // 交叉核对真的成立：每段的 record_count == index 里指向它的行数
+    const store = [...dirsOf(runner)][0];
+    void store;
+    const total = manifest.segments.reduce((n, s) => n + s.record_count, 0);
+    assert.equal(manifest.index.line_count, total, 'index 行数必须等于所有段的记录数之和');
+    assert.ok(total > 1, '要真的跨过了崩溃点，否则这条测试没测到东西');
+  });
+
+  test('恢复之后 manifest 的计数含崩溃之前那些', async () => {
+    // `counts.by_verdict` 之类同样是内存累加。只算恢复之后那段的话，manifest
+    // 会说这份档案比它实际小得多。
+    const { runner, runStore } = harness(
+      broadcastOnly([bcPage(20, 0), bcPage(20, 20), bcPage(0)]), { batchSize: 2 },
+    );
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null;
+    await runner.resume(cp);
+    for (let i = 0; i < 30; i++) if ((await runner.runBatch()).done) break;
+
+    const manifest = await runner.finish('complete');
+    const okCount = manifest.counts?.by_verdict?.ok ?? 0;
+    assert.ok(okCount >= 2, `by_verdict.ok 只有 ${okCount}，崩溃之前那些没算进来`);
+  });
+});
+
+/** 取出 harness 里的档案目录（只用于上面那条测试的可读性）。 */
+function dirsOf(runner) {
+  return [runner?._run?.store].filter(Boolean);
+}

@@ -46,7 +46,7 @@ import { Supervisor, ALARM_NAME } from './crawl/supervisor.js';
 import { ScheduleStore } from './crawl/run-store.js';
 import { IdbKvStore } from './storage/idb-kv-store.js';
 import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
-import { FAILURES_PENDING } from './crawl/resume-policy.js';
+import { FAILURES_PENDING, FINALIZE_FAILED } from './crawl/resume-policy.js';
 import { readLog, clearLog } from './crawl/event-log.js';
 import { preflightStorage } from './storage/quota.js';
 import { exportedKey } from './storage/storage-usage.js';
@@ -145,7 +145,23 @@ async function drive() {
   debugLog('推进结果', JSON.stringify(r.result));
 
   if (r.result.done && !r.result.stoppedBy && !r.result.unresolvedFailures) {
-    await withOffscreen({ op: 'finish', status: 'complete' });
+    // **收尾失败不能变成无限重试。**
+    //
+    // 报上来过一次：`IndexWriter` 没有恢复路径，于是收尾时段与索引对不上并抛错。
+    // 那个异常从这里一路冒到 `onResume`，没有人接——心跳每 30 秒来一次，每次都
+    // 走到同一处抛同一个错，控制台里刷「心跳出错」，而界面上**什么都不显示**：
+    // 用户看到的是一个既不继续也不结束、也不说为什么的抓取。
+    //
+    // 抓到的数据本身没事（都落盘了），坏的只是收尾这一步。所以：停下来、
+    // 写进调度镜像（心跳据此不再自动重试）、并且把话说给用户听。
+    try {
+      await withOffscreen({ op: 'finish', status: 'complete' });
+    } catch (err) {
+      debugLog('收尾失败', err);
+      await getSupervisor().pauseRun(FINALIZE_FAILED, { last_error: String(err?.message ?? err) });
+      await notifyNeedsAction(FINALIZE_FAILED, { kv: getKv() });
+      return { ...r.result, stoppedBy: FINALIZE_FAILED, finalizeError: String(err?.message ?? err) };
+    }
     await getSupervisor().finishRun();
     await notifyDone(r.result, { kv: getKv() });
   } else if (r.result.done && r.result.unresolvedFailures) {

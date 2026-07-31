@@ -207,7 +207,37 @@ export async function recoverBundle({ store, bundleId }) {
     // 会跨越很多次 worker 死亡，于是那个数字实际显示的是「上次恢复以来抓了多少」，
     // 用户看到的却是「一共抓了多少」。
     capturedByRoute: countByRoute(entries),
+    // index 的计数器同样要交还给写入器。它们活在内存里，而 index 文件是追加写的
+    // ——不交还的话收尾时段与索引对不上（见 `IndexWriter` 构造里的说明）。
+    indexStats: indexStatsOf(entries),
   };
+}
+
+/**
+ * 重建 index 的内存计数器。
+ *
+ * 这些数全都能从 index.ndjson 重算——本来就该从这里来，而不是指望内存里的累加
+ * 能活过 service worker 被杀。
+ *
+ * @param {Array<Record<string, any>>} entries
+ * @returns {import('./index-writer.js').IndexStats}
+ */
+function indexStatsOf(entries) {
+  const counts = { by_verdict: {}, by_surface: {}, by_intent: {} };
+  /** @type {Map<string, number>} */
+  const perSegment = new Map();
+  const bump = (bucket, key) => {
+    if (typeof key === 'string') bucket[key] = (bucket[key] ?? 0) + 1;
+  };
+  for (const e of entries) {
+    bump(counts.by_verdict, e.verdict);
+    bump(counts.by_surface, e.surface);
+    bump(counts.by_intent, e.intent);
+    if (typeof e.segment === 'string') {
+      perSegment.set(e.segment, (perSegment.get(e.segment) ?? 0) + 1);
+    }
+  }
+  return { lineCount: entries.length, counts, perSegment };
 }
 
 /**

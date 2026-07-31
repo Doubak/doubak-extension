@@ -53,6 +53,9 @@ export class BundleWriter {
    * @param {() => Date} [opts.now]
    * @param {number} [opts.startSeq] 崩溃恢复时传入「已用到的最大序号」
    * @param {Record<string, {segmentNo: number, segments: object[]}>} [opts.resume]
+   * @param {import('./index-writer.js').IndexStats} [opts.indexStats]  崩溃恢复时，
+   *   index 文件里已有那些行的统计。**不传的话被恢复过的抓取收不了尾**——段的
+   *   `record_count` 从磁盘恢复了，而 index 的计数器从零开始，两边对不上。
    *   崩溃恢复返回的段状态，按留存等级分组。见 recovery.js
    */
   constructor({
@@ -66,6 +69,7 @@ export class BundleWriter {
     now,
     startSeq = 0,
     resume,
+    indexStats,
   }) {
     if (!store) throw new Error('缺少 store');
 
@@ -91,7 +95,11 @@ export class BundleWriter {
       );
     }
 
-    this._index = new IndexWriter({ store, filename: indexFilename(this._bundleId) });
+    // index 的计数器也要恢复。少了它，收尾时会报「record_count 为 N，但 index 中
+    // 指向本段的行数为 0」——段那边恢复了，index 这边没有。
+    this._index = new IndexWriter({
+      store, filename: indexFilename(this._bundleId), resume: indexStats,
+    });
 
     this._manifest = new ManifestBuilder({
       bundleId: this._bundleId,

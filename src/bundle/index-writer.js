@@ -130,19 +130,38 @@ export class IndexWriter {
    * @param {object} opts
    * @param {import('../storage/file-store.js').FileStore} opts.store
    * @param {string} opts.filename  index-<bundle_id>.ndjson
+   * @param {IndexStats} [opts.resume]  崩溃恢复时，已经写在文件里的那些行的统计
    */
-  constructor({ store, filename }) {
+  constructor({ store, filename, resume }) {
     if (!store) throw new Error('缺少 store');
     if (!filename) throw new Error('缺少 filename');
     this._store = store;
     this._filename = filename;
-    this._lineCount = 0;
+
+    // ── 恢复
+    //
+    // **少了这一段，任何被恢复过的抓取都收不了尾。**
+    //
+    // index 文件是追加写的，崩溃之后那些行还在；但这几个计数器活在内存里，
+    // 新建一个 IndexWriter 就全归零。而段那边是**会**从磁盘恢复的
+    // （`SegmentWriter` 收 `resume`），于是收尾时两边对不上：
+    //
+    //   record_count 为 219，但 index 中指向本段的行数为 0
+    //
+    // 那句话是对的——只是它描述的不是档案坏了，是我们忘了把计数读回来。
+    // 而一场几小时的抓取必然跨越很多次 service worker 死亡，也就是说
+    // **正常的完整抓取一次都收不了尾**。
+    this._lineCount = resume?.lineCount ?? 0;
 
     /** @type {{by_verdict: Record<string, number>, by_surface: Record<string, number>, by_intent: Record<string, number>}} */
-    this._counts = { by_verdict: {}, by_surface: {}, by_intent: {} };
+    this._counts = {
+      by_verdict: { ...(resume?.counts?.by_verdict ?? {}) },
+      by_surface: { ...(resume?.counts?.by_surface ?? {}) },
+      by_intent: { ...(resume?.counts?.by_intent ?? {}) },
+    };
 
     /** @type {Map<string, number>} 每段的行数，供 manifest 的 record_count 交叉核对 */
-    this._perSegment = new Map();
+    this._perSegment = new Map(resume?.perSegment ?? []);
   }
 
   get filename() {
@@ -185,22 +204,96 @@ export class IndexWriter {
     };
   }
 
+  /**
+   * @typedef {object} IndexStats
+   * @property {number} lineCount
+   * @property {{by_verdict: Record<string, number>, by_surface: Record<string, number>, by_intent: Record<string, number>}} counts
+   * @property {Array<[string, number]> | Map<string, number>} perSegment
+   */
+
   /** 每段的行数。manifest 里每段的 record_count 必须与之相等。 */
   perSegmentCounts() {
     return new Map(this._perSegment);
   }
 
   /**
+   * 收尾：读回整个 index 文件，算摘要，**并按文件重算行数与每段计数**。
+   *
+   * ## 为什么按文件重算，而不是用内存里的累加
+   *
+   * 因为**文件才是权威**。内存里的计数器活在一个随时会被杀掉的 service worker 里，
+   * 而 index 是追加写的、每页落盘。两者一旦分叉，分叉的一定是内存那边。
+   *
+   * 这不是假想：`IndexWriter` 原本压根没有恢复路径，于是任何被恢复过的抓取收尾时
+   * 都会撞上
+   *
+   *     record_count 为 219，但 index 中指向本段的行数为 0
+   *
+   * ——段那边从磁盘恢复了，index 这边从零开始。而一场几小时的抓取必然跨越很多次
+   * worker 死亡，也就是说**正常的完整抓取一次都收不了尾**。
+   *
+   * 恢复路径现在有了（见构造函数），但那只解决了「这一次」。按文件重算是结构性的：
+   * 内存计数器往后再怎么错，也不会写进 manifest。
+   *
+   * 代价是把 index 再解析一遍。这个文件本来就要整份读进来算 sha256，多一次解析
+   * 在收尾时跑一次，可以忽略。
+   *
+   * 与段的交叉核对因此变得更硬了：它现在比的是「段自己声称写了多少条记录」与
+   * 「index 文件里真的有多少行指向它」——两个独立来源。
+   *
    * @returns {Promise<{filename: string, sha256: string, line_count: number}>}
    */
   async finalize() {
     const bytes = (await this._store.exists(this._filename))
       ? await this._store.read(this._filename)
       : new Uint8Array(0);
+
+    this._recountFromFile(bytes);
+
     return {
       filename: this._filename,
       sha256: await sha256Hex(bytes),
       line_count: this._lineCount,
     };
+  }
+
+  /**
+   * 按文件内容重建三个计数器。
+   *
+   * 解析不动的行**跳过而不抛**：崩溃可能在末尾留半行，那属于 `recoverBundle()`
+   * 的职责，不该在收尾时把一份本来能救的档案变成异常。
+   *
+   * @param {Uint8Array} bytes
+   */
+  _recountFromFile(bytes) {
+    const text = new TextDecoder().decode(bytes);
+    let lines = 0;
+    const counts = { by_verdict: {}, by_surface: {}, by_intent: {} };
+    /** @type {Map<string, number>} */
+    const perSegment = new Map();
+    const bump = (bucket, key) => {
+      if (typeof key === 'string') bucket[key] = (bucket[key] ?? 0) + 1;
+    };
+
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let e;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      lines += 1;
+      bump(counts.by_verdict, e.verdict);
+      bump(counts.by_surface, e.surface);
+      bump(counts.by_intent, e.intent);
+      if (typeof e.segment === 'string') {
+        perSegment.set(e.segment, (perSegment.get(e.segment) ?? 0) + 1);
+      }
+    }
+
+    this._lineCount = lines;
+    this._counts = counts;
+    this._perSegment = perSegment;
   }
 }

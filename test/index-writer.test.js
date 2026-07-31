@@ -223,3 +223,73 @@ describe('汇总', () => {
     assert.equal(meta.sha256, EMPTY_SHA256);
   });
 });
+
+describe('恢复：index 的计数器必须接得上', () => {
+  test('不接的话，被恢复过的抓取收不了尾', async () => {
+    // 报上来的原样：
+    //   record_count 为 219，但 index 中指向本段的行数为 0。段与索引已失去对应关系。
+    // 而那份 index 文件里确实有 219 行。坏的不是档案，是这几个计数器归零了。
+    const store = new MemoryFileStore();
+    const w1 = new IndexWriter({ store, filename: 'index-x.ndjson' });
+    await w1.append(entry({ capture_id: `${BID}#000001`, segment: 'data-x-00001.warc.gz' }));
+    await w1.append(entry({ capture_id: `${BID}#000002`, segment: 'data-x-00001.warc.gz' }));
+
+    // worker 被杀，新建一个
+    const cold = new IndexWriter({ store, filename: 'index-x.ndjson' });
+    assert.equal(cold.perSegmentCounts().get('data-x-00001.warc.gz'), undefined, '内存里当然是空的');
+
+    const warm = new IndexWriter({
+      store,
+      filename: 'index-x.ndjson',
+      resume: { lineCount: 2, counts: w1.counts(), perSegment: w1.perSegmentCounts() },
+    });
+    assert.equal(warm.lineCount, 2);
+    assert.equal(warm.perSegmentCounts().get('data-x-00001.warc.gz'), 2);
+  });
+
+  test('恢复之后接着写，计数是累加的', async () => {
+    const store = new MemoryFileStore();
+    const w1 = new IndexWriter({ store, filename: 'index-x.ndjson' });
+    await w1.append(entry({ capture_id: `${BID}#000001`, segment: 'data-x-00001.warc.gz' }));
+
+    const w2 = new IndexWriter({
+      store,
+      filename: 'index-x.ndjson',
+      resume: { lineCount: 1, counts: w1.counts(), perSegment: w1.perSegmentCounts() },
+    });
+    await w2.append(entry({ capture_id: `${BID}#000002`, segment: 'data-x-00001.warc.gz' }));
+    assert.equal(w2.lineCount, 2);
+    assert.equal(w2.perSegmentCounts().get('data-x-00001.warc.gz'), 2);
+    assert.equal(w2.counts().by_verdict.ok, 2);
+  });
+});
+
+describe('收尾时按文件重算 —— 文件才是权威', () => {
+  test('内存计数器错了也不会写进 manifest', async () => {
+    // 这是结构性的那一层：恢复路径解决的是「这一次」，按文件重算保证往后
+    // 内存再怎么错也不会污染 manifest。
+    const store = new MemoryFileStore();
+    const w = new IndexWriter({ store, filename: 'index-x.ndjson' });
+    await w.append(entry({ capture_id: `${BID}#000001`, segment: 'data-x-00001.warc.gz' }));
+    await w.append(entry({ capture_id: `${BID}#000002`, segment: 'data-x-00001.warc.gz' }));
+
+    // 手动把内存计数器搞坏
+    w._lineCount = 999;
+    w._perSegment = new Map([['data-x-00001.warc.gz', 999]]);
+
+    const meta = await w.finalize();
+    assert.equal(meta.line_count, 2, '行数要按文件来');
+    assert.equal(w.perSegmentCounts().get('data-x-00001.warc.gz'), 2);
+    assert.equal(w.counts().by_verdict.ok, 2);
+  });
+
+  test('末尾的半行跳过而不抛 —— 那是 recoverBundle 的活', async () => {
+    const store = new MemoryFileStore();
+    const w = new IndexWriter({ store, filename: 'index-x.ndjson' });
+    await w.append(entry({ capture_id: `${BID}#000001`, segment: 'data-x-00001.warc.gz' }));
+    await store.append('index-x.ndjson', new TextEncoder().encode('{"capture_id":"x#0000'));
+
+    const meta = await w.finalize();
+    assert.equal(meta.line_count, 1, '半行不算数，但也不该让收尾炸掉');
+  });
+});
