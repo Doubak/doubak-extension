@@ -32,6 +32,7 @@ import { RequestGate } from './pacing.js';
 import { buildRoutes } from './routes.js';
 import { buildCheckpoint } from './run-store.js';
 import { bundleDirName, newBundleId } from '../core/ids.js';
+import { urlKey } from '../core/urlkey.js';
 import { CRASH_SENTINEL_REASON } from './resume-policy.js';
 
 /** 一批抓多少条。见文件开头的权衡说明。 */
@@ -321,11 +322,16 @@ export class CrawlRunner {
     // 队列从 checkpoint 里的未完成条目重建；已完成的不在里面——那是 index
     // 的职责，重复记录会带来两个可能不一致的真相来源。
     const frontier = new Frontier();
+    // **先给去重集合打底，再放条目回去。** 顺序要紧：打底用的是 index 里已经抓成功
+    // 的 url_key，而 checkpoint 里的条目是**没抓成**的，两者不该互相覆盖。
+    frontier.markCaptured(repair.capturedUrlKeys ?? []);
     for (const it of cp.frontier ?? []) {
       const def = routes.get(it.route_key);
       frontier.enqueue({
         url: it.url,
-        urlKey: it.url,
+        // **要归一化。** 抓取循环入队时用的是 `urlKey(url)`，而 index 里存的也是
+        // 归一化后的 `url_key`——恢复时直接拿原始 URL 当键，去重就跨不过这条边界。
+        urlKey: urlKey(it.url),
         routeKey: it.route_key,
         intent: it.intent,
         enqueuedBy: it.enqueued_by ?? null,
@@ -344,7 +350,9 @@ export class CrawlRunner {
         state: it.state === 'in_flight' ? 'pending' : (it.state ?? 'pending'),
         attempts: it.attempts ?? 0,
         // 游标：少了它，下一页会从第 1 页重新算（见 buildCheckpoint 里的说明）。
-        cursor: it.cursor ?? null,
+        // 旧 checkpoint 没记这个字段，所以要能从 URL 反推——不然一份升级前写下的
+        // 半成品档案一恢复就从头重抓。
+        cursor: it.cursor ?? cursorFromUrl(it.url, def),
       });
     }
     // 每条路线按 checkpoint 里的游标续上
@@ -353,7 +361,7 @@ export class CrawlRunner {
       if (!def?.entryUrl || !r.cursor) continue;
       const url = def.entryUrl({ offset: r.cursor.value });
       frontier.enqueue({
-        url, urlKey: url, routeKey: r.route_key, intent: def.intent, cursor: r.cursor,
+        url, urlKey: urlKey(url), routeKey: r.route_key, intent: def.intent, cursor: r.cursor,
         ordered: def.ordered ?? Boolean(def.pagination),
         priority: def.priority ?? 50,
       });
@@ -602,6 +610,39 @@ export class CrawlRunner {
 }
 
 /**
+ * 从 URL 反推游标。
+ *
+ * 恢复时的兜底：checkpoint 里没记 `cursor` 的条目（升级前写下的那些）如果就这样
+ * 放回队列，`_enqueueNextPage` 会按 `route.pagination.first` 从第一页重新数——
+ * 于是抓完 `p=20` 之后去抓 `p=2`。真实日志里就是这样，而且后果比「多抓几页」严重：
+ * 重抓的那些页全是重复条目，**停滞检测会把它当成「这条线走完了」**，于是广播只抓到
+ * 第 20 页就被标成完成，然后去抓标记列表了。那是一次假的完整性声明。
+ *
+ * 反推是可靠的：URL 就是 `entryUrl({offset})` 生成的，参数名固定。
+ *
+ * @param {string} url
+ * @param {object} [def]  路线定义
+ * @returns {{kind: string, value: number} | null}
+ */
+export function cursorFromUrl(url, def) {
+  const pg = def?.pagination;
+  if (!pg) return null;
+  let raw = null;
+  try {
+    const u = new URL(url);
+    raw = u.searchParams.get(pg.kind === 'page' ? 'p' : 'start');
+  } catch {
+    return null;
+  }
+  if (raw === null) {
+    // 入口页可能压根不带参数（第一页）。那就是起点。
+    return { kind: pg.kind, value: pg.first };
+  }
+  const value = Number(raw);
+  return Number.isFinite(value) ? { kind: pg.kind, value } : null;
+}
+
+/**
  * 按优先级把各路线的入口页放进队列。
  *
  * 前置依赖未满足的路线**不入队**——比如作品详情页要等广播抓完。不能拿最不可
@@ -619,7 +660,9 @@ export function seedFrontier(frontier, routeDefs) {
     if (
       frontier.enqueue({
         url,
-        urlKey: url,
+        // 与抓取循环、与 index 里的 `url_key` 用同一套归一化——三处必须一致，
+        // 否则去重跨不过「种子 / 翻页 / 恢复」这三条边界。
+        urlKey: urlKey(url),
         routeKey: def.key,
         intent: def.intent,
         cursor: def.pagination ? { kind: def.pagination.kind, value: def.pagination.first } : null,

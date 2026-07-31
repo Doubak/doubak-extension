@@ -210,6 +210,12 @@ export async function recoverBundle({ store, bundleId }) {
     // index 的计数器同样要交还给写入器。它们活在内存里，而 index 文件是追加写的
     // ——不交还的话收尾时段与索引对不上（见 `IndexWriter` 构造里的说明）。
     indexStats: indexStatsOf(entries),
+    // 已经抓成功的页面。恢复时用来给 frontier 的去重集合打底——它只从**未完成**
+    // 的条目重建，于是抓完的那些一律不认识，任何把旧页码算回来的 bug 都会变成
+    // 真实的重抓。见 `Frontier.markCaptured`。
+    capturedUrlKeys: entries
+      .filter((e) => e.verdict === 'ok' && typeof e.url_key === 'string')
+      .map((e) => e.url_key),
   };
 }
 

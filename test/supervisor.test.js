@@ -190,6 +190,26 @@ describe('tick 必须幂等', () => {
     assert.equal(calls, 2, '第二次心跳没能推进');
   });
 
+  test('开工之后心跳照样能推进 —— startRun 不许占住那个标志', async () => {
+    // 报上来的：新开一场抓取，跑完第一段（captured 25）之后，此后每一次心跳都是
+    // 「未恢复」，直到重新加载扩展。
+    //
+    // `startRun()` 把 `_running` 置成 true，而真正推进的是紧随其后由 background
+    // 直接调用的 `drive()`——它不走 tick，也就没人来清这个标志。
+    const { sup, resumed, store } = harness();
+    await sup.startRun({ bundle_id: 'b1' });
+    assert.equal(sup.running, false, 'startRun 不该占住「正在推进」这个标志');
+
+    // 第一段推进由 background 直接跑（不经过 tick），这里只模拟它写下的状态
+    await store.saveCheckpoint({
+      ...store.peek(), pause_reason: 'crash', paused_at: '2026-07-29T11:00:00Z',
+    });
+
+    const r = await sup.tick();
+    assert.equal(r.acted, true, '开工之后的第一次心跳就该能推进');
+    assert.equal(resumed.length, 1);
+  });
+
   test('没有 checkpoint 时 tick 是空操作', async () => {
     const { sup, resumed } = harness();
     const r = await sup.tick();

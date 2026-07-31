@@ -88,7 +88,19 @@ export class Supervisor {
       paused_at: new Date(this._now()).toISOString(),
     });
     await this._ensureHeartbeat();
-    this._running = true;
+    // **这里不能置 `_running`。**
+    //
+    // 那个标志的含义是「有一段推进正在飞」，而 `startRun()` 不推进——真正推进的是
+    // 紧随其后由 background 直接调用的 `drive()`，它走的不是这条路，也就没人会来清。
+    // 于是标志一直是 true，此后每一次心跳都在这里掉头返回「已经在跑了」，抓取
+    // **在第一段之后就停住**。
+    //
+    // 真实日志：一次「推进结果 …captured:25…」，然后十几次「心跳 → 未恢复」，
+    // 直到用户重新加载扩展把内存清零。
+    //
+    // 上一次修的是 `tick()` 里忘了在 finally 清；这是同一个标志的另一个写入点，
+    // 而它压根就不该写。并发防护本来就有三层，都不依赖它：`Exclusive` 全局互斥、
+    // offscreen 的 `driving` 复用同一个 promise、以及 tick 自己的这个检查。
   }
 
   /**

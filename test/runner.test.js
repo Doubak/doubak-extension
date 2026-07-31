@@ -7,6 +7,7 @@ import { RunStore } from '../src/crawl/run-store.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { Frontier } from '../src/crawl/frontier.js';
+import { urlKey } from '../src/core/urlkey.js';
 import { CRASH_SENTINEL_REASON } from '../src/crawl/resume-policy.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { indexFilename } from '../src/core/ids.js';
@@ -1077,5 +1078,130 @@ describe('规范 §7.1：恢复之后的 manifest 必须与「一次跑完」的
     const bc = m.crawl_state.find((r) => r.route_key === 'broadcast.timeline');
     assert.ok(bc.gaps.length > 0, '真没跑完就该记缺口');
     assert.equal(bc.advanced, false, '没跑完绝不许推进水位线');
+  });
+});
+
+describe('恢复之后不许倒着翻页 —— 那会伪造出一次「跑完了」', () => {
+  /**
+   * 报上来的日志（广播）：
+   *
+   *     02:02:12  p=20      ← 恢复后的第一页，对的
+   *     02:02:14  p=2       ← ？？
+   *     02:02:17  p=3
+   *     ...       p=19
+   *     02:02:59  interest.book.collect   ← 广播根本没抓完就换线了
+   *
+   * 两步：① checkpoint 里的条目没记 `cursor`，于是「下一页」按
+   * `route.pagination.first` 从第 1 页重新数——抓完 p=20 之后去抓 p=2。
+   * ② p=2…p=19 全是重复条目，**停滞检测把它当成「这条线走完了」**，于是广播被
+   * `markFinished()`、水位线推进、门控放开、去抓标记列表。
+   *
+   * ② 才是真正严重的那一半：一次**假的完整性声明**。
+   */
+
+  /** 一场跑到第 N 页的广播抓取，返回 checkpoint 与 runner。 */
+  async function crawlThenCrash(stopAfterBatches) {
+    const seen = [];
+    const { runner, runStore } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (!url.includes('statuses')) return bcPage(0);
+      seen.push(url);
+      const p = Number(/[?&]p=(\d+)/.exec(url)?.[1] ?? 1);
+      // 每页 20 条**互不重复**的条目，一直有下一页
+      return bcPage(20, (p - 1) * 20);
+    }, { batchSize: 1 });
+
+    await runner.start({ username: 'example', mediums: ['book'], includeCatalog: false });
+    for (let i = 0; i < stopAfterBatches; i++) await runner.runBatch();
+    return { runner, runStore, seen };
+  }
+
+  test('checkpoint 里的条目带着游标 —— 这是「下一页」唯一的依据', async () => {
+    const { runStore, seen } = await crawlThenCrash(8);
+    const lastBefore = Number(/[?&]p=(\d+)/.exec(seen.at(-1))?.[1] ?? 1);
+    assert.ok(lastBefore >= 3, `崩溃前该抓到第 3 页以后，实际到 p=${lastBefore}`);
+
+    const cp = await runStore.loadCheckpoint();
+    const pending = cp.frontier.find((it) => it.url.includes('statuses'));
+    assert.ok(pending, '广播那条应当还有未抓的页留在 checkpoint 里');
+    assert.ok(pending.cursor, '没有 cursor，下一页就会从第 1 页重新数');
+    assert.equal(pending.cursor.value, lastBefore + 1);
+  });
+
+  test('恢复之后队列里那条也带着游标', async () => {
+    const { runner, runStore, seen } = await crawlThenCrash(8);
+    const lastBefore = Number(/[?&]p=(\d+)/.exec(seen.at(-1))?.[1] ?? 1);
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null;
+    await runner.resume(cp);
+
+    const it = runner._run.frontier.snapshot()
+      .find((x) => x.routeKey === 'broadcast.timeline' && x.state === 'pending');
+    assert.ok(it?.cursor, '恢复之后游标丢了');
+    assert.equal(it.cursor.value, lastBefore + 1);
+  });
+
+  test('旧 checkpoint 没记 cursor → 从 URL 反推', async () => {
+    // 升级之前写下的半成品档案必须还能救——不然用户手上那份只能从头重抓。
+    const { runner, runStore, seen } = await crawlThenCrash(8);
+    const lastBefore = Number(/[?&]p=(\d+)/.exec(seen.at(-1))?.[1] ?? 1);
+
+    const cp = await runStore.loadCheckpoint();
+    for (const it of cp.frontier) delete it.cursor; // 模拟旧格式
+    runner._run = null;
+    await runner.resume(cp);
+
+    const it = runner._run.frontier.snapshot()
+      .find((x) => x.routeKey === 'broadcast.timeline' && x.state === 'pending');
+    assert.ok(it?.cursor, '反推失败，下一页会从第 1 页重新数');
+    assert.equal(it.cursor.value, lastBefore + 1);
+  });
+
+  test('恢复之后去重集合认识已经抓成功的页面', async () => {
+    const { runner, runStore, seen } = await crawlThenCrash(8);
+    const already = seen[1]; // 抓过的某一页
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null;
+    await runner.resume(cp);
+
+    const ok = runner._run.frontier.enqueue({
+      url: already, urlKey: urlKey(already), routeKey: 'broadcast.timeline',
+      intent: 'broadcast.timeline', ordered: true, priority: 10,
+    });
+    assert.equal(ok, false, '已经抓成功的页面被重新排进队列了');
+  });
+
+  test('端到端：恢复之后一页都不重抓，也不倒着翻', async () => {
+    const { runner, runStore, seen } = await crawlThenCrash(8);
+    const lastBefore = Number(/[?&]p=(\d+)/.exec(seen.at(-1))?.[1] ?? 1);
+    const before = new Set(seen);
+
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null;
+    await runner.resume(cp);
+    const mark = seen.length;
+    for (let i = 0; i < 5; i++) await runner.runBatch();
+
+    const after = seen.slice(mark);
+    assert.ok(after.length > 0, '恢复之后要接着抓');
+    for (const u of after) {
+      assert.equal(before.has(u), false, `重抓了已经抓过的 ${u}`);
+      const p = Number(/[?&]p=(\d+)/.exec(u)?.[1] ?? 1);
+      assert.ok(p > lastBefore, `倒回去抓了 p=${p}（崩溃前已经到 p=${lastBefore}）`);
+    }
+  });
+
+  test('广播没走完就不许放开作品详情页的门控', async () => {
+    // 假停滞的连锁后果：广播被标成完成 → 门控放开 → 去抓最可替代的东西，
+    // 而最不可替代的那条线还剩一大半。
+    const { runner, runStore } = await crawlThenCrash(8);
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null;
+    await runner.resume(cp);
+    for (let i = 0; i < 6; i++) await runner.runBatch();
+
+    const st = runner._run.loop.routeStates.get('broadcast.timeline');
+    assert.equal(st._finished, false, '广播还有下一页，不该被标成走完了');
+    assert.equal(st.contiguous, false);
   });
 });
