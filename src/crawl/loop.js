@@ -65,7 +65,7 @@ export class CrawlLoop {
    */
   constructor({
     frontier, transport, writer, session, pacer, routes, onEvent, floors,
-    bypassGates = false, priorCounts = null,
+    bypassGates = false, priorCounts = null, savedStates = null,
   }) {
     this._frontier = frontier;
     this._transport = transport;
@@ -94,6 +94,16 @@ export class CrawlLoop {
      * @type {Record<string, number>}
      */
     this._priorCounts = priorCounts ?? {};
+    /**
+     * checkpoint 里存下来的各路线状态。
+     *
+     * 不接回来的话，恢复之后每条路线都是崭新的——没有水位线、没有缺口、没走完，
+     * 于是收尾时 `flushRouteEvidence()` 会把它们**全部**记成「aborted」。
+     * 真实档案里 21 条路线全是这样，而它一次都没被打断过。
+     *
+     * @type {Record<string, object>}
+     */
+    this._savedStates = savedStates ?? {};
 
     // **马上把这些路线的状态建出来。**
     //
@@ -103,6 +113,7 @@ export class CrawlLoop {
     //
     // 有历史计数就说明这条线之前抓过，那它本来就该在表上。
     for (const routeKey of Object.keys(this._priorCounts)) this.stateFor(routeKey);
+    for (const routeKey of Object.keys(this._savedStates)) this.stateFor(routeKey);
     /**
      * 跳过抓取顺序的门控。**只给调试用**。
      *
@@ -123,16 +134,15 @@ export class CrawlLoop {
   stateFor(routeKey) {
     if (!this._states.has(routeKey)) {
       const route = this._routes.get(routeKey) ?? {};
-      this._states.set(
+      const opts = {
         routeKey,
-        new RouteState({
-          routeKey,
-          intent: route.intent ?? routeKey,
-          enumeration: route.enumeration ?? 'bounded',
-          floorTime: this._floors.get(routeKey) ?? null,
-          priorCount: this._priorCounts[routeKey] ?? 0,
-        }),
-      );
+        intent: route.intent ?? routeKey,
+        enumeration: route.enumeration ?? 'bounded',
+        floorTime: this._floors.get(routeKey) ?? null,
+        priorCount: this._priorCounts[routeKey] ?? 0,
+      };
+      const saved = this._savedStates[routeKey];
+      this._states.set(routeKey, saved ? RouteState.restore(opts, saved) : new RouteState(opts));
     }
     return this._states.get(routeKey);
   }

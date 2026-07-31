@@ -228,6 +228,69 @@ export class RouteState {
   }
 
   /**
+   * 交出全部状态，供 checkpoint 保存。
+   *
+   * ## 为什么整条状态都要存
+   *
+   * 连续性证明是这个项目唯一的完整性依据，而它是**跨越整场抓取**攒出来的。
+   * 这个对象活在内存里，而 MV3 的 service worker 每 30 秒空闲就被杀——一场几小时的
+   * 抓取必然跨越很多次死亡。
+   *
+   * 不存的后果是**静默的**：抓取照常跑完，manifest 照常写出来，只是里面每一条路线
+   * 都写着「被打断、未验证、不许推进水位线」。真实档案里就是这样：21 条路线全是
+   * 「有 1 处缺口，原因：aborted」，而实际上一次都没被打断过。
+   *
+   * 判据：**恢复之后产出的 manifest，必须与「一次不间断跑完」产出的那份一致。**
+   */
+  serialize() {
+    return {
+      high_water_time: this.highWater?.iso ?? null,
+      high_water_raw: this.highWater?.raw ?? null,
+      high_water_ids: this.highWaterIds,
+      low_water_time: this.lowWater?.iso ?? null,
+      low_water_raw: this.lowWater?.raw ?? null,
+      claimed: this.claimed,
+      captured_count: this.capturedCount,
+      // **缺口一定要交还。** 丢了就等于恢复之后重新声称自己是连续的——
+      // 这是这份规范里最不能出的那种错：假的完整性声明。
+      gaps: this.gaps,
+      finished: this._finished,
+      stopped: this._stopped,
+      cursor: this.cursor,
+      stall: this.stall.serialize(),
+      items_seen: this.stall.uniqueCount,
+      stall_counter: this.stall.consecutiveNoProgress,
+    };
+  }
+
+  /**
+   * 从 checkpoint 里的状态恢复。
+   *
+   * @param {object} opts  与构造函数相同
+   * @param {ReturnType<RouteState['serialize']>} saved
+   */
+  static restore(opts, saved) {
+    const s = new RouteState(opts);
+    if (!saved) return s;
+
+    const mark = (iso, raw) => (iso ? { iso, raw: raw ?? iso, epochMs: Date.parse(iso) } : null);
+    s.highWater = mark(saved.high_water_time, saved.high_water_raw);
+    s.lowWater = mark(saved.low_water_time, saved.low_water_raw);
+    s.highWaterIds = saved.high_water_ids ?? [];
+    s.claimed = saved.claimed ?? null;
+    // 计数以 checkpoint 为准；它比从 index 汇总更精确（index 里没有「唯一条目」的概念）。
+    if (typeof saved.captured_count === 'number') s.capturedCount = saved.captured_count;
+    s.gaps = saved.gaps ? [...saved.gaps] : [];
+    s._finished = Boolean(saved.finished);
+    s._stopped = Boolean(saved.stopped);
+    s.cursor = saved.cursor ?? null;
+    if (saved.stall) s.stall = StallDetector.restore(saved.stall);
+    // `_idsSeenThisSession` **刻意不恢复**：它问的是「本次会话抽到过 ID 没有」，
+    // 那是抽取器坏没坏的判据，按会话算才有意义。
+    return s;
+  }
+
+  /**
    * 水位线能不能推进。
    *
    * **核心不变量**：中途暂停、被风控打断、用户放弃——一律不推进。已抓到的

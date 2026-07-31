@@ -191,12 +191,25 @@ export function buildCheckpoint({
     paused_at: pausedAt,
     pause_reason: pauseReason,
     last_capture_id: lastCaptureId,
+    // **整条 RouteState 都要存，不只是游标。**
+    //
+    // 连续性证明是这个项目唯一的完整性依据，而它跨越整场抓取攒出来——水位线、
+    // 已观测的条目 ID、停滞计数、缺口、这条线走没走完。这些活在内存里，而
+    // service worker 每 30 秒空闲就被杀。
+    //
+    // 只存游标的后果是**静默的**：抓取照常跑完、manifest 照常写出，只是里面每条
+    // 路线都写着「有 1 处缺口，原因：aborted」——而它一次都没被打断过。真实档案
+    // 里 21 条路线全是这样。规范 §7.1 现在把这条写死了。
     routes: [...routes.entries()].map(([routeKey, r]) => ({
       route_key: routeKey,
       state: 'in_progress',
-      cursor: r.cursor ?? null,
-      items_seen: r.stall?.uniqueCount ?? 0,
-      stall_counter: r.stall?.consecutiveNoProgress ?? 0,
+      ...(typeof r.serialize === 'function'
+        ? r.serialize()
+        : {
+            cursor: r.cursor ?? null,
+            items_seen: r.stall?.uniqueCount ?? 0,
+            stall_counter: r.stall?.consecutiveNoProgress ?? 0,
+          }),
     })),
     // 只保留未完成的条目。已完成的在 index 里，重复记录只会带来两个可能
     // 不一致的真相来源。
@@ -213,6 +226,14 @@ export function buildCheckpoint({
         // 门控要跟着走：不记的话恢复之后作品详情页会在广播抓完之前就开跑，
         // 而那正是「不能拿最不可替代的换最可替代的」要防的事。
         gated_by: it.gatedBy ?? null,
+        // **游标必须跟着走。**
+        //
+        // 不记的话，恢复之后那一页的 `cursor` 是 null，而下一页是按
+        // `item.cursor?.value ?? route.pagination.first` 算的——于是从第 1 页
+        // 重新开始数。算出来的「下一页」要么早就抓过（被去重挡掉，这条线就此
+        // **静默停住**、永远等不到停滞终止、收尾时被记成 aborted），要么把已经
+        // 走过的页码再走一遍。两种都坏。
+        cursor: it.cursor ?? null,
       })),
     rate_state: pacer.serialize(),
   };

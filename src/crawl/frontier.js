@@ -141,6 +141,30 @@ export class StallDetector {
     };
   }
 
+  /**
+   * 交出全部状态，供 checkpoint 保存。
+   *
+   * **必须包含 `seenIds`。** 不交的话，恢复之后重抓的那一页会被整页当成新条目：
+   * 停滞计数归零、`items_seen` 虚高。而停滞检测是分页路线唯一的终止条件。
+   */
+  serialize() {
+    return {
+      threshold: this._threshold,
+      consecutiveNoProgress: this._consecutiveNoProgress,
+      seenIds: [...this._seenIds],
+      pages: this._pages,
+    };
+  }
+
+  /** @param {ReturnType<StallDetector['serialize']>} s */
+  static restore(s) {
+    const d = new StallDetector(s?.threshold ?? 3);
+    d._consecutiveNoProgress = s?.consecutiveNoProgress ?? 0;
+    d._seenIds = new Set(s?.seenIds ?? []);
+    d._pages = s?.pages ?? 0;
+    return d;
+  }
+
   get uniqueCount() {
     return this._seenIds.size;
   }

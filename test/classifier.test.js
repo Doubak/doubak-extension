@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { classifyResponse, RollingSize, ROUTE_PROFILES, profileForRoute, extractItemIds, extractItemTimes } from '../src/crawl/classifier.js';
+import { classifyResponse, RollingSize, ROUTE_PROFILES, profileForRoute, extractItemIds, extractItemTimes, extractClaimedCount } from '../src/crawl/classifier.js';
 import { fixtures, stripLoginMarkers, anonymizeWithLoginPrompt } from './helpers/fixtures.js';
 
 const BROADCAST_URL = 'https://www.douban.com/people/82160871/statuses?p=1';
@@ -523,5 +523,52 @@ describe('标记列表页：ID 与时间必须覆盖全部媒介', () => {
     assert.equal(ids.length, 3);
     assert.equal(times.length, 3);
     assert.deepEqual(ids, ['34912679', '10944608', '35999593']);
+  });
+});
+
+describe('声称数量：豆瓣自己写在标题里的那个数', () => {
+  /**
+   * 下面每一条 `<h1>` 都是从一份**真实档案**里抄出来的（20260730T131755Z-74f5dc，
+   * 21 条路线逐条核对过）。三种写法差得挺远：
+   *
+   * - 紧凑：`<h1>我看过的影视(1333)</h1>`
+   * - 带用户名前缀：`<h1>MewX玩过的游戏(306)</h1>`
+   * - 多行加缩进（舞台剧）：`<h1>\n        我看过的舞台剧(3)\n    </h1>`
+   *
+   * 值得单独钉住，是因为这个数**抓不回来**：它来自抓取那一刻的页面，事后没有
+   * 任何办法重建。而 `claimed > captured` 是「豆瓣藏了东西」的唯一证据
+   * （counts 不能证明完整，但差值是线索）。
+   */
+  const list = profileForRoute('interest.movie.collect');
+
+  const cases = [
+    ['紧凑', '<h1>我看过的影视(1333)</h1>', 1333],
+    ['带用户名前缀', '<h1>MewX玩过的游戏(306)</h1>', 306],
+    ['多行加缩进', '<h1>\n        我看过的舞台剧(3)\n    </h1>', 3],
+    ['两边有空格', '<h1> 我读过的书(45) </h1>', 45],
+  ];
+
+  for (const [name, html, want] of cases) {
+    test(`${name}：${want}`, () => {
+      const c = extractClaimedCount(html, list);
+      assert.ok(c, `抽不到：${JSON.stringify(html)}`);
+      assert.equal(c.count, want);
+      assert.ok(c.raw.includes(String(want)), 'raw 要留原样，供事后核对');
+    });
+  }
+
+  test('0 是合法的声称值，不能当成「没抽到」', () => {
+    // 真实档案里 `我在听的音乐(0)` 与 `我想听的音乐(0)` 都是 0，而它们的
+    // 实抓也是 0——那是一次**成立的**对账，不是缺失。
+    const c = extractClaimedCount('<h1>我在听的音乐(0)</h1>', list);
+    assert.ok(c, '0 被当成 falsy 丢掉了');
+    assert.equal(c.count, 0);
+  });
+
+  test('广播没有声称数量 —— null 不是 0', () => {
+    // 广播页上压根没有这个数。写成 0 会让覆盖率表显示「声称 0 / 实抓 80」，
+    // 看起来像抓多了。
+    const bc = profileForRoute('broadcast.timeline');
+    assert.equal(extractClaimedCount('<h1>我的动态</h1>', bc), null);
   });
 });

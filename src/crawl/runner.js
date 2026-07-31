@@ -343,6 +343,8 @@ export class CrawlRunner {
         // 那也让失败真的能被看见，而不是在下一次恢复里被抹掉。
         state: it.state === 'in_flight' ? 'pending' : (it.state ?? 'pending'),
         attempts: it.attempts ?? 0,
+        // 游标：少了它，下一页会从第 1 页重新算（见 buildCheckpoint 里的说明）。
+        cursor: it.cursor ?? null,
       });
     }
     // 每条路线按 checkpoint 里的游标续上
@@ -364,6 +366,9 @@ export class CrawlRunner {
       // 界面上的「已抓」要接着数，不能每次恢复都归零。数字来自 index——
       // 内存里的计数随 service worker 一起清零，index 不会。
       priorCounts: repair.capturedByRoute,
+      // **连续性证明要接回来。** 不接的话，收尾时每条路线都会被记成「aborted」——
+      // 而它可能一次都没被打断过。规范 §7.1。
+      savedStates: Object.fromEntries((cp.routes ?? []).map((r) => [r.route_key, r])),
     });
 
     this._run = {
@@ -583,9 +588,13 @@ export class CrawlRunner {
   /** @param {string} reason */
   async _saveCheckpoint(reason) {
     const { bundleId, frontier, pacer, loop } = this._run;
-    const routes = new Map(
-      [...loop.routeStates.entries()].map(([k, s]) => [k, { cursor: s.cursor, stall: s.stall }]),
-    );
+    // **整个 RouteState 传下去，不要在这里挑字段。**
+    //
+    // 原来这里挑成 `{cursor, stall}`——够续上翻页，不够重建连续性证明。于是恢复
+    // 之后每条路线都是崭新的：没有水位线、没走完、没被打断，收尾时被**全部**记成
+    // 「aborted」。真实档案里 21 条路线全是这样，而它一次都没被打断过。
+    // 顺带 `advanced` 永远是 false，增量抓取永远不可能。规范 §7.1。
+    const routes = new Map(loop.routeStates);
     await this._runStore.saveCheckpoint(
       buildCheckpoint({ bundleId, frontier, pacer, routes, pauseReason: reason }),
     );

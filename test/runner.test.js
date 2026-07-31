@@ -958,3 +958,124 @@ describe('被恢复过的抓取必须收得了尾', () => {
 function dirsOf(runner) {
   return [runner?._run?.store].filter(Boolean);
 }
+
+describe('规范 §7.1：恢复之后的 manifest 必须与「一次跑完」的一致', () => {
+  /**
+   * 报上来的样子：一份 status=complete 的档案，21 条路线**全部**写着
+   *
+   *     有 1 处缺口。原因：aborted。
+   *
+   * 而那次抓取一次都没被风控打断过——只是中途崩过、恢复过。
+   *
+   * 成因：checkpoint 的 `routes[]` 只存了游标（够续上翻页），没存连续性证明。
+   * 恢复之后每条路线都是崭新的：没有水位线、没走完、没被打断，于是收尾时
+   * `flushRouteEvidence()` 把它们全部记成 aborted。
+   *
+   * 后果不只是难看：`advanced` 永远是 false，**增量抓取永远不可能**。
+   */
+
+  /**
+   * 时间**逐页递减**的广播页。
+   *
+   * 共用的 `bcPage()` 在每页上重复同样的 9 个时间戳，那会让「水位线活过崩溃」这条
+   * 测试假通过：无论从哪一页开始重算，最新时间都一样。水位线是**跨页**的量，
+   * 测它就必须让页与页的时间真的不同。
+   *
+   * @param {number} page  1 起
+   */
+  function descendingPage(page, n = 20) {
+    let items = '';
+    for (let i = 0; i < n; i++) {
+      const day = 28 - (page - 1) * 2 - (i % 2);
+      const hour = 20 - (i % 10);
+      items += `<div class="status-item" data-sid="${page * 100 + i}" data-uid="82160871">`
+        + `<span class="created_at" title="2026-07-${String(day).padStart(2, '0')} `
+        + `${String(hour).padStart(2, '0')}:00:00">x</span></div>`;
+    }
+    return `<html><head><title>\n我的动态\n</title></head><body>${NAV}
+<div id="db-usr-profile"><div class="info"><h1>示例</h1></div></div>
+<div class="stream-items">${items}</div></body></html>`;
+  }
+
+  /** 跑一场完整抓取，返回 manifest。`crashAfter` 批之后模拟 worker 被杀。 */
+  async function crawl({ crashAfter = null } = {}) {
+    const { runner, runStore } = harness(
+      broadcastOnly([descendingPage(1), descendingPage(2), descendingPage(3), bcPage(0)]),
+      { batchSize: 1 },
+    );
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+
+    let n = 0;
+    for (let i = 0; i < 40; i++) {
+      const b = await runner.runBatch();
+      n += 1;
+      if (b.done) break;
+      if (crashAfter && n === crashAfter) {
+        const cp = await runStore.loadCheckpoint();
+        runner._run = null; // worker 被杀
+        await runner.resume(cp);
+      }
+    }
+    return runner.finish('complete');
+  }
+
+  test('崩过一次也不该冒出 aborted 缺口', async () => {
+    const m = await crawl({ crashAfter: 2 });
+    const bc = m.crawl_state.find((r) => r.route_key === 'broadcast.timeline');
+    assert.ok(bc, '广播那条要在');
+    assert.deepEqual(bc.gaps, [], `凭空多出缺口：${JSON.stringify(bc.gaps)}`);
+  });
+
+  test('水位线要活过崩溃 —— 否则增量永远不可能', async () => {
+    const m = await crawl({ crashAfter: 2 });
+    const bc = m.crawl_state.find((r) => r.route_key === 'broadcast.timeline');
+    assert.ok(bc.high_water_time, 'high_water_time 是 null，下次就没有下界可用');
+    assert.equal(bc.contiguous, true);
+    assert.equal(bc.advanced, true, 'advanced=false 意味着这次抓取推不进水位线');
+  });
+
+  test('「已回溯到」也要活过崩溃', async () => {
+    const m = await crawl({ crashAfter: 2 });
+    const bc = m.crawl_state.find((r) => r.route_key === 'broadcast.timeline');
+    assert.ok(bc.low_water_time, 'low_water_time 是界面上「已回溯到」那一列');
+  });
+
+  test('逐字段比对：崩过的那份与没崩的那份一致', async () => {
+    // 这是规范 §7.1 写下的判据本身。
+    const clean = await crawl();
+    const crashed = await crawl({ crashAfter: 2 });
+
+    const strip = (m) => m.crawl_state.map((r) => ({
+      route_key: r.route_key,
+      high_water_time: r.high_water_time,
+      high_water_raw: r.high_water_raw,
+      low_water_time: r.low_water_time,
+      contiguous: r.contiguous,
+      advanced: r.advanced,
+      gaps: r.gaps,
+    })).sort((a, b) => (a.route_key < b.route_key ? -1 : 1));
+
+    assert.deepEqual(strip(crashed), strip(clean));
+  });
+
+  test('覆盖率的实抓数也一致，不因崩溃而少算或多算', async () => {
+    const clean = await crawl();
+    const crashed = await crawl({ crashAfter: 2 });
+    const cov = (m) => Object.fromEntries(m.coverage.map((c) => [c.route_key, c.captured_count]));
+    assert.deepEqual(cov(crashed), cov(clean));
+  });
+
+  test('真被打断的时候，aborted 还是要如实记 —— 别把这条测试反过来满足', async () => {
+    const { runner } = harness(
+      broadcastOnly([bcPage(20, 0), bcPage(20, 20), bcPage(0)]), { batchSize: 1 },
+    );
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+    await runner.runBatch();
+
+    const m = await runner.finish('aborted');
+    const bc = m.crawl_state.find((r) => r.route_key === 'broadcast.timeline');
+    assert.ok(bc.gaps.length > 0, '真没跑完就该记缺口');
+    assert.equal(bc.advanced, false, '没跑完绝不许推进水位线');
+  });
+});
