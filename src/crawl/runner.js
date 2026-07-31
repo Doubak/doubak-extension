@@ -224,8 +224,11 @@ export class CrawlRunner {
     // 出路。（这个坑真的踩过。）
     try {
       await this._runStore.setCurrentRun({
-      bundleId, dir, username, mediums, includeCatalog, bypassGates,
-    });
+        bundleId, dir, username, mediums, includeCatalog, bypassGates,
+        // 小范围试跑的上限也要跟着走。少了它，一次「最多抓 10 条」的调试跑在
+        // 心跳恢复之后会变成一场全量抓取——而用户点的是「试一下」。
+        maxCaptures,
+      });
       await this._saveCheckpoint(CRASH_SENTINEL_REASON);
     } catch (err) {
       this._run = null;
@@ -347,6 +350,18 @@ export class CrawlRunner {
 
     this._run = {
       bundleId: pointer.bundleId, dir: pointer.dir, store, writer, frontier, loop, pacer, routes, session,
+      // **这两个字段少了会让抓取全速空转。**
+      //
+      // 少写 `maxCaptures` 的话它是 `undefined`，而下面那句判的是 `=== null`：
+      // `Math.max(0, undefined - undefined)` → NaN → `maxItems` NaN →
+      // `while (0 < NaN)` 直接为假 → 一个请求都不发；而 `hitCap` 也是假
+      // （`NaN >= undefined`），于是 `done` 为假，驱动循环以每秒几十次的速度
+      // 空转下去。日志里的样子：几百条 `batch`，一条 `capture` 都没有。
+      //
+      // 安全阀是**按会话**算的：`capturedSoFar` 没有持久化，所以恢复之后重新计数。
+      // 对一个「调试用的兜底上限」来说这是可以接受的，但不能不写——见上。
+      maxCaptures: pointer.maxCaptures ?? null,
+      capturedSoFar: 0,
     };
     this._emit({ type: 'resumed', bundleId: pointer.bundleId, lastSeq: repair.lastSeq });
     return { bundleId: pointer.bundleId };
@@ -362,10 +377,15 @@ export class CrawlRunner {
     const { loop, frontier } = this._run;
 
     // 安全阀：剩余额度小于一批时，只跑剩下那么多。
-    const remaining =
-      this._run.maxCaptures === null
-        ? Infinity
-        : Math.max(0, this._run.maxCaptures - this._run.capturedSoFar);
+    //
+    // `Number.isFinite` 而不是 `=== null`：**一个 undefined 就能让整场抓取空转**。
+    // `Math.max(0, undefined - undefined)` 是 NaN，`while (0 < NaN)` 直接为假，
+    // 于是一批里一个请求都不发；而 NaN 又通不过 `hitCap` 的比较，`done` 保持为假，
+    // 驱动循环便以每秒几十次的速度空转。这条在 `resume()` 漏写字段时真的发生过。
+    const cap = this._run.maxCaptures;
+    const remaining = Number.isFinite(cap)
+      ? Math.max(0, cap - (this._run.capturedSoFar ?? 0))
+      : Infinity;
     const r = await loop.run({ maxItems: Math.min(this._batchSize, remaining) });
     this._run.capturedSoFar += r.captured + r.failed;
 
@@ -374,8 +394,7 @@ export class CrawlRunner {
     const stopped = frontier.stopped;
     await this._saveCheckpoint(stopped ? frontier.stopReason : CRASH_SENTINEL_REASON);
 
-    const hitCap =
-      this._run.maxCaptures !== null && this._run.capturedSoFar >= this._run.maxCaptures;
+    const hitCap = Number.isFinite(cap) && this._run.capturedSoFar >= cap;
     // 用 hasReady() 而不是 next()：后者会把条目标成 in_flight，拿它当判断用
     // 会白白消耗一个条目并让它永远卡住，进而堵死整条路线。
     const done = stopped || hitCap || !frontier.hasReady();

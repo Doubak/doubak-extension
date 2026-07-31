@@ -144,6 +144,22 @@ describe('分批推进', () => {
     assert.equal(done, true);
   });
 
+  test('小范围试跑的上限跟着恢复走 —— 否则「试一下」会变成全量抓取', async () => {
+    const { runner, runStore } = harness(
+      broadcastOnly([bcPage(20, 0), bcPage(20, 20), bcPage(20, 40), bcPage(0)]), { batchSize: 2 },
+    );
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false, maxCaptures: 3,
+    });
+    const pointer = await runStore.getCurrentRun();
+    assert.equal(pointer.maxCaptures, 3, '上限必须写进指针 —— 恢复时只有它读得到');
+
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null;
+    await runner.resume(cp);
+    assert.equal(runner._run.maxCaptures, 3);
+  });
+
   test('默认批大小是个有限值', () => {
     assert.ok(DEFAULT_BATCH_SIZE > 0 && DEFAULT_BATCH_SIZE <= 100);
   });
@@ -296,6 +312,35 @@ describe('暂停 → 继续', () => {
     const after = await runner.runBatch();
     assert.equal(after.stoppedBy ?? null, null, '继续之后不该还报着同一个停机原因');
     assert.ok(after.captured > 0, '继续之后必须真的抓到东西');
+  });
+
+  test('从 checkpoint 恢复之后不会全速空转 —— 这是那 500 行 batch 日志的真凶', async () => {
+    // `resume()` 漏写了 `maxCaptures` / `capturedSoFar`，于是：
+    //
+    //   remaining = Math.max(0, undefined - undefined)  → NaN
+    //   maxItems  = Math.min(25, NaN)                   → NaN
+    //   while (0 < NaN)                                 → 假，一个请求都不发
+    //   hitCap    = undefined !== null && NaN >= undefined → 假
+    //   done      = 假 → 驱动循环以每秒几十次空转下去
+    //
+    // 豆瓣那边什么都看不到（一个请求都没发），所以不会有外力把它撞停。
+    const { runner, runStore, calls } = harness(
+      broadcastOnly([bcPage(20, 0), bcPage(20, 20), bcPage(0)]), { batchSize: 2 },
+    );
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+    await runner.pause('user_paused');
+
+    // 模拟 worker 被杀：丢掉内存里的这一场，只留磁盘上的 checkpoint
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null;
+    const before = calls.length;
+    await runner.resume(cp);
+
+    const b = await runner.runBatch();
+    assert.ok(Number.isFinite(b.captured), 'captured 不能是 NaN');
+    assert.ok(calls.length > before + 1, '恢复之后必须真的发请求，而不是空转');
+    assert.ok(b.captured > 0 || b.done, '一批要么抓到东西，要么说自己跑完了');
   });
 
   test('本来就在跑的时候继续 → 报 alreadyRunning，不重开一场', async () => {

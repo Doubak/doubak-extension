@@ -49,8 +49,23 @@ export const MAX_FETCH_ENTRIES = 200;
  */
 const FETCH_TYPES = new Set(['capture']);
 
-/** 完全不记的：`page` 与 `capture` 重复。 */
-const SKIP = new Set(['page']);
+/**
+ * 完全不记的。
+ *
+ * | 类型 | 为什么不记 |
+ * |---|---|
+ * | `page` | 与 `capture` 一一对应，记两遍没意义 |
+ * | `batch` | **内部记账**。它只说「跑完了一批」，没有一个字是人能据此行动的 |
+ *
+ * `batch` 那条是踩出来的：一次驱动层空转让它以每秒几十次的速度刷屏，导出的日志
+ * 是整整 500 行 `batch`——**唯一有价值的那一行是最后的 `paused`**，其余全是噪音，
+ * 而真正该看见的（抓了哪些 URL、为什么停）早被挤没了。
+ *
+ * 空转本身已经修了（见 `driver.js` 的空转检测），但这不改变结论：`batch` 的频率
+ * 由内部批大小决定，与「用户想知道什么」无关，本来就不该进日志。日志只记
+ * **发生了什么事**，不记**循环转了几圈**。
+ */
+const SKIP = new Set(['page', 'batch']);
 
 /** @param {object} e */
 export function shouldLog(e) {

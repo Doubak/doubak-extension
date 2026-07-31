@@ -24,6 +24,22 @@ describe('只记 index.ndjson 里没有的事件', () => {
     assert.equal(shouldLog({ type: 'page', routeKey: 'r' }), false);
   });
 
+  test('batch 不进日志 —— 它是内部记账，没有一个字是人能据此行动的', () => {
+    // 踩出来的：一次驱动层空转让它以每秒几十次刷屏，导出的日志是整整 500 行
+    // `batch`，唯一有用的那一行是最后的 `paused`。
+    assert.equal(shouldLog({ type: 'batch', captured: 3, failed: 0, done: false }), false);
+  });
+
+  test('一场空转塞不满日志 —— 真正要紧的那几条还在', async () => {
+    const kv = new MemoryKvStore();
+    await appendEvent(kv, { type: 'stopped', reason: 'driver_stalled' }, { at: '2026-07-31T00:00:00Z' });
+    for (let i = 0; i < 2000; i++) {
+      await appendEvent(kv, { type: 'batch', captured: 0, failed: 0 }, { at: '2026-07-31T00:00:01Z' });
+    }
+    const rows = await readLog(kv);
+    assert.deepEqual(rows.map((r) => r.type), ['stopped']);
+  });
+
   test('capture 要记，但进的是**另一个**环', () => {
     // 一次全量抓取有几千页。混在一个 500 条的环里，翻页记录会把真正要紧的信号
     // （为什么停的、哪一页反复失败）全挤出去——而那几条正是事后唯一能查的东西。

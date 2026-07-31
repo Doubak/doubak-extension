@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { driveWithinBudget, DEFAULT_BUDGET_MS } from '../src/crawl/driver.js';
+import { driveWithinBudget, DEFAULT_BUDGET_MS, MAX_IDLE_BATCHES } from '../src/crawl/driver.js';
 import { HEARTBEAT_PERIOD_MINUTES } from '../src/crawl/supervisor.js';
 
 /**
@@ -79,5 +79,79 @@ describe('预算与心跳周期的关系', () => {
       `预算 ${DEFAULT_BUDGET_MS}ms 应当小于心跳周期 ${heartbeatMs}ms`,
     );
     assert.ok(DEFAULT_BUDGET_MS > heartbeatMs / 2, '也不该小到每次只干一点点');
+  });
+});
+
+describe('空转检测：一批什么都没推进，下一批也不会', () => {
+  /** 永远「还没跑完」但什么都不做的 runner —— 那次 NaN bug 的形状。 */
+  function spinner() {
+    let n = 0;
+    return {
+      calls: () => n,
+      runner: {
+        async runBatch() {
+          n += 1;
+          return { captured: 0, failed: 0, done: false, stoppedBy: null };
+        },
+        status: () => ({ counts: { pending: 42 } }),
+      },
+    };
+  }
+
+  test('几批之后停下，而不是转到天荒地老', async () => {
+    // 真实发生过：`resume()` 漏写 `maxCaptures` → `maxItems` 是 NaN →
+    // `while (0 < NaN)` 一次都不进 → 一个请求都不发。日志里是每秒几十条 `batch`。
+    //
+    // **豆瓣那边什么都看不到**（一个请求都没发），所以不会有任何外力把它撞停。
+    const { runner, calls } = spinner();
+    // 时间不动：证明挡住它的是空转检测，不是预算
+    const r = await driveWithinBudget({ runner, now: () => 0, budgetMs: 60_000 });
+
+    assert.equal(r.stoppedBy, 'driver_stalled');
+    assert.equal(calls(), MAX_IDLE_BATCHES);
+    assert.equal(r.done, false, '空转不是「跑完了」');
+  });
+
+  test('预算挡不住它 —— 所以必须另有一层', async () => {
+    // 预算只会让空转每 22 秒重来一次，而心跳一直把它叫醒。那是一个能烧到用户
+    // 合上电脑为止的循环。
+    const { runner, calls } = spinner();
+    await driveWithinBudget({ runner, now: () => 0, budgetMs: DEFAULT_BUDGET_MS });
+    assert.ok(calls() <= MAX_IDLE_BATCHES, '时间不推进时，只有空转检测能停下它');
+  });
+
+  test('停下来时把队列状态一起报出来 —— 下次才有的查', async () => {
+    const events = [];
+    const { runner } = spinner();
+    await driveWithinBudget({ runner, now: () => 0, onEvent: (e) => events.push(e) });
+
+    const st = events.find((e) => e.type === 'stalled');
+    assert.ok(st, '必须发一条事件出来，否则它只是安静地停了');
+    assert.deepEqual(st.counts, { pending: 42 });
+  });
+
+  test('有进展就重新计数 —— 偶尔一批空转是正常的', async () => {
+    // 比如上一页刚触发降速、这一批恰好什么都没轮到。
+    let n = 0;
+    const runner = {
+      async runBatch() {
+        n += 1;
+        // 每两批里有一批是空的
+        const idle = n % 2 === 0;
+        return { captured: idle ? 0 : 1, failed: 0, done: n >= 12, stoppedBy: null };
+      },
+    };
+    const r = await driveWithinBudget({ runner, now: () => 0, budgetMs: 60_000 });
+    assert.equal(r.done, true, '交替出现的空批不该被当成死循环');
+    assert.equal(r.stoppedBy, null);
+  });
+
+  test('一批既没抓到也没失败、但说自己跑完了 → 那是正常收尾，不是空转', async () => {
+    const runner = {
+      runBatch: async () => ({ captured: 0, failed: 0, done: true, stoppedBy: null }),
+    };
+    const r = await driveWithinBudget({ runner, now: () => 0 });
+    assert.equal(r.done, true);
+    assert.equal(r.stoppedBy, null);
   });
 });
