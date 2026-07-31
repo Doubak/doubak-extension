@@ -166,6 +166,30 @@ async function writeRealBundle() {
     parentCaptureId: page.captureId,
   });
 
+  // **同一个 URL 抓两次。**
+  //
+  // 这是可达的：一部电影同时在「想看」和「看过」列表上（刚看完还没删想看），
+  // 或者崩溃恢复之后那一页被重抓。frontier 在同一次会话里按 url_key 去重，
+  // 但 checkpoint 只留未完成的条目——已经抓完的不在里面，所以跨恢复去重不住。
+  //
+  // 规范要求的是 `capture_id` 唯一，**不是 URL 唯一**：同一个 URL 的多次捕获正是
+  // WARC 存在的理由（重抓、随时间变化）。这里把它写进一致性测试，确保校验器、
+  // 读取器和覆盖率都不会被绊倒。
+  await writer.writeCapture({
+    url: 'https://movie.douban.com/subject/20495023/',
+    intent: 'interest.item',
+    routeKey: 'interest.item',
+    surface: 'html',
+    verdict: 'ok',
+    captureFidelity: 'decoded_body+observed_headers',
+    httpStatus: 200,
+    headers: [['Content-Type', 'text/html; charset=utf-8']],
+    contentType: 'text/html; charset=utf-8',
+    kind: 'catalog',
+    // 内容也不同：第二次抓到的是「看过」之后的页面。两份都要留着。
+    body: enc.encode('<html><h1>银翼杀手 2049</h1><span>我的评分 5 星</span></html>'),
+  });
+
   const hw = parseDoubanTimestamp('2026-07-26 12:34:00');
   writer.addCoverage(
     coverageEntry({

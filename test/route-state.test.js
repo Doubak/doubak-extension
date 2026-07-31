@@ -269,3 +269,54 @@ describe('一个条目都没观测到时，「跑完了」不是证据', () => {
     assert.deepEqual(s.gaps, [], '广播没有可信总数，不能拿它来判抽取器坏了');
   });
 });
+
+describe('叶子路线也要计数 —— 否则「作品详情页」永远显示 0', () => {
+  test('recordLeafCapture 一次加一条', () => {
+    const s = new RouteState({ routeKey: 'interest.item', intent: 'interest.item', enumeration: 'full' });
+    s.recordLeafCapture();
+    s.recordLeafCapture();
+    assert.equal(s.capturedCount, 2);
+  });
+
+  test('接着历史计数往上加 —— 恢复之后不归零', () => {
+    const s = new RouteState({
+      routeKey: 'interest.item', intent: 'interest.item', enumeration: 'full', priorCount: 500,
+    });
+    s.recordLeafCapture();
+    assert.equal(s.capturedCount, 501);
+  });
+});
+
+describe('抽取器自检看的是「本次会话抽到过 ID 没有」', () => {
+  test('声称有条目却一个 ID 都没抽到 → 记缺口', () => {
+    // 这道自检当初抓到过真问题：舞台剧的 idAnchor 漏了 /location/drama/N，
+    // 于是 coverage 写着「声称 3 / 抓到 0 / 连续性 ✔ 已验证」。
+    const s = new RouteState({ routeKey: 'r', intent: 'i', enumeration: 'full' });
+    s.observePage({ ids: [], claimed: { count: 3, raw: '3' }, captureId: 'c1', observedAt: 'x' });
+    s.markFinished();
+    assert.ok(s.gaps.some((g) => g.reason === 'no_items_observed'));
+  });
+
+  test('接了历史计数也不会把这道自检说哑 —— 判的是本次会话', () => {
+    // 用 capturedCount 判的话，priorCount 一非零，自检就永远沉默。
+    const s = new RouteState({
+      routeKey: 'r', intent: 'i', enumeration: 'full', priorCount: 1000,
+    });
+    s.observePage({ ids: [], claimed: { count: 3, raw: '3' }, captureId: 'c1', observedAt: 'x' });
+    s.markFinished();
+    assert.ok(
+      s.gaps.some((g) => g.reason === 'no_items_observed'),
+      '恢复之后抽取器坏掉就查不出来了',
+    );
+  });
+
+  test('全是重复条目也算「抽取器在工作」，不该误报', () => {
+    // 恢复之后只读到一页重复内容是完全正常的：newIds 合法地是 0。
+    // 只数 newIds 的话这里会误报「抽取器坏了」。
+    const s = new RouteState({ routeKey: 'r', intent: 'i', enumeration: 'full' });
+    s.observePage({ ids: ['a', 'b'], claimed: { count: 3, raw: '3' }, captureId: 'c1', observedAt: 'x' });
+    s.observePage({ ids: ['a', 'b'], claimed: { count: 3, raw: '3' }, captureId: 'c2', observedAt: 'x' });
+    s.markFinished();
+    assert.equal(s.gaps.some((g) => g.reason === 'no_items_observed'), false);
+  });
+});

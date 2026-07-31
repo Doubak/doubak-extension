@@ -370,6 +370,9 @@ export class CrawlLoop {
 
     // ── 6. 只有 ok 才继续翻页 / 派生新条目
     if (cls.verdict === 'ok') {
+      // 叶子路线（没有分页的，比如作品详情页）不走 `observePage`，得在这里记一笔，
+      // 否则它抓了几千页仍然显示「已抓 0」——而且只在出错时才出现在进度表上。
+      if (!route.pagination) this.stateFor(item.routeKey).recordLeafCapture();
       this._enqueueNextPage(item, route, profile, res, written.captureId, items);
       this._enqueueSubjects(item, res, written.captureId);
     }

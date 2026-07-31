@@ -213,9 +213,19 @@ export async function recoverBundle({ store, bundleId }) {
 /**
  * 从 index 汇总每条路线的条目数。
  *
- * 数的是**条目**不是页：`item_count` 才是用户理解的「已抓 40 条广播」。
- * 那个字段是可选的（旧档案没有），缺了就退回按页数——宁可少数一点，
- * 也不要把 40 条说成 2 条。
+ * 数的是**条目**不是页：用户理解的是「已抓 40 条广播」，不是「已抓 2 页」。
+ *
+ * `item_count` 有三种情形，对应三种算法——这跟捕获列表那边的措辞是同一套区分
+ * （见 `src/ui/capture-label.js`）：
+ *
+ * | `item_count` | 含义 | 算几条 |
+ * |---|---|---|
+ * | 数字 | 这一页有这么多条目 | 就是它 |
+ * | `null` | **这条路线没有条目概念**（作品详情页） | 1 —— 一次捕获就是一个条目 |
+ * | 字段不存在 | 旧档案，写它的时候规范里还没这个字段 | 1，且是个**下界** |
+ *
+ * 最后一种会把 40 条广播数成 2 条。那是明知的低估，不是错报：这个数字只用来接上
+ * 界面上的「已抓」，而低估会随着继续抓而自己收敛；反过来高估则会一直挂在那里。
  *
  * @param {Array<Record<string, any>>} entries
  * @returns {Record<string, number>}
@@ -227,7 +237,7 @@ function countByRoute(entries) {
     if (!e.route_key) continue;
     // 只数成功的：判定不是 ok 的那些没有内容，算进去等于虚报进度。
     if (e.verdict && e.verdict !== 'ok') continue;
-    out[e.route_key] = (out[e.route_key] ?? 0) + (typeof e.item_count === 'number' ? e.item_count : 0);
+    out[e.route_key] = (out[e.route_key] ?? 0) + (typeof e.item_count === 'number' ? e.item_count : 1);
   }
   return out;
 }
