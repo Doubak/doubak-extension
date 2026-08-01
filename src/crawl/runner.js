@@ -31,9 +31,10 @@ import { Transport } from './transport.js';
 import { RequestGate } from './pacing.js';
 import { buildRoutes } from './routes.js';
 import { buildCheckpoint } from './run-store.js';
-import { bundleDirName, newBundleId } from '../core/ids.js';
+import { bundleDirName, newBundleId, parseCaptureId } from '../core/ids.js';
 import { urlKey } from '../core/urlkey.js';
 import { CRASH_SENTINEL_REASON } from './resume-policy.js';
+import { replayableCaptures } from './replay.js';
 
 /** 一批抓多少条。见文件开头的权衡说明。 */
 export const DEFAULT_BATCH_SIZE = 25;
@@ -406,9 +407,26 @@ export class CrawlRunner {
     // 队列从 checkpoint 里的未完成条目重建；已完成的不在里面——那是 index
     // 的职责，重复记录会带来两个可能不一致的真相来源。
     const frontier = new Frontier();
+
+    // ── 补回「checkpoint 还没见过的那几条捕获」派生出来的活
+    //
+    // 捕获每页落盘、checkpoint 每批才落，中间那个窗口里页面已经进了 index，而它
+    // 派生的下一页 / 作品链接 / 封面图只活在内存队列里，跟着 worker 一起没了。
+    // 而 index 会把这张页面标成「抓过了」，于是它不会被重取，派生也就永远不会
+    // 再发生——静默、永久。详见 replay.js。
+    const replay = replayableCaptures({
+      captures: repair.captures ?? [],
+      sinceSeq: cp.last_capture_id ? parseCaptureId(cp.last_capture_id).seq : 0,
+      routeOf: (k) => routes.get(k),
+    });
+    const replayKeys = new Set(replay.items.map((c) => c.urlKey));
+
     // **先给去重集合打底，再放条目回去。** 顺序要紧：打底用的是 index 里已经抓成功
     // 的 url_key，而 checkpoint 里的条目是**没抓成**的，两者不该互相覆盖。
-    frontier.markCaptured(repair.capturedUrlKeys ?? []);
+    //
+    // 要重抓的那几条**不能**进去重集合——进去了它们就再也入不了队，这个修法整个
+    // 失效（而且失效得悄无声息，因为 `enqueue` 返回 false 没人看）。
+    frontier.markCaptured((repair.capturedUrlKeys ?? []).filter((k) => !replayKeys.has(k)));
     for (const it of cp.frontier ?? []) {
       const def = routes.get(it.route_key);
       frontier.enqueue({
@@ -442,6 +460,47 @@ export class CrawlRunner {
         referer: it.referer ?? null,
       });
     }
+    // 重抓那几条，好让它们的派生重来一遍。
+    //
+    // **放在 checkpoint 条目之后。** 顺序要紧：checkpoint 里那份带着状态与已用
+    // 重试次数，是权威的；先塞一份崭新的 pending 进去，会把一个 `failed` 的条目
+    // 洗成新的，等于每次恢复都偷偷给一次新的重试预算——那正是上面刚防住的事。
+    //
+    // 于是这一轮里很多会返回 false（重复），那是对的：它们已经由 checkpoint 带
+    // 回来了，本来就没丢。真正靠这一轮救回来的，是那些在 checkpoint 里连影子都
+    // 没有的——抓完就 settle 掉、下一批还没开始就崩了的那些。
+    //
+    // 门控照旧过一遍：这些页面当初能抓到说明门当时开着，但恢复之后门的状态是
+    // 重建的。
+    for (const c of replay.items) {
+      const def = routes.get(c.routeKey);
+      frontier.enqueue({
+        url: c.url,
+        urlKey: urlKey(c.url),
+        routeKey: c.routeKey,
+        intent: c.intent,
+        ordered: def ? (def.ordered ?? Boolean(def.pagination)) : true,
+        priority: def?.priority ?? 50,
+        gatedBy: pointer.bypassGates ? null : (def?.requires?.[0] ?? null),
+        cursor: cursorFromUrl(c.url, def),
+      });
+    }
+
+    // 报出去的是**真的会被重取的条数**，不是「我入队成功了几条」。
+    //
+    // 两者能差很远：一条已经由 checkpoint 带回来的条目，这里入队会返回 false，
+    // 但它照样要被重取。按入队返回值计数会报出 0，而实际上重取了一批——一个
+    // 说着「什么都没发生」却在发请求的日志，比不打日志更坏。
+    const pendingNow = new Set(
+      frontier.snapshot().filter((it) => it.state === 'pending').map((it) => it.urlKey),
+    );
+    const replayed = [...replayKeys].filter((k) => pendingNow.has(k)).length;
+    if (replayed > 0 || replay.truncated > 0) {
+      // 说出来。被截掉的那部分派生是真丢了，用户有权知道，而不是让它变成
+      // 覆盖率上一个说不清来历的小数字。
+      this._emit({ type: 'replayed_derivations', count: replayed, truncated: replay.truncated });
+    }
+
     // 每条路线按 checkpoint 里的游标续上
     for (const r of cp.routes ?? []) {
       const def = routes.get(r.route_key);
@@ -720,7 +779,7 @@ export class CrawlRunner {
 
   /** @param {string} reason */
   async _saveCheckpoint(reason) {
-    const { bundleId, frontier, pacer, loop } = this._run;
+    const { bundleId, frontier, pacer, loop, writer } = this._run;
     // **整个 RouteState 传下去，不要在这里挑字段。**
     //
     // 原来这里挑成 `{cursor, stall}`——够续上翻页，不够重建连续性证明。于是恢复
@@ -729,7 +788,14 @@ export class CrawlRunner {
     // 顺带 `advanced` 永远是 false，增量抓取永远不可能。规范 §7.1。
     const routes = new Map(loop.routeStates);
     await this._runStore.saveCheckpoint(
-      buildCheckpoint({ bundleId, frontier, pacer, routes, pauseReason: reason }),
+      buildCheckpoint({
+        bundleId, frontier, pacer, routes, pauseReason: reason,
+        // **必须记。** 这个字段在 checkpoint 的形状里一直都有，但从来没人往里填，
+        // 于是真实档案里它恒为 null。恢复时要靠它算出「index 里有哪些是 checkpoint
+        // 还没见过的」——不填就等于「全都没见过」，一恢复会把能派生的页面统统重抓
+        // 一遍。见 replay.js。
+        lastCaptureId: writer?.lastCaptureId ?? null,
+      }),
     );
   }
 }

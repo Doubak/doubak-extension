@@ -111,6 +111,9 @@ export class BundleWriter {
       createdAt: toRfc3339(this._now()),
     });
 
+    /** 最后一条写成了的捕获。恢复时靠它算出「checkpoint 之后写下了哪些」。 */
+    this._lastCaptureId = null;
+
     // TODO(debug): 开发期计数。发布前连同 debugStats() 一起删。
     this._debug = { captures: 0, byKind: { data: 0, assets: 0, catalog: 0 } };
   }
@@ -122,6 +125,19 @@ export class BundleWriter {
   /** 已分配到的最大序号。崩溃恢复时用它重建分配器。 */
   get lastSeq() {
     return this._seq.last;
+  }
+
+  /**
+   * 最后一条**写成了**的捕获。
+   *
+   * 与 `lastSeq` 不是一回事：那个是最后**分配**到的序号，分配之后可能崩在写盘
+   * 途中（序号空洞就是这么来的）。checkpoint 要记的是「到此为止 index 里有什么」，
+   * 所以只能用写成了的那个。
+   *
+   * @type {string | null}
+   */
+  get lastCaptureId() {
+    return this._lastCaptureId;
   }
 
   /**
@@ -227,6 +243,9 @@ export class BundleWriter {
 
     // ── 第 4 步：状态更新
     // TODO: checkpoint 落地后接在这里（A5）。现在还没有需要持久化的抓取状态。
+
+    // 走到这里 WARC 与 index 两边都写成了。放在最后一步，才配得上「写成了」。
+    this._lastCaptureId = captureId;
 
     this._debug.captures += 1;
     this._debug.byKind[kind] += 1;

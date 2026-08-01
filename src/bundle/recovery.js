@@ -216,6 +216,18 @@ export async function recoverBundle({ store, bundleId }) {
     capturedUrlKeys: entries
       .filter((e) => e.verdict === 'ok' && typeof e.url_key === 'string')
       .map((e) => e.url_key),
+    // 成功的捕获，带上序号。恢复时要靠它找出「已经写进 index、但 checkpoint 还
+    // 没见过」的那几条——它们派生出来的活（下一页链接、作品链接、封面图）只活在
+    // 内存队列里，跟着 worker 一起没了。见 `replayableCaptures`。
+    captures: entries
+      .filter((e) => e.verdict === 'ok' && typeof e.url_key === 'string')
+      .map((e) => ({
+        seq: parseCaptureId(e.capture_id).seq,
+        url: e.url,
+        urlKey: e.url_key,
+        routeKey: e.route_key,
+        intent: e.intent,
+      })),
   };
 }
 
