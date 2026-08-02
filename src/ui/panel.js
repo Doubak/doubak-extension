@@ -300,6 +300,58 @@ function setActions(buttons) {
 
 let lastStatus = null;
 
+/**
+ * 操作失败的提示。
+ *
+ * ## 为什么不能用 `setState()`
+ *
+ * 状态卡由 `refresh()` 画，而 `refresh()` **每 2 秒被轮询调用一次**。于是任何写
+ * 进状态卡的错误信息，最多活两秒就被下一轮按后台状态重画掉。
+ *
+ * 用户看到的正是这个：点一下按钮 → 闪出点什么 → 回到原样。而这整个排查过程里
+ * 有好几轮浪费在这上面——「点了没反应」和「报了错但你没看见」在屏幕上完全一样，
+ * 却指向完全不同的原因。
+ *
+ * 所以操作类的错误有自己的一块地方，**轮询不碰它**。清掉它的只有两件事：用户
+ * 自己关掉，或者下一次操作成功了。
+ *
+ * @type {{title: string, detail: string} | null}
+ */
+let actionError = null;
+
+/** @param {string} title @param {string} detail */
+function setActionError(title, detail) {
+  actionError = { title, detail };
+  renderNotice();
+}
+
+function clearActionError() {
+  if (!actionError) return;
+  actionError = null;
+  renderNotice();
+}
+
+function renderNotice() {
+  const el = $('notice');
+  if (!el) return;
+  if (!actionError) {
+    el.replaceChildren();
+    return;
+  }
+  const card = document.createElement('div');
+  card.className = 'card err';
+  const b = document.createElement('b');
+  b.textContent = actionError.title;
+  card.append(b);
+  card.append(document.createTextNode(actionError.detail));
+  const close = document.createElement('button');
+  close.className = 'act';
+  close.textContent = '知道了';
+  close.onclick = clearActionError;
+  card.append(close);
+  el.replaceChildren(card);
+}
+
 async function refresh() {
   const s = await send({ type: 'status' });
   lastStatus = s;
@@ -460,9 +512,10 @@ async function refresh() {
       const r = await send({ type: 'start', mode: crawlMode });
       if (!r?.ok) {
         pendingCommand = null;
-        setState('err', '无法开始', r?.error ?? '');
+        setActionError('无法开始', r?.error ?? '后台没有给出原因。');
         return;
       }
+      clearActionError();
     } finally {
       pendingCommand = null;
     }
@@ -738,12 +791,11 @@ async function showLastRun() {
 async function retryFailures() {
   const r = await send({ type: 'retryFailed' });
   if (!r?.ok) {
-    setState('err', '重试失败', r?.error ?? '后台没有给出原因。');
+    setActionError('重试失败', r?.error ?? '后台没有给出原因。');
     return;
   }
   if (!r.count) {
-    setState(
-      'err',
+    setActionError(
       '没有可重试的条目',
       r.loaded === false
         ? '这次抓取已经不在内存里，也没有可恢复的存档点——它可能已经收尾或被中止了。'
@@ -752,6 +804,7 @@ async function retryFailures() {
     );
     return;
   }
+  clearActionError();
   refresh();
 }
 
@@ -782,8 +835,7 @@ async function finishWithGaps(leaves) {
 
   const r = await send({ type: 'finishWithGaps' });
   if (!r?.ok) {
-    // 同上：出错就停在错误上。后面跟一个 refresh() 会把它抹掉。
-    setState('err', '收尾失败', r?.error ?? '后台没有给出原因。');
+    setActionError('收尾失败', r?.error ?? '后台没有给出原因。');
     return;
   }
   refresh();
@@ -843,9 +895,10 @@ async function resumeCrawl() {
     pendingCommand = null;
   }
   if (!r?.ok) {
-    setState('err', '无法继续', r?.error ?? '后台没有给出原因。');
+    setActionError('无法继续', r?.error ?? '后台没有给出原因。');
     return;
   }
+  clearActionError();
   refresh();
 }
 
@@ -868,7 +921,7 @@ async function abortCrawl(bundleId) {
 
   setState('idle', '正在中止…', '当前这一页抓完就停，然后写出档案。');
   const res = await send({ type: 'abort' });
-  if (!res?.ok) setState('err', '中止失败', res?.error ?? '');
+  if (!res?.ok) setActionError('中止失败', res?.error ?? '后台没有给出原因。');
   // 存储与档案页都变了
   summaryCache = null;
   storageUsage = [];

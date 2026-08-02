@@ -105,6 +105,10 @@
 
   <main>
     <section id="tab-overview">
+      <!-- 操作失败的提示。**必须与状态卡分开**：状态卡由每 2 秒一次的轮询按
+           后台状态重画，写在它上面的错误活不过两秒（见 panel.js 的
+           `setActionError`）。这一块只由用户或下一次成功的操作清掉。 -->
+      <div id="notice"></div>
       <div id="state" class="card idle">正在读取状态…</div>
       <div id="actions"></div>
       <div id="preflight"></div>

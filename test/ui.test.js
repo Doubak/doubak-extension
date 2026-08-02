@@ -1163,23 +1163,35 @@ describe('出错就停在错误上，不要接着刷新掉', () => {
   };
 
   for (const fn of ['retryFailures', 'finishWithGaps', 'resumeCrawl']) {
-    test(`${fn}：写了错误就 return`, () => {
-      // `refresh()` 按后台状态重画整块，跟在 setState('err', …) 后面会**当场把
-      // 刚写的错误抹掉**。用户看到的是「闪了一下又回到原样」，而真正的原因刚被
-      // 自己擦掉——这个毛病在「继续」上犯过一次，在「重试」上又犯了一次。
+    test(`${fn}：错误写进 notice，不是状态卡`, () => {
+      // **状态卡活不过两秒。** 它由 refresh() 画，而 refresh() 每 2 秒被轮询
+      // 调用一次——写在上面的错误会被下一轮按后台状态重画掉。
+      //
+      // 用户看到的正是这个：点一下 → 闪出点什么 → 回到原样。而「点了没反应」
+      // 与「报了错但你没看见」在屏幕上完全一样，却指向完全不同的原因——这次
+      // 排查在这上面白绕了好几轮。
       const body = bodyOf(fn);
-      const errIdx = body.indexOf("setState('err'");
-      assert.ok(errIdx > 0, `${fn} 没有错误分支？`);
-      const after = body.slice(errIdx, errIdx + 240);
-      assert.match(after, /return;/, `${fn} 写完错误没有 return`);
-      const refreshIdx = after.indexOf('refresh()');
-      const returnIdx = after.indexOf('return;');
-      assert.ok(
-        refreshIdx === -1 || returnIdx < refreshIdx,
-        `${fn} 在错误分支之后又 refresh()，错误会被抹掉`,
+      assert.match(body, /setActionError\(/, `${fn} 还在往状态卡里写错误`);
+      assert.equal(
+        /setState\('err'/.test(body), false,
+        `${fn} 用 setState('err') 写错误，两秒后会被轮询抹掉`,
       );
+      const errIdx = body.indexOf('setActionError(');
+      const after = body.slice(errIdx);
+      assert.match(after, /return;/, `${fn} 写完错误没有 return`);
     });
   }
+
+  test('提示由用户或下一次成功清掉，轮询不碰它', () => {
+    // 轮询要是也清它，就等于没做——那正是原来的毛病。
+    assert.match(js, /function renderNotice\(\)/);
+    assert.match(js, /function clearActionError\(\)/);
+    const refreshBody = js.slice(js.indexOf('async function refresh()'), js.indexOf('async function refresh()') + 2000);
+    assert.equal(
+      /clearActionError\(\)/.test(refreshBody), false,
+      'refresh() 里清了提示，等于又回到「闪一下就没」',
+    );
+  });
 
   test('「一条都没重试」要说出来，不能与成功长得一样', () => {
     // count: 0 时原来什么都不做：按钮按下去、界面回到原样、一个请求都没发——
@@ -1187,5 +1199,71 @@ describe('出错就停在错误上，不要接着刷新掉', () => {
     const body = bodyOf('retryFailures');
     assert.match(body, /if \(!r\.count\)/);
     assert.match(body, /没有可重试的条目/);
+  });
+});
+
+describe('操作失败的提示活得过轮询', () => {
+  /**
+   * 这是这次排查里最贵的一个坑。
+   *
+   * 状态卡由 `refresh()` 画，而 `refresh()` **每 2 秒被轮询调用一次**。写进状态卡的
+   * 错误最多活两秒，然后被下一轮按后台状态重画掉。用户看到的是：
+   *
+   *     点一下 → 闪出点什么 → 回到原样
+   *
+   * 而「点了没反应」与「报了错但你没看见」在屏幕上完全一样，却指向完全不同的
+   * 原因——为此白绕了好几轮。
+   *
+   * 所以这条测试不看源码，看**行为**：报个错，再跑一次 refresh，提示必须还在。
+   */
+  test('refresh 之后提示还在', async () => {
+    const checkpointWithFailures = (msg) => {
+      if (msg.type === 'status') {
+        return {
+          ok: true,
+          running: false,
+          checkpoint: { bundle_id: '20260802T101500Z-a1b2c3', pause_reason: 'failures_pending' },
+          runner: { active: false },
+        };
+      }
+      // 重试一律失败，这正是要显示出来的那种情况
+      if (msg.type === 'retryFailed') return { ok: false, error: '没有进行中的抓取' };
+      if (msg.type === 'preflight') {
+        return {
+          ok: true,
+          permissions: { granted: true, missing: [] },
+          storage: { usage: 0, quota: 100e9, available: 100e9, need: 1.2e9, enough: true },
+        };
+      }
+      return { ok: true };
+    };
+
+    const dom = await loadUi({ which: 'panel', onMessage: checkpointWithFailures });
+    try {
+      // 这个状态下必须有出路，而不是只剩「中止」
+      const buttons = [...dom.byId.get('actions').children].map((b) => b.textContent);
+      assert.ok(
+        buttons.some((x) => x.includes('重试')),
+        `只剩这些按钮：${JSON.stringify(buttons)}`,
+      );
+
+      // 点它 —— 后台会拒绝
+      const retry = [...dom.byId.get('actions').children].find((b) => b.textContent.includes('重试'));
+      await retry.onclick();
+      await new Promise((r) => setTimeout(r, 5));
+      assert.match(dom.byId.get('notice').textContent, /重试失败/, '错误根本没显示出来');
+
+      // **轮询再来一轮。** 原来的实现在这里把错误抹掉了。
+      // 用 `dom.tick()`——它跑的是界面真正注册的那个 2 秒回调。
+      // （第一版写成了 `dom.rerunRefresh?.()`，那个方法根本不存在，于是可选链
+      //  把整句变成空操作，断言必然通过。又一次差点写出无效的测试。）
+      await dom.tick();
+      assert.match(
+        dom.byId.get('notice').textContent, /重试失败/,
+        '刷新一次之后提示没了 —— 用户看到的就是「闪一下又回到原样」',
+      );
+    } finally {
+      dom.restore();
+    }
   });
 });
