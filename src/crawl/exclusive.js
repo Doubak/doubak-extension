@@ -119,10 +119,24 @@ export class Exclusive {
   async run(name, fn) {
     if (this._held && !this.stale) {
       const secs = Math.round((this._now() - this._held.since) / 1000);
-      throw new Error(
+      const err = new Error(
         `已经有「${this._held.name}」在进行中（${secs} 秒前开始）。` +
           '同一时刻只能跑一件——两条请求流叠加会让实际请求频率翻倍，可能导致账号被限制。',
       );
+      // **带一个可识别的码。**
+      //
+      // 「被占用」多数时候根本不是错误，而是**正常的并发保护**：service worker
+      // 约 30 秒就被杀一次，而 offscreen 活得久得多。于是新起的 worker 内存全空、
+      // 以为没人在跑，就来叫一次恢复——而 offscreen 里那一段推进还好好地跑着。
+      //
+      // 只丢一句话出去的话，上层只能把它当异常记进日志，用户看到的是
+      //
+      //     心跳出错 Error: 已经有「抓取」在进行中（6 秒前开始）
+      //
+      // ——一句每半分钟出现一次、看起来像「跑了两个实例」的吓人报错，而实际发生的
+      // 是并发保护**正确地生效了**。有了码，上层就能把它当「跳过这次」而不是错误。
+      /** @type {any} */ (err).reason = 'busy';
+      throw err;
     }
     if (this._held) {
       // 抢占。老持有者的 `finally` 会看代号，不会误放新锁。

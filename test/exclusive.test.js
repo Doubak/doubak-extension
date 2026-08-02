@@ -185,3 +185,29 @@ describe('持有者永远不返回 —— 合上电脑睡一觉就会这样', ()
     assert.ok(DEFAULT_STALE_AFTER_MS >= 2 * 60_000, '阈值太短，正常抓取会被误判为死');
   });
 });
+
+describe('「被占用」是状况，不是错误', () => {
+  test('拒绝时带一个可识别的码', async () => {
+    // service worker 约 30 秒被杀一次，而 offscreen 活得久得多。新起的 worker
+    // 内存全空、以为没人在跑，就来叫一次恢复——而那一段推进还好好地跑着。
+    // 这**正是并发保护该有的样子**，不该被记成错误。
+    //
+    // 只丢一句话出去的话，控制台里每半分钟出现一次
+    //     心跳出错 Error: 已经有「抓取」在进行中（6 秒前开始）
+    // ——看起来像同时跑了好几个实例，而事实恰恰相反。
+    const lock = new Exclusive();
+    const first = lock.run('抓取', () => sleep(30));
+    await assert.rejects(() => lock.run('恢复抓取', async () => {}), (e) => {
+      assert.equal(e.reason, 'busy', '拒绝没有带上可识别的码');
+      return true;
+    });
+    await first;
+  });
+
+  test('上层据此把它当「跳过」而不是「出错」', async () => {
+    const { readFileSync } = await import('node:fs');
+    const bg = readFileSync(new URL('../src/background.js', import.meta.url), 'utf-8');
+    assert.match(bg, /reason === 'busy'/);
+    assert.match(bg, /上一段还在跑，跳过/);
+  });
+});

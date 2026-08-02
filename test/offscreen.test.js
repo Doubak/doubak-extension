@@ -156,9 +156,17 @@ describe('通知文案', () => {
     // 兜底文案会把原因原文直接摊给用户。那对未知情况是对的（至少他能把这行字
     // 发给我们），但对**已知**的停机原因来说是偷懒——用户需要的是下一步动作。
     const src = await readFile(new URL('../src/ui/notify.js', import.meta.url), 'utf-8');
-    // 两个例外，都是「用户已经知道了」：崩溃恢复应当安静（它不该吓人），
-    // 用户自己按的暂停更不需要通知他自己按了暂停。
-    const silent = new Set(['crash', 'user_paused']);
+    // 例外分两类，都是「不该打扰用户」：
+    //
+    // ① `userVisible: false` 的——按定义就是不通知的那些（崩溃恢复、网络断了）。
+    //    这一类**从策略表推导**，不手写：将来再加一条自动恢复的原因，这里会自动
+    //    放行，而不是让人先撞一次红再回来补名单。
+    // ② `user_paused`——通知用户他自己刚按了暂停，是纯粹的噪音。
+    const { policyFor: pf } = await import('../src/crawl/resume-policy.js');
+    const silent = new Set([
+      ...PAUSE_REASONS.filter((r) => !pf(r).userVisible),
+      'user_paused',
+    ]);
     for (const reason of PAUSE_REASONS) {
       if (silent.has(reason)) continue;
       assert.ok(src.includes(`${reason}:`), `notify.js 缺少 ${reason} 的文案`);

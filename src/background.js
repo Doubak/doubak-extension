@@ -278,9 +278,23 @@ globalThis.chrome?.alarms?.onAlarm?.addListener(async (alarm) => {
     const r = await getSupervisor().tick();
     debugLog('心跳', r.acted ? '→ 已恢复' : `→ 未恢复：${r.decision.reason}`);
   } catch (e) {
-    // 心跳里抛异常会让这一次唤醒白费。记下来，等下一次闹钟再试——闹钟是
-    // 周期性的，所以一次失败不是终局。
-    debugLog('心跳出错', e);
+    // **「上一段还在跑」不是错误。**
+    //
+    // service worker 约 30 秒就被杀一次，而 offscreen 活得久得多。新起的 worker
+    // 内存全空、以为没人在跑，于是来叫一次恢复——而 offscreen 里那一段推进还好好
+    // 地跑着，互斥锁把它挡了回来。**那正是并发保护该有的样子。**
+    //
+    // 原来一律记成「心跳出错」，于是控制台里每半分钟出现一次
+    //
+    //     心跳出错 Error: 已经有「抓取」在进行中（6 秒前开始）
+    //
+    // 看起来像同时跑了好几个实例——而事实恰恰相反。
+    if (/** @type {any} */ (e)?.reason === 'busy') {
+      debugLog('心跳 → 上一段还在跑，跳过');
+    } else {
+      // 真的出错了：记下来，等下一次闹钟再试——闹钟是周期性的，一次失败不是终局。
+      debugLog('心跳出错', e);
+    }
   }
 });
 

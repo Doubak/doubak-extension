@@ -74,9 +74,21 @@ describe('刻意停下的一律不自动恢复', () => {
     assert.equal(d.resume, false);
   });
 
-  test('只有 crash 一种会自动恢复', () => {
+  test('自动恢复的白名单很短，而且每一条都说得出理由', () => {
+    // **这个白名单要一直短。** 往里加一条，就是在说「这种停法不需要人看一眼」
+    // ——而绝大多数停法恰恰需要（风控、验证码、账号变了、空间不够）。
+    //
+    // 目前只有两条，共同点是：**用户什么都不用做，等着就好**。
+    //   - crash        进程被杀 / 系统休眠，没有任何外部信号说我们该停
+    //   - network_down 网络断了，恢复之后自己就好了
     const auto = PAUSE_REASONS.filter((r) => policyFor(r).autoResume);
-    assert.deepEqual(auto, ['crash'], '自动恢复的白名单必须只有意外中断这一类');
+    assert.deepEqual(auto.sort(), ['crash', 'network_down']);
+    for (const r of auto) {
+      assert.equal(
+        policyFor(r).userVisible, false,
+        `${r} 会自动恢复却还要弹通知——那是在为一件不需要用户做任何事的事打扰他`,
+      );
+    }
   });
 });
 

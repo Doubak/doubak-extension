@@ -13,6 +13,8 @@ import { MemoryFileStore } from '../src/storage/file-store.js';
 import { buildRoutes } from '../src/crawl/routes.js';
 import { indexFilename } from '../src/core/ids.js';
 import { TransportError } from '../src/crawl/errors.js';
+import { MAX_CONSECUTIVE_NETWORK_ERRORS } from '../src/crawl/loop.js';
+import { MAX_NETWORK_RETRIES } from '../src/crawl/frontier.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -543,5 +545,79 @@ describe('抽得到条目、抽不到时间 —— 静默退化的第二种样�
     assert.match(src, /type: 'no_watermark'/);
     // 只对**本该有时间**的路线报——作品详情页、个人主页压根没有时间概念
     assert.match(src, /profile\?\.timeAnchor/);
+  });
+});
+
+describe('网络断了要早早停手，不要一条条熬超时', () => {
+  /**
+   * 实测撞到的：电脑闲置、网络断开，一段推进跑了 **780 秒**。
+   *
+   * 算得出来：一批 25 条，每条熬满 30 秒超时加约 1 秒间隔 ≈ 775 秒。而预算
+   * （22 秒）**只在批与批之间检查**，拦不住进行中的那一批。期间心跳每 30 秒来
+   * 一次、每次都只能说「上一段还在跑」——用户看到二十来行「未恢复」，像是彻底
+   * 卡死了。
+   *
+   * 网络断了是**全局状况**，不是某一条 URL 的问题。连着几条都连不上，就没有
+   * 任何理由再试下一条。
+   */
+  test('连续网络错误达到阈值就停机，理由是 network_down', async () => {
+    const { loop, frontier, events } = await harness([]);
+    // 多排几个**叶子**条目：叶子失败不堵路线（一个作品页与另一个无关），
+    // 所以队列会继续往下走——这正是真实抓取里网络断掉时的样子。
+    for (let i = 0; i < 5; i++) {
+      frontier.enqueue({
+        url: `https://movie.douban.com/subject/${i}/`,
+        urlKey: `https://movie.douban.com/subject/${i}/`,
+        routeKey: 'interest.item',
+        intent: 'interest.item',
+        ordered: false,
+      });
+    }
+    // 让每一次请求都变成网络错误
+    loop._transport.fetch = async () => {
+      throw new TransportError('timeout', '连接超时');
+    };
+
+    const r = await loop.run({ maxCaptures: 100 });
+    assert.equal(r.stoppedBy, 'network_down', `实际停机原因：${r.stoppedBy}`);
+    const stop = events.find((e) => e.type === 'stopped' && e.reason === 'network_down');
+    assert.ok(stop, '没有报出停机事件');
+    assert.match(stop.message, /连不上豆瓣|网络中断/);
+    assert.ok(stop.url, '停机事件要说清是抓哪一页时判断的');
+  });
+
+  test('**阈值必须大于单个条目的重试预算**', () => {
+    // 否则一个坏 URL 自己就能把整场抓取判成「网络断了」——那是把「这一页有问题」
+    // 误读成「全世界都没了」，而两者的处置完全相反。
+    assert.ok(
+      MAX_CONSECUTIVE_NETWORK_ERRORS > 1 + MAX_NETWORK_RETRIES,
+      `阈值 ${MAX_CONSECUTIVE_NETWORK_ERRORS} 没超过单条的预算 ${1 + MAX_NETWORK_RETRIES}`,
+    );
+  });
+
+  test('省下的时间是数量级的', async () => {
+    // 25 条 × 31 秒 ≈ 775 秒 vs 阈值 × 31 秒。这条测试守的是「早停」这件事本身
+    // 有没有意义——阈值要是被调到接近批大小，这个修法就白做了。
+    const { DEFAULT_BATCH_SIZE } = await import('../src/crawl/runner.js');
+    assert.ok(
+      MAX_CONSECUTIVE_NETWORK_ERRORS * 3 < DEFAULT_BATCH_SIZE,
+      '阈值太接近批大小，早停省不下多少时间',
+    );
+  });
+
+  test('抓成功一条就清零 —— 判据是「连续」', async () => {
+    // 偶尔一次超时是正常的（网络抖动）。只有一次接一次才说明断了。
+    let n = 0;
+    const { loop } = await harness([broadcastPage(3, 0), broadcastPage(0)]);
+    const realFetch = loop._transport.fetch.bind(loop._transport);
+    loop._transport.fetch = async (...args) => {
+      n += 1;
+      // 每隔一次抛一个可重试的网络错误：永远达不到「连续」阈值
+      if (n % 2 === 0) throw new TransportError('timeout', '连接超时');
+      return realFetch(...args);
+    };
+
+    const r = await loop.run({ maxCaptures: 20 });
+    assert.notEqual(r.stoppedBy, 'network_down', '零星抖动被误判成了网络中断');
   });
 });

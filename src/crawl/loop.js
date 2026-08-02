@@ -39,8 +39,23 @@ import { TransportError } from './errors.js';
 import { PermissionError } from './permissions.js';
 import { classifyWriteError } from '../storage/quota.js';
 import { RouteState } from './route-state.js';
+import { MAX_NETWORK_RETRIES } from './frontier.js';
 import { urlKey } from '../core/urlkey.js';
 import { nowRfc3339, parseDoubanTimestamp } from '../core/time.js';
+
+/**
+ * 连续多少次网络层错误就判定「网络没了」。
+ *
+ * ## 这个数不能随手取
+ *
+ * 它**必须大于单个条目的重试预算**（`1 + MAX_NETWORK_RETRIES` = 3）。否则一个
+ * 坏 URL 自己就能把整场抓取判成「网络断了」——那是把「这一页有问题」误读成
+ * 「全世界都没了」，而两者的处置完全相反。
+ *
+ * 取两个条目的预算（6）：这是「不止一个 URL 出问题」所需的最小值。再大就是在
+ * 白白多熬超时——网络真断了的时候，每多试一次就是 30 秒。
+ */
+export const MAX_CONSECUTIVE_NETWORK_ERRORS = (1 + MAX_NETWORK_RETRIES) * 2;
 
 /**
  * @typedef {object} LoopDeps
@@ -76,6 +91,12 @@ export class CrawlLoop {
     this._pacer = pacer;
     this._routes = routes;
     this._emit = onEvent ?? (() => {});
+
+    /**
+     * 连续多少次网络层错误。用来判定「网络没了」——见 `_handleTransportError`。
+     * 抓成功一条就清零。
+     */
+    this._consecutiveNetworkErrors = 0;
 
     /** @type {Map<string, RollingSize>} 每条路线的体积基线 */
     this._sizes = new Map();
@@ -471,6 +492,10 @@ export class CrawlLoop {
       this._emit({ type: 'stopped', reason: se.reason, message: se.message, url: item.url });
       return 'stop';
     }
+    // 连上了，计数清零。判据是「**连续**几次」——偶尔一次超时是正常的，
+    // 网络断了才会一次接一次。
+    this._consecutiveNetworkErrors = 0;
+
     this._lastCapture.set(item.routeKey, written.captureId);
     // 界面在两批之间没有 in_flight 条目可看，那时候要有个「刚抓完 X」顶上——
     // 否则那一行会时有时无地闪。
@@ -587,6 +612,33 @@ export class CrawlLoop {
    */
   _handleTransportError(item, err) {
     const te = err instanceof TransportError ? err : null;
+
+    // **连着几次都是网络层错误 = 网络没了，别再一条条熬超时。**
+    //
+    // 没有网络时每个请求都要熬满 30 秒才算失败，一批 25 条就是十几分钟；而预算
+    // （22 秒）只在批与批之间检查，拦不住进行中的那一批。实测撞到过：电脑闲置、
+    // 网络断开，一段推进跑了 **780 秒**（≈ 25 × 31 秒），期间心跳每 30 秒来一次、
+    // 每次都只能说「上一段还在跑」。用户看到二十来行「未恢复」，像是彻底卡死。
+    //
+    // 网络断了是**全局状况**，不是这一条 URL 的问题——第 3 条还是同样的错，
+    // 就没有任何理由再试第 4 条。停下来，记一个明确的原因，剩下的十几分钟省掉。
+    // `network_down` 会自动恢复且不弹通知：用户什么都不用做，等着就好。
+    if (te?.retryable) {
+      this._consecutiveNetworkErrors += 1;
+      if (this._consecutiveNetworkErrors >= MAX_CONSECUTIVE_NETWORK_ERRORS) {
+        this.stateFor(item.routeKey).markStopped('network_down');
+        this._frontier.stop('network_down');
+        this._emit({
+          type: 'stopped',
+          reason: 'network_down',
+          url: item.url,
+          message:
+            `连续 ${this._consecutiveNetworkErrors} 次请求都没能连上豆瓣，判定为网络中断。` +
+            '已停下——不这么做的话，剩下的条目会一条条熬满超时，白耗十几分钟。',
+        });
+        return 'stop';
+      }
+    }
 
     if (te?.retryable) {
       const { willRetry } = this._frontier.settleNetworkError(item, te.message);
