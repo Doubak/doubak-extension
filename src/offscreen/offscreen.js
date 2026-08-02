@@ -283,6 +283,11 @@ function getRunner() {
  * @param {object} e
  */
 function relayEvent(e) {
+  // **「我还活着」。** 互斥锁靠这个区分「跑得久」和「卡死了」——不吭声超过阈值
+  // 就会被抢占。抓取每抓一页都会走到这儿，所以正常情况下永远不会被判死；而真的
+  // 卡在某个永不返回的 await 上时，事件也就随之停了。见 crawl/exclusive.js。
+  lock.touch();
+
   debugLog('事件', e.type, e.routeKey ?? e.reason ?? '');
   // 没有界面打开时 sendMessage 会 reject，那是正常的，不是错误。
   chrome.runtime.sendMessage({ type: 'crawl_event', event: e }).catch(() => {});
@@ -303,7 +308,17 @@ function relayEvent(e) {
  *
  * 抓取全都在这一个 document 里跑，所以这一个锁就够——不需要跨上下文的协调。
  */
-const lock = new Exclusive();
+const lock = new Exclusive({
+  onPreempt: ({ name, silentMs }) => {
+    // 抢占意味着上一段真的卡死了。**必须留下痕迹**——静默夺锁会把「抓取卡了
+    // 20 分钟」变成一件谁也不知道发生过的事。
+    const msg =
+      `上一段「${name}」已经 ${Math.round(silentMs / 1000)} 秒没有任何动静，` +
+      '判定为卡死并接管。（常见诱因：抓取途中让电脑睡眠。已抓到的内容都在档案里。）';
+    debugLog('抢占', msg);
+    relayEvent({ type: 'preempted', reason: 'stale_holder', message: msg, silentMs });
+  },
+});
 
 /** 正在推进的那一段，挡住同一件事的重入。 */
 let driving = null;
@@ -311,16 +326,30 @@ let driving = null;
 async function drive() {
   // 心跳可能在上一段还没跑完时又来一次。这里返回**同一个** promise 而不是报错：
   // 重复唤醒是 MV3 的常态，不该被当成冲突。
-  if (driving) return driving;
-  driving = lock
+  //
+  // **但卡死的那一段不能一直被返回。** 它的 `.finally()` 永远不会执行，于是
+  // `driving` 永远不为空——此后每一次心跳都拿到同一个永不结算的 promise，
+  // 看起来像「在跑」，实际上一页都不会再抓。锁那边判死了，这里也得跟着放手，
+  // 否则抢占出来的锁没人去用。
+  if (driving && !lock.stale) return driving;
+  if (driving) driving = null;
+
+  const mine = lock
     .run('抓取', () =>
       driveWithinBudget({
         runner: getRunner(),
-        onEvent: (e) => debugLog('驱动', e.type),
+        onEvent: (e) => {
+          lock.touch();
+          debugLog('驱动', e.type);
+        },
       }))
+    // **只清自己那一份。** 被判死的那一段万一晚一步醒过来，无条件清空会把
+    // 正在跑的这一段的记号抹掉，于是下一次心跳又开一段——两段并行，正好是
+    // 这里要防的事。与锁那边看代号是同一个道理。
     .finally(() => {
-      driving = null;
+      if (driving === mine) driving = null;
     });
+  driving = mine;
   return driving;
 }
 

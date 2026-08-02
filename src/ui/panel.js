@@ -352,17 +352,7 @@ async function refresh() {
         ['warn', '抓取已停下', `原因：${r.stoppedBy}`, '继续'];
       setState(cls, title, why);
       setActions([
-        ...(action ? [[action, async () => {
-          // 恢复同样要好几秒（修段尾 + 确认登录状态），同样先给个兜底状态。
-          pendingCommand = '恢复抓取';
-          refresh();
-          try {
-            await send({ type: 'resume' });
-          } finally {
-            pendingCommand = null;
-          }
-          refresh();
-        }]] : []),
+        ...(action ? [[action, resumeCrawl]] : []),
         // 停下来之后**尤其**需要这个：不想接着抓的话，只有中止才能把这份档案
         // 放开（暂停不行——它还挂在「正在抓的那份」上，删不掉）。
         ['中止这次抓取', () => abortCrawl(r.bundleId), 'danger'],
@@ -398,18 +388,7 @@ async function refresh() {
       ['warn', '抓取已停下', `原因：${s.checkpoint.pause_reason}`, '继续'];
     setState(cls, title, why);
     setActions([
-      ...(action ? [[action, async () => {
-        // 恢复要好几秒（修段尾 + 确认登录状态，都是真请求），先给个兜底状态——
-        // 否则点下去到几秒后之间界面一动不动，看起来像没反应。
-        pendingCommand = '恢复抓取';
-        refresh();
-        try {
-          await send({ type: 'resume' });
-        } finally {
-          pendingCommand = null;
-        }
-        refresh();
-      }]] : []),
+      ...(action ? [[action, resumeCrawl]] : []),
       // **这里也要能中止。** 刚打开插件时 offscreen 还没起来，只有 checkpoint——
       // 而那正是用户最可能想说「这次不抓了」的时刻。
       ['中止这次抓取', () => abortCrawl(s.checkpoint.bundle_id), 'danger'],
@@ -725,6 +704,38 @@ async function showLastRun() {
  *
  * @param {string} bundleId
  */
+/**
+ * 「继续」。
+ *
+ * ## 失败必须说出来
+ *
+ * 这两处原来是 `await send({ type: 'resume' })` 然后 `refresh()`——**返回值一眼
+ * 都没看**。而 `send()` 从不抛异常，它把失败包成 `{ok:false, error}` 返回。于是
+ * 后台拒绝恢复时（比如上一段抓取卡死、锁没放），界面上**什么都不会发生**：
+ * 按钮按下去、刷新一遍、还是原样。用户唯一能得到的信息是「点了没反应」，而
+ * 真正的原因就在那个被丢掉的 `error` 字段里。
+ *
+ * 「开始」和「中止」都查了 `r.ok`，只有「继续」没查——这类不一致最容易漏，
+ * 因为它不报错，只是安静。
+ */
+async function resumeCrawl() {
+  // 恢复要好几秒（修段尾 + 确认登录状态，都是真请求），先给个兜底状态——
+  // 否则点下去到几秒后之间界面一动不动，看起来像没反应。
+  pendingCommand = '恢复抓取';
+  refresh();
+  let r;
+  try {
+    r = await send({ type: 'resume' });
+  } finally {
+    pendingCommand = null;
+  }
+  if (!r?.ok) {
+    setState('err', '无法继续', r?.error ?? '后台没有给出原因。');
+    return;
+  }
+  refresh();
+}
+
 async function abortCrawl(bundleId) {
   const st = await send({ type: 'status' });
   const r = st?.runner ?? {};
