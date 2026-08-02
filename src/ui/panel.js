@@ -353,6 +353,9 @@ async function refresh() {
       setState(cls, title, why);
       setActions([
         ...(action ? [[action, resumeCrawl]] : []),
+        // 没有「继续」时（failures_pending），该做的决定在失败清单里——但那张表
+        // 有一百多行，顶端只剩「中止」就成了一条死路。把同样的动作提上来。
+        ...(action ? [] : failureActions(r.failures)),
         // 停下来之后**尤其**需要这个：不想接着抓的话，只有中止才能把这份档案
         // 放开（暂停不行——它还挂在「正在抓的那份」上，删不掉）。
         ['中止这次抓取', () => abortCrawl(r.bundleId), 'danger'],
@@ -704,6 +707,48 @@ async function showLastRun() {
  *
  * @param {string} bundleId
  */
+/** 重试全部失败条目。顶部动作行与失败清单共用。 */
+async function retryFailures() {
+  const r = await send({ type: 'retryFailed' });
+  if (!r?.ok) setState('err', '重试失败', r?.error ?? '');
+  refresh();
+}
+
+/** 带着已知缺口收尾。 */
+async function finishWithGaps() {
+  const r = await send({ type: 'finishWithGaps' });
+  if (!r?.ok) setState('err', '收尾失败', r?.error ?? '');
+  refresh();
+}
+
+/**
+ * 停下来之后，顶部那一行该给哪些按钮。
+ *
+ * ## 为什么不能只靠下面那张失败清单
+ *
+ * `failures_pending` 这个状态**刻意不给「继续」按钮**——该做的决定是「重试」还是
+ * 「就这样收尾」，而那两个按钮在失败清单里。道理是对的，可结果是：屏幕顶端只剩
+ * 一个「中止这次抓取」，而真正该点的东西在一百多行表格的**下面**。
+ *
+ * 用户的原话是「继续按钮没了，只剩中止」——也就是说，从顶端看这就是一条死路。
+ * 一个只提供「放弃」的界面，会把人推向放弃。
+ *
+ * 所以把同样的两个动作也放到顶部。它们指向同一个函数，不是另一套逻辑。
+ *
+ * @param {Array<object>} failures
+ * @returns {Array<[string, () => void] | [string, () => void, string]>}
+ */
+function failureActions(failures) {
+  if (!failures?.length) return [];
+  const ordered = failures.filter((f) => f.ordered);
+  /** @type {Array<any>} */
+  const acts = [[`重试这 ${failures.length} 个`, retryFailures]];
+  // 有分页失败就不给「就这样收尾」：跳过它等于免掉水位线赖以成立的前提，
+  // 那不是用户能授权的事。与失败清单里的判断保持一致。
+  if (!ordered.length) acts.push(['就这样收尾', finishWithGaps]);
+  return acts;
+}
+
 /**
  * 「继续」。
  *
@@ -989,9 +1034,7 @@ function renderFailures(failures) {
   retry.onclick = async () => {
     retry.disabled = true;
     retry.textContent = '正在重试…';
-    const r = await send({ type: 'retryFailed' });
-    if (!r?.ok) alert(`重试失败：${r?.error ?? ''}`);
-    refresh();
+    await retryFailures();
   };
   acts.append(retry);
 
@@ -1013,9 +1056,7 @@ function renderFailures(failures) {
       ].filter(Boolean);
       if (!confirm(lines.join('\n'))) return;
       accept.disabled = true;
-      const r = await send({ type: 'finishWithGaps' });
-      if (!r?.ok) alert(`收尾失败：${r?.error ?? ''}`);
-      refresh();
+      await finishWithGaps();
     };
     acts.append(accept);
   }

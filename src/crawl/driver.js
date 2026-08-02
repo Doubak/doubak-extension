@@ -33,7 +33,7 @@ export const DEFAULT_BUDGET_MS = 22_000;
  * @param {number} [opts.budgetMs]
  * @param {() => number} [opts.now]
  * @param {(evt: object) => void} [opts.onEvent]
- * @returns {Promise<{batches: number, captured: number, failed: number, done: boolean, stoppedBy: string | null, unresolvedFailures: number, unresolvedOrderedFailures: number}>}
+ * @returns {Promise<{batches: number, captured: number, failed: number, done: boolean, stoppedBy: string | null, unresolvedFailures: number, unresolvedOrderedFailures: number, awaitingHuman: number}>}
  */
 /**
  * 连续多少批毫无进展就判定空转。
@@ -60,6 +60,7 @@ export async function driveWithinBudget({
   let stoppedBy = null;
   let unresolvedFailures = 0;
   let unresolvedOrderedFailures = 0;
+  let awaitingHuman = 0;
 
   while (true) {
     const r = await runner.runBatch();
@@ -69,6 +70,7 @@ export async function driveWithinBudget({
     stoppedBy = r.stoppedBy;
     unresolvedFailures = r.unresolvedFailures ?? 0;
     unresolvedOrderedFailures = r.unresolvedOrderedFailures ?? 0;
+    awaitingHuman = r.awaitingHuman ?? 0;
 
     if (r.done) {
       done = true;
@@ -110,5 +112,8 @@ export async function driveWithinBudget({
     }
   }
 
-  return { batches, captured, failed, done, stoppedBy, unresolvedFailures, unresolvedOrderedFailures };
+  return {
+    batches, captured, failed, done, stoppedBy,
+    unresolvedFailures, unresolvedOrderedFailures, awaitingHuman,
+  };
 }

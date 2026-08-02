@@ -397,7 +397,7 @@ async function runDryRun(scenario) {
     captured += b.captured;
     failed += b.failed;
     stoppedBy = b.stoppedBy;
-    unresolved = b.unresolvedFailures ?? 0;
+    unresolved = (b.unresolvedFailures ?? 0) + (b.awaitingHuman ?? 0);
     if (b.done) break;
   }
 
@@ -408,8 +408,12 @@ async function runDryRun(scenario) {
   // 进度是 `oldestSeen`，那是给人看的。
   const advanced = route ? Boolean(route.contiguous && route.newestSeen) : null;
 
-  // 中途停机、**或者还有抓不下来的条目**，都不是 complete。演练也不许在这一点上
-  // 撒谎——这正是被演练验证的规则之一。
+  // 中途停机、还有抓不下来的条目、**或者被软封锁挡住的条目**，都不是 complete。
+  // 演练也不许在这一点上撒谎——这正是被演练验证的规则之一。
+  //
+  // 软封锁那一类原来没算进来：它们的状态是 awaiting_human 而不是 failed，于是
+  // 一个 blocked 的剧本会「干净跑完」并标成 complete——而那正是这个剧本要验证
+  // 不会发生的事。
   await r.finish(stoppedBy || unresolved ? 'aborted' : 'complete');
 
   return { captured, failed, stoppedBy, unresolved, byVerdict, advanced };

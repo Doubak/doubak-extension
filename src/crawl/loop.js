@@ -338,6 +338,9 @@ export class CrawlLoop {
       // 只能重试；叶子失败可以由用户决定「就这样收尾」。
       unresolvedFailures: this._frontier.failedItems().length,
       unresolvedOrderedFailures: this._frontier.failedItems({ orderedOnly: true }).length,
+      // 软封锁挡住的条目同样**不能当成跑完了**。只数失败的话，一整条路线全被
+      // 挡住时队列取不出东西，上层会把它读成「干净跑完」然后收尾成 complete。
+      awaitingHuman: this._frontier.awaitingHumanItems().length,
     };
   }
 

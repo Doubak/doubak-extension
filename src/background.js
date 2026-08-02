@@ -145,7 +145,13 @@ async function drive() {
   const r = await withOffscreen({ op: 'drive' });
   debugLog('推进结果', JSON.stringify(r.result));
 
-  if (r.result.done && !r.result.stoppedBy && !r.result.unresolvedFailures) {
+  // 软封锁挡住的条目**不能**当成跑完了。它们不在 unresolvedFailures 里（状态是
+  // awaiting_human 而不是 failed），而一整条路线全被挡住时队列就取不出东西——
+  // 于是「没有可跑的了」会被读成干净跑完。实测差点撞上：豆瓣对图片请求回 418，
+  // 2900 张封面会全部进 awaiting_human。
+  const awaitingHuman = r.result.awaitingHuman ?? 0;
+
+  if (r.result.done && !r.result.stoppedBy && !r.result.unresolvedFailures && !awaitingHuman) {
     // **收尾失败不能变成无限重试。**
     //
     // 报上来过一次：`IndexWriter` 没有恢复路径，于是收尾时段与索引对不上并抛错。
@@ -165,6 +171,11 @@ async function drive() {
     }
     await getSupervisor().finishRun();
     await notifyDone(r.result, { kv: getKv() });
+  } else if (r.result.done && awaitingHuman) {
+    // 豆瓣在拒绝我们，而不是我们抓不下来。该做的是等、降速、再试——所以走
+    // `blocked` 那条路（界面上有「现在试试」按钮），不是「有几个页面抓不下来」。
+    await getSupervisor().pauseRun('blocked');
+    await notifyNeedsAction('blocked', { kv: getKv() });
   } else if (r.result.done && r.result.unresolvedFailures) {
     // 跑不动了，但**不是**干净跑完：有抓不下来的条目。
     //

@@ -21,6 +21,9 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { installFakeDom, readRepoFile } from './helpers/fake-dom.js';
+// `readRepoFile` 是异步的（返回 Promise）。同步读一份给那些只做源码约束的检查用——
+// 拿 Promise 去 assert.match 不会报类型错，只会静默地永远不匹配。
+import { readFileSync } from 'node:fs';
 
 /** 每次都要新的模块实例——界面脚本有模块级状态（preflightShown、routeRows）。 */
 let cacheBust = 0;
@@ -1071,5 +1074,39 @@ describe('openPanel：点图标和点通知共同的落点', () => {
     } finally {
       globalThis.chrome = prev;
     }
+  });
+});
+
+describe('停下来之后，顶端不能是死路', () => {
+  const js = readFileSync(new URL('../src/ui/panel.js', import.meta.url), 'utf-8');
+
+  test('failures_pending 刻意不给「继续」—— 但必须给别的', () => {
+    // 这个状态该做的决定是「重试」还是「就这样收尾」，而那两个按钮在失败清单里。
+    // 道理是对的，可结果是：屏幕顶端只剩一个「中止这次抓取」，真正该点的东西在
+    // 一百多行表格的下面。
+    //
+    // 用户的原话是「继续按钮没了，只剩中止」——从顶端看这就是一条死路，而一个
+    // 只提供「放弃」的界面会把人推向放弃。
+    assert.match(js, /failureActions\(r\.failures\)/, '没有把失败动作提到顶部动作行');
+    assert.match(js, /\.\.\.\(action \? \[\] : failureActions/, '有「继续」时不该重复给');
+  });
+
+  test('顶部与清单里指向同一个函数，不是另一套逻辑', () => {
+    // 两处各写一遍的话，迟早有一处忘了改——而它们是同一个决定。
+    assert.match(js, /async function retryFailures\(\)/);
+    assert.match(js, /async function finishWithGaps\(\)/);
+    assert.equal(
+      (js.match(/type: 'retryFailed'/g) ?? []).length, 1,
+      '「重试」的实现出现了不止一处',
+    );
+    assert.equal(
+      (js.match(/type: 'finishWithGaps'/g) ?? []).length, 1,
+      '「就这样收尾」的实现出现了不止一处',
+    );
+  });
+
+  test('有分页失败时不给「就这样收尾」', () => {
+    // 跳过分页条目等于免掉水位线赖以成立的前提，那不是用户能授权的事。
+    assert.match(js, /if \(!ordered\.length\) acts\.push\(\['就这样收尾'/);
   });
 });

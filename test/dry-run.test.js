@@ -73,7 +73,8 @@ async function runScenario(key) {
     captured += b.captured;
     failed += b.failed;
     stoppedBy = b.stoppedBy;
-    unresolved = b.unresolvedFailures ?? 0;
+    // 软封锁挡住的条目同样不算跑完（状态是 awaiting_human，不是 failed）。
+    unresolved = (b.unresolvedFailures ?? 0) + (b.awaitingHuman ?? 0);
     if (b.done) break;
   }
 
@@ -83,7 +84,7 @@ async function runScenario(key) {
   // 进度是 `oldestSeen`，那是给人看的。
   const advanced = route ? Boolean(route.contiguous && route.newestSeen) : null;
   const bundleId = st.bundleId;
-  // 有未解决的失败也不许标 complete（见 runner.finish 的说明）。
+  // 有未解决的失败、或者被软封锁挡住的条目，都不许标 complete（见 runner.finish）。
   await runner.finish(stoppedBy || unresolved ? 'aborted' : 'complete');
 
   // 计数器与档案是两回事。「拦截页也要进档案」这条承诺只能对着档案本身验，

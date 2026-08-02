@@ -619,6 +619,24 @@ export class CrawlRunner {
             `请先重试（第一个：${ordered[0].url}），或者把这次抓取标成中止。`,
         );
       }
+      // **软封锁挡住的也不算跑完。**
+      //
+      // 它们不在 `failedItems()` 里（状态是 awaiting_human，不是 failed），于是
+      // 一整条路线全被挡住时，队列取不出东西 →「没有可跑的了」→ 收尾成 complete。
+      // 实测差点撞上：豆瓣对图片请求回 418，2900 张封面会全部进 awaiting_human。
+      //
+      // 与失败不同的是**该做什么**：失败可以「就这样收尾」，而软封锁意味着豆瓣
+      // 正在拒绝我们——那时候该等、该降速，不该把它记成一个既成事实。所以这里
+      // 不给 acceptLeafGaps 开口子。
+      const waiting = frontier.awaitingHumanItems();
+      if (waiting.length > 0) {
+        throw new Error(
+          `有 ${waiting.length} 个条目被豆瓣挡住了（软封锁），现在不能标成「已完成」。` +
+            '这不是抓不下来，是豆瓣正在拒绝——等一段时间再继续通常就好了' +
+            `（第一个：${waiting[0].url}）。`,
+        );
+      }
+
       const leaves = frontier.failedItems();
       if (leaves.length > 0 && !acceptLeafGaps) {
         throw new Error(

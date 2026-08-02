@@ -135,7 +135,7 @@ function pageFor(url) {
   return dramaList();
 }
 
-function harness(batchSize) {
+function harness(batchSize, { imageStatus = 200 } = {}) {
   const kv = new MemoryKvStore();
   /** @type {Map<string, MemoryFileStore>} */
   const dirs = new Map();
@@ -145,11 +145,13 @@ function harness(batchSize) {
   };
   const runStore = new RunStore({ kv, openBundle });
   const events = [];
+  const calls = [];
   const fetchImpl = async (url) => {
+    calls.push(url);
     const isImage = url.includes('doubanio.com');
     const body = isImage ? new Uint8Array([0xff, 0xd8, 1, 2, 3]) : enc.encode(pageFor(url));
     return {
-      status: 200,
+      status: isImage ? imageStatus : 200,
       url,
       headers: new Headers({ 'content-type': isImage ? 'image/jpeg' : 'text/html; charset=utf-8' }),
       arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
@@ -161,7 +163,7 @@ function harness(batchSize) {
     pacerOptions: { intervalMs: 1, jitterRatio: 0 },
     onEvent: (e) => events.push(e),
   });
-  return { runner, runStore, dirs, events };
+  return { runner, runStore, dirs, events, calls };
 }
 
 const SCOPE = {
@@ -348,5 +350,72 @@ describe('一批中途被杀，派生出来的封面图不能就此消失', () =
       '不该把已经抓到的封面图重新排进队',
     );
     assert.ok(events.some((e) => e.type === 'replayed_derivations'));
+  });
+});
+
+describe('被豆瓣挡住的条目不能当成「跑完了」', () => {
+  /**
+   * 这是 418 那件事的连锁后果，也是最危险的一环。
+   *
+   * 软封锁的条目状态是 `awaiting_human`，**不是 `failed`**。而「还有没有没解决的
+   * 东西」原来只数 `failedItems()`——于是一整条路线全被挡住时，队列里取不出任何
+   * 东西，上层读到的是「没有可跑的了」，然后**自动收尾成 complete**。
+   *
+   * 实测差点撞上：豆瓣对图片请求一律回 418，2900 张封面会全部进 awaiting_human。
+   * 那样产出的是一份声称「已完成」、却整条路线没抓到的档案——这个项目最不能
+   * 出的错：假的完整性声明。
+   */
+  /**
+   * 让图片全部返回 418 —— 这就是真实发生的事。走完整条链路：
+   * 分类器判 blocked → frontier 转 awaiting_human → 收尾时的守卫。
+   */
+  async function crawlWithTeapotImages() {
+    const h = harness(50, { imageStatus: 418 });
+    await h.runner.start(SCOPE);
+    await drain(h.runner);
+    return h;
+  }
+
+  test('**第一个 418 就停手**，不是一路撞过去', async () => {
+    // 这是整件事最要紧的一条。原来 418 判成「判不出来」，于是每一张都记一次失败
+    // 然后接着抓下一张——豆瓣说了 123 次「不」，我们一次都没听懂，还打算再说
+    // 2900 次。而在软封锁上继续请求，正是把限流升级成封号的标准路径。
+    //
+    // 现在第一张就转成 awaiting_human，那条路线随即被挡住，其余的原地不动。
+    const { runner, calls } = await crawlWithTeapotImages();
+    const covers = runner._run.frontier.snapshot().filter((x) => x.routeKey === 'asset.subject_cover');
+    assert.ok(covers.length > 1, '排进队的封面不足两张，这个用例验不到东西');
+
+    const waiting = covers.filter((x) => x.state === 'awaiting_human');
+    const pending = covers.filter((x) => x.state === 'pending');
+    assert.equal(waiting.length, 1, '不该有第二张被送出去撞墙');
+    assert.equal(pending.length, covers.length - 1, '其余的应当原地不动');
+
+    const imageCalls = calls.filter((u) => u.includes('doubanio.com'));
+    assert.equal(imageCalls.length, 1, `发了 ${imageCalls.length} 次图片请求，应当只有 1 次`);
+  });
+
+  test('finish("complete") 必须拒绝', async () => {
+    const { runner } = await crawlWithTeapotImages();
+    await assert.rejects(() => runner.finish('complete'), /挡住|软封锁/);
+  });
+
+  test('**「就这样收尾」也不给开口子**', async () => {
+    // 与失败不同：失败是「试过了，不行」，可以由用户决定记成缺口收尾。而软封锁
+    // 是豆瓣正在拒绝我们——那时候该等、该降速，不该把它记成一个既成事实。
+    const { runner } = await crawlWithTeapotImages();
+    await assert.rejects(() => runner.finish('complete', { acceptLeafGaps: true }), /挡住|软封锁/);
+  });
+
+  test('中止照样可以 —— 用户总得有办法结束', async () => {
+    const { runner } = await crawlWithTeapotImages();
+    const m = await runner.finish('aborted');
+    assert.equal(m.status, 'aborted');
+  });
+
+  test('状态里数得出来，上层才有可能不误判', async () => {
+    const { runner } = await crawlWithTeapotImages();
+    const b = await runner.runBatch();
+    assert.ok(b.awaitingHuman > 0, 'runBatch 没报出被挡住的条数');
   });
 });
