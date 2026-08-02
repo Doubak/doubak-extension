@@ -29,6 +29,38 @@ export { SEGMENT_KINDS };
  * @param {Date} [now]
  * @returns {string} 形如 `20260728T101500Z-a3f9c1`
  */
+/**
+ * 从 bundle_id 反推出这次抓取**开始**的时刻。
+ *
+ * ## 为什么需要它
+ *
+ * `manifest.created_at` 原来取自「构造 BundleWriter 的那一刻」。正常情况下那就是
+ * 开始抓取的时刻，但**崩溃恢复会重新构造一个 BundleWriter**——于是 `created_at`
+ * 变成了「最后一次恢复的时刻」。
+ *
+ * 实测的一份真实档案：
+ *
+ *     bundle_id            20260801T005010Z-3eef52   （2026-08-01 00:50:10 UTC）
+ *     manifest.created_at  2026-08-02T22:48:02+10:00
+ *     manifest.completed_at 2026-08-02T22:56:24+10:00
+ *
+ * 差了两天。照那份 manifest 读，这次抓取只花了 8 分钟——而它实际跑了两天、
+ * 跨越了几十次恢复。这不是显示问题：`created_at` 是写进档案的**溯源信息**。
+ *
+ * 而正确答案一直就在手边：**`bundle_id` 本身就是创建时刻**（它由
+ * `newBundleId(now)` 生成）。从它反推，就不可能与自己漂移。
+ *
+ * @param {string} id
+ * @returns {Date | null} 认不出来就返回 null，不猜
+ */
+export function bundleIdTime(id) {
+  if (!isBundleId(id)) return null;
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z-/.exec(id);
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s] = m;
+  return new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi, +s));
+}
+
 export function newBundleId(now = new Date()) {
   const p = (n, w = 2) => String(n).padStart(w, '0');
   const stamp =

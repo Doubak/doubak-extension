@@ -318,3 +318,60 @@ describe('README.txt', () => {
     assert.match(text, /删掉它不影响你自己写的内容/);
   });
 });
+
+describe('created_at 说的是「什么时候开始的」', () => {
+  /**
+   * 原来取自「构造 BundleWriter 的那一刻」。正常情况下那就是开始抓取的时刻，
+   * 但**崩溃恢复会重新构造一个 BundleWriter**——于是它变成了「最后一次恢复的
+   * 时刻」。
+   *
+   * 一份真实档案：
+   *
+   *     bundle_id             20260801T005010Z-3eef52   （08-01 00:50:10 UTC）
+   *     manifest.created_at   2026-08-02T22:48:02+10:00
+   *     manifest.completed_at 2026-08-02T22:56:24+10:00
+   *
+   * 差了两天。照那份 manifest 读，这次抓取只花了 8 分钟——而它实际跑了两天、
+   * 跨越几十次恢复。`created_at` 是写进档案的溯源信息，不是显示文字。
+   */
+  test('恢复之后重建写入器，created_at 不跟着变', async () => {
+    const store = new MemoryFileStore();
+    const bundleId = '20260801T005010Z-3eef52';
+    const account = { user_id: '1', username: 'x' };
+
+    // 两天后「恢复」：now 完全不同，但 bundle_id 还是原来那个
+    const writer = new BundleWriter({
+      store, account, bundleId,
+      now: () => new Date('2026-08-02T12:48:02Z'),
+    });
+    await writer.writeCapture(capture());
+    const m = await writer.finalize();
+
+    assert.equal(
+      Date.parse(m.created_at), Date.parse('2026-08-01T00:50:10Z'),
+      `created_at 跟着恢复时刻跑了：${m.created_at}`,
+    );
+    assert.ok(
+      Date.parse(m.completed_at) > Date.parse(m.created_at),
+      '收尾时间应当晚于开始时间',
+    );
+  });
+
+  test('新抓取时两者一致', async () => {
+    const store = new MemoryFileStore();
+    const at = new Date('2026-08-05T03:04:05Z');
+    const writer = new BundleWriter({
+      store, account: { user_id: '1', username: 'x' }, now: () => at,
+    });
+    await writer.writeCapture(capture());
+    const m = await writer.finalize();
+    // bundle_id 只精确到秒，所以比到秒
+    assert.equal(Date.parse(m.created_at), Date.parse('2026-08-05T03:04:05Z'));
+  });
+
+  test('bundle_id 认不出来时退回「现在」，不炸也不猜', async () => {
+    const { bundleIdTime } = await import('../src/core/ids.js');
+    assert.equal(bundleIdTime('乱七八糟'), null);
+    assert.equal(bundleIdTime(''), null);
+  });
+});

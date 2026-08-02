@@ -24,6 +24,7 @@
 
 import {
   newBundleId,
+  bundleIdTime,
   captureId as makeCaptureId,
   indexFilename,
   newWarcRecordId,
@@ -108,7 +109,14 @@ export class BundleWriter {
       account,
       producer,
       timezoneAssumption,
-      createdAt: toRfc3339(this._now()),
+      // **从 bundle_id 反推，不要用「现在」。**
+      //
+      // 崩溃恢复会重新构造一个 BundleWriter，于是「现在」变成了「最后一次恢复
+      // 的时刻」。一份真实档案里 created_at 比 bundle_id 晚了两天，照 manifest
+      // 读这次抓取只花了 8 分钟——而它实际跑了两天、跨越几十次恢复。
+      //
+      // 而正确答案一直在手边：bundle_id 本身就是创建时刻。从它反推就不可能漂移。
+      createdAt: toRfc3339(bundleIdTime(this._bundleId) ?? this._now()),
     });
 
     /** 最后一条写成了的捕获。恢复时靠它算出「checkpoint 之后写下了哪些」。 */
