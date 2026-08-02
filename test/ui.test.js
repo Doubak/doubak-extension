@@ -1094,7 +1094,7 @@ describe('停下来之后，顶端不能是死路', () => {
   test('顶部与清单里指向同一个函数，不是另一套逻辑', () => {
     // 两处各写一遍的话，迟早有一处忘了改——而它们是同一个决定。
     assert.match(js, /async function retryFailures\(\)/);
-    assert.match(js, /async function finishWithGaps\(\)/);
+    assert.match(js, /async function finishWithGaps\(leaves\)/);
     assert.equal(
       (js.match(/type: 'retryFailed'/g) ?? []).length, 1,
       '「重试」的实现出现了不止一处',
@@ -1108,5 +1108,46 @@ describe('停下来之后，顶端不能是死路', () => {
   test('有分页失败时不给「就这样收尾」', () => {
     // 跳过分页条目等于免掉水位线赖以成立的前提，那不是用户能授权的事。
     assert.match(js, /if \(!ordered\.length\) acts\.push\(\['就这样收尾'/);
+  });
+});
+
+describe('只剩 checkpoint 时也不能是死路', () => {
+  const js = readFileSync(new URL('../src/ui/panel.js', import.meta.url), 'utf-8');
+  const bg = readFileSync(new URL('../src/background.js', import.meta.url), 'utf-8');
+
+  test('failures_pending 在 checkpoint 分支里有出路', () => {
+    // 这条分支（offscreen 被回收了，只剩 checkpoint）**根本不渲染失败清单**，
+    // 而 failures_pending 又刻意不给「继续」——于是整个界面只剩一个
+    // 「中止这次抓取」。用户唯一能做的事，是把一次跑了几小时、只差几个页面的
+    // 抓取扔掉。
+    assert.match(js, /s\.checkpoint\.pause_reason !== 'failures_pending'/);
+    assert.match(js, /重试抓不下来的页面/);
+  });
+
+  test('那两个操作要能自己把抓取装回内存', () => {
+    // frontier 活在内存里，offscreen 一被回收就没了。不先装回来的话，这两个
+    // 按钮点下去只会拿到「没有进行中的抓取」——按钮在，但按不动。
+    assert.match(bg, /async function ensureRunLoaded\(\)/);
+    const retryIdx = bg.indexOf("case 'retryFailed'");
+    const finishIdx = bg.indexOf("case 'finishWithGaps'");
+    assert.ok(retryIdx > 0 && finishIdx > 0);
+    assert.match(bg.slice(retryIdx, retryIdx + 300), /ensureRunLoaded\(\)/);
+    assert.match(bg.slice(finishIdx, finishIdx + 300), /ensureRunLoaded\(\)/);
+  });
+
+  test('装回内存不等于接着抓', () => {
+    // 用户点的是「处理失败」，不是「继续抓」。顺手驱动一段等于替他做了决定，
+    // 而这个状态下他很可能正想收尾。
+    const i = bg.indexOf('async function ensureRunLoaded()');
+    const body = bg.slice(i, bg.indexOf('\n}', i));
+    assert.equal(/\bdrive\(\)/.test(body), false, 'ensureRunLoaded 不该顺手驱动');
+  });
+
+  test('**收尾的确认放在函数里**，不在调用方', () => {
+    // 有两个入口会调它。确认写在调用方的话，迟早有一个入口忘了——而这是一个
+    // 会写进 manifest、影响下次水位线的决定。
+    const i = js.indexOf('async function finishWithGaps(leaves)');
+    const body = js.slice(i, js.indexOf('\n}', i));
+    assert.match(body, /confirm\(/);
   });
 });

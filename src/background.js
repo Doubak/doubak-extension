@@ -140,6 +140,30 @@ function getSupervisor() {
   return supervisor;
 }
 
+/**
+ * 确保 offscreen 里有一次「在内存里的抓取」可以操作。
+ *
+ * ## 为什么需要
+ *
+ * `retryFailed` 与 `finishWithGaps` 都要动 frontier，而 frontier 活在内存里。
+ * offscreen 被回收（或扩展重载）之后它就没了，只剩磁盘上的 checkpoint——于是
+ * 这两个操作会抛「没有进行中的抓取」。
+ *
+ * 而这两个操作恰恰是 `failures_pending` 状态下**仅有的出路**。加上那个状态
+ * 刻意不给「继续」按钮，结果就是界面上只剩一个「中止这次抓取」：用户唯一能做的
+ * 事，是把一次跑了几小时、只差几个页面的抓取扔掉。
+ *
+ * 所以先把它从 checkpoint 装回内存。**不驱动**——用户要的是处理失败，不是接着抓。
+ */
+async function ensureRunLoaded() {
+  const st = await withOffscreen({ op: 'status' }).catch(() => null);
+  if (st?.status?.active) return true;
+  const cp = await getRunStore().loadCheckpoint();
+  if (!cp) return false;
+  await withOffscreen({ op: 'resume' });
+  return true;
+}
+
 /** 推进一段有界的抓取，跑完就收尾。 */
 async function drive() {
   const r = await withOffscreen({ op: 'drive' });
@@ -436,6 +460,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           break;
 
         case 'retryFailed': {
+          await ensureRunLoaded();
           const r = await withOffscreen({ op: 'retryFailed', routeKey: msg.routeKey });
           if (r.count > 0) {
             await clearAttention({ kv: getKv() });
@@ -446,6 +471,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         }
 
         case 'finishWithGaps': {
+          await ensureRunLoaded();
           // 用户看过失败清单之后决定「就这样收尾」。规范允许带着缺口 complete
           // （bundle/v1 §5.0），前提是每处缺口都如实记录、且该路线 advanced=false。
           await withOffscreen({ op: 'finish', status: 'complete', acceptLeafGaps: true });

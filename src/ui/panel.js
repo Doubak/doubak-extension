@@ -392,6 +392,18 @@ async function refresh() {
     setState(cls, title, why);
     setActions([
       ...(action ? [[action, resumeCrawl]] : []),
+      // **没有「继续」时也必须有出路。**
+      //
+      // `failures_pending` 刻意不给「继续」，因为该做的决定是「重试」还是
+      // 「就这样收尾」。而在这条分支里（offscreen 被回收了，只剩 checkpoint）
+      // 失败清单**根本不渲染**——于是整个界面只剩一个「中止这次抓取」：用户唯一
+      // 能做的事，是把一次跑了几小时、只差几个页面的抓取扔掉。
+      //
+      // 这两个动作会先把抓取从 checkpoint 装回内存（见 background 的
+      // `ensureRunLoaded`），所以在这里点得动。
+      ...(action || s.checkpoint.pause_reason !== 'failures_pending'
+        ? []
+        : [['重试抓不下来的页面', retryFailures], ['就这样收尾', () => finishWithGaps()]]),
       // **这里也要能中止。** 刚打开插件时 offscreen 还没起来，只有 checkpoint——
       // 而那正是用户最可能想说「这次不抓了」的时刻。
       ['中止这次抓取', () => abortCrawl(s.checkpoint.bundle_id), 'danger'],
@@ -714,8 +726,31 @@ async function retryFailures() {
   refresh();
 }
 
-/** 带着已知缺口收尾。 */
-async function finishWithGaps() {
+/**
+ * 带着已知缺口收尾。
+ *
+ * **确认在这里做，不在调用方。** 原来只有失败清单里那个按钮弹确认，于是任何
+ * 别处调它都会静默地把档案定稿——而这是一个会写进 manifest、影响下次水位线的
+ * 决定。放在函数里，就不存在「某个入口忘了确认」这回事。
+ *
+ * @param {Array<object>} [leaves]  拿得到清单就列出来给人看；拿不到就说得笼统些
+ */
+async function finishWithGaps(leaves) {
+  const lines = leaves?.length
+    ? [
+      `确认收尾？${leaves.length} 个页面会作为已知缺口记进档案。`,
+      '',
+      ...leaves.slice(0, 8).map((f) => `· ${f.url}`),
+      leaves.length > 8 ? `…另有 ${leaves.length - 8} 个` : '',
+    ]
+    : ['确认收尾？抓不下来的页面会作为已知缺口记进档案。'];
+  lines.push(
+    '',
+    '档案会标成「已完成」，但每一处缺口都会如实写进 manifest，',
+    '受影响路线的水位线不会推进——下次抓取仍会从旧下界重走。',
+  );
+  if (!confirm(lines.filter(Boolean).join('\n'))) return;
+
   const r = await send({ type: 'finishWithGaps' });
   if (!r?.ok) setState('err', '收尾失败', r?.error ?? '');
   refresh();
@@ -745,7 +780,7 @@ function failureActions(failures) {
   const acts = [[`重试这 ${failures.length} 个`, retryFailures]];
   // 有分页失败就不给「就这样收尾」：跳过它等于免掉水位线赖以成立的前提，
   // 那不是用户能授权的事。与失败清单里的判断保持一致。
-  if (!ordered.length) acts.push(['就这样收尾', finishWithGaps]);
+  if (!ordered.length) acts.push(['就这样收尾', () => finishWithGaps(failures)]);
   return acts;
 }
 
@@ -1045,18 +1080,9 @@ function renderFailures(failures) {
     accept.className = 'act';
     accept.textContent = '就这样收尾';
     accept.onclick = async () => {
-      const lines = [
-        `确认收尾？${leaves.length} 个页面会作为已知缺口记进档案。`,
-        '',
-        ...leaves.slice(0, 8).map((f) => `· ${f.url}`),
-        leaves.length > 8 ? `…另有 ${leaves.length - 8} 个` : '',
-        '',
-        '档案会标成「已完成」，但每一处缺口都会如实写进 manifest，',
-        '受影响路线的水位线不会推进——下次抓取仍会从旧下界重走。',
-      ].filter(Boolean);
-      if (!confirm(lines.join('\n'))) return;
       accept.disabled = true;
-      await finishWithGaps();
+      await finishWithGaps(leaves);
+      accept.disabled = false;
     };
     acts.append(accept);
   }
