@@ -1087,8 +1087,7 @@ describe('停下来之后，顶端不能是死路', () => {
     //
     // 用户的原话是「继续按钮没了，只剩中止」——从顶端看这就是一条死路，而一个
     // 只提供「放弃」的界面会把人推向放弃。
-    assert.match(js, /failureActions\(r\.failures\)/, '没有把失败动作提到顶部动作行');
-    assert.match(js, /\.\.\.\(action \? \[\] : failureActions/, '有「继续」时不该重复给');
+    assert.match(js, /\.\.\.failureActions\(r\.failures\)/, '没有把失败动作提到顶部动作行');
   });
 
   test('顶部与清单里指向同一个函数，不是另一套逻辑', () => {
@@ -1319,6 +1318,92 @@ describe('别把不相干的问题挂在这次操作头上', () => {
       const notice = dom.byId.get('notice').textContent;
       assert.match(notice, /登录状态已失效/, `报错标题不对：${notice}`);
       assert.equal(/重试失败/.test(notice), false, '把会话过期说成了重试功能坏了');
+    } finally {
+      dom.restore();
+    }
+  });
+});
+
+describe('暂停状态下也要能重试', () => {
+  /**
+   * 「继续」看起来什么都能解决，实际上它**不会重试失败条目**——重试刻意只能由人
+   * 触发（见 `Frontier.retryFailed` 与 `CrawlRunner.resume` 里的说明：恢复时把
+   * 失败洗成新的，等于每次崩溃都偷偷给一次新的重试预算，而如果那面墙是风控，
+   * 代价是账号）。
+   *
+   * 于是暂停状态下如果只给「继续」，用户会一路点下去，而那几十个页面永远留在
+   * 原地——**而且不会有任何地方提醒他**。
+   */
+  test('暂停 + 有失败 → 顶端同时有「继续」和「重试」', async () => {
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return {
+            ok: true,
+            running: false,
+            checkpoint: null,
+            runner: {
+              active: true,
+              stopped: true,
+              stoppedBy: 'user_paused',
+              bundleId: '20260802T101500Z-a1b2c3',
+              routes: [],
+              failures: [
+                { url: 'https://img1.doubanio.com/a.jpg', routeKey: 'asset.subject_cover', attempts: 1, ordered: false, lastError: 'unclassified' },
+                { url: 'https://img1.doubanio.com/b.jpg', routeKey: 'asset.subject_cover', attempts: 1, ordered: false, lastError: 'unclassified' },
+              ],
+            },
+          };
+        }
+        if (msg.type === 'preflight') {
+          return {
+            ok: true,
+            permissions: { granted: true, missing: [] },
+            storage: { usage: 0, quota: 100e9, available: 100e9, need: 1.2e9, enough: true },
+          };
+        }
+        return { ok: true };
+      },
+    });
+    try {
+      const labels = [...dom.byId.get('actions').children].map((b) => b.textContent);
+      assert.ok(labels.some((x) => x.includes('继续')), `缺「继续」：${JSON.stringify(labels)}`);
+      assert.ok(labels.some((x) => x.includes('重试这 2 个')), `缺「重试」：${JSON.stringify(labels)}`);
+      assert.ok(labels.some((x) => x.includes('就这样收尾')), `缺「收尾」：${JSON.stringify(labels)}`);
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('没有失败时不摆多余的按钮', async () => {
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return {
+            ok: true,
+            running: false,
+            checkpoint: null,
+            runner: {
+              active: true, stopped: true, stoppedBy: 'user_paused',
+              bundleId: '20260802T101500Z-a1b2c3', routes: [], failures: [],
+            },
+          };
+        }
+        if (msg.type === 'preflight') {
+          return {
+            ok: true,
+            permissions: { granted: true, missing: [] },
+            storage: { usage: 0, quota: 100e9, available: 100e9, need: 1.2e9, enough: true },
+          };
+        }
+        return { ok: true };
+      },
+    });
+    try {
+      const labels = [...dom.byId.get('actions').children].map((b) => b.textContent);
+      assert.equal(labels.some((x) => x.includes('重试')), false, `没有失败却给了重试：${JSON.stringify(labels)}`);
     } finally {
       dom.restore();
     }

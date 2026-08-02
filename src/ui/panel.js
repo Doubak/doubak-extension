@@ -405,9 +405,14 @@ async function refresh() {
       setState(cls, title, why);
       setActions([
         ...(action ? [[action, resumeCrawl]] : []),
-        // 没有「继续」时（failures_pending），该做的决定在失败清单里——但那张表
-        // 有一百多行，顶端只剩「中止」就成了一条死路。把同样的动作提上来。
-        ...(action ? [] : failureActions(r.failures)),
+        // **只要有抓不下来的条目就摆出来，不管是哪种停法。**
+        //
+        // 原来只在没有「继续」时才给（failures_pending），理由是「决定在失败清单
+        // 里」。但那张表有一百多行，顶端只剩「中止」就成了死路；而在**暂停**状态
+        // 下它更隐蔽——「继续」看起来什么都能解决，实际上它**不会重试失败条目**
+        // （重试刻意只能由人触发，见 frontier.retryFailed）。于是用户会一路点
+        // 「继续」，而那几十个页面永远留在原地。
+        ...failureActions(r.failures),
         // 停下来之后**尤其**需要这个：不想接着抓的话，只有中止才能把这份档案
         // 放开（暂停不行——它还挂在「正在抓的那份」上，删不掉）。
         ['中止这次抓取', () => abortCrawl(r.bundleId), 'danger'],
