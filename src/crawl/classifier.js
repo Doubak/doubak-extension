@@ -37,6 +37,29 @@
 const SEC_HOST = 'sec.douban.com';
 
 /**
+ * 豆瓣拒绝请求时用的状态码。
+ *
+ * `418 I'm a teapot` 本是一个愚人节笑话（RFC 2324），豆瓣把它当成「我不想理你」
+ * 来用——这是它多年来的既定做法，广为人知。
+ *
+ * ## 为什么必须专门认出它
+ *
+ * 实测：抓封面图时连续收到 **123 个 418**，而 418 不在任何一条判定分支里，于是
+ * 一路走到「判不出来」——记一次失败，然后**若无其事地去抓下一张**。也就是说
+ * 豆瓣说了 123 次「不」，我们一次都没听懂，还打算再说 2900 次。
+ *
+ * 这正是 CLAUDE.md 里那句话描述的情形：**在软封锁上重试，是把限流升级成封号的
+ * 标准路径**。判成 `blocked` 之后走的是「停下来等人 + 降速」，那才是对的反应。
+ *
+ * 响应体是 13 字节、还标着 `content-type: image/jpeg`——所以光看 Content-Type
+ * 也认不出来，必须看状态码。
+ */
+const TEAPOT = 418;
+const TEAPOT_REASON =
+  'HTTP 418——豆瓣用这个状态码表示拒绝服务（防盗链或反爬）。' +
+  '这不是「判不出来」，是明确的拒绝，继续请求只会让情况更糟。';
+
+/**
  * 页面文案特征。
  *
  * 都来自真实旧档案里实际出现过的字符串，不是凭印象写的。注意匹配要容忍
@@ -162,6 +185,10 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   }
   if (status === 429) {
     reasons.push('HTTP 429——请求过于频繁');
+    return { verdict: 'blocked', reasons, itemCount };
+  }
+  if (status === TEAPOT) {
+    reasons.push(TEAPOT_REASON);
     return { verdict: 'blocked', reasons, itemCount };
   }
   if (status >= 500) {
@@ -804,6 +831,11 @@ export function classifyAsset({ finalUrl, status, contentType, byteLength, body,
   /** @type {string[]} */
   const reasons = [];
   if (status !== 200) {
+    // 418 是豆瓣说「不」，不是「判不出来」。判错的代价是继续往墙上撞几千次。
+    if (status === TEAPOT) {
+      reasons.push(TEAPOT_REASON);
+      return { verdict: 'blocked', reasons, itemCount: null };
+    }
     reasons.push(`HTTP ${status}`);
     return { verdict: status === 404 ? 'gone' : status === 403 ? 'blocked' : null, reasons, itemCount: null };
   }

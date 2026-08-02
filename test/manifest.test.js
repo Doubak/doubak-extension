@@ -63,7 +63,14 @@ const PERMISSION_API = {
   tabs: /chrome[?.]*\.tabs\.(query|get|getCurrent|captureVisibleTab)\b/,
   notifications: /chrome[?.]*\.notifications\b/,
   offscreen: /chrome[?.]*\.offscreen\b/,
+  // 两条权限对应**同一套 API**，区别只在作用范围：带 WithHostAccess 的那条只
+  // 允许改我们已有 host_permissions 的站点，安装警告因此温和得多。声明其中
+  // 任意一条都算数——见下面 `EQUIVALENT_PERMISSIONS`。
+  //
+  // 用它做什么：给图片请求补 Referer。豆瓣图片域有防盗链，不带 Referer 一律
+  // 返回 418，而 Referer 是 fetch 的禁改头，只能靠 DNR 的 modifyHeaders。
   declarativeNetRequest: /chrome[?.]*\.declarativeNetRequest\b/,
+  declarativeNetRequestWithHostAccess: /chrome[?.]*\.declarativeNetRequest\b/,
   webRequest: /chrome[?.]*\.webRequest\.\w+\.addListener\b/,
   downloads: /chrome[?.]*\.downloads\b/,
   cookies: /chrome[?.]*\.cookies\b/,
@@ -77,15 +84,38 @@ describe('manifest 权限', () => {
       const re = PERMISSION_API[perm];
       assert.ok(re, `声明了 ${perm}，但这条测试不知道它对应哪个 API——补上映射再说`);
       assert.ok(re.test(source), `声明了 ${perm} 却没有任何代码用它。多要的权限要删掉`);
+      // 两条 DNR 权限只该声明一条：都声明等于白要那个更吓人的安装警告。
+      const eq = EQUIVALENT_PERMISSIONS[perm];
+      if (eq) {
+        assert.equal(
+          eq.filter((p) => manifest.permissions.includes(p)).length, 1,
+          `${eq.join(' 与 ')} 是同一套 API 的两种范围，只该声明一条`,
+        );
+      }
     }
   });
+
+  /**
+   * 同一套 API 的等价权限：声明其中任意一条即可。
+   *
+   * 只有 DNR 是这种情况——`declarativeNetRequest` 与
+   * `declarativeNetRequestWithHostAccess` 管的是同一批 API，后者把作用范围限死
+   * 在已有 host_permissions 的站点上，安装警告温和得多，所以应当优先用后者。
+   */
+  const EQUIVALENT_PERMISSIONS = {
+    declarativeNetRequest: ['declarativeNetRequest', 'declarativeNetRequestWithHostAccess'],
+    declarativeNetRequestWithHostAccess: [
+      'declarativeNetRequest', 'declarativeNetRequestWithHostAccess',
+    ],
+  };
 
   test('用到的每个受限 API 都声明了权限', () => {
     for (const [perm, re] of Object.entries(PERMISSION_API)) {
       if (!re.test(source)) continue;
+      const accepted = EQUIVALENT_PERMISSIONS[perm] ?? [perm];
       assert.ok(
-        manifest.permissions.includes(perm),
-        `代码里用了需要 ${perm} 权限的 API，但 manifest 没声明——运行时会静默失败`,
+        accepted.some((p) => manifest.permissions.includes(p)),
+        `代码里用了需要 ${accepted.join(' 或 ')} 权限的 API，但 manifest 没声明——运行时会静默失败`,
       );
     }
   });

@@ -125,7 +125,19 @@ describe('判不出来必须返回 null', () => {
 
   test('未预期的状态码 → null', () => {
     assert.equal(classify({ status: 302 }).verdict, null);
-    assert.equal(classify({ status: 418 }).verdict, null);
+  });
+
+  test('**418 是豆瓣说「不」，不是判不出来**', () => {
+    // 这条测试原来断言 418 → null，而那正是纵容了后来那件事：抓封面图时连续收到
+    // 123 个 418，每一个都记成「判不出来」然后**若无其事地去抓下一张**。豆瓣说了
+    // 123 次「不」，我们一次都没听懂，还打算再说 2900 次。
+    //
+    // 418 判成 blocked 之后走的是「停下来等人 + 降速」，那才是对的反应——
+    // 在软封锁上继续请求，是把限流升级成封号的标准路径。
+    const r = classify({ status: 418 });
+    assert.equal(r.verdict, 'blocked');
+    assert.ok(r.reasons.some((x) => x.includes('418')));
+    assert.ok(r.reasons.some((x) => /拒绝/.test(x)), '要说清这是拒绝，不是故障');
   });
 
   test('5xx → null（交给上层按可重试的网络错误处理，不是封锁）', () => {

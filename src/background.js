@@ -48,6 +48,7 @@ import { IdbKvStore } from './storage/idb-kv-store.js';
 import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
 import { FAILURES_PENDING, FINALIZE_FAILED } from './crawl/resume-policy.js';
 import { readLog, clearLog } from './crawl/event-log.js';
+import { installRefererRule } from './crawl/referer-rule.js';
 import { preflightStorage } from './storage/quota.js';
 import { exportedKey } from './storage/storage-usage.js';
 import { ensureOffscreen, withOffscreen, serializeScope } from './offscreen/host.js';
@@ -201,6 +202,22 @@ globalThis.chrome?.action?.onClicked?.addListener(async () => {
   }
 });
 
+/**
+ * 给图片请求补上 Referer 的规则。
+ *
+ * **每次 worker 醒来都装一遍。** 它是会话规则（活不过浏览器重启），而 service
+ * worker 本来就会被反复叫醒；装规则是幂等的（先删后加），所以宁可多装。
+ *
+ * 装不上不抛：后果是封面图全部返回 418（豆瓣图片域有防盗链），抓取会把它判成
+ * blocked 然后停下来等人——响亮地失败，而不是整个扩展起不来。
+ */
+async function ensureRefererRule() {
+  await installRefererRule({
+    onError: (msg, err) => debugLog('Referer 规则', msg, err ?? ''),
+  });
+}
+void ensureRefererRule();
+
 /** 心跳。这是自恢复的主路径。 */
 globalThis.chrome?.alarms?.onAlarm?.addListener(async (alarm) => {
   if (alarm.name !== ALARM_NAME) return;
@@ -218,6 +235,7 @@ globalThis.chrome?.alarms?.onAlarm?.addListener(async (alarm) => {
 globalThis.chrome?.runtime?.onStartup?.addListener(async () => {
   debugLog('浏览器启动');
   try {
+    await ensureRefererRule();
     await getSupervisor().tick();
   } catch (e) {
     debugLog('启动检查出错', e);
@@ -228,6 +246,7 @@ globalThis.chrome?.runtime?.onStartup?.addListener(async () => {
 globalThis.chrome?.runtime?.onInstalled?.addListener(async (details) => {
   debugLog('onInstalled', details?.reason);
   try {
+    await ensureRefererRule();
     await getSupervisor().tick();
   } catch (e) {
     debugLog('安装后检查出错', e);

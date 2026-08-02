@@ -218,6 +218,24 @@ describe('图片响应的判定 —— 没有结构锚点可用', () => {
     );
   });
 
+  test('**418 是封锁，不是判不出来** —— 图片这条路上尤其要紧', () => {
+    // 实测真实响应：
+    //
+    //     Status Code: 418 I'm a teapot
+    //     content-type: image/jpeg
+    //     content-length: 13
+    //
+    // 13 字节、还标着 image/jpeg——**看 Content-Type 认不出来，只能看状态码**。
+    // 而这正是那次 123 张封面全军覆没的真相：每一个都判成「判不出来」，然后接着
+    // 抓下一张，一路撞过去。
+    const c = classifyAsset({
+      ...base, status: 418, contentType: 'image/jpeg', byteLength: 13,
+      body: new Uint8Array(13),
+    });
+    assert.equal(c.verdict, 'blocked');
+    assert.ok(c.reasons.some((r) => r.includes('418')));
+  });
+
   test('404 是 gone，403 是 blocked', () => {
     assert.equal(classifyAsset({ ...base, status: 404, contentType: 'image/jpeg', byteLength: 0 }).verdict, 'gone');
     assert.equal(classifyAsset({ ...base, status: 403, contentType: 'image/jpeg', byteLength: 0 }).verdict, 'blocked');

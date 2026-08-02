@@ -12,7 +12,8 @@
     "unlimitedStorage",
     "alarms",
     "offscreen",
-    "notifications"
+    "notifications",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "https://*.douban.com/*",

@@ -14,6 +14,7 @@
 | `alarms` | 心跳。service worker 约 30 秒空闲即被杀，闹钟是**唯一一个我们死了它还在**的东西 | 无 |
 | `offscreen` | 抓取本体跑在 offscreen document 里。service worker 不是专用 Worker，`createSyncAccessHandle()` 用不了，所以它写不了 OPFS（见 `src/offscreen/offscreen.js`） | 无 |
 | `notifications` | 把用户叫回来。见下方「为什么最终要了通知权限」 | 「显示通知」 |
+| `declarativeNetRequestWithHostAccess` | **给图片请求补 `Referer`。** 豆瓣图片域有防盗链，不带 Referer 一律返回 `418 I'm a teapot`（13 字节，还标着 `image/jpeg`）——实测过，直接在地址栏打开图片 URL 也是同样的 418。而 `Referer` 是 `fetch()` 的禁改头，代码里设了会被丢掉，唯一的途径就是 DNR 的 `modifyHeaders`。规则只作用于 `tabIds: [-1]`（不属于任何标签页的请求，即扩展自己发的），不碰用户正常浏览的流量。<br><br>**为什么不是 `declarativeNetRequest`**：那一条允许改任意站点，安装警告是「屏蔽任意网页上的内容」。带 `WithHostAccess` 的这条把作用范围限死在已有 `host_permissions` 的站点上，能力更小、警告更轻，而我们要的恰好就只有豆瓣。 | 无（能力受 host_permissions 限制） |
 | `https://*.douban.com/*`<br>`https://*.doubanio.com/*` | 抓取本体；`doubanio` 是图片域 | 「读取和更改你在 douban.com 上的数据」 |
 
 就这些。

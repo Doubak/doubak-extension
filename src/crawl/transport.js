@@ -9,10 +9,30 @@
  * Chrome 109 的桌面 UA，那反而更容易被挑出来——伪造的 UA 与 TLS 指纹、
  * 其他请求头不一致。
  *
- * 但 `Referer` 是另一回事：豆瓣的移动端接口要求它指向对应页面，不设就取不到
- * 数据。而 `fetch()` 里 `Referer` 是**禁止修改**的 header，只能靠
- * `declarativeNetRequest` 规则改写。做法是发一个自定义头 `X-Override-Referer`，
- * 由 DNR 规则把它改写成真正的 `Referer`。
+ * 但 `Referer` 是另一回事。两处都需要它：
+ *
+ * - 豆瓣的移动端接口要求它指向对应页面，不设就取不到数据。
+ * - **图片域有防盗链**：不带 Referer 去取一张封面，拿回来的是
+ *   `418 I'm a teapot`（13 字节，还标着 `image/jpeg`）。实测确认过。
+ *
+ * 而 `fetch()` 里 `Referer` 是**禁止修改**的 header，代码里设了会被丢掉，唯一的
+ * 途径是 `declarativeNetRequest` 的 `modifyHeaders`。
+ *
+ * ## 这里发的 `X-Override-Referer` 曾经是一句空话
+ *
+ * 本文件一直按「发一个 `X-Override-Referer`，由 DNR 规则改写成 `Referer`」来写，
+ * 而 **manifest 里从来没有过 DNR 权限，也从来没有过规则**。整套机制自始至终是空的。
+ * 在此之前抓的全是 douban.com 的页面（不查防盗链），所以一直没暴露；抓图片是第一
+ * 次踩到，代价是 123 张封面连续 418。
+ *
+ * 现在真的有规则了（`crawl/referer-rule.js`），但它是**静态**的：DNR 规则里的
+ * 头部值不能取自另一个头，所以做不到「每张图带上它所在的那一页」。规则统一设成
+ * `https://www.douban.com/`——防盗链看的是来源站点，不是具体哪一页。同一条规则
+ * 顺手把 `X-Override-Referer` 删掉，免得把一个非标准头发给豆瓣。
+ *
+ * 也就是说：`route.referer` / `item.referer` 目前只表达**意图**，不决定实际发出去
+ * 的值。要做到逐请求精确，得在每次请求前后各改一次会话规则（闸门保证并发恒为 1，
+ * 所以做得到），等确有必要时再说。
  *
  * 设一个真实浏览器本来就会发的 Referer 是**提高**保真度，不是降低。
  *
