@@ -107,6 +107,44 @@ describe('失败页阻塞该路线，不跳过', () => {
   });
 });
 
+describe('失败要说得出为什么', () => {
+  test('**分类器给的具体理由必须留下**', () => {
+    // 一次真实抓取里，失败列表 123 行全写着
+    //
+    //     错误：unclassified
+    //
+    // 一个既不能行动、也不能报告的字符串。而分类器当时明明知道原因
+    // （「Content-Type 不是图片：application/octet-stream」），只是在 `settle`
+    // 这一行里被扔掉了——它只记 `transitionFor` 给的那个分类码。
+    //
+    // 判不出来已经够坏，判不出来还不说为什么，等于让人对着几千页去猜。
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a' }));
+    const it = f.next();
+    f.settle(it, null, ['Content-Type 不是图片：application/octet-stream']);
+
+    assert.match(it.lastError, /unclassified/, '分类码要留着，才能按它筛与统计');
+    assert.match(it.lastError, /application\/octet-stream/, '具体原因丢了');
+  });
+
+  test('多条理由都留下', () => {
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a' }));
+    const it = f.next();
+    f.settle(it, null, ['第一条', '第二条']);
+    assert.match(it.lastError, /第一条/);
+    assert.match(it.lastError, /第二条/);
+  });
+
+  test('没有理由时退回分类码，不留空', () => {
+    const f = new Frontier();
+    f.enqueue(item({ urlKey: 'a' }));
+    const it = f.next();
+    f.settle(it, null);
+    assert.equal(it.lastError, 'unclassified');
+  });
+});
+
 describe('重试只给网络错误', () => {
   test('网络错误可有限重试', () => {
     const f = new Frontier();

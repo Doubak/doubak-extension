@@ -720,6 +720,33 @@ function isCatalogImage(url) {
 }
 
 /**
+ * 常见图片格式的开头几个字节。
+ *
+ * **判内容，不判标签。** 这是这个项目的一贯立场（豆瓣以 HTTP 200 送封锁页，
+ * 所以状态码不算数），而 `Content-Type` 同样只是个标签：CDN 把 `.jpg` 标成
+ * `application/octet-stream`、或者干脆不给这个头，都是常事。只认标签的话，
+ * 一张完好的 JPEG 会被判成「抓不下来」，而它的字节明明就在档案里。
+ *
+ * @param {Uint8Array} b
+ */
+function looksLikeImage(b) {
+  if (!b || b.length < 12) return false;
+  const at = (i) => b[i];
+  // JPEG
+  if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return true;
+  // PNG
+  if (at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4e && at(3) === 0x47) return true;
+  // GIF87a / GIF89a
+  if (at(0) === 0x47 && at(1) === 0x49 && at(2) === 0x46) return true;
+  // RIFF....WEBP
+  if (at(0) === 0x52 && at(1) === 0x49 && at(2) === 0x46 && at(3) === 0x46
+      && at(8) === 0x57 && at(9) === 0x45 && at(10) === 0x42 && at(11) === 0x50) return true;
+  // BMP
+  if (at(0) === 0x42 && at(1) === 0x4d) return true;
+  return false;
+}
+
+/**
  * 图片响应的判定。
  *
  * ## 为什么不能复用 classifyResponse
@@ -727,7 +754,17 @@ function isCatalogImage(url) {
  * 那套判定的核心是**结构锚点**——页面里有没有该有的东西。图片没有结构，把一份
  * JPEG 的字节当文本去跑那些正则，得到的判断没有意义。
  *
- * 收窄成规范 §6.6.1 的两条：`Content-Type` 是 `image/*`，且载荷非空。
+ * 收窄成规范 §6.6.1 的两条：是图片，且载荷非空。
+ *
+ * ## 「是图片」按字节认，不只按 Content-Type
+ *
+ * 第一版只认 `Content-Type: image/*`。那是在**判标签而不是判内容**——正好是这个
+ * 项目一贯反对的做法（豆瓣以 200 送封锁页，所以状态码不算数；同理，头也只是头）。
+ * CDN 把 `.jpg` 标成 `application/octet-stream`、或者压根不给这个头，都是常事，
+ * 而那时候一张完好的 JPEG 会被判成「抓不下来」——字节明明已经在档案里了。
+ *
+ * 反过来**不放松**的是那条要紧的：拿回来的是 HTML 就绝不算成功。那条防的是
+ * 封锁页伪装成图片，与标签宽松与否无关。
  *
  * ## 收到 HTML 是最要紧的那种情况
  *
@@ -741,10 +778,11 @@ function isCatalogImage(url) {
  * @param {number} input.status
  * @param {string | null | undefined} input.contentType
  * @param {number} input.byteLength
+ * @param {Uint8Array} [input.body]  原始字节。Content-Type 靠不住时按它认
  * @param {string} [input.bodyText]  只在收到 HTML 时用得上
  * @returns {Classification}
  */
-export function classifyAsset({ finalUrl, status, contentType, byteLength, bodyText = '' }) {
+export function classifyAsset({ finalUrl, status, contentType, byteLength, body, bodyText = '' }) {
   const ct = (contentType ?? '').split(';')[0].trim().toLowerCase();
 
   // 收到网页 → 交给 HTML 那套判定，它认得封锁页与登录页。
@@ -774,7 +812,15 @@ export function classifyAsset({ finalUrl, status, contentType, byteLength, bodyT
     return { verdict: null, reasons, itemCount: null };
   }
   if (!ct.startsWith('image/')) {
-    reasons.push(`Content-Type 不是图片：${ct || '（缺失）'}`);
+    // 标签不说是图片时，问字节。头缺失、或者 CDN 标成 application/octet-stream
+    // 都是常事，而那时候把一张完好的 JPEG 判成失败，是在拿标签否定内容。
+    if (looksLikeImage(body)) {
+      reasons.push(`Content-Type 是 ${ct || '（缺失）'}，但字节是图片——按内容算数`);
+      return { verdict: 'ok', reasons, itemCount: null };
+    }
+    reasons.push(
+      `既不是图片的 Content-Type（${ct || '缺失'}），字节开头也不像任何已知图片格式`,
+    );
     return { verdict: null, reasons, itemCount: null };
   }
   reasons.push(`${ct}，${byteLength} 字节`);

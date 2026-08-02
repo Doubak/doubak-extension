@@ -157,12 +157,60 @@ describe('图片响应的判定 —— 没有结构锚点可用', () => {
     assert.notEqual(c.verdict, 'ok');
   });
 
+  test('**Content-Type 靠不住时按字节认**', () => {
+    // 这条是实测逼出来的：一次真实抓取里 123 张封面全部判成「抓不下来」，
+    // 而字节明明已经在档案里了。第一版只认 `Content-Type: image/*`——那是在
+    // 判标签而不是判内容，正好是这个项目一贯反对的做法（豆瓣以 200 送封锁页，
+    // 所以状态码不算数；同理，头也只是头）。CDN 把 .jpg 标成
+    // application/octet-stream、或者压根不给这个头，都是常事。
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
+    for (const ct of ['application/octet-stream', 'binary/octet-stream', null, '']) {
+      const c = classifyAsset({ ...base, contentType: ct, byteLength: jpeg.length, body: jpeg });
+      assert.equal(c.verdict, 'ok', `Content-Type=${JSON.stringify(ct)} 时把好图判成了失败`);
+    }
+  });
+
+  test('认得 PNG / GIF / WebP', () => {
+    const cases = {
+      png: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13],
+      gif: [0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0, 1, 0, 0, 0],
+      webp: [0x52, 0x49, 0x46, 0x46, 0x1a, 0, 0, 0, 0x57, 0x45, 0x42, 0x50],
+    };
+    for (const [name, bytes] of Object.entries(cases)) {
+      const body = new Uint8Array(bytes);
+      const c = classifyAsset({ ...base, contentType: null, byteLength: body.length, body });
+      assert.equal(c.verdict, 'ok', `没认出 ${name}`);
+    }
+  });
+
+  test('字节不像图片、标签也不说是图片 → 仍然判不出来', () => {
+    // 放松的是标签，不是底线。随便什么二进制都算数的话，这条判定就没用了。
+    const junk = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    const c = classifyAsset({
+      ...base, contentType: 'application/json', byteLength: junk.length, body: junk,
+    });
+    assert.equal(c.verdict, null);
+  });
+
+  test('**收到 HTML 时不看字节** —— 那条底线不放松', () => {
+    // 放松标签是为了不冤枉好图；而「拿回来的是网页」是封锁页伪装成图片的样子，
+    // 与标签宽松与否无关。
+    const html = new TextEncoder().encode('<html><body>有异常请求</body></html>');
+    const c = classifyAsset({
+      ...base, contentType: 'text/html', byteLength: html.length, body: html,
+      bodyText: '<html><body>有异常请求，请输入验证码后继续</body></html>',
+    });
+    assert.notEqual(c.verdict, 'ok');
+  });
+
   test('0 字节的 200 不是图片', () => {
     const c = classifyAsset({ ...base, contentType: 'image/jpeg', byteLength: 0 });
     assert.equal(c.verdict, null);
   });
 
-  test('Content-Type 缺失或不是图片 → 判不出来，不放行', () => {
+  test('两条都不成立就不放行：标签不说是图片，也拿不到字节', () => {
+    // 拿不到字节时只能退回看标签。此时**不放行**是对的：判不出来就说判不出来，
+    // 「大概没事」是这套系统里最危险的一句话。
     assert.equal(classifyAsset({ ...base, contentType: null, byteLength: 99 }).verdict, null);
     assert.equal(
       classifyAsset({ ...base, contentType: 'application/json', byteLength: 99 }).verdict,

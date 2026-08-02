@@ -385,6 +385,7 @@ export class CrawlLoop {
         status: res.status,
         contentType,
         byteLength: res.body.length,
+        body: res.body,
         bodyText: res.bodyText,
       });
     } else if (profile) {
@@ -513,7 +514,7 @@ export class CrawlLoop {
     }
 
     // ── 5. 推进 frontier
-    const t = this._frontier.settle(item, cls.verdict);
+    const t = this._frontier.settle(item, cls.verdict, cls.reasons);
 
     if (t.state === 'awaiting_human') {
       // 软封锁：降速，且**不自动重试**。等人处理完、金丝雀确认之后再继续。
@@ -617,7 +618,8 @@ export class CrawlLoop {
     }
 
     // 分不清的错误：判失败并阻塞该路线，等人来看。
-    this._frontier.settle(item, null);
+    // 异常本身的话要带上——否则失败列表里只剩一个 `unclassified`。
+    this._frontier.settle(item, null, [String(err?.message ?? err)]);
     this.stateFor(item.routeKey).recordGap(
       'fetch_failed',
       `${item.url}：${String(err?.message ?? err)}`,

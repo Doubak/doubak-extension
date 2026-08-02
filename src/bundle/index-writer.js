@@ -82,7 +82,7 @@ export function assertValidEntry(entry) {
     );
   }
   if (!SURFACE_SET.has(/** @type {string} */ (entry.surface))) {
-    throw new Error(`未知的 surface: ${JSON.stringify(entry.surface)}（只能是 html 或 api）`);
+    throw new Error(`未知的 surface: ${JSON.stringify(entry.surface)}（只能是 ${SURFACES.join(' / ')}）`);
   }
   if (!FIDELITY_SET.has(/** @type {string} */ (entry.capture_fidelity))) {
     throw new Error(`未知的 capture_fidelity: ${JSON.stringify(entry.capture_fidelity)}`);

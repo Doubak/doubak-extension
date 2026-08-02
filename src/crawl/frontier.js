@@ -485,14 +485,30 @@ export class Frontier {
   /**
    * 按判定结果推进条目状态。
    *
+   * ## `reasons` 必须带上
+   *
+   * 分类器每次判定都会给出一串**具体理由**（「Content-Type 不是图片：text/html」、
+   * 「缺少 2 个页面框架标志（…）」），而这里原来只记下 `transitionFor` 给的那个
+   * 分类码。于是失败列表里一百多行全写着 `unclassified`——用户看到的是
+   *
+   *     123 个页面抓不下来 … 错误：unclassified
+   *
+   * 一个既不能行动、也不能报告的字符串。而分类器当时**明明知道**为什么，只是
+   * 在这一行里被扔掉了。这与项目「响亮地失败」的立场是矛盾的：判不出来已经够坏，
+   * 判不出来还不说为什么，等于让人对着几千页去猜。
+   *
    * @param {FrontierItem} item
    * @param {string | null} verdict
+   * @param {string[]} [reasons]  分类器给出的具体理由
    * @returns {{state: ItemState, stopRun: boolean, reason?: string}}
    */
-  settle(item, verdict) {
+  settle(item, verdict, reasons) {
     const t = transitionFor(verdict);
     item.state = t.state;
-    if (t.reason) item.lastError = t.reason;
+    if (t.reason) {
+      // 分类码在前（可以按它筛、按它统计），人看的理由在后。
+      item.lastError = reasons?.length ? `${t.reason}：${reasons.join('；')}` : t.reason;
+    }
     if (t.stopRun) this.stop(t.reason ?? 'terminal');
     return t;
   }
