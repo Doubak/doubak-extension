@@ -460,13 +460,17 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           break;
 
         case 'retryFailed': {
-          await ensureRunLoaded();
-          const r = await withOffscreen({ op: 'retryFailed', routeKey: msg.routeKey });
+          // 装不回来（没有存档点）与「装回来了但一条失败都没有」是两件不同的事，
+          // 界面要能分开说——否则两种情况看起来都是「按了没反应」。
+          const loaded = await ensureRunLoaded();
+          const r = loaded
+            ? await withOffscreen({ op: 'retryFailed', routeKey: msg.routeKey })
+            : { count: 0 };
           if (r.count > 0) {
             await clearAttention({ kv: getKv() });
             void drive();
           }
-          sendResponse({ ok: true, count: r.count });
+          sendResponse({ ok: true, count: r.count, loaded });
           break;
         }
 

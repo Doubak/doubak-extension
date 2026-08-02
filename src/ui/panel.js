@@ -719,10 +719,39 @@ async function showLastRun() {
  *
  * @param {string} bundleId
  */
-/** 重试全部失败条目。顶部动作行与失败清单共用。 */
+/**
+ * 重试全部失败条目。顶部动作行与失败清单共用。
+ *
+ * ## 出错就停在错误上，**不要接着 refresh()**
+ *
+ * 原来是 `if (!r.ok) setState('err', …); refresh();`——`refresh()` 无条件跟在
+ * 后面，它按后台状态重画整块，于是刚写上去的错误信息**当场被抹掉**。用户看到的
+ * 是「闪了一下，又回到原样」，而真正的原因刚被自己擦掉了。
+ *
+ * 这与「继续」按钮那次是同一个毛病，我在刚写的这个函数里又犯了一遍。
+ *
+ * ## 「一条都没重试」也要说
+ *
+ * 后台返回 `count: 0` 时原来什么都不做。而这跟成功长得一模一样：按钮按下去、
+ * 界面回到原样、一个请求都没发。得说出来它是**哪一种**没发生。
+ */
 async function retryFailures() {
   const r = await send({ type: 'retryFailed' });
-  if (!r?.ok) setState('err', '重试失败', r?.error ?? '');
+  if (!r?.ok) {
+    setState('err', '重试失败', r?.error ?? '后台没有给出原因。');
+    return;
+  }
+  if (!r.count) {
+    setState(
+      'err',
+      '没有可重试的条目',
+      r.loaded === false
+        ? '这次抓取已经不在内存里，也没有可恢复的存档点——它可能已经收尾或被中止了。'
+        : '队列里没有处于「失败」状态的条目。若这些页面是被豆瓣挡住的（软封锁），'
+          + '那不算失败：等一段时间之后用「继续」重新开始，而不是重试。',
+    );
+    return;
+  }
   refresh();
 }
 
@@ -752,7 +781,11 @@ async function finishWithGaps(leaves) {
   if (!confirm(lines.filter(Boolean).join('\n'))) return;
 
   const r = await send({ type: 'finishWithGaps' });
-  if (!r?.ok) setState('err', '收尾失败', r?.error ?? '');
+  if (!r?.ok) {
+    // 同上：出错就停在错误上。后面跟一个 refresh() 会把它抹掉。
+    setState('err', '收尾失败', r?.error ?? '后台没有给出原因。');
+    return;
+  }
   refresh();
 }
 

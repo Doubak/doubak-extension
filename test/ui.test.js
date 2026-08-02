@@ -1151,3 +1151,41 @@ describe('只剩 checkpoint 时也不能是死路', () => {
     assert.match(body, /confirm\(/);
   });
 });
+
+describe('出错就停在错误上，不要接着刷新掉', () => {
+  const js = readFileSync(new URL('../src/ui/panel.js', import.meta.url), 'utf-8');
+
+  /** 取一个函数体（到下一个顶层 `}` 为止，够用）。 */
+  const bodyOf = (name) => {
+    const i = js.indexOf(`async function ${name}(`);
+    assert.ok(i > 0, `找不到 ${name}`);
+    return js.slice(i, js.indexOf('\n}', i));
+  };
+
+  for (const fn of ['retryFailures', 'finishWithGaps', 'resumeCrawl']) {
+    test(`${fn}：写了错误就 return`, () => {
+      // `refresh()` 按后台状态重画整块，跟在 setState('err', …) 后面会**当场把
+      // 刚写的错误抹掉**。用户看到的是「闪了一下又回到原样」，而真正的原因刚被
+      // 自己擦掉——这个毛病在「继续」上犯过一次，在「重试」上又犯了一次。
+      const body = bodyOf(fn);
+      const errIdx = body.indexOf("setState('err'");
+      assert.ok(errIdx > 0, `${fn} 没有错误分支？`);
+      const after = body.slice(errIdx, errIdx + 240);
+      assert.match(after, /return;/, `${fn} 写完错误没有 return`);
+      const refreshIdx = after.indexOf('refresh()');
+      const returnIdx = after.indexOf('return;');
+      assert.ok(
+        refreshIdx === -1 || returnIdx < refreshIdx,
+        `${fn} 在错误分支之后又 refresh()，错误会被抹掉`,
+      );
+    });
+  }
+
+  test('「一条都没重试」要说出来，不能与成功长得一样', () => {
+    // count: 0 时原来什么都不做：按钮按下去、界面回到原样、一个请求都没发——
+    // 与成功完全无法区分。
+    const body = bodyOf('retryFailures');
+    assert.match(body, /if \(!r\.count\)/);
+    assert.match(body, /没有可重试的条目/);
+  });
+});
