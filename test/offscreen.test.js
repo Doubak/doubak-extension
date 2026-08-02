@@ -12,6 +12,9 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+// 同步读一份给源码约束用：`readFile` 返回 Promise，拿它去 assert.match
+// 不会报类型错，只会静默地永远不匹配。
+import { readFileSync } from 'node:fs';
 
 import { serializeScope } from '../src/offscreen/host.js';
 import { handleOpfsRpc, WRITE_OPS } from '../src/storage/opfs-rpc.js';
@@ -363,5 +366,24 @@ describe('增量：offscreen 这一侧的接线', () => {
     const body = fn.slice(0, fn.indexOf('\n}\n'));
     assert.match(body, /catch/, '整段要有兜底');
     assert.match(body, /return \{\}/, '兜底的结论是「没有下界」');
+  });
+});
+
+describe('错误码要过得了 offscreen 那道界', () => {
+  const src = readFileSync(new URL('../src/offscreen/offscreen.js', import.meta.url), 'utf-8');
+  const host = readFileSync(new URL('../src/offscreen/host.js', import.meta.url), 'utf-8');
+
+  test('offscreen 报错时把 reason 一起送出去', () => {
+    // 只送 error 字符串的话，`SessionError('session_expired')` 到了另一边就只是
+    // 一句话。上层无从分辨「这次操作失败了」与「会话失效了，整场都得停」——
+    // 而这两件事该走的界面完全不同。
+    const i = src.lastIndexOf('} catch (e) {');
+    const body = src.slice(i, i + 900);
+    assert.match(body, /reason:/, 'offscreen 的错误响应里没有 reason');
+  });
+
+  test('host 把 reason 挂回抛出的 Error 上', () => {
+    // 中间这一层丢了它，前面送出来也白搭。
+    assert.match(host, /\(err\)\.reason = r\.reason/);
   });
 });

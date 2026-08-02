@@ -1267,3 +1267,60 @@ describe('操作失败的提示活得过轮询', () => {
     }
   });
 });
+
+describe('别把不相干的问题挂在这次操作头上', () => {
+  /**
+   * 用户点「重试抓不下来的页面」，屏幕上出现：
+   *
+   *     重试失败
+   *     当前未登录豆瓣。请先登录再开始——……
+   *
+   * 看起来像重试功能坏了。实际发生的是**会话过期**——而界面里本来就有一块专门
+   * 处理它的（「登录状态已失效 / 我登录好了，继续」），只是走不到。
+   *
+   * 成因：错误码在 offscreen → background → 面板这一路上被拍扁成了一句话，
+   * 上层无从分辨「这次操作失败了」与「整场都得停」。
+   */
+  test('会话过期报的是「登录状态已失效」，不是「重试失败」', async () => {
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => {
+        if (msg.type === 'status') {
+          return {
+            ok: true,
+            running: false,
+            checkpoint: { bundle_id: '20260802T101500Z-a1b2c3', pause_reason: 'failures_pending' },
+            runner: { active: false },
+          };
+        }
+        if (msg.type === 'retryFailed') {
+          return {
+            ok: false,
+            error: '当前未登录豆瓣。请先登录再开始——未登录不仅看不到私密条目……',
+            reason: 'session_expired',
+          };
+        }
+        if (msg.type === 'preflight') {
+          return {
+            ok: true,
+            permissions: { granted: true, missing: [] },
+            storage: { usage: 0, quota: 100e9, available: 100e9, need: 1.2e9, enough: true },
+          };
+        }
+        return { ok: true };
+      },
+    });
+    try {
+      const retry = [...dom.byId.get('actions').children].find((b) => b.textContent.includes('重试'));
+      assert.ok(retry, '这个状态下应当有重试按钮');
+      await retry.onclick();
+      await new Promise((r) => setTimeout(r, 10));
+
+      const notice = dom.byId.get('notice').textContent;
+      assert.match(notice, /登录状态已失效/, `报错标题不对：${notice}`);
+      assert.equal(/重试失败/.test(notice), false, '把会话过期说成了重试功能坏了');
+    } finally {
+      dom.restore();
+    }
+  });
+});

@@ -666,7 +666,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ ok: false, error: `offscreen 不认识的命令：${msg.op}` });
       }
     } catch (e) {
-      sendResponse({ ok: false, error: String(e?.message ?? e) });
+      // **错误码要一起过界。**
+      //
+      // 原来只送 `error` 字符串，于是 `SessionError('session_expired')` 到了另一边
+      // 就只是一句话。上层无从分辨「这次操作本身失败了」与「会话失效了，整场都得
+      // 停」——而这两件事该走的界面完全不同。
+      //
+      // 真实症状：用户点「重试抓不下来的页面」，屏幕上出现
+      // 「重试失败：当前未登录豆瓣」——看起来像重试功能坏了，实际是会话过期，
+      // 而界面里本来就有一块专门处理它的（「我登录好了，继续」）。
+      sendResponse({
+        ok: false,
+        error: String(e?.message ?? e),
+        reason: typeof e?.reason === 'string' ? e.reason : null,
+      });
     }
   })();
   return true;

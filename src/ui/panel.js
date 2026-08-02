@@ -791,6 +791,15 @@ async function showLastRun() {
 async function retryFailures() {
   const r = await send({ type: 'retryFailed' });
   if (!r?.ok) {
+    // **别把不相干的问题挂在这次操作头上。** 「重试失败：当前未登录豆瓣」看起来
+    // 像重试功能坏了，而实际发生的是会话过期——界面里本来就有一块专门处理它的。
+    // 后台已经把整场抓取的状态改成了对应原因，刷一下就会切到那个界面去。
+    if (r?.reason) {
+      const [, title] = PAUSE_COPY[r.reason] ?? [];
+      setActionError(title ?? '抓取已停下', r.error ?? '');
+      refresh();
+      return;
+    }
     setActionError('重试失败', r?.error ?? '后台没有给出原因。');
     return;
   }

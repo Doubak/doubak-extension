@@ -160,7 +160,25 @@ async function ensureRunLoaded() {
   if (st?.status?.active) return true;
   const cp = await getRunStore().loadCheckpoint();
   if (!cp) return false;
-  await withOffscreen({ op: 'resume' });
+
+  // 装回内存要先确认账号（一次真实请求）。它可能报出**与本次操作无关**的问题
+  // ——最常见的是会话过期。那时候必须把整场抓取的状态改成 `session_expired`，
+  // 而不是把它当成「这次操作失败了」：
+  //
+  //   - 界面里本来就有一块专门处理它的（「我登录好了，继续」）
+  //   - 心跳的判据也是 pause_reason，不改的话它会一直按老原因决策
+  //
+  // 用户看到的原本是「重试失败：当前未登录豆瓣」——像是重试功能坏了。
+  try {
+    await withOffscreen({ op: 'resume' });
+  } catch (err) {
+    const reason = /** @type {any} */ (err)?.reason;
+    if (reason) {
+      await getSupervisor().pauseRun(reason, { last_error: String(err?.message ?? err) });
+      await notifyNeedsAction(reason, { kv: getKv() });
+    }
+    throw err;
+  }
   return true;
 }
 
@@ -528,7 +546,13 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           sendResponse({ ok: false, error: `未知命令: ${msg?.type}` });
       }
     } catch (e) {
-      sendResponse({ ok: false, error: String(e?.message ?? e) });
+      // 错误码要一路带到界面：它决定那句话该挂在谁头上。「会话失效」不是
+      // 「重试失败」，前者有专门的处置界面，后者只会让人以为功能坏了。
+      sendResponse({
+        ok: false,
+        error: String(e?.message ?? e),
+        reason: typeof e?.reason === 'string' ? e.reason : null,
+      });
     }
   })();
   // 返回 true 表示会异步答复——不返回的话 sendResponse 会失效。

@@ -83,7 +83,13 @@ export async function withOffscreen(msg) {
   await ensureOffscreen();
   const r = await callOffscreen(msg);
   if (!r) throw new Error('offscreen 没有答复——它可能刚被关掉，下一次心跳会重建');
-  if (!r.ok) throw new Error(r.error ?? 'offscreen 报了一个没有说明的错误');
+  if (!r.ok) {
+    // 错误码要带过来。丢了它，上层只能拿字符串去猜——而「会话失效」与「这次操作
+    // 失败了」该走的路完全不同。
+    const err = new Error(r.error ?? 'offscreen 报了一个没有说明的错误');
+    if (r.reason) /** @type {any} */ (err).reason = r.reason;
+    throw err;
+  }
   return r;
 }
 
