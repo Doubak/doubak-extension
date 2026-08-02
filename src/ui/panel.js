@@ -935,9 +935,40 @@ function renderFailures(failures) {
   ));
   el.append(card);
 
+  // **先说「为什么」，再列「哪些」。**
+  //
+  // 139 行里前 30 行长得一模一样，那张表回答不了唯一要紧的问题：它们是**同一个**
+  // 原因还是一百多个原因？前者说明有个系统性的毛病该修，后者说明是零星的网络抖动
+  // ——两者的下一步动作完全不同，而逐行去读是看不出来的。
+  //
+  // 实测就栽在这儿：123 个封面全军覆没，界面上只能看到 30 行相同的 URL。
+  const byReason = new Map();
+  for (const f of failures) {
+    const k = f.lastError ?? '（没有记下原因）';
+    byReason.set(k, (byReason.get(k) ?? 0) + 1);
+  }
+  if (byReason.size > 0) {
+    const why = document.createElement('div');
+    why.className = 'card';
+    const t = document.createElement('b');
+    t.textContent = byReason.size === 1 ? '失败原因（全部相同）' : `失败原因（${byReason.size} 种）`;
+    why.append(t);
+    const ul = document.createElement('ul');
+    for (const [reason, n] of [...byReason].sort((a, b) => b[1] - a[1]).slice(0, 6)) {
+      const li = document.createElement('li');
+      li.textContent = `${n} 个 · ${reason}`;
+      ul.append(li);
+    }
+    why.append(ul);
+    el.append(why);
+  }
+
   el.append(table(
     ['页面', '路线', { text: '试过', num: true }, '错误'],
-    failures.slice(0, 30).map((f) => [
+    // **最近失败的排前面。** 原来取数组前 30 个，而队列是按入队顺序排的——于是
+    // 表上永远是最早那批，刚刚发生的失败一个都看不见。而人来看这张表，通常正是
+    // 因为刚刚又失败了一批。
+    failures.slice(-30).reverse().map((f) => [
       { text: f.url.replace(/^https?:\/\//, ''), muted: false },
       routeName(f.routeKey) + (f.ordered ? '（分页）' : ''),
       { text: String(f.attempts), num: true },
@@ -947,7 +978,7 @@ function renderFailures(failures) {
   if (failures.length > 30) {
     const more = document.createElement('div');
     more.className = 'muted';
-    more.textContent = `另有 ${failures.length - 30} 个未列出`;
+    more.textContent = `另有 ${failures.length - 30} 个较早的未列出（上表按最近失败排序）`;
     el.append(more);
   }
 

@@ -299,7 +299,7 @@ export class Frontier {
   enqueue({
     url, urlKey, routeKey, intent, enqueuedBy = null, cursor = null,
     ordered = true, state = 'pending', attempts = 0, priority = 50, gatedBy = null,
-    referer = null,
+    referer = null, lastError,
   }) {
     if (this._enqueued.has(urlKey)) return false;
 
@@ -322,6 +322,9 @@ export class Frontier {
       // 一张封面的 Referer 是**它所在的那个作品页**，每条都不一样，只能跟着条目走。
       // 放进 _items 就自动进 checkpoint（snapshot 是整份展开的），恢复后不会丢。
       referer,
+      // 恢复失败条目时带回来的原因。新入队的条目没有，那就别写这个键——
+      // 写成 undefined 会让 JSON 里凭空多一个字段又消失，形状不稳定。
+      ...(lastError === undefined ? {} : { lastError }),
     });
     return true;
   }

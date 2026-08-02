@@ -458,6 +458,9 @@ export class CrawlRunner {
         // 派生条目自带的 Referer（封面图指向它所在的作品页）。恢复时算不出来——
         // 那个作品页是谁，只有入队的那一刻知道。见 buildCheckpoint 里的说明。
         referer: it.referer ?? null,
+        // 失败原因同理：失败条目会一直躺在队列里等人处理，而人来看的时候往往
+        // 已经隔了一次重启。丢了它，界面上那一列整列变成「—」。
+        lastError: it.last_error ?? undefined,
       });
     }
     // 重抓那几条，好让它们的派生重来一遍。

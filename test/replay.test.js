@@ -19,6 +19,10 @@ import { RunStore } from '../src/crawl/run-store.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { indexFilename } from '../src/core/ids.js';
+import { Frontier } from '../src/crawl/frontier.js';
+import { buildCheckpoint } from '../src/crawl/run-store.js';
+import { Pacer } from '../src/crawl/pacing.js';
+import { readFileSync } from 'node:fs';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -211,6 +215,29 @@ describe('checkpoint 必须记下「我见过到哪一条」', () => {
     const cp = await runStore.loadCheckpoint();
     const idx = await readIndex(dirs);
     assert.equal(cp.last_capture_id, idx.at(-1).capture_id);
+  });
+});
+
+describe('失败的原因必须挺过一次恢复', () => {
+  test('checkpoint 存了 last_error，恢复之后还在', () => {
+    // 失败条目**恰恰是最需要跨越恢复留存的东西**：它们会一直躺在队列里等人处理，
+    // 而人来看它们的时候往往已经隔了一次重启。
+    //
+    // 真实症状：139 个抓不下来的封面，前 123 个（恢复之前失败的）原因全没了，
+    // 界面上那一列整列是「—」，于是「为什么抓不下来」在界面上无解。
+    const f = new Frontier();
+    f.enqueue({ url: 'https://img1.doubanio.com/x.jpg', urlKey: 'k', routeKey: 'asset.subject_cover', intent: 'i', ordered: false });
+    f.settle(f.next(), null, ['Content-Type 不是图片：text/plain']);
+
+    const cp = JSON.parse(JSON.stringify(buildCheckpoint({
+      bundleId: '20260801T000000Z-aaaaaa', frontier: f, pacer: new Pacer({}),
+      routes: new Map(), lastCaptureId: null, pauseReason: 'user_paused',
+    })));
+    assert.match(cp.frontier[0].last_error, /text\/plain/, 'checkpoint 里丢了失败原因');
+
+    // 读回来那一侧是白名单，漏一个字段不会报错，只会静默地少一样东西。
+    const src = readFileSync(new URL('../src/crawl/runner.js', import.meta.url), 'utf-8');
+    assert.match(src, /lastError: it\.last_error/, 'resume() 没把 last_error 读回来');
   });
 });
 
