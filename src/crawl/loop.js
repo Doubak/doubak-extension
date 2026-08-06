@@ -928,7 +928,29 @@ export class CrawlLoop {
     }
 
     const cur = item.cursor?.value ?? route.pagination.first;
-    const nextValue = Number(cur) + route.pagination.step;
+
+    // `step: 'items'` —— 步长取**本页实际有多少条**，而不是写死一个数。
+    //
+    // 写死是要先知道每页装几条。标记列表知道（实测 15 槽），日记与评论**不知道**：
+    // 手上那份真实页面只有 2 条，一页就装下了，翻页器根本没出现。
+    //
+    // 猜一个数的失败方向是最坏的那种：猜大了，`start` 会跨过中间的条目——**静默漏抓**，
+    // 而日记列表连声明数量都没有（`<h1>我的日记</h1>`，没有 `(N)`），漏了没有任何
+    // 信号能发现。猜小了则每页重叠，只是浪费。
+    //
+    // 用本页条数就没有猜的余地：下一页的起点正好是「已经读过的条数」，与每页装几条
+    // 无关，也不受豆瓣改页长影响。
+    const step = route.pagination.step === 'items' ? items.ids.length : route.pagination.step;
+
+    // 步长为 0 会让下一页的 URL 和这一页一模一样。urlKey 去重会拦住它，但那是靠副作用
+    // 兜底；这里直接停——本页一条都没有，本来就是终点。
+    if (!(step > 0)) {
+      state.markFinished();
+      this._emit({ type: 'route_finished', routeKey: item.routeKey, reason: 'empty_page' });
+      return;
+    }
+
+    const nextValue = Number(cur) + step;
     const nextUrl = route.entryUrl({ offset: nextValue });
 
     this._frontier.enqueue({

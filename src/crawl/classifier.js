@@ -551,6 +551,49 @@ export const ROUTE_PROFILES = {
     itemAnchor: undefined,
     claimedCount: null,
   },
+  /**
+   * 日记列表 `www.douban.com/people/<user>/notes`。
+   *
+   * 全部锚点都是对着一份真实页面量出来的，不是照别的路线套的。三处与标记列表不同：
+   *
+   * **① 没有声明数量。** 标题就是 `<h1>我的日记</h1>`，没有 `(N)`——整页找不出第二个
+   * 带数字的括号。所以 `claimedCount: null`：这条路线的完整性**只能**靠连续性证明，
+   * 没有第二个信号可以对账。（评论列表有，是 `<h1>我的评论(2)</h1>`。）
+   *
+   * **② 页面上有别人的日记。** 侧栏「最近回应过的日记」列着 6 篇他人的，藏在
+   * `link2/?url=…` 里做了百分号编码。今天扫 `/note/(\d+)/` 恰好碰不到它们——但那是
+   * **运气**，不是设计。所以 `idAnchor` 锚在 `note-title` 上，且不允许跨过 `<a>` 标签
+   * （`[^>]*` 里不含 `>`），只认条目自己的那个链接。
+   *
+   * 这与 `extractSubjectLinks` 的「整页扫更准」是相反的结论，而两边都对：那边实测
+   * 400 页没有游离链接，这边实测一页就有 6 条。判据是量出来的，不是选定的风格。
+   *
+   * **③ 时间是完整时刻。** `2025-04-14 18:47:50`，不像标记列表只有日期。
+   */
+  'note.list': {
+    urlAnchor: /\/people\/[^/]+\/notes/,
+    frameAnchors: [/<h1>\s*我的日记\s*<\/h1>/, /class="note-list"/],
+    itemAnchor: /class="note-item"/,
+    idAnchor: /class="note-title"[^>]*>\s*<a[^>]*href="https:\/\/www\.douban\.com\/note\/(\d+)\//g,
+    timeAnchor: /class="note-date">\s*([\d-]{10}[^<]*)/g,
+    claimedCount: null,
+  },
+  /**
+   * 评论（影评/书评/游戏评论）列表 `www.douban.com/people/<user>/reviews`。
+   *
+   * 比日记干净：整页只有本人一个 `people/` 链接，没有任何第三方板块，而且**条目 id
+   * 就在容器上**（`<div class="main review-item" id="8381069">`），不需要开窗口去找。
+   *
+   * 有声明数量，形式与标记列表一致（`<h1>我的评论(2)</h1>`），所以复用同一个模式。
+   */
+  'review.list': {
+    urlAnchor: /\/people\/[^/]+\/reviews/,
+    frameAnchors: [/<h1>\s*[^<]*\(\d+\)\s*<\/h1>/, /class="review-list/],
+    itemAnchor: /class="main review-item"/,
+    idAnchor: /class="main review-item" id="(\d+)"/g,
+    timeAnchor: /class="main-meta">\s*([\d-]{10}[^<]*)/g,
+    claimedCount: /<h1>\s*([^<]*?)\((\d+)\)\s*<\/h1>/,
+  },
   'interest.list': {
     // 列表页的标题形如「我看过的影视(1157)」
     frameAnchors: [/<h1>\s*[^<]*\(\d+\)\s*<\/h1>/],

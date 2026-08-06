@@ -36,6 +36,32 @@ const PROFILE = `<html><head><title>示例的账号</title></head><body>${NAV}
 <div id="db-usr-profile"><div class="info"><h1>示例</h1></div></div>
 <div class="status-item" data-sid="1" data-uid="82160871">x</div></body></html>`;
 
+/**
+ * 空的日记列表页。
+ *
+ * 一条都没有的时候，页面框架照样在——这正是判定必须靠框架而不是条目数的理由。
+ * 结构按 downloads/notes.html 那份真实页面写：`<h1>我的日记</h1>` **没有** `(N)`，
+ * 声明数量整页都找不到。
+ */
+const NOTES_EMPTY = `<html><head><title>我的日记</title></head><body>${NAV}
+<h1>我的日记</h1><div class="note-list"></div></body></html>`;
+
+/**
+ * 空的评论列表页。
+ *
+ * 与日记的关键差别：这一页**有**声明数量（`<h1>我的评论(0)</h1>`）。
+ * 结构按 downloads/reviews.html 那份真实页面写。
+ */
+const REVIEWS_EMPTY = `<html><head><title>我的评论(0)</title></head><body>${NAV}
+<h1>我的评论(0)</h1><div class="review-list chart "></div></body></html>`;
+
+/** 长文那两条路线的空页，其余情况返回 null。 */
+function longformEmpty(url) {
+  if (url.includes('/notes?')) return NOTES_EMPTY;
+  if (url.includes('/reviews?')) return REVIEWS_EMPTY;
+  return null;
+}
+
 function bcPage(n, from = 0) {
   let items = '';
   for (let i = 0; i < n; i++) {
@@ -101,6 +127,10 @@ function harness(respond, { batchSize = 5, pacerOptions } = {}) {
 function broadcastOnly(pages) {
   return (url) => {
     if (url.endsWith('/people/example/')) return PROFILE;
+    // 长文那两条路线的框架标志与广播页不一样，给广播页会被判成「框架不全」——
+    // 那是判定在正确工作，不是它该测的东西。
+    const lf = longformEmpty(url);
+    if (lf) return lf;
     if (!url.includes('statuses')) return bcPage(0); // 其他路线直接给空页
     const m = /[?&]p=(\d+)/.exec(url);
     const page = m ? Number(m[1]) : 1;

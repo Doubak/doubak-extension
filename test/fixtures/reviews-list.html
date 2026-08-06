@@ -1,0 +1,82 @@
+<!--
+  评论列表页 www.douban.com/people/<user>/reviews
+
+  结构按一份真实页面（2026-08-06 抓的）逐处核对过。两条评论是档案主人自己的公开内容。
+
+  与日记列表的三处关键差别，每一处都在测试里被用到：
+
+  1. **有声明数量**：`<h1>我的评论(2)</h1>`。日记那页整页找不出一个 `(N)`。
+  2. **条目 id 就在容器上**（容器的 class 后面直接跟着 id="8381069"），
+     不需要开窗口去找，比日记那条锚干净。
+     注意：这段注释里不能出现条目容器的 class 原文——itemAnchor 是纯文本匹配，
+     连注释一起数，会让条目数凭空多一个。
+  3. **整页没有第三方内容**：真实页面上唯一的 `people/` 链接就是本人，
+     没有日记页那种「最近回应过的」侧栏。所以这份夹具原样保留。
+
+  「我的评论」里影评、书评、游戏评论混在一起——实测这两条都是游戏评论，
+  `subject-img` 指向 `/game/`。所以路线名不能只写「影评 / 书评」。
+
+  真实页面上没有翻页器（两条一页装下），每页装几条未知，故用 `step: 'items'`。
+-->
+<html>
+<head><title>
+我的评论(2)
+</title></head>
+<body>
+<div class="top-nav-info">
+  <ul><li class="nav-user-account">
+    <a href="https://accounts.douban.com/passport/setting/" class="bn-more"><span>MewX的账号</span></a>
+    <div class="more-items"><table><tbody>
+      <tr><td><a href="https://www.douban.com/accounts/logout?source=main&ck=XXXX">退出</a></td></tr>
+    </tbody></table></div>
+  </li></ul>
+</div>
+<script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>
+
+<div id="content">
+  <h1>我的评论(2)</h1>
+  <div class="review-list chart ">
+    <div data-cid="8381069">
+      <div class="main review-item" id="8381069">
+        <a class="subject-img" href="https://www.douban.com/game/26425271/"><img alt="幽灵行动：荒野" src="https://img1.doubanio.com/mpic/s28765129.jpg"/></a>
+        <header class="main-hd">
+          <a href="https://www.douban.com/people/mewcatcher/" class="avator"><img src="https://img3.doubanio.com/icon/u82160871-12.jpg"></a>
+          <a href="https://www.douban.com/people/mewcatcher/" class="name">MewX</a>
+          <span class="allstar40 main-title-rating" title="推荐"></span>
+          <span content="2017-02-24" class="main-meta">2017-02-24 16:15:24</span>
+        </header>
+        <div class="main-bd">
+          <h2><a href="https://www.douban.com/review/8381069/">一个区域的很多地点都一模一样啊，是偷工减料了吗</a></h2>
+          <div id="review_8381069_short" class="review-short" data-rid="8381069">
+            <div class="short-content">
+              玩了 Open Beta 大概 10 个小时……
+              &nbsp;(<a href="javascript:;" id="toggle-8381069-copy" class="unfold" title="展开">展开</a>)
+            </div>
+          </div>
+          <div id="review_8381069_full" class="hidden"><div id="review_8381069_full_content" class="full-content"></div></div>
+          <div class="action">
+            <a href="https://www.douban.com/review/8381069/#comments" class="reply ">1回应</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div data-cid="7500205">
+      <div class="main review-item" id="7500205">
+        <a class="subject-img" href="https://www.douban.com/game/10758368/"><img alt="交错†频道" src="https://img2.doubanio.com/mpic/s9129421.jpg"/></a>
+        <header class="main-hd">
+          <a href="https://www.douban.com/people/mewcatcher/" class="avator"><img src="https://img3.doubanio.com/icon/u82160871-12.jpg"></a>
+          <a href="https://www.douban.com/people/mewcatcher/" class="name">MewX</a>
+          <span content="2015-06-14" class="main-meta">2015-06-14 21:57:18</span>
+        </header>
+        <div class="main-bd">
+          <h2><a href="https://www.douban.com/review/7500205/">噗，搬运一下组里用来做测试的攻略吧 - CROSS†CHANNEL汉化版攻略</a></h2>
+          <div id="review_7500205_short" class="review-short" data-rid="7500205">
+            <div class="short-content">攻略正文……</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

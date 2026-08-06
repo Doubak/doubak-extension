@@ -621,3 +621,78 @@ describe('网络断了要早早停手，不要一条条熬超时', () => {
     assert.notEqual(r.stoppedBy, 'network_down', '零星抖动被误判成了网络中断');
   });
 });
+
+describe('翻页步长取本页条数 —— 因为「每页装几条」并不总是已知', () => {
+  /**
+   * 日记与评论列表的每页条数是**未知**的：手上那份真实页面只有 2 条、一页就装下了，
+   * 翻页器根本没出现过。
+   *
+   * 写死一个数的失败方向是最坏的那种——猜大了，`start` 会跨过中间的条目，**静默漏抓**。
+   * 而日记列表连声明数量都没有（`<h1>我的日记</h1>`，整页找不出一个 `(N)`），漏了
+   * 之后没有任何信号能发现。
+   *
+   * 用本页实际条数就没有猜的余地：下一页的起点正好是「已经读过多少条」。
+   */
+
+  /** @param {number} n @param {number} from */
+  const notesPage = (n, from = 0) => {
+    let items = '';
+    for (let i = 0; i < n; i++) {
+      items += `<div class="note-item"><div class="note-header">
+        <h3 class="note-title"><a title="t" href="https://www.douban.com/note/${from + i}/">t</a></h3>
+        <div class="note-info"><span class="note-date">2026-07-2${i % 9} 1${i % 9}:00:00</span></div>
+      </div></div>`;
+    }
+    return `<html><head><title>我的日记</title></head><body>${NAV}
+<h1>我的日记</h1><div class="note-list">${items}</div></body></html>`;
+  };
+
+  /** 只跑日记那条路线的 harness。 */
+  async function notesHarness(script) {
+    const h = await harness(script);
+    h.frontier.snapshot().forEach(() => {});
+    // 换掉种子：只留日记
+    const fresh = new Frontier();
+    const route = h.loop._routes.get('note.list');
+    const url = route.entryUrl({ offset: 0 });
+    fresh.enqueue({
+      url, urlKey: url, routeKey: 'note.list', intent: 'note.list',
+      cursor: { kind: 'start', value: 0 },
+    });
+    h.loop._frontier = fresh;
+    return { ...h, frontier: fresh };
+  }
+
+  test('第 1 页 7 条 → 下一页 start=7；第 2 页 3 条 → start=10', async () => {
+    const { loop, calls } = await notesHarness([
+      { body: notesPage(7, 0) },
+      { body: notesPage(3, 100) },
+      { body: notesPage(0) },
+    ]);
+    await loop.run({ maxCaptures: 5 });
+
+    const starts = calls.map((c) => new URL(c.url).searchParams.get('start'));
+    assert.deepEqual(starts, ['0', '7', '10'], `实际请求的是 ${starts.join(', ')}`);
+  });
+
+  test('**页长变了也跟得上** —— 写死步长就会在这里跨过条目', async () => {
+    // 豆瓣改页长（或者不同路线页长不同）时，写死的步长要么重叠要么跳过。
+    const { loop, calls } = await notesHarness([
+      { body: notesPage(15, 0) },
+      { body: notesPage(4, 100) },
+      { body: notesPage(0) },
+    ]);
+    await loop.run({ maxCaptures: 5 });
+    assert.deepEqual(calls.map((c) => new URL(c.url).searchParams.get('start')), ['0', '15', '19']);
+  });
+
+  test('空页当场收尾，不会拿同一个 URL 原地打转', async () => {
+    // 步长为 0 会让下一页的 URL 和这一页一模一样。urlKey 去重能兜住，但那是靠副作用；
+    // 本页一条都没有，本来就是终点。
+    const { loop, calls, events } = await notesHarness([{ body: notesPage(0) }]);
+    await loop.run({ maxCaptures: 5 });
+
+    assert.equal(calls.length, 1);
+    assert.ok(events.some((e) => e.type === 'route_finished' && e.reason === 'empty_page'));
+  });
+});

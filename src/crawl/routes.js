@@ -205,6 +205,43 @@ export function buildRoutes({
     note: '广播附图中本人上传的原件；可静默删除且无法重抓，优先级仅次于广播本身',
   });
 
+  // ── 本人的长文：日记与评论
+  //
+  // 按「补不回来的程度」排，这是仅次于广播的一档：**本人写的**，豆瓣一删就没有第二份。
+  // 而它此前一条都没抓过——`buildUnverifiedApiRoutes()` 写了四条 Rexxar 接口路线，
+  // 有测试、但生产代码里从没被调用过，是死代码。
+  //
+  // 这里走**普通 HTML 页面**，不走那个未公开的移动端接口。入口 URL 是从真实档案里
+  // 的个人主页上读出来的（`content-menu-item` 那一排），判定锚点是对着真实页面量出来的。
+  // Rexxar 那份自己的注释就写着「URL 抄自 tofu，未经核对，随时可能变」。
+  //
+  // 两条路线差别不小，别当成同一种东西：日记**没有声明数量**（`<h1>我的日记</h1>`），
+  // 评论有（`<h1>我的评论(2)</h1>`）。也就是说日记这条线的完整性只有连续性证明这一个
+  // 信号，没有第二处可以对账。
+  for (const [key, path, intent] of /** @type {const} */ ([
+    ['note.list', 'notes', 'note.list'],
+    ['review.list', 'reviews', 'review.list'],
+  ])) {
+    routes.push({
+      key,
+      intent,
+      kind: 'data',
+      surface: 'html',
+      priority: PRIORITY.LONGFORM,
+      source: 'archive',
+      // 与标记列表同理：整份列表从头走到尾。有下界时 RouteState 会自动降成 bounded。
+      enumeration: 'full',
+      safetyNet: 'contiguity',
+      // **步长取本页条数，不写死。** 手上的真实页面只有 2 条、一页装下、翻页器没出现，
+      // 所以每页装几条是未知的。猜大了会跨过中间的条目静默漏抓，而日记连声明数量都
+      // 没有，漏了发现不了。见 loop.js `_enqueueNextPage`。
+      pagination: { kind: 'start', step: 'items', first: 0 },
+      entryUrl: ({ offset }) =>
+        `https://www.douban.com/people/${enc(username)}/${path}?start=${offset}`,
+      note: '本人写的长文，豆瓣一删就没有第二份；日记列表没有声明数量',
+    });
+  }
+
   // ── 标记列表
   for (const medium of mediums) {
     const build = INTEREST_URLS[medium];

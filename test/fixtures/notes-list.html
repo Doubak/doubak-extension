@@ -1,0 +1,103 @@
+<!--
+  日记列表页 www.douban.com/people/<user>/notes
+
+  结构按一份真实页面（2026-08-06 抓的）**逐处核对**过：条目容器、标题锚、日期格式、
+  侧栏板块，全都是原样。两条日记是档案主人自己的公开内容，保留原文。
+
+  **侧栏那三条是合成的。** 真实页面上「最近回应过的日记」列着 6 篇他人的日记，
+  带着他们的用户名、头像与主页链接——那是第三方内容，不进公开仓库。这里换成假名假号，
+  但把要害的结构原样留着：`link2/?url=` 外壳 + 百分号编码的 `%2Fnote%2FN%2F`。
+  那个外壳正是「今天扫 /note/(\d+)/ 碰巧扫不到侧栏」的原因，而这个夹具要守住的恰恰是
+  「不许依赖那份运气」。
+
+  真实页面上没有翻页器——两条日记一页就装下了。所以每页装几条是未知的，
+  路线用 `step: 'items'`（见 routes.js）。
+
+  注意标题是 `<h1>我的日记</h1>`，**没有** `(N)`：这条路线没有声明数量。
+-->
+<html>
+<head><title>
+我的日记
+</title></head>
+<body>
+<div class="top-nav-info">
+  <ul><li class="nav-user-account">
+    <a href="https://accounts.douban.com/passport/setting/" class="bn-more"><span>MewX的账号</span></a>
+    <div class="more-items"><table><tbody>
+      <tr><td><a href="https://www.douban.com/accounts/logout?source=main&ck=XXXX">退出</a></td></tr>
+    </tbody></table></div>
+  </li></ul>
+</div>
+<script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>
+
+<div id="content">
+  <h1>我的日记</h1>
+  <div class="note-list">
+    <div class="note-item">
+      <div class="note-header">
+        <h3 class="note-title">
+          <a title="豆瓣更换海外手机号显示“不可预期状态”的解决方案" href="https://www.douban.com/note/872015292/">豆瓣更换海外手机号显示“不可预期状态”的解决方案</a>
+        </h3>
+        <div class="note-info">
+          <span class="note-date">2025-04-14 18:47:50</span>
+          <span class="note-location">澳大利亚</span>
+        </div>
+      </div>
+      <div class="note-body">
+        今天发现豆瓣终于可以绑定海外手机号了……
+        <a href="https://www.douban.com/note/872015292/#comments">(2回应)</a>
+      </div>
+    </div>
+    <div class="note-item">
+      <div class="note-header">
+        <h3 class="note-title">
+          <a title="想看的被河蟹的电影" href="https://www.douban.com/note/868128497/">想看的被河蟹的电影</a>
+        </h3>
+        <div class="note-info">
+          <span class="note-date">2024-11-27 05:41:10</span>
+          <span class="note-location">澳大利亚</span>
+        </div>
+      </div>
+      <div class="note-body">
+        列一下……
+      </div>
+    </div>
+  </div>
+
+  <!-- 以下三条为合成的第三方内容，结构照抄真实页面 -->
+  <div class="recent-replied-mod mod">
+    <h2>最近回应过的日记</h2>
+    <ul class="comment-list">
+      <li>
+        <a href="https://www.douban.com/people/900000001/" class="avatar"><img src="https://img1.doubanio.com/icon/up900000001-8.jpg" width="36" height="36" alt="示例用户甲"/></a>
+        <a href="https://www.douban.com/people/900000001/" class="lnk-people">示例用户甲</a>
+        <span class="pl">的日记：</span>
+        <p><a href="https://www.douban.com/link2/?url=https%3A%2F%2Fwww.douban.com%2Fnote%2F700000001%2F&amp;type=note&amp;pos=sidebar_commented_notes">某篇别人的日记……</a></p>
+      </li>
+      <li>
+        <a href="https://www.douban.com/people/900000002/" class="avatar"><img src="https://img1.doubanio.com/icon/up900000002-8.jpg" width="36" height="36" alt="示例用户乙"/></a>
+        <a href="https://www.douban.com/people/900000002/" class="lnk-people">示例用户乙</a>
+        <span class="pl">的日记：</span>
+        <p><a href="https://www.douban.com/link2/?url=https%3A%2F%2Fwww.douban.com%2Fnote%2F700000002%2F&amp;type=note&amp;pos=sidebar_commented_notes">又一篇别人的日记……</a></p>
+      </li>
+      <!--
+        第三条**故意不套 link2 外壳**，直接写成 https://www.douban.com/note/N/。
+
+        真实页面上 6 条全都是 link2 包着的，所以今天整页扫 `/note/(\d+)/` 恰好扫不到
+        侧栏。但那是豆瓣当下的实现细节，不是我们的保证——哪天它不套了，整页扫就会
+        把别人的日记排进队列，而日记这条路线没有声明数量能把多出来的一条比出来。
+
+        这一条是**刻意加的压力样本**：它让「锚在 note-title 上」这条设计有东西可守。
+        去掉 idAnchor 的作用域，下面那个测试就会变红。
+      -->
+      <li>
+        <a href="https://www.douban.com/people/900000003/" class="avatar"><img src="https://img1.doubanio.com/icon/up900000003-8.jpg" width="36" height="36" alt="示例用户丙"/></a>
+        <a href="https://www.douban.com/people/900000003/" class="lnk-people">示例用户丙</a>
+        <span class="pl">的日记：</span>
+        <p><a href="https://www.douban.com/note/700000003/">第三篇别人的日记……</a></p>
+      </li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>
