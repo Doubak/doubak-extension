@@ -34,6 +34,7 @@ import {
   extractSubjectLinks,
   extractCoverImage,
   extractStatusPhotos,
+  extractDetailLinks,
 } from './classifier.js';
 import { SessionError } from './session.js';
 import { TransportError } from './errors.js';
@@ -575,6 +576,7 @@ export class CrawlLoop {
       if (!route.pagination) this.stateFor(item.routeKey).recordLeafCapture();
       this._enqueueNextPage(item, route, profile, res, written.captureId, items);
       this._enqueueSubjects(item, res, written.captureId);
+      this._enqueueLongformItems(item, res, written.captureId);
       this._enqueueCover(item, res, written.captureId);
       this._enqueueStatusPhotos(item, res, written.captureId);
 
@@ -765,6 +767,45 @@ export class CrawlLoop {
    * @param {object} res
    * @param {string} captureId
    */
+  /**
+   * 从日记 / 评论列表页派生正文页。
+   *
+   * 与 `_enqueueSubjects` 同构，两点不同：
+   *
+   * - **URL 取页面上的 href，不拿 id 拼**（见 `extractDetailLinks` 的说明）。
+   * - **不设 `gatedBy`**：它的门就是它的来源——正文页只可能从一张已经抓到的列表页上
+   *   抽出来。作品详情页需要门是因为它要等广播先跑完（拿不可替代的换可替代的），
+   *   而长文本身就在广播那一档，没有什么可让的。
+   *
+   * @param {object} item      刚抓完的那张列表页
+   * @param {object} res
+   * @param {string} captureId
+   */
+  _enqueueLongformItems(item, res, captureId) {
+    const targetKey = { 'note.list': 'note.item', 'review.list': 'review.item' }[item.routeKey];
+    if (!targetKey) return;
+    const target = this._routes.get(targetKey);
+    if (!target) return;
+
+    let enqueued = 0;
+    for (const url of extractDetailLinks(res.bodyText, profileForRoute(item.routeKey))) {
+      const ok = this._frontier.enqueue({
+        url,
+        urlKey: urlKey(url),
+        routeKey: targetKey,
+        intent: target.intent,
+        enqueuedBy: captureId,
+        ordered: false,
+        priority: target.priority,
+        gatedBy: null,
+      });
+      if (ok) enqueued += 1;
+    }
+    if (enqueued > 0) {
+      this._emit({ type: 'longform_enqueued', routeKey: targetKey, count: enqueued, from: item.url });
+    }
+  }
+
   _enqueueCover(item, res, captureId) {
     if (item.routeKey !== 'interest.item') return;
     const target = this._routes.get('asset.subject_cover');

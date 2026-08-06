@@ -36,6 +36,7 @@ import {
   extractItemIds,
   extractItemTimes,
   extractClaimedCount,
+  extractDetailLinks,
 } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { routeName } from '../src/ui/route-names.js';
@@ -180,5 +181,93 @@ describe('路线定义', () => {
       .find((r) => r.key === 'note.list');
     assert.equal(odd.entryUrl({ offset: 0 }),
       'https://www.douban.com/people/a%20b%2Fc/notes?start=0');
+  });
+});
+
+describe('正文页 —— 列表页上的是截断摘要，全文只在这里', () => {
+  const NOTE = () => fixture('note-detail.html');
+  const REVIEW = () => fixture('review-detail.html');
+
+  test('日记正文页判定通过', () => {
+    const cls = classify('note.item', NOTE(), 'https://www.douban.com/note/872015292/');
+    assert.equal(cls.verdict, 'ok');
+  });
+
+  test('评论正文页判定通过', () => {
+    const cls = classify('review.item', REVIEW(), 'https://www.douban.com/review/8381069/');
+    assert.equal(cls.verdict, 'ok');
+  });
+
+  test('**全文在 HTML 里，不是懒加载**', () => {
+    // 这是接这条路线的全部理由。要是全文也走接口拉，抓正文页就白抓了，得另想办法。
+    assert.match(NOTE(), /今天发现豆瓣终于可以绑定海外手机号了/);
+    assert.match(REVIEW(), /玩了Open Beta大概10个小时/);
+  });
+
+  test('**页面上没有任何第三方内容**', () => {
+    // 量出来的，不是假设：`#comments` 是空的，回应由前端调 Rexxar 接口在渲染时拉。
+    // 整页唯一的 people 链接是作者本人。
+    //
+    // 这一条决定了发布到 GitHub Pages 时要不要过滤，也印证了 CLAUDE.md 里
+    // 「不抓他人回应」那条在正文页上同样成立——不是靠我们躲，是豆瓣本来就没渲染。
+    for (const html of [NOTE(), REVIEW()]) {
+      const comments = /id="comments"[^>]*>([\s\S]*?)<\/div>/.exec(html);
+      assert.equal(comments[1].trim(), '', '回应被渲染进 HTML 了，第三方内容会跟着进档案');
+      const people = [...html.matchAll(/douban\.com\/people\/([\w-]+)\//g)].map((m) => m[1]);
+      assert.deepEqual([...new Set(people)], ['mewcatcher']);
+    }
+  });
+
+  test('封锁页不会因为「有个 div」就判成 ok', () => {
+    for (const key of ['note.item', 'review.item']) {
+      const cls = classify(key, '<html><body>访问过于频繁，请稍后再试</body></html>',
+        `https://www.douban.com/${key.split('.')[0]}/1/`);
+      assert.notEqual(cls.verdict, 'ok');
+    }
+  });
+
+  test('urlAnchor 只认路径不认 host —— 影评可能在 movie.douban.com', () => {
+    // 手上两条样本都是**游戏**评论，走 www。影评的 host 很可能不一样，
+    // 认死 www 会把真页面判成「被跳走了」。
+    const cls = classify('review.item', REVIEW(), 'https://movie.douban.com/review/9999999/');
+    assert.equal(cls.verdict, 'ok');
+  });
+});
+
+describe('从列表页派生正文页', () => {
+  test('**URL 取页面上的 href，不拿 id 去拼**', () => {
+    // 拼出来的是我们的猜测，页面上的是豆瓣的事实。今天两者恰好一样，但评论那条
+    // 几乎肯定不是：样本全是游戏评论走 www，影评多半在 movie.douban.com。
+    // 拼错会得到一整批 404，而且看起来像「豆瓣把它们都删了」。
+    assert.deepEqual(extractDetailLinks(NOTES(), profileForRoute('note.list')), [
+      'https://www.douban.com/note/872015292/',
+      'https://www.douban.com/note/868128497/',
+    ]);
+    assert.deepEqual(extractDetailLinks(REVIEWS(), profileForRoute('review.list')), [
+      'https://www.douban.com/review/8381069/',
+      'https://www.douban.com/review/7500205/',
+    ]);
+  });
+
+  test('侧栏里别人的日记同样不许派生', () => {
+    const urls = extractDetailLinks(NOTES(), profileForRoute('note.list'));
+    assert.ok(!urls.some((u) => /70000000\d/.test(u)), `抽到了别人的日记：${urls.join(' ')}`);
+  });
+
+  test('没有 detailLink 的路线返回空，不报错', () => {
+    assert.deepEqual(extractDetailLinks(NOTES(), profileForRoute('interest.movie.collect')), []);
+    assert.deepEqual(extractDetailLinks(null, profileForRoute('note.list')), []);
+  });
+
+  test('正文页是叶子，没有分页', () => {
+    // 有 pagination 会让 `ordered` 推导把它判成有序，于是一篇取不到会堵死其余的。
+    const routes = buildRoutes({ username: 'x', includeCatalog: false });
+    for (const k of ['note.item', 'review.item']) {
+      const r = routes.find((x) => x.key === k);
+      assert.equal(r.pagination, undefined);
+      assert.equal(r.ordered, false);
+      assert.equal(r.entryUrl, undefined, '正文页没有入口 URL，只能从列表页派生');
+      assert.ok(routeName(k) !== k, '界面上会露出内部标识');
+    }
   });
 });

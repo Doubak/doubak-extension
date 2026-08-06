@@ -1,0 +1,62 @@
+<!--
+  日记正文页 www.douban.com/note/<id>/
+
+  结构按一份真实页面（2026-08-06 抓的）逐处核对：容器 class 与 id、data-author、
+  pub-date 的写法、正文所在的三层 div。正文本身截短了，其余原样。
+
+  两件量出来的事，都写进了测试：
+
+  1. **全文在 HTML 里**，不是懒加载。列表页上的 note-body 是截断的摘要
+     （真实页面上以 `number=xxx...` 结尾），这里才是完整的。
+  2. **页面上没有任何第三方内容。** `<div id="comments" class="comment-list"></div>`
+     是空的——回应由前端调 Rexxar 接口在渲染时拉，不进 HTML。整页唯一的 people 链接
+     是作者本人。这一点必须是量出来的：它决定了发布到 GitHub Pages 时要不要过滤。
+
+  注意 `<div class="note" id="note_<id>_short" style="display:none;"></div>` 是**空的**
+  ——摘要那一份在正文页上不渲染。抽全文时别抓错这一个。
+-->
+<html>
+<head><title>豆瓣更换海外手机号显示“不可预期状态”的解决方案</title></head>
+<body>
+<div class="top-nav-info">
+  <ul><li class="nav-user-account">
+    <a href="https://accounts.douban.com/passport/setting/" class="bn-more"><span>MewX的账号</span></a>
+    <div class="more-items"><table><tbody>
+      <tr><td><a href="https://www.douban.com/accounts/logout?source=main&ck=XXXX">退出</a></td></tr>
+    </tbody></table></div>
+  </li></ul>
+</div>
+<script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>
+
+<div id="content">
+  <div id="note-runtime-config" data-config='{"note_id": "872015292"}' style="display:none"></div>
+  <div id="note-872015292"
+       class="note-container"
+       data-url="https://www.douban.com/note/872015292/"
+       data-author="MewX"
+       data-is-original="1">
+    <div class="note-header note-header-container">
+      <h1>豆瓣更换海外手机号显示“不可预期状态”的解决方案</h1>
+      <div class="note-header-tab">
+        <a href="https://www.douban.com/people/mewcatcher/"><img class="note_author_avatar" width="24" height="24" src="https://img3.doubanio.com/icon/u82160871-12.jpg" alt="MewX"></a>
+        <a href="https://www.douban.com/people/mewcatcher/" class="note-author">MewX</a>
+        <span class="pub-date">
+          2025-04-14 18:47:50 澳大利亚
+        </span>
+      </div>
+    </div>
+    <div class="note" id="note_872015292_short" style="display:none;"></div>
+    <div id="note_872015292_full">
+      <div id="link-report">
+        <div class="note">
+          <p data-page="0">今天发现豆瓣终于可以绑定海外手机号了，这样可以省去一大堆麻烦事。因为我国内的手机号并不会一直带在身边。……</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="">
+    <div id="comments" class="comment-list"></div>
+  </div>
+</div>
+</body>
+</html>

@@ -240,6 +240,27 @@ export function buildRoutes({
         `https://www.douban.com/people/${enc(username)}/${path}?start=${offset}`,
       note: '本人写的长文，豆瓣一删就没有第二份；日记列表没有声明数量',
     });
+
+    // 正文页。**列表页上的正文是截断的**——真实页面上那段摘要以 `number=xxx...`
+    // 结尾，全文只在正文页里。不接这一条，长文这一档等于只存了标题和摘要。
+    //
+    // URL 从列表页上原样取（见 classifier 的 `extractDetailLinks`），不拿 id 拼：
+    // 手上两条评论样本都是游戏评论、走 www 域，而影评多半在 movie.douban.com。
+    routes.push({
+      key: `${key.split('.')[0]}.item`,
+      intent: `${key.split('.')[0]}.item`,
+      kind: 'data',
+      surface: 'html',
+      // 紧跟在自己的列表页后面：列表页抓到就能派生，没必要等到最后。
+      priority: PRIORITY.LONGFORM + 1,
+      source: 'archive',
+      enumeration: 'full',
+      safetyNet: 'contiguity',
+      // **没有 pagination**：它是一个集合，URL 来自列表页。与 interest.item 同理，
+      // 有 pagination 会让 `ordered` 推导把它判成有序，于是一篇取不到会堵死其余的。
+      ordered: false,
+      note: '长文全文；列表页上的只是截断摘要',
+    });
   }
 
   // ── 标记列表

@@ -663,15 +663,21 @@ describe('翻页步长取本页条数 —— 因为「每页装几条」并不�
     return { ...h, frontier: fresh };
   }
 
+  /** 只留日记**列表页**的 start 参数；正文页是另一条路线派生出来的。 */
+  const listStarts = (calls) => calls
+    .filter((c) => c.url.includes('/notes?'))
+    .map((c) => new URL(c.url).searchParams.get('start'));
+
   test('第 1 页 7 条 → 下一页 start=7；第 2 页 3 条 → start=10', async () => {
     const { loop, calls } = await notesHarness([
       { body: notesPage(7, 0) },
       { body: notesPage(3, 100) },
       { body: notesPage(0) },
     ]);
-    await loop.run({ maxCaptures: 5 });
+    await loop.run({ maxCaptures: 40 });
 
-    const starts = calls.map((c) => new URL(c.url).searchParams.get('start'));
+    // 只看列表页——正文页也会被派生出来去抓，那是另一条路线的事。
+    const starts = listStarts(calls);
     assert.deepEqual(starts, ['0', '7', '10'], `实际请求的是 ${starts.join(', ')}`);
   });
 
@@ -682,8 +688,8 @@ describe('翻页步长取本页条数 —— 因为「每页装几条」并不�
       { body: notesPage(4, 100) },
       { body: notesPage(0) },
     ]);
-    await loop.run({ maxCaptures: 5 });
-    assert.deepEqual(calls.map((c) => new URL(c.url).searchParams.get('start')), ['0', '15', '19']);
+    await loop.run({ maxCaptures: 40 });
+    assert.deepEqual(listStarts(calls), ['0', '15', '19']);
   });
 
   test('空页当场收尾，不会拿同一个 URL 原地打转', async () => {
@@ -692,7 +698,7 @@ describe('翻页步长取本页条数 —— 因为「每页装几条」并不�
     const { loop, calls, events } = await notesHarness([{ body: notesPage(0) }]);
     await loop.run({ maxCaptures: 5 });
 
-    assert.equal(calls.length, 1);
+    assert.equal(listStarts(calls).length, 1);
     assert.ok(events.some((e) => e.type === 'route_finished' && e.reason === 'empty_page'));
   });
 });

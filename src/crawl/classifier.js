@@ -577,6 +577,8 @@ export const ROUTE_PROFILES = {
     idAnchor: /class="note-title"[^>]*>\s*<a[^>]*href="https:\/\/www\.douban\.com\/note\/(\d+)\//g,
     timeAnchor: /class="note-date">\s*([\d-]{10}[^<]*)/g,
     claimedCount: null,
+    // 正文页的 URL **原样取自页面**，不拿 id 拼。见 `extractDetailLinks`。
+    detailLink: /class="note-title"[^>]*>\s*<a[^>]*href="(https:\/\/[^"]*\/note\/\d+\/?)"/g,
   },
   /**
    * 评论（影评/书评/游戏评论）列表 `www.douban.com/people/<user>/reviews`。
@@ -593,6 +595,52 @@ export const ROUTE_PROFILES = {
     idAnchor: /class="main review-item" id="(\d+)"/g,
     timeAnchor: /class="main-meta">\s*([\d-]{10}[^<]*)/g,
     claimedCount: /<h1>\s*([^<]*?)\((\d+)\)\s*<\/h1>/,
+    detailLink: /<h2><a href="(https:\/\/[^"]*\/review\/\d+\/?)"/g,
+  },
+  /**
+   * 日记正文页 `www.douban.com/note/<id>/`。
+   *
+   * 列表页上的 `note-body` 是**截断的摘要**（真实页面上以 `number=xxx...` 结尾），
+   * 全文只在这里。所以长文这一档不接上正文页等于没做。
+   *
+   * ## 页面上没有任何第三方内容
+   *
+   * 量过：`<div id="comments" class="comment-list"></div>` 是**空的**——回应由前端
+   * 调 Rexxar 接口在渲染时拉，不在 HTML 里。整页唯一的 `people/` 链接是作者本人。
+   *
+   * 这和广播列表页是同一个结论（CLAUDE.md 里「他人回应」那一条），所以抓正文页
+   * 不会顺手把别人的话存进档案。这一点必须是**量出来的**而不是假设的，因为它决定了
+   * 发布到 GitHub Pages 时要不要过滤。
+   *
+   * ## 用 anyFrameAnchors 而不是 frameAnchors
+   *
+   * 与作品详情页同理：手上只有一份真实样本，而豆瓣对不同形态的日记很可能有不同模板。
+   * 要求全中会把好页面判成故障；这三个标志封锁页与错误页一个都不会有，够用了。
+   */
+  'note.item': {
+    urlAnchor: /\/note\/\d+/,
+    anyFrameAnchors: [/class="note-container"/, /id="note-\d+"/, /class="note-header/],
+    itemAnchor: undefined,
+    claimedCount: null,
+  },
+  /**
+   * 评论正文页 `www.douban.com/review/<id>/`。
+   *
+   * 同样量过：`#comments` 是空的，整页唯一的 `people/` 链接是作者本人。
+   *
+   * `anyFrameAnchors` 在这条上尤其必要——手上两条样本**都是游戏评论**，而影评与书评
+   * 多半是另一套模板（连 host 都可能是 `movie.douban.com`）。所以 `urlAnchor` 只认
+   * 路径不认 host，框架标志也只要求中一个。
+   */
+  'review.item': {
+    urlAnchor: /\/review\/\d+/,
+    anyFrameAnchors: [
+      /class="review-content/,
+      /id="review-\d+-content"/,
+      /class="main-bd"/,
+    ],
+    itemAnchor: undefined,
+    claimedCount: null,
   },
   'interest.list': {
     // 列表页的标题形如「我看过的影视(1157)」
@@ -808,6 +856,33 @@ export function extractCoverImage(html) {
     if (PLACEHOLDER_IMAGE.test(img[1])) return { url: null, reason: 'placeholder' };
   }
   return { url: null, reason: sawContainer ? 'placeholder' : 'not_found' };
+}
+
+/**
+ * 从列表页抽出正文页的 URL。
+ *
+ * ## 为什么取页面上的 href，而不是拿 id 去拼
+ *
+ * 拼出来的 URL 是我们的猜测，页面上的是豆瓣的事实。这两者今天恰好一样
+ * （`https://www.douban.com/note/<id>/`），但评论那条几乎肯定不是：手上两条样本
+ * **都是游戏评论**，走 `www.douban.com`；影评的 host 很可能是 `movie.douban.com`。
+ * 拼错了会得到一整批 404，而且看起来像「豆瓣把它们都删了」。
+ *
+ * 与 `extractSubjectLinks` 一样锚在条目容器上，不整页扫——日记列表页的侧栏
+ * 「最近回应过的日记」列着别人的日记（实测 6 篇）。
+ *
+ * @param {string} html
+ * @param {RouteProfile | null} profile
+ * @returns {string[]} 去重后的绝对 URL，页面出现顺序
+ */
+export function extractDetailLinks(html, profile) {
+  if (typeof html !== 'string' || !profile?.detailLink) return [];
+  const re = new RegExp(profile.detailLink.source, 'g');
+  /** @type {Set<string>} */
+  const out = new Set();
+  let m;
+  while ((m = re.exec(html)) !== null) out.add(m[1]);
+  return [...out];
 }
 
 /**

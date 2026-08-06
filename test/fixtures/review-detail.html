@@ -1,0 +1,56 @@
+<!--
+  评论正文页 www.douban.com/review/<id>/
+
+  结构按一份真实页面（2026-08-06 抓的）逐处核对。正文本身截短了，其余原样。
+
+  与日记正文页相同的两件事：全文在 HTML 里；`#comments` 是空的（回应走 Rexxar 接口
+  在渲染时拉），整页唯一的 people 链接是作者本人。
+
+  **手上两条样本都是游戏评论**，走 www.douban.com。影评与书评多半是另一套模板，
+  连 host 都可能是 movie.douban.com——所以 urlAnchor 只认路径不认 host，框架标志
+  也用 anyFrameAnchors（至少中一个），不要求全中。
+
+  JSON-LD 里带着评分（reviewRating.ratingValue）。现在不解析它——那是解析器的事，
+  抓取阶段只负责把字节原样存下来。
+-->
+<html>
+<head><title>一个区域的很多地点都一模一样啊，是偷工减料了吗（幽灵行动：荒野）</title></head>
+<body>
+<div class="top-nav-info">
+  <ul><li class="nav-user-account">
+    <a href="https://accounts.douban.com/passport/setting/" class="bn-more"><span>MewX的账号</span></a>
+    <div class="more-items"><table><tbody>
+      <tr><td><a href="https://www.douban.com/accounts/logout?source=main&ck=XXXX">退出</a></td></tr>
+    </tbody></table></div>
+  </li></ul>
+</div>
+<script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>
+
+<div id="content">
+  <header>
+    <h1>一个区域的很多地点都一模一样啊，是偷工减料了吗</h1>
+    <a href="https://www.douban.com/people/mewcatcher/" class="name">MewX</a>
+    <span content="2017-02-24" class="main-meta">2017-02-24 16:15:24</span>
+    <script type="application/ld+json">
+      {
+        "@type": "Review",
+        "itemReviewed": { "@type": "CreativeWork", "name": "幽灵行动：荒野", "sameAs": "https://www.douban.com/game/26425271/" },
+        "author": { "@type": "Person", "url": "https://www.douban.com/people/mewcatcher/", "name": "MewX" },
+        "reviewRating": { "@type": "Rating", "ratingValue": "4" }
+      }
+    </script>
+  </header>
+  <div class="main-bd" id="review-8381069-content" data-ad-ext="有用0 · 没用0">
+    <div id="link-report-8381069">
+      <div class="review-content clearfix"
+           data-author="MewX"
+           data-url="https://www.douban.com/review/8381069/"
+           data-original="0">
+        玩了Open Beta大概10个小时，起始那片区域很多很多地方都一样的布局，连人的位置都没有变化……<br><br>（豆瓣游戏条目里面没有提问题的地方，所以就写到这了）
+      </div>
+    </div>
+  </div>
+  <div id="comments" class="comment-list"></div>
+</div>
+</body>
+</html>
