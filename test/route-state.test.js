@@ -209,6 +209,38 @@ describe('枚举方式决定下游能否推断删除', () => {
     f.markFinished();
     assert.equal(f.toCrawlState(BID).enumeration, 'full');
   });
+
+  /**
+   * 路线定义上的 `enumeration` 是静态常量（标记列表恒为 `'full'`），而它只对**首次**
+   * 全量成立。真实档案 `20260806T083926Z-f72157` 里 12 条路线踩到了这个：
+   *
+   *     interest.movie.collect   claimed=1336  captured=15
+   *     floor_time=2026-08-02    enumeration="full"
+   *
+   * 只读了第一页就撞上下界，却声称「整份都枚举过了」。下游拿它和首次全量做差，会
+   * 得出「用户删了 1321 条看过」——规范 §5.4.3 说这个方向「静默地把没删的当成删了，
+   * 而且事后无从发现」。
+   */
+  test('**有下界就不是 full**——增量抓取一律 bounded', () => {
+    const s = state({ enumeration: 'full', floorTime: '2026-08-02T00:00:00+08:00' });
+    s.observePage(page(['2026-08-04 12:00:00']));
+    s.markFinished();
+    assert.equal(s.toCrawlState(BID).enumeration, 'bounded');
+  });
+
+  test('没有下界时不受影响，首次全量仍是 full', () => {
+    const s = state({ enumeration: 'full', floorTime: null });
+    s.observePage(page(['2026-08-04 12:00:00']));
+    s.markFinished();
+    assert.equal(s.toCrawlState(BID).enumeration, 'full');
+  });
+
+  test('路线定义上的静态值原样留着，只有报出去的那个是推导的', () => {
+    // 混成一个字段的话，「这条线本来是什么性质」就没地方读了。
+    const s = state({ enumeration: 'full', floorTime: '2026-08-02T00:00:00+08:00' });
+    assert.equal(s.enumeration, 'full');
+    assert.equal(s.effectiveEnumeration, 'bounded');
+  });
 });
 
 describe('一个条目都没观测到时，「跑完了」不是证据', () => {

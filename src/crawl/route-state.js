@@ -393,6 +393,29 @@ export class RouteState {
   }
 
   /**
+   * 写进 manifest 的那个 `enumeration`。**不是**路线定义上的那个。
+   *
+   * 路线定义里的是静态常量：标记列表写死 `'full'`，注释的理由是「整份列表从头走到
+   * 尾，所以『上次有这次没有』是有意义的信号」。那句话只对**首次**全量成立——链上
+   * 一旦有了下界，这条线读到下界就停，下界以下这次压根没看。
+   *
+   * 两者不对账的后果在真实档案里发生过（`20260806` 那份，12 条路线）：
+   *
+   *     interest.movie.collect   claimed=1336  captured=15  enumeration="full"
+   *
+   * 下游拿它和首次全量做差，会得出「用户删了 1321 条看过」。规范 §5.4.3 说的正是
+   * 这个方向：「静默地把没删的当成删了，而且事后无从发现」。
+   *
+   * 保守方向是 `bounded`——多报一次 bounded 只是少一个删除信号，多报一次 full 是
+   * 凭空捏造删除。所以只看有没有下界，不去分辨「这次其实碰巧走完了整份」。
+   *
+   * @returns {'full' | 'bounded'}
+   */
+  get effectiveEnumeration() {
+    return this.floorTime ? 'bounded' : this.enumeration;
+  }
+
+  /**
    * 产出写进 manifest 的抓取存档信息。
    *
    * @param {string} bundleId
@@ -412,7 +435,7 @@ export class RouteState {
       lowWaterRaw: this.lowWater?.raw ?? null,
       floorTime: this.floorTime,
       floorFromBundleId: this.floorFromBundleId,
-      enumeration: this.enumeration,
+      enumeration: this.effectiveEnumeration,
       contiguous: this.contiguous,
       gaps: this.gaps,
       advanced,

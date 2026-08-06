@@ -113,6 +113,26 @@ export function crawlStateEntry({
     );
   }
 
+  // 有下界就不可能是 full。
+  //
+  // 实测踩到过：`enumeration` 是路线定义上的静态常量（标记列表恒为 `'full'`，注释
+  // 写着「整份列表从头走到尾」），而那句话只对**首次**全量成立。一旦链上有了下界，
+  // 这条线读到下界就停，于是 `20260806` 那份档案里出现了
+  //
+  //     interest.movie.collect  claimed=1336  captured=15  enumeration="full"
+  //
+  // 照字面读，下游拿它和首次全量做差会得出「用户删了 1321 条看过」——正是规范
+  // §5.4.3 那句「猜错的方向是静默地把没删的当成删了，而且事后无从发现」。
+  //
+  // 判据是现成的（`floor_time` 就在同一个对象里），所以这里直接拦死：写错了要在
+  // 写盘前炸，而不是冻进一份再也改不了的档案。
+  if (floorTime !== null && enumeration === 'full') {
+    throw new Error(
+      `crawl_state[${routeKey}]: floor_time=${floorTime} 却写 enumeration=full。` +
+        `走到下界就停的路线是 bounded——下界以下根本没看过，下游【不得】据此推断删除。`,
+    );
+  }
+
   // 核心不变量。中途暂停、被风控打断、用户放弃，一律不许推进水位线——
   // 重复是免费的，空洞是永久且不可检测的。
   if (advanced) {

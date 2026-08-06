@@ -221,6 +221,33 @@ describe('crawl_state —— 水位线不变量', () => {
     assert.equal(crawlStateEntry({ ...base, enumeration: 'full' }).enumeration, 'full');
   });
 
+  test('**有 floor_time 却写 enumeration=full —— 拒绝**', () => {
+    // 走到下界就停的路线，下界以下这次压根没看，所以是 bounded。写成 full 的后果是
+    // 下游把「这次没走到」当成「用户删了」。真实档案 20260806 里 12 条路线是这样的
+    // ——`claimed=1336 / captured=15 / enumeration="full"`。
+    //
+    // 判据就在同一个对象里，所以这里拦死：写错了要在写盘前炸，而不是冻进一份再也
+    // 改不了的档案。
+    assert.throws(
+      () => crawlStateEntry({
+        ...base,
+        floorTime: '2026-08-02T00:00:00+08:00',
+        enumeration: 'full',
+      }),
+      /floor_time.*enumeration=full|走到下界/,
+    );
+  });
+
+  test('有 floor_time 且写 bounded —— 放行', () => {
+    const e = crawlStateEntry({
+      ...base,
+      floorTime: '2026-08-02T00:00:00+08:00',
+      enumeration: 'bounded',
+    });
+    assert.equal(e.enumeration, 'bounded');
+    assert.equal(e.floor_time, '2026-08-02T00:00:00+08:00');
+  });
+
   test('时间必须带时区偏移', () => {
     assert.throws(
       () => crawlStateEntry({ ...base, highWaterTime: '2026-07-26 12:34:00' }),
