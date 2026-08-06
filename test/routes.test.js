@@ -197,3 +197,33 @@ describe('范围可裁剪', () => {
     assert.throws(() => buildRoutes({}), /username/);
   });
 });
+
+describe('做不了的路线要写清「为什么做不了」', () => {
+  test('正文内嵌图：缺的是样本，不是想法', () => {
+    // 长文正文页已经在抓，但正文里插的图不会下载——档案里留的是指向 doubanio.com
+    // 的 URL，也就是这一段要联网、且要豆瓣还在才看得见（DESIGN F-04e 要否定的东西）。
+    //
+    // 卡点是硬约束：这里每条选择器都标着「实测」。没有样本就没有锚点，只能猜，
+    // 而猜错在这个系统里是静默的（舞台剧那次：抽不到 id → 停滞检测失效 → 第 3 页
+    // 就停，`contiguous` 还报 true）。
+    const embed = UNRESOLVED_ROUTES['asset.longform_embed'];
+    assert.equal(embed.source, 'no_sample', '得能和「URL 都不知道」那种区分开');
+    assert.match(embed.reason, /样本|sample/);
+    assert.match(embed.reason, /内嵌/);
+    // 别混进 buildRoutes：那会在覆盖率报告上留一个永远为 0 的条目，看起来像 bug。
+    assert.equal(routes.find((r) => r.key === 'asset.longform_embed'), undefined);
+  });
+
+  test('两种「做不了」用不同的 source', () => {
+    // `unknown` = URL 都不知道；`no_sample` = 知道在哪但量不了锚点。
+    // 混成一个的话，「去找一份样本」和「去实地发现入口」这两件很不一样的事就分不开了。
+    const kinds = new Set(Object.values(UNRESOLVED_ROUTES).map((r) => r.source));
+    assert.deepEqual([...kinds].sort(), ['no_sample', 'unknown']);
+  });
+
+  test('每一条都得说清现状，不能只写「TODO」', () => {
+    for (const [key, r] of Object.entries(UNRESOLVED_ROUTES)) {
+      assert.ok(r.reason.length > 40, `${key} 的 reason 太短，说不清为什么做不了`);
+    }
+  });
+});
