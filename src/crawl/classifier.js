@@ -665,7 +665,51 @@ const SUBJECT_LINK =
 export function extractSubjectLinks(html) {
   if (typeof html !== 'string') return [];
   SUBJECT_LINK.lastIndex = 0;
-  return [...new Set(html.match(SUBJECT_LINK) ?? [])];
+  return [...new Set(stripUserComments(html).match(SUBJECT_LINK) ?? [])];
+}
+
+/**
+ * 用户自己写的短评正文——**扫作品链接之前必须先抹掉这一段**。
+ *
+ * 上面那段注释说「一旦哪天列表页上出现游离的作品链接，这个函数会开始多抽」。它出现
+ * 了，而且来源不是推荐区，是用户自己：
+ *
+ *     《在这世界的角落》（书 27141473）  想读  2026-07-31
+ *        短评：为什么电影条目被删了？？？https://movie.douban.com/subject/11611021/
+ *
+ * 于是读书「想读」列表第 1 页上抽出 16 条链接、只有 15 个槽位，那条**电影** URL 被
+ * 当成一个待抓的作品排进了队列。后果有两层：
+ *
+ * | | |
+ * |---|---|
+ * | 每次增量都白跑一次请求 | 那部电影确实被豆瓣删了，恒定 404 |
+ * | `coverage` 被污染 | `book.wish` 写成「声称 82 / 抓到 83 / 差 **+1**」 |
+ *
+ * 第二层更要命：`delta` 是「豆瓣是不是在藏东西」的唯一证据，而这个 +1 是我们自己
+ * 数出来的假信号。
+ *
+ * ## 为什么按 class 抹，而且必须认「独立的 comment」
+ *
+ * 短评容器各媒介不同，实测三种形态：
+ *
+ *     书            <p class="comment comment-item" data-cid="…">…</p>
+ *     电影/音乐/游戏  <span class="comment">…</span>
+ *
+ * 而 `comment-item` 在电影与音乐列表上是**条目外壳本身**（`class="item comment-item"`）
+ * ——按 `comment-item` 抹会把整个条目连同它的作品链接一起抹掉，那是静默漏抓，比多抽
+ * 严重得多。所以判据是「class 列表里有独立的 `comment` 这个词」：`item comment-item`
+ * 不含独立的 `comment`，`comment comment-item` 与 `comment` 含。
+ *
+ * 只抹标签之间的正文，标签本身留着——这个函数的产出只喂给正则扫描，不进档案。
+ *
+ * @param {string} html
+ * @returns {string} 短评正文被清空后的 HTML
+ */
+function stripUserComments(html) {
+  return html.replace(
+    /<(p|span)\b[^>]*\bclass="([^"]*)"[^>]*>[\s\S]*?<\/\1>/gi,
+    (whole, tag, cls) => (/(?:^|\s)comment(?:\s|$)/.test(cls) ? `<${tag}></${tag}>` : whole),
+  );
 }
 
 /**

@@ -68,6 +68,78 @@ describe('从列表页抽作品链接', () => {
   });
 });
 
+describe('短评正文里的作品链接不算条目', () => {
+  /**
+   * 上面那条「列表页上没有游离的作品链接」的测量是对的，但它漏了一种来源：**用户
+   * 自己在短评里贴的链接**。真实档案 `20260806` 里就有一条——读书「想读」列表第 1 页
+   * 抽出 16 条链接却只有 15 个槽位，多的那条是一部**电影**：
+   *
+   *     《在这世界的角落》（书 27141473）想读 2026-07-31
+   *        短评：为什么电影条目被删了？？？https://movie.douban.com/subject/11611021/
+   *
+   * 后果两层：每次增量白跑一次恒定 404 的请求；以及 `coverage` 被污染成
+   * 「声称 82 / 抓到 83 / 差 +1」——而 `delta` 是「豆瓣是不是在藏东西」的唯一证据。
+   */
+
+  // 下面几段都是从真实档案的 WARC 里原样取出来的，不是手写的近似。
+  const BOOK_ITEM = `
+<li class="subject-item">
+  <div class="pic">
+    <a class="nbg" href="https://book.douban.com/subject/27141473/"><img src="x"></a>
+  </div>
+  <div class="info">
+    <h2><a href="https://book.douban.com/subject/27141473/" title="在这世界的角落">在这世界的角落</a></h2>
+    <div class="short-note">
+      <div><span class="date">2026-07-31 想读</span></div>
+      <p class="comment comment-item" data-cid="4904793097">
+        为什么电影条目被删了？？？https://movie.douban.com/subject/11611021/
+      </p>
+    </div>
+  </div>
+</li>`;
+
+  test('书：短评里的电影链接不进队列，条目本身照抽', () => {
+    assert.deepEqual(extractSubjectLinks(BOOK_ITEM), [
+      'https://book.douban.com/subject/27141473/',
+    ]);
+  });
+
+  test('电影/音乐：短评在 <span class="comment"> 里', () => {
+    const html = `
+      <div class="item comment-item" data-cid="1">
+        <div class="pic"><a href="https://movie.douban.com/subject/1292052/" class="nbg"><img></a></div>
+        <span class="comment">跟 https://movie.douban.com/subject/999999/ 是同一个班底</span>
+      </div>`;
+    assert.deepEqual(extractSubjectLinks(html), ['https://movie.douban.com/subject/1292052/']);
+  });
+
+  test('**不许把 `item comment-item` 当成短评抹掉**', () => {
+    // 这是这个改动唯一危险的失败方向。电影与音乐列表上，`comment-item` 是**条目外壳
+    // 本身**（`class="item comment-item"`）——按 `comment-item` 抹会把整个条目连同它的
+    // 作品链接一起抹掉。那是静默漏抓，比多抽一条严重得多：多抽会在 coverage 上留下
+    // 正的 delta，漏抓什么痕迹都不留。
+    const html = `
+      <div class="item comment-item" data-cid="1">
+        <a href="https://movie.douban.com/subject/1292052/" class="nbg"><img></a>
+      </div>
+      <div class="item comment-item" data-cid="2">
+        <a href="https://movie.douban.com/subject/1291546/" class="nbg"><img></a>
+      </div>`;
+    assert.equal(extractSubjectLinks(html).length, 2);
+  });
+
+  test('抹的是正文，不是整页——短评后面的条目照抽', () => {
+    const html = `${BOOK_ITEM}
+      <li class="subject-item">
+        <a class="nbg" href="https://book.douban.com/subject/1084336/"><img></a>
+      </li>`;
+    assert.deepEqual(extractSubjectLinks(html).sort(), [
+      'https://book.douban.com/subject/1084336/',
+      'https://book.douban.com/subject/27141473/',
+    ]);
+  });
+});
+
 describe('路线定义', () => {
   const routes = buildRoutes({ username: 'x', includeCatalog: true });
   const item = routes.find((r) => r.key === 'interest.item');
