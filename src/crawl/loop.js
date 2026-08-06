@@ -33,6 +33,7 @@ import {
   extractClaimedCount,
   extractSubjectLinks,
   extractCoverImage,
+  extractStatusPhotos,
 } from './classifier.js';
 import { SessionError } from './session.js';
 import { TransportError } from './errors.js';
@@ -575,6 +576,7 @@ export class CrawlLoop {
       this._enqueueNextPage(item, route, profile, res, written.captureId, items);
       this._enqueueSubjects(item, res, written.captureId);
       this._enqueueCover(item, res, written.captureId);
+      this._enqueueStatusPhotos(item, res, written.captureId);
 
       // **单页路线抓到那一页就是走完了，当场标掉。**
       //
@@ -799,6 +801,74 @@ export class CrawlLoop {
       referer: item.url,
     });
     if (ok) this._emit({ type: 'cover_enqueued', url, from: item.url });
+  }
+
+  /**
+   * 从广播页派生**本人上传的**附图。
+   *
+   * ## 为什么这条比封面重要得多
+   *
+   * 封面是目录数据，豆瓣还在就能重抓。这些是本人拍的、传的，而广播「发布后不可
+   * 编辑、可静默删除」——图跟着广播一起没，且删除不留痕迹。所以它归 `assets-*`，
+   * 和 `catalog-*` 那种「可以整批 rm」的东西分开放（规范 §6.6.2：判据是谁上传的）。
+   *
+   * ## 主人是谁必须来自 session，不能来自路线配置
+   *
+   * 转发别人的广播，会把对方的附图一并渲染在自己的时间线上（实测 175 张广播页上
+   * 149 个附图条目，**30 个属于别人**）。把它们存进 `assets-*` 会让「这一层里都是
+   * 本人不可替代的东西」这条判断失效，也违背项目对第三方内容的立场。
+   *
+   * 判据取自 `session.account.userId`——preflight 已经确认过它是谁，且
+   * `missing_user_id` 会让整场抓取停下。拿不到就**一张都不抽**：宁可这一轮没有图，
+   * 也不能在不知道主人是谁的情况下往那一层里写东西。
+   *
+   * @param {object} item      刚抓完的那张广播页
+   * @param {object} res
+   * @param {string} captureId
+   */
+  _enqueueStatusPhotos(item, res, captureId) {
+    if (item.routeKey !== 'broadcast.timeline') return;
+    const target = this._routes.get('asset.status_photo');
+    if (!target) return;
+
+    const ownerUserId = this._session?.account?.userId;
+    if (!ownerUserId) {
+      this._emit({ type: 'photos_skipped_no_owner', routeKey: item.routeKey, url: item.url });
+      return;
+    }
+
+    const { urls, unresolved } = extractStatusPhotos(res.bodyText, { ownerUserId });
+
+    // 认出了附图条目却取不到原件 URL——这只可能是豆瓣改了结构。静默跳过等于宣布
+    // 「这一页没有图」，而那是不可检测的丢失：几年后打开档案才发现少了。
+    if (unresolved > 0) {
+      this._emit({
+        type: 'photos_unresolved',
+        routeKey: item.routeKey,
+        url: item.url,
+        count: unresolved,
+      });
+    }
+
+    let enqueued = 0;
+    for (const url of urls) {
+      const ok = this._frontier.enqueue({
+        url,
+        urlKey: urlKey(url),
+        routeKey: 'asset.status_photo',
+        intent: target.intent,
+        enqueuedBy: captureId,
+        ordered: false,
+        priority: target.priority,
+        // 与封面同理：它的门就是它的来源——这张图只可能从一页已经抓到的广播里抽出来。
+        gatedBy: null,
+        referer: item.url,
+      });
+      if (ok) enqueued += 1;
+    }
+    if (enqueued > 0) {
+      this._emit({ type: 'photos_enqueued', count: enqueued, from: item.url });
+    }
   }
 
   /**

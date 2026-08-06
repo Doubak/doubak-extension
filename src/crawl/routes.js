@@ -176,6 +176,35 @@ export function buildRoutes({
     note: '发布后不可编辑、可静默删除、最时间敏感。每页条数不固定（实测 20/21/22）',
   });
 
+  // ── 广播里用户自己上传的图
+  //
+  // **这是整份档案里最不可替代的一批字节。** 广播本身就「发布后不可编辑、可静默
+  // 删除」，图跟着广播一起消失，而删除不留任何痕迹。作品封面丢了还能重抓（豆瓣
+  // 还在就有），这些丢了就是丢了。
+  //
+  // 归 `assets` 而不是 `catalog`：判据是**谁上传的**（规范 §6.6.2）。`catalog-*`
+  // 的存在意义是「可以整批 rm」，把本人的照片放进去等于让那条操作变得危险。
+  //
+  // URL 从已经抓到的广播页里派生，不需要额外的列表页——图藏在一段 `<script>` 的
+  // JSON 里（见 classifier 的 `extractStatusPhotos`），且**只取 data-uid 等于本人的
+  // 那些**：转发别人的广播会把对方的附图一并渲染在自己的时间线上，实测 149 个附图
+  // 条目里有 30 个是别人的。
+  routes.push({
+    key: 'asset.status_photo',
+    intent: 'asset.image.user_upload',
+    kind: 'assets',
+    surface: 'asset',
+    priority: PRIORITY.IMAGES,
+    source: 'archive',
+    // 图是从广播页派生的，广播走到哪儿就派生到哪儿——本身没有「整份枚举」的概念。
+    // 保守起见标 bounded：下游不得据此推断某张图被删了。
+    enumeration: 'bounded',
+    safetyNet: 'contiguity',
+    // 叶子：一张图取不到不该连累其余的。
+    ordered: false,
+    note: '广播附图中本人上传的原件；可静默删除且无法重抓，优先级仅次于广播本身',
+  });
+
   // ── 标记列表
   for (const medium of mediums) {
     const build = INTEREST_URLS[medium];

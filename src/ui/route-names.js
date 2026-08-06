@@ -53,6 +53,9 @@ const FIXED = {
   'profile.overview': '个人主页',
   'interest.item': '作品详情页',
   'asset.subject_cover': '作品封面图',
+  // 说「自己上传的」而不是「广播图片」：这一行的数字与旁边那行封面图的数字，
+  // 含义完全不同——封面丢了能重抓，这些丢了就没了。
+  'asset.status_photo': '广播里自己上传的图',
   'diary.list': '日记',
   'review.list': '影评 / 书评',
   'photo.album_list': '相册',

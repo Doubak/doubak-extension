@@ -768,6 +768,156 @@ export function extractCoverImage(html) {
 }
 
 /**
+ * 广播里**用户自己上传**的图片。
+ *
+ * ## 为什么这一条和封面完全不是一回事
+ *
+ * 封面是目录数据：豆瓣还在就能重抓，归 `catalog-*`，一条 `rm` 就能整批丢掉。
+ * 这里这些是**用户自己拍的、自己传的**，删了就没了，归 `assets-*`，属于 CLAUDE.md
+ * 里说的「两样神圣的东西」那一类。判据是**谁上传的**，不是长什么样（规范 §6.6.2）。
+ *
+ * 而广播本身「发布后不可编辑、可静默删除」——图跟着广播一起消失，且删除不留痕迹。
+ * 所以这是整份档案里最不可替代的一批字节。
+ *
+ * ## 它们不在 `<img src>` 里
+ *
+ * 图由前端 JS 渲染，源数据是一段 `<script>` 里的 JSON 字面量：
+ *
+ *     var photos = [{"image": {"large": {"url": "…/view/status/l/public/x.jpg",
+ *                                        "width": 2146, "height": 722},
+ *                              "normal": {"url": "…/view/status/medium/public/x.jpg", …},
+ *                              "is_animated": false}}, …];
+ *
+ * 所以扫 `<img>` 一张都拿不到——这正是 `loop.js` 里那句「需要另一个抽取器」。
+ *
+ * ## **只要本人的**，转发进来的一概不要
+ *
+ * 这是这个函数里最要紧的一条。实测 175 张广播页上共 149 个附图条目，其中
+ * **30 个属于别人**——转发别人的广播时，那条广播连同附图一起渲染在自己的时间线上。
+ *
+ * 判据是外层 `status-wrapper` 上的 `data-uid`。转发**不是**嵌套结构：豆瓣把原作者的
+ * 广播整个渲染成一个顶层 wrapper，`data-uid` 就是原作者，旁边加一个
+ * `<span class="reshared_by">…转发</span>`。所以对着 wrapper 比 uid 是准的。
+ *
+ * 为什么必须拦住：这些图要进 `assets-*`，而那是「删了就没了、永不丢弃」的那一层。
+ * 把别人的照片混进去，既让「assets 里都是本人不可替代的东西」这条判断失效，也和
+ * 项目对第三方内容的立场相悖（CLAUDE.md：默认不发布他人内容）。
+ *
+ * ## 取原件：`raw` 优先，没有才退 `large`
+ *
+ * 三种附图形态实测同时存在于同一份档案：
+ *
+ * | 形态 | 出处 | 原件在哪 | 实测（本人的） |
+ * |---|---|---|---|
+ * | `var photos` JSON，`image.large` | 广播直接附图 | `large`（无 `raw` 字段） | 111 |
+ * | `var photos` JSON，`image.raw` 为空串 | 讨论/小组话题附图 | `large`（`raw.url === ""`） | 36 |
+ * | `data-raw-src` 属性 | 老版单图广播 | `data-raw-src` | 2 |
+ *
+ * `normal` / `medium` / `ismall` / `small` 都是同一张图的缩略版，一律不取——存下来
+ * 只是把每张图存两遍，而缩略版没有任何原件没有的信息。也**不拿缩略版顶替原件**：
+ * 宁可如实报缺，也不静默地把一张缩水的图当成原件存进档案，事后无从分辨。
+ *
+ * URL 原样保留，包括 `?imageView2/...` 这类尺寸参数——CLAUDE.md：抓取时不做归一化。
+ *
+ * @param {string} html
+ * @param {object} opts
+ * @param {string} opts.ownerUserId  档案主人的数字 ID（manifest 里的 `account.user_id`）
+ * @returns {{urls: string[], skippedOthers: number, unresolved: number}}
+ *   - `skippedOthers`：转发进来的、属于别人的附图个数。正常值不为 0。
+ *   - `unresolved`：认出了附图条目却取不到原件 URL 的个数。**非 0 说明豆瓣改了结构**，
+ *     必须报出来——静默返回空数组等于宣布「这一页没有图」，那是不可检测的丢失。
+ */
+export function extractStatusPhotos(html, { ownerUserId }) {
+  if (typeof html !== 'string') return { urls: [], skippedOthers: 0, unresolved: 0 };
+  if (!ownerUserId) throw new Error('extractStatusPhotos 需要 ownerUserId，否则会把别人的图也存下来');
+
+  /** @type {Set<string>} */
+  const urls = new Set();
+  let skippedOthers = 0;
+  let unresolved = 0;
+
+  for (const { uid, html: chunk } of statusWrappers(html)) {
+    const mine = uid === String(ownerUserId);
+    const before = urls.size;
+
+    // 新版：一段 `<script>` 里的 JSON 字面量。只截到 `];` 为止——整段 script 后面
+    // 还有别的语句，连着一起喂给 JSON.parse 必然失败，而那会把「有图但解析不了」
+    // 变成「没有图」。
+    for (const m of chunk.matchAll(/var\s+photos\s*=\s*(\[[\s\S]*?\])\s*;/g)) {
+      /** @type {any[]} */
+      let list;
+      try {
+        list = JSON.parse(m[1]);
+      } catch {
+        unresolved += 1;
+        continue;
+      }
+      if (!Array.isArray(list)) continue;
+      for (const entry of list) {
+        if (!mine) { skippedOthers += 1; continue; }
+        const raw = entry?.image?.raw?.url;
+        const large = entry?.image?.large?.url;
+        const pick = typeof raw === 'string' && raw ? raw : large;
+        if (typeof pick === 'string' && isDoubanioImage(pick)) urls.add(pick);
+        else unresolved += 1;
+      }
+    }
+
+    // 老版：原件挂在 `data-raw-src` 上。旁边的 `data-median-src`（`/l/`）与
+    // `data-small-src`（`/ismall/`）是缩略版，不要。
+    for (const m of chunk.matchAll(/data-raw-src="(https:\/\/[^"]+)"/g)) {
+      if (!mine) { skippedOthers += 1; continue; }
+      if (isDoubanioImage(m[1])) urls.add(m[1]);
+      else unresolved += 1;
+    }
+
+    // ── 独立的第二个信号：**这条广播有没有附图容器**
+    //
+    // 上面两条抽取路径都靠具体写法（`var photos =`、`data-raw-src=`）。豆瓣哪天换了
+    // 变量名或改成别的渲染方式，两条都会**一声不吭地返回空**——而「这一页没有图」
+    // 和「这一页的图我们不认识了」在数据上完全一样，事后无从分辨。
+    //
+    // 容器的 class 是另一套标记，不随 JSON 的写法变。实测 175 张广播页上，带容器的
+    // wrapper 与抽得到图的 wrapper **都是 33 个，一一对应**，没有一个只有其一。所以
+    // 只要容器在而一张都没抽到，就是结构变了，必须报出来。
+    if (mine && urls.size === before && PHOTO_CONTAINER.test(chunk)) unresolved += 1;
+  }
+
+  return { urls: [...urls], skippedOthers, unresolved };
+}
+
+/**
+ * 广播附图容器的 class。两种形态各一个：
+ *
+ *     新版  <div class="pics-wrapper">            里面是 `var photos` 那段 script
+ *     老版  <div class="attachments-saying attachments-pic">   里面是 data-raw-src
+ */
+const PHOTO_CONTAINER = /pics-wrapper|attachments-pic/;
+
+/**
+ * 把广播页切成一条条广播，并带上它的 `data-uid`。
+ *
+ * 切片而不是整页扫，是为了让「这张图是谁的」有个可靠的判据——整页扫的话，本人的图
+ * 与转发来的图混在一起，没有任何办法分开。
+ *
+ * @param {string} html
+ * @returns {Array<{uid: string, html: string}>}
+ */
+function statusWrappers(html) {
+  const marks = [...html.matchAll(/<div class="new-status status-wrapper[^"]*"[^>]*>/g)];
+  return marks.map((m, i) => ({
+    uid: /data-uid="(\d+)"/.exec(m[0])?.[1] ?? '',
+    html: html.slice(m.index, i + 1 < marks.length ? marks[i + 1].index : undefined),
+  }));
+}
+
+/** @param {string} url 是不是一个 doubanio 上的图片 URL（尺寸参数可以带着） */
+function isDoubanioImage(url) {
+  if (!/^https:\/\/[a-z0-9.]*doubanio\.com\//i.test(url)) return false;
+  return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(url);
+}
+
+/**
  * 「这个作品没有海报」时豆瓣塞进来的那张图。
  *
  * 走 `/cuphead/`（新版界面的静态资源目录），所以 `isCatalogImage` 本来就会挡掉它
