@@ -1916,3 +1916,31 @@ describe('中止之后的档案能删 —— 这是中止的全部意义', () =>
     assert.equal(/^这份正在抓，先暂停或等它结束$/.test(reason), false);
   });
 });
+
+describe('「重抓作品详情页」排进来的条目没有 parent', () => {
+  /**
+   * 那些 URL 来自**旧档案的索引**，不是从这一次的任何一张页面上派生出来的。所以
+   * 它们的 `parent_capture_id` 事实上就是 null。
+   *
+   * 而 loop 的兜底是 `item.enqueuedBy ?? this._lastCapture.get(routeKey) ?? null`
+   * ——不显式传的话，parent 会落到**同路线上刚抓完的那一条**，也就是另一个作品详情页。
+   *
+   * 实测：一份真实档案里 2925 条作品详情页，**2921 条的 parent 指向另一条作品详情页**，
+   * 串成一条毫无意义的链。而 parent 存在的理由是「整张抓取图可以离线重建，连续性证明
+   * 因而可被第三方独立验证」（规范 §6.2）——**一条伪造的边比没有边更糟**：没有边只是
+   * 缺信息，伪造的边会让重建出来的图是错的。
+   */
+  test('parent 必须是 null，不许串成链', async () => {
+    const src = readFileSync(new URL('../src/crawl/runner.js', import.meta.url), 'utf-8');
+    const block = src.slice(src.indexOf('if (refreshSubjectUrls?.length)'));
+    assert.match(block.slice(0, 1400), /enqueuedBy: null/);
+  });
+
+  test('**翻页仍然要走兜底** —— 第 2 页确实是第 1 页派生的', async () => {
+    // 修法不能是「一律不兜底」：那会把翻页的 parent 也抹成 null，而那条边是真的。
+    // 判据是 `enqueuedBy === null`（显式说没有）与 undefined（没传）的区别。
+    const src = readFileSync(new URL('../src/crawl/loop.js', import.meta.url), 'utf-8');
+    assert.match(src, /item\.enqueuedBy === null/);
+    assert.match(src, /this\._lastCapture\.get\(item\.routeKey\)/);
+  });
+});

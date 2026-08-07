@@ -545,7 +545,19 @@ export class CrawlLoop {
         contentType,
         body: res.body,
         kind: route.kind ?? 'data',
-        parentCaptureId: item.enqueuedBy ?? this._lastCapture.get(item.routeKey) ?? null,
+        // **`enqueuedBy` 为 null 与「没传」是两件事。**
+        //
+        // 没传（undefined）→ 用同路线上一次捕获兜底，那对翻页是对的：第 2 页确实是
+        // 第 1 页派生出来的。
+        // 显式传 null → 这条 URL 不是从任何一次捕获里派生的（比如「重抓作品详情页」
+        // 直接从旧索引排进来的那些），此时兜底会**伪造**一条边。
+        //
+        // 实测：一份档案里 2925 条作品详情页有 2921 条的 parent 指向另一条作品详情页，
+        // 串成一条毫无意义的链。而 parent 的用途是让抓取图可以离线重建并被第三方验证
+        // （规范 §6.2）——伪造的边比没有边更糟。
+        parentCaptureId: item.enqueuedBy === null
+          ? null
+          : (item.enqueuedBy ?? this._lastCapture.get(item.routeKey) ?? null),
         cursor: item.cursor ?? null,
         // null 与 0 是两件事：null 是「这条路线没有条目概念」（个人主页），
         // 0 是「数过了，是空的」——而空页正是翻页终点的正常形态。

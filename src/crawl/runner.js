@@ -294,6 +294,18 @@ export class CrawlRunner {
           urlKey: urlKey(url),
           routeKey: 'interest.item',
           intent: target?.intent ?? 'interest.item',
+          // **必须显式写 null。** 不传的话 loop 的兜底是
+          // `item.enqueuedBy ?? this._lastCapture.get(routeKey) ?? null`——于是
+          // parent 会落到**同路线上刚抓完的那一条**，也就是另一个作品详情页。
+          //
+          // 实测后果：一份真实档案里 2925 条作品详情页，其中 2921 条的 parent 指向
+          // 另一条作品详情页，串成一条毫无意义的链。而 parent 存在的理由是「整张抓取
+          // 图可以离线重建、连续性证明因而可被第三方独立验证」（规范 §6.2）——一条
+          // 伪造的边比没有边更糟：没有边只是缺信息，伪造的边会让重建出来的图是错的。
+          //
+          // 这些 URL 本来就不是从任何一次捕获里派生出来的（它们来自旧档案的索引），
+          // 所以 null 才是事实。
+          enqueuedBy: null,
           ordered: false,
           priority: target?.priority ?? 90,
           gatedBy: bypassGates ? null : (target?.requires?.[0] ?? null),
