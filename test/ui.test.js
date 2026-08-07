@@ -1414,3 +1414,30 @@ describe('暂停状态下也要能重试', () => {
     }
   });
 });
+
+describe('「判不出来」不该显示成「被限制」', () => {
+  /**
+   * 规范的 verdict 是封闭词表，没有「判不出来」这个取值。抓取时判不出来的响应必须
+   * 留证、又绝不能标成 ok，于是写入时用了 `cls.verdict ?? 'blocked'`——真相退到了
+   * note 里。保守方向是对的，但界面照抄 verdict 就把两件很不一样的事说成了同一件：
+   *
+   *   被限制    豆瓣主动拒绝了 → 该等一等，再抓可能撞限流
+   *   判不出来  页面拿到了，只是我们不认识 → 该校准选择器，重抓没用
+   *
+   * 实测撞到过：一篇 /topic/ 日记因为没有对应的框架标志判不出来，界面上写着「被限制」，
+   * 而用户按提示去重试——重试当然还是一样的结果。
+   */
+  test('note 说了判不出来，就显示判不出来', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /function verdictName\(e\)/);
+    assert.match(js, /e\?\.note\?\.startsWith\('判不出来'\)/);
+  });
+
+  test('**三处显示判定的地方都要走它**', async () => {
+    // 漏掉任何一处，同一条捕获在档案页与详情页会显示成两种不同的东西。
+    const js = await readRepoFile('src/ui/panel.js');
+    const direct = [...js.matchAll(/VERDICT_NAMES\[(?:e|entry)\.verdict\]/g)];
+    assert.equal(direct.length, 0, `还有 ${direct.length} 处直接查表，没走 verdictName`);
+    assert.ok((js.match(/verdictName\(/g) ?? []).length >= 4, '至少三处显示 + 一处定义');
+  });
+});

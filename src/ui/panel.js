@@ -153,6 +153,30 @@ const VERDICT_NAMES = {
   soft404: '页面不存在',
 };
 
+/**
+ * 一条捕获该显示成什么。
+ *
+ * ## 为什么不能直接查 `VERDICT_NAMES[verdict]`
+ *
+ * 规范的 `verdict` 是封闭词表，里面**没有「判不出来」这个取值**。而抓取时判不出来
+ * 的响应必须留证、又绝不能标成 ok，于是写入时用了 `cls.verdict ?? 'blocked'`
+ * （见 loop.js）——真相退到了 `note` 里，写着「判不出来：一个内容区块都没有…」。
+ *
+ * 保守方向是对的，但**界面照抄 verdict 就把两件很不一样的事说成了同一件**：
+ *
+ *   被限制    豆瓣主动拒绝了 → 该等一等，再抓可能撞限流
+ *   判不出来  页面拿到了，只是我们不认识 → 多半是选择器该校准了，重抓没用
+ *
+ * 用户看到「被限制」会去等、去重试；而真正该做的是改抽取器。实测撞到过：一篇
+ * `/topic/` 日记因为没有对应的框架标志判不出来，界面上却写着「被限制」。
+ *
+ * @param {{verdict?: string, note?: string}} e
+ */
+function verdictName(e) {
+  if (e?.note?.startsWith('判不出来')) return '判不出来';
+  return VERDICT_NAMES[e?.verdict] ?? e?.verdict ?? '判不出来';
+}
+
 /** @param {number} n */
 function bytes(n) {
   if (n < 1024) return `${n} B`;
@@ -1821,7 +1845,7 @@ function renderVanished() {
     left.textContent = captureTitle(e, routeName);
     const right = document.createElement('span');
     right.className = 'v warn-text';
-    right.textContent = VERDICT_NAMES[e.verdict] ?? (e.verdict ?? '判不出来');
+    right.textContent = verdictName(e);
     row.append(left, right);
 
     const url = document.createElement('div');
@@ -1888,7 +1912,7 @@ function renderCaptures() {
     // 真正要看见的那几行。
     right.textContent = e.verdict === 'ok'
       ? bytes(e.length ?? 0)
-      : `${VERDICT_NAMES[e.verdict] ?? e.verdict} · ${bytes(e.length ?? 0)}`;
+      : `${verdictName(e)} · ${bytes(e.length ?? 0)}`;
     if (e.verdict !== 'ok') right.classList.add('warn-text');
     main.append(left, right);
 
@@ -1929,7 +1953,7 @@ async function showCapture(entry) {
         [
           ['URL', entry.url],
           ...(entry.final_url ? [['跟随跳转后', entry.final_url]] : []),
-          ['判定', VERDICT_NAMES[entry.verdict] ?? entry.verdict],
+          ['判定', verdictName(entry)],
           ['抓取原因', entry.intent],
           ['保真度', entry.capture_fidelity],
           ['抓取时间', entry.observed_at],
