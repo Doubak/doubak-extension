@@ -235,6 +235,52 @@ describe('正文页 —— 列表页上的是截断摘要，全文只在这里',
   });
 });
 
+describe('日记有不止一种 URL 形状', () => {
+  /**
+   * 实测一张真实的日记列表页上三条并存：
+   *
+   *     /topic/496284296/    2026-08-07 16:25:36
+   *     /note/872015292/     2025-04-14 18:47:50
+   *     /note/868128497/     2024-11-27 05:41:10
+   *
+   * **不是豆瓣改版**——两种形状同时存在，发日记时用哪个编辑器就得到哪一种。
+   * 错在写选择器时手上只有两篇、恰好都是 `/note/`，于是从 n=2 推出了一个封闭集合。
+   *
+   * 只认一种的后果是**整条被丢掉**：那条日记有时间没有 id，`extractItemPairs`
+   * 连带把它的时间也丢了，于是水位线不推进、正文页不派生——而列表页上明明有三条。
+   */
+  const listPage = (hrefs) => `<html><head><title>我的日记</title></head><body>
+    <li class="nav-user-account"><a href="/accounts/logout">退出</a></li>
+    <h1>我的日记</h1><div class="note-list">${hrefs.map((h, i) => `
+      <div class="note-item"><div class="note-header">
+        <h3 class="note-title"><a title="t" href="${h}">t</a></h3>
+        <div class="note-info"><span class="note-date">2026-08-0${i + 1} 10:00:00</span></div>
+      </div></div>`).join('')}</div></body></html>`;
+
+  test('**两种形状都要抽到**', () => {
+    const html = listPage([
+      'https://www.douban.com/topic/496284296/?_spm_id=ODIx',
+      'https://www.douban.com/note/872015292/',
+    ]);
+    const p = profileForRoute('note.list');
+    const r = extractItemPairs(html, p);
+    assert.deepEqual(r.ids, ['496284296', '872015292']);
+    assert.equal(r.idless, 0, '有一条抽不到 id —— 它的时间会跟着一起丢');
+    assert.deepEqual(extractDetailLinks(html, p), [
+      'https://www.douban.com/topic/496284296/',
+      'https://www.douban.com/note/872015292/',
+    ]);
+  });
+
+  test('派生出的 URL 不带查询串', () => {
+    // 列表页上的链接挂着 `?_spm_id=…` 追踪参数。带着它去抓会让 url_key 每次都不同，
+    // 跨档案去重随之失效。
+    const html = listPage(['https://www.douban.com/topic/496284296/?_spm_id=ODIx']);
+    assert.deepEqual(extractDetailLinks(html, profileForRoute('note.list')),
+      ['https://www.douban.com/topic/496284296/']);
+  });
+});
+
 describe('从列表页派生正文页', () => {
   test('**URL 取页面上的 href，不拿 id 去拼**', () => {
     // 拼出来的是我们的猜测，页面上的是豆瓣的事实。今天两者恰好一样，但评论那条

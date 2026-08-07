@@ -574,11 +574,27 @@ export const ROUTE_PROFILES = {
     urlAnchor: /\/people\/[^/]+\/notes/,
     frameAnchors: [/<h1>\s*我的日记\s*<\/h1>/, /class="note-list"/],
     itemAnchor: /class="note-item"/,
-    idAnchor: /class="note-title"[^>]*>\s*<a[^>]*href="https:\/\/www\.douban\.com\/note\/(\d+)\//g,
+    // **日记有不止一种 URL 形状，两种都要认。**
+    //
+    //     /note/<id>/     旧的那种
+    //     /topic/<id>/    另一种，配图走 `view/group_topic/` 命名空间
+    //
+    // **这不是豆瓣改版**——两种形状同时存在，发日记时用哪个编辑器就得到哪一种。
+    // 错在这里：写这条选择器时手上只有两篇日记，恰好都是 `/note/`，于是从 n=2
+    // 推出了一个封闭的形状集合。
+    //
+    // 这是这个项目最常犯的一种错，之前已经撞过两次：游戏的评分与短评走完全不同的
+    // markup（用一套选择器量出「0% 有评分」，真值 51%）；广播附图有三种形态并存
+    // （只认一种就漏掉另外两种）。**样本小的时候，"我见过的就是全部" 是最贵的假设。**
+    //
+    // 好在这次它是响着坏的：只认 `/note/` 时那条日记有时间、没有 id，于是
+    // `extractItemPairs` 把它整条丢掉——水位线不推进、正文页不派生——而 `idless`
+    // 因此为 1，`extractor_stale` 告警响了。那道网就是为这一刻建的。
+    idAnchor: /class="note-title"[^>]*>\s*<a[^>]*href="https:\/\/www\.douban\.com\/(?:note|topic)\/(\d+)\//g,
     timeAnchor: /class="note-date">\s*([\d-]{10}[^<]*)/g,
     claimedCount: null,
     // 正文页的 URL **原样取自页面**，不拿 id 拼。见 `extractDetailLinks`。
-    detailLink: /class="note-title"[^>]*>\s*<a[^>]*href="(https:\/\/[^"]*\/note\/\d+\/?)"/g,
+    detailLink: /class="note-title"[^>]*>\s*<a[^>]*href="(https:\/\/[^"]*\/(?:note|topic)\/\d+\/?)[^"]*"/g,
   },
   /**
    * 评论（影评/书评/游戏评论）列表 `www.douban.com/people/<user>/reviews`。
@@ -618,7 +634,17 @@ export const ROUTE_PROFILES = {
    * 要求全中会把好页面判成故障；这三个标志封锁页与错误页一个都不会有，够用了。
    */
   'note.item': {
-    urlAnchor: /\/note\/\d+/,
+    urlAnchor: /\/(?:note|topic)\/\d+/,
+    /**
+     * `/topic/<id>/` 那种日记的页面结构**还没量过**——那条新日记从来没被抓到
+     * （id 抽不出来，所以没进队列）。这里先不为它加标志：
+     *
+     * 认不出来时判定是 null（「判不出来」），条目记为失败，而**页面本身照样原样
+     * 存进档案**（loop.js 的写入顺序保证这一点）。那正是想要的失败方向——
+     * 下一次抓取就有样本可量，改好抽取器重跑即可，不必重抓。
+     *
+     * 反过来，为一种没见过的页面先编几个标志出来，才是这个项目一贯要避免的事。
+     */
     anyFrameAnchors: [/class="note-container"/, /id="note-\d+"/, /class="note-header/],
     itemAnchor: undefined,
     claimedCount: null,
