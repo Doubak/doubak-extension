@@ -793,3 +793,35 @@ describe('容器在、抽不出来 —— 改版的第一个征兆', () => {
     assert.ok(!stale.some((e) => e.missing === 'ids'), 'id 抽得到，不该报成 ids');
   });
 });
+
+describe('判不出来写进档案的是 unknown，不是 blocked', () => {
+  /**
+   * bundle/1.2 之前词表里没有「判不出来」，只能退而写 blocked——于是两件处置正好
+   * 相反的事被合并了：blocked 该等一等再抓，unknown 重抓一百次也一样。
+   *
+   * 实测代价：一篇日记因为没有对应的框架标志判不出来，界面照 blocked 显示成
+   * 「被限制」，用户于是去重试——白费。
+   */
+  test('**verdict 是 unknown，且带着原因**', async () => {
+    // 页面框架标志一个都不中 → 判不出来。
+    const bad = `<html><head><title>我的动态</title></head><body>${NAV}
+      <div class="stream-items"></div></body></html>`;
+    const { loop, store, writer } = await harness([{ body: bad }]);
+    await loop.run({ maxCaptures: 2 });
+
+    const idx = await readIndex(store, writer.bundleId);
+    assert.ok(idx.length >= 1);
+    assert.equal(idx[0].verdict, 'unknown', '写成 blocked 会把「我们不认识」说成「豆瓣拒绝了」');
+    assert.equal(idx[0].verdict_reason, 'frame_anchors_missing');
+    // note 仍然留着人能读的那一份——旧读者只有它。
+    assert.match(idx[0].note, /判不出来/);
+  });
+
+  test('判得出来时不写 verdict_reason —— 那个字段只属于 unknown', async () => {
+    const { loop, store, writer } = await harness([{ body: broadcastPage(3, 0) }]);
+    await loop.run({ maxCaptures: 2 });
+    const idx = await readIndex(store, writer.bundleId);
+    assert.equal(idx[0].verdict, 'ok');
+    assert.equal(idx[0].verdict_reason, undefined);
+  });
+});
