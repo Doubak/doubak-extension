@@ -6,7 +6,7 @@
 // verdict 之后，扩展会继续把它当非法值拒掉，且没有任何东西会提醒你。
 
 /** 本扩展按哪一版规范写入。 */
-export const SPEC_VERSION = "bundle/1.1";
+export const SPEC_VERSION = "bundle/1.2";
 
 /**
  * 生成来源的摘要：common.schema.json、index-entry.schema.json、crawl-state-entry.schema.json 的内容哈希。
@@ -15,7 +15,7 @@ export const SPEC_VERSION = "bundle/1.1";
  * 读取的文件，所以规范仓库改文档或加测试用例不会让它变，只有真正影响生成
  * 结果的改动才会。
  */
-export const SPEC_SOURCE_DIGEST = "b459575d68ccb24bd44ab9ec1d67de0e132796e02de1167087e26b181de1f5c2";
+export const SPEC_SOURCE_DIGEST = "e89748fd36d0c7d606e508769043de6ec421a4274adaa7e0017612f0a94b477d";
 
 /**
  * 响应可信度判定。封闭词表——安全相关字段，拼错必须失败。
@@ -28,6 +28,7 @@ export const VERDICTS = Object.freeze([
   "login",
   "gone",
   "soft404",
+  "unknown",
 ]);
 
 /** 抓取面。同一条内容可能在两面各存一份，不标注会被误认为两次修订。 */

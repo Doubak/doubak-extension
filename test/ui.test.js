@@ -1441,3 +1441,19 @@ describe('「判不出来」不该显示成「被限制」', () => {
     assert.ok((js.match(/verdictName\(/g) ?? []).length >= 4, '至少三处显示 + 一处定义');
   });
 });
+
+describe('判不出来时要说清该怎么办', () => {
+  test('原因文案说的是「该怎么办」，不是「哪里不对」', async () => {
+    // 用户看到判定之后要做决定，而决定只有三种：等一等重抓、改抽取器、先看一眼。
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /frame_anchors_missing: '页面结构变了，重抓没用'/);
+    assert.match(js, /empty_body: '空响应，可以重抓'/);
+  });
+
+  test('**旧档案也要认** —— 它们只有 note，没有 verdict_reason', async () => {
+    // bundle/1.2 之前判不出来的响应写成 blocked，真相在 note 里。档案是冻结的，
+    // 改词表救不回它们，所以两条路都要走。
+    const js = await readRepoFile('src/ui/panel.js');
+    assert.match(js, /e\?\.verdict === 'unknown' \|\| e\?\.note\?\.startsWith\('判不出来'\)/);
+  });
+});

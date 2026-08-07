@@ -720,3 +720,60 @@ describe('标记日期：书的那一栏后面还跟着状态词', () => {
     assert.deepEqual(extractItemTimes('<span class="pub">2024-02-18</span>', list), []);
   });
 });
+
+describe('判不出来时要说清是哪一种', () => {
+  /**
+   * 一个光秃秃的 `unknown` 只是把问题换了个说法。真正有用的是**这次判不出来该怎么办**，
+   * 而那由原因决定（规范 §6.3.1）：
+   *
+   *   empty_body / server_error       → 重抓可能有用
+   *   frame_anchors_missing           → **重抓没有用**，改抽取器离线重跑即可
+   *   url_drifted / unexpected_status → 先看一眼再决定
+   *
+   * 实测代价：一篇日记因为没有对应的框架标志判不出来，界面照 blocked 显示成「被限制」，
+   * 用户于是去重试——白费。
+   */
+  const route = { frameAnchors: [/id="db-usr-profile"/], userNav: /退出/ };
+  const nav = '<li><a href="/accounts/logout">退出</a></li>';
+  const at = (body, status = 200, url = 'https://www.douban.com/people/x/') =>
+    classifyResponse({ finalUrl: url, status, bodyText: body, route, sizeStats: null });
+
+  test('框架标志一个都没中 → frame_anchors_missing', () => {
+    const r = at(`<html><body>${nav}页面变了</body></html>`);
+    assert.equal(r.verdict, null);
+    assert.equal(r.reason, 'frame_anchors_missing');
+  });
+
+  test('0 字节的 200 → empty_body（这个重抓有用）', () => {
+    assert.equal(at('').reason, 'empty_body');
+  });
+
+  test('HTTP 5xx → server_error', () => {
+    assert.equal(at(`<html>${nav}</html>`, 503).reason, 'server_error');
+  });
+
+  test('被跳到别处 → url_drifted', () => {
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/',
+      status: 200,
+      bodyText: `<html><body>${nav}<div id="db-usr-profile"></div></body></html>`,
+      route: { ...route, urlAnchor: /\/people\// },
+      sizeStats: null,
+    });
+    assert.equal(r.reason, 'url_drifted');
+  });
+
+  test('**每一条判不出来的路径都要带原因**', async () => {
+    // 漏掉任何一处，那一处就退回成「光秃秃的 unknown」——而那正是这次改动要消灭的东西。
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../src/crawl/classifier.js', import.meta.url), 'utf-8');
+    const bare = [...src.matchAll(/return \{ verdict: null, reasons/g)];
+    assert.equal(bare.length, 0, `还有 ${bare.length} 处 verdict: null 没带原因`);
+  });
+
+  test('判定得出来时不带原因 —— 那个字段只属于 unknown', () => {
+    const r = at(`<html><body>${nav}<div id="db-usr-profile"></div></body></html>`);
+    assert.equal(r.verdict, 'ok');
+    assert.equal(r.reason, undefined);
+  });
+});

@@ -530,7 +530,15 @@ export class CrawlLoop {
         intent: route.intent ?? item.intent,
         routeKey: item.routeKey,
         surface: route.surface ?? 'html',
-        verdict: cls.verdict ?? 'blocked', // 判不出来的也要留证，但不能标成 ok
+        // **判不出来就写 unknown，不再退成 blocked。**
+        //
+        // 1.2 之前词表里没有这个取值，只能退而写 blocked——于是「豆瓣拒绝了」与
+        // 「页面拿到了但我们不认识」被合并，而两者的处置正好相反：前者该等一等，
+        // 后者重抓一百次也一样，该做的是改抽取器。实测代价：用户照界面上的
+        // 「被限制」去重试，白费。
+        verdict: cls.verdict ?? 'unknown',
+        // 光有 unknown 只是把问题换了个说法。原因才决定该怎么办（规范 §6.3.1）。
+        verdictReason: cls.verdict === null ? (cls.reason ?? 'unexpected_status') : undefined,
         captureFidelity: this._transport.fidelity,
         httpStatus: res.status,
         headers: res.headers,

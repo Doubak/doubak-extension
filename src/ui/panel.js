@@ -173,9 +173,30 @@ const VERDICT_NAMES = {
  * @param {{verdict?: string, note?: string}} e
  */
 function verdictName(e) {
-  if (e?.note?.startsWith('判不出来')) return '判不出来';
+  if (e?.verdict === 'unknown' || e?.note?.startsWith('判不出来')) {
+    // 原因决定该怎么办，所以能说就说出来（bundle/1.2 起 index 里有 verdict_reason；
+    // 更早的档案只有 note，读 note 兜底——两种都要认，档案是冻结的）。
+    const why = REASON_NAMES[e?.verdict_reason];
+    return why ? `判不出来 · ${why}` : '判不出来';
+  }
   return VERDICT_NAMES[e?.verdict] ?? e?.verdict ?? '判不出来';
 }
+
+/**
+ * `verdict_reason` → 一句人话，**说的是「该怎么办」而不是「哪里不对」**。
+ *
+ * 用户看到判定之后要做决定，而决定只有三种：等一等重抓、改抽取器、先看一眼。
+ * 原因分类就是按这个分的（规范 §6.3.1 的 remedy_classes）。
+ */
+const REASON_NAMES = {
+  empty_body: '空响应，可以重抓',
+  server_error: '豆瓣出错了，可以重抓',
+  frame_anchors_missing: '页面结构变了，重抓没用',
+  not_an_image: '拿到的不是图片，重抓没用',
+  url_drifted: '被跳到别处了',
+  unexpected_status: '没见过的状态码',
+  malformed_url: '地址解析不了',
+};
 
 /** @param {number} n */
 function bytes(n) {

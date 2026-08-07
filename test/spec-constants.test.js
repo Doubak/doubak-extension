@@ -81,10 +81,13 @@ describe('从规范生成的词表', () => {
 });
 
 describe('词表内容', () => {
-  test('六个 verdict 取值', () => {
+  test('七个 verdict 取值 —— unknown 是 bundle/1.2 加的', () => {
+    // 在此之前判不出来的响应只能退而写 blocked，于是「豆瓣拒绝了」与「页面拿到了
+    // 但我们不认识」被合并——而两者的处置正好相反：前者该等一等再抓，后者重抓
+    // 一百次也一样，该做的是改抽取器。
     assert.deepEqual(
       [...constants.VERDICTS].sort(),
-      ['blocked', 'challenge', 'gone', 'login', 'ok', 'soft404'],
+      ['blocked', 'challenge', 'gone', 'login', 'ok', 'soft404', 'unknown'],
     );
   });
 

@@ -147,7 +147,7 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   // 而「判不出来」本来就是这套系统里唯一诚实的答案。
   if (!bodyText || bodyText.length === 0) {
     reasons.push('响应体为空——0 字节的 200 不是页面');
-    return { verdict: null, reasons, itemCount };
+    return { verdict: null, reason: 'empty_body', reasons, itemCount };
   }
 
   // ── 1. 跳转到风控域名：最明确的信号，优先于一切
@@ -156,7 +156,7 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
     host = new URL(finalUrl).host;
   } catch {
     reasons.push('finalUrl 无法解析');
-    return { verdict: null, reasons, itemCount };
+    return { verdict: null, reason: 'malformed_url', reasons, itemCount };
   }
   if (host === SEC_HOST || host.endsWith(`.${SEC_HOST}`)) {
     reasons.push(`跳转到风控域名 ${host}`);
@@ -194,11 +194,11 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   if (status >= 500) {
     // 服务端错误不是封锁，但也不能当成数据。交给上层按可重试的网络错误处理。
     reasons.push(`HTTP ${status}`);
-    return { verdict: null, reasons, itemCount };
+    return { verdict: null, reason: 'server_error', reasons, itemCount };
   }
   if (status !== 200) {
     reasons.push(`未预期的 HTTP ${status}`);
-    return { verdict: null, reasons, itemCount };
+    return { verdict: null, reason: 'unexpected_status', reasons, itemCount };
   }
 
   // ── 4. 以 200 返回的异常页
@@ -234,7 +234,7 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   // 它挡的是「被跳走了」：首页信息流同样有 `stream-items`，单看 markup 会认错。
   if (route.urlAnchor && !route.urlAnchor.test(finalUrl)) {
     reasons.push(`最终 URL 不像这条路线：${finalUrl}`);
-    return { verdict: null, reasons, itemCount };
+    return { verdict: null, reason: 'url_drifted', reasons, itemCount };
   }
   if (route.urlAnchor) reasons.push('最终 URL 仍是这条路线');
 
@@ -261,7 +261,7 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
           '——URL 与登录状态都正常，所以最可能是豆瓣改版了。这一页已如实存进档案，' +
           '可据此重新校准标志，不必重抓。',
       );
-      return { verdict: null, reasons, itemCount };
+      return { verdict: null, reason: 'frame_anchors_missing', reasons, itemCount };
     }
     reasons.push('内容区块存在');
     return finish(reasons, itemCount, bodyText, sizeStats);
@@ -277,7 +277,7 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
         'URL 与登录状态都正常，所以最可能是豆瓣改版了。这一页已如实存进档案，' +
         '可据此重新校准标志，不必重抓。',
     );
-    return { verdict: null, reasons, itemCount };
+    return { verdict: null, reason: 'frame_anchors_missing', reasons, itemCount };
   }
   reasons.push('页面框架完整');
 
@@ -1258,7 +1258,7 @@ export function classifyAsset({ finalUrl, status, contentType, byteLength, body,
   }
   if (byteLength === 0) {
     reasons.push('载荷为零长度——0 字节的 200 不是图片');
-    return { verdict: null, reasons, itemCount: null };
+    return { verdict: null, reason: 'empty_body', reasons, itemCount: null };
   }
   if (!ct.startsWith('image/')) {
     // 标签不说是图片时，问字节。头缺失、或者 CDN 标成 application/octet-stream
@@ -1270,7 +1270,7 @@ export function classifyAsset({ finalUrl, status, contentType, byteLength, body,
     reasons.push(
       `既不是图片的 Content-Type（${ct || '缺失'}），字节开头也不像任何已知图片格式`,
     );
-    return { verdict: null, reasons, itemCount: null };
+    return { verdict: null, reason: 'not_an_image', reasons, itemCount: null };
   }
   reasons.push(`${ct}，${byteLength} 字节`);
   return { verdict: 'ok', reasons, itemCount: null };

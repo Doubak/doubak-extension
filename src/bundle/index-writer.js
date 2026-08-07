@@ -48,6 +48,7 @@ const FIELD_ORDER = [
   'http_status',
   'content_type',
   'content_sha256',
+  'verdict_reason',
   'parent_capture_id',
   'cursor',
   'item_count',

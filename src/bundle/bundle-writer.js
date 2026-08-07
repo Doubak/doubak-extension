@@ -192,6 +192,7 @@ export class BundleWriter {
       itemTimeRange = null,
       observedAt,
       note,
+      verdictReason,
     } = cap;
 
     if (!(body instanceof Uint8Array)) throw new Error('body 必须是 Uint8Array');
@@ -235,6 +236,7 @@ export class BundleWriter {
       route_key: routeKey,
       surface,
       verdict,
+      ...(verdictReason ? { verdict_reason: verdictReason } : {}),
       capture_fidelity: captureFidelity,
       observed_at: observedAt ?? nowRfc3339(),
       http_status: httpStatus,
