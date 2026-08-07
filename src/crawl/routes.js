@@ -274,6 +274,30 @@ export function buildRoutes({
     });
   }
 
+  // ── 长文正文里内嵌的图片
+  //
+  // 与广播附图同一档：**用户自己上传的，删了就没有第二份**，所以归 `assets`。
+  //
+  // 这条路线在 UNRESOLVED_ROUTES 里挂过一阵（`source: 'no_sample'`）——当时手上两篇
+  // 真实日记正文里一个 `<img>` 都没有，结构完全未知。拿到样本的路径正是这套设计
+  // 想要的：那篇带图日记第一次抓时判不出来、记了失败，**但页面原样进了档案**。
+  //
+  // 顺带说明为什么不能省：发日记会生成一条广播，广播卡片把配图一起渲染，于是那些图
+  // 常常已经被 `asset.status_photo` 顺手抓到了。但编辑日记时加的图不会再生成广播，
+  // 广播卡片也只渲染前几张——**靠副作用拿到的东西不算拿到**。
+  routes.push({
+    key: 'asset.longform_embed',
+    intent: 'asset.image.user_upload',
+    kind: 'assets',
+    surface: 'asset',
+    priority: PRIORITY.IMAGES,
+    source: 'archive',
+    enumeration: 'bounded',
+    safetyNet: 'contiguity',
+    ordered: false,
+    note: '日记/评论正文里内嵌的图；与广播附图同一档，删了就没有第二份',
+  });
+
   // ── 标记列表
   for (const medium of mediums) {
     const build = INTEREST_URLS[medium];
@@ -369,36 +393,6 @@ export function buildRoutes({
  * 只能猜，而猜错在这个系统里是静默的。
  */
 export const UNRESOLVED_ROUTES = {
-  /**
-   * 日记 / 评论**正文里内嵌的图片**。
-   *
-   * 长文正文页已经在抓（`note.item` / `review.item`），但正文里如果插了图，那些图
-   * 现在**不会被下载**——档案里留下的是指向 doubanio.com 的 URL，也就是说这一段
-   * 内容要联网、而且要豆瓣还在才看得见。正是 DESIGN F-04e 要否定的那种备份。
-   *
-   * 这些图属于「用户自己上传的」那一档：删了就没有第二份，该进 `assets-*`，
-   * 优先级与广播附图（`asset.status_photo`）相同。
-   *
-   * **缺的只是一份样本。** 手上两份真实正文页（日记 872015292、评论 8381069）
-   * 正文段里一个 `<img>` 都没有，全页也不含任何 `doubanio.com/view/...` 图片 URL。
-   * 所以内嵌图长什么样、走哪个命名空间、是不是也像广播那样藏在一段 script 的
-   * JSON 里，全都无从得知。
-   *
-   * 广播附图那条路线本身就是这个问题的先例：实测下来它有**三种**形态同时存在
-   * （`var photos` JSON 的两种 + 老版 `data-raw-src` 属性），没有样本一种都猜不到。
-   *
-   * 要做的话：找一篇正文里带图的日记，存下来，然后照 `extractStatusPhotos` 的路子
-   * 量一遍——容器 class、原图字段、缩略版怎么排除。
-   */
-  'asset.longform_embed': {
-    reason:
-      '日记/评论正文里内嵌的图片暂不支持：手上没有一份带图的正文页可以量锚点。' +
-      '两份真实样本（日记 872015292、评论 8381069）正文里都没有 <img>，' +
-      '全页也不含 doubanio.com/view/ 的图片 URL，所以内嵌图的结构完全未知——' +
-      '广播附图实测有三种形态同时存在，没有样本一种都猜不到。' +
-      '现状：正文页会抓，正文里的图不会下载，档案里那一段要联网才看得见。',
-    source: 'no_sample',
-  },
   'interest.app': {
     reason:
       '移动应用的标记列表 URL 未知。前代的 category.proto 声明了 app 但没实现爬虫；' +

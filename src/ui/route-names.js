@@ -56,6 +56,7 @@ const FIXED = {
   // 说「自己上传的」而不是「广播图片」：这一行的数字与旁边那行封面图的数字，
   // 含义完全不同——封面丢了能重抓，这些丢了就没了。
   'asset.status_photo': '广播里自己上传的图',
+  'asset.longform_embed': '日记正文里的图',
   // key 跟着豆瓣的 URL 走（`/people/<user>/notes`），不叫 diary——两个名字并存过一阵，
   // 结果是路线用 note.list、界面里查 diary.list，于是界面上显示的是内部标识。
   'note.list': '日记',

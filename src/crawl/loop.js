@@ -33,6 +33,7 @@ import {
   extractSubjectLinks,
   extractCoverImage,
   extractStatusPhotos,
+  extractEmbeddedImages,
   extractDetailLinks,
 } from './classifier.js';
 import { SessionError } from './session.js';
@@ -634,6 +635,7 @@ export class CrawlLoop {
       this._enqueueNextPage(item, route, profile, res, written.captureId, items);
       this._enqueueSubjects(item, res, written.captureId);
       this._enqueueLongformItems(item, res, written.captureId);
+      this._enqueueEmbeddedImages(item, res, written.captureId);
       this._enqueueCover(item, res, written.captureId);
       this._enqueueStatusPhotos(item, res, written.captureId);
 
@@ -868,6 +870,41 @@ export class CrawlLoop {
     if (enqueued > 0) {
       this._emit({ type: 'longform_enqueued', routeKey: targetKey, count: enqueued, from: item.url });
     }
+  }
+
+  /**
+   * 从长文正文页派生内嵌的图片。
+   *
+   * 与广播附图同一档：用户自己上传的，删了就没有第二份。区别是**不需要按 uid 过滤**
+   * ——正文页整页都是作者本人的内容，没有转发进来的东西（那一点是量过的：日记与评论
+   * 正文页上唯一的 `people/` 链接就是作者，`#comments` 是空的）。
+   *
+   * @param {object} item @param {object} res @param {string} captureId
+   */
+  _enqueueEmbeddedImages(item, res, captureId) {
+    if (item.routeKey !== 'note.item' && item.routeKey !== 'review.item') return;
+    const target = this._routes.get('asset.longform_embed');
+    if (!target) return;
+
+    const { urls, captions } = extractEmbeddedImages(res.bodyText);
+    let enqueued = 0;
+    for (const url of urls) {
+      const ok = this._frontier.enqueue({
+        url,
+        urlKey: urlKey(url),
+        routeKey: 'asset.longform_embed',
+        intent: target.intent,
+        enqueuedBy: captureId,
+        ordered: false,
+        priority: target.priority,
+        gatedBy: null,
+        referer: item.url,
+        // 图注是用户写的字，跟着图一起记进 index——它在别处没有第二份。
+        ...(captions[url] ? { note: `图注：${captions[url]}` } : {}),
+      });
+      if (ok) enqueued += 1;
+    }
+    if (enqueued > 0) this._emit({ type: 'embed_enqueued', count: enqueued, from: item.url });
   }
 
   _enqueueCover(item, res, captureId) {

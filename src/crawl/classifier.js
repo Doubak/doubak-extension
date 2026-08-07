@@ -636,16 +636,23 @@ export const ROUTE_PROFILES = {
   'note.item': {
     urlAnchor: /\/(?:note|topic)\/\d+/,
     /**
-     * `/topic/<id>/` 那种日记的页面结构**还没量过**——那条新日记从来没被抓到
-     * （id 抽不出来，所以没进队列）。这里先不为它加标志：
+     * 两种日记的页面结构**完全不同**，两套标志都要有：
      *
-     * 认不出来时判定是 null（「判不出来」），条目记为失败，而**页面本身照样原样
-     * 存进档案**（loop.js 的写入顺序保证这一点）。那正是想要的失败方向——
-     * 下一次抓取就有样本可量，改好抽取器重跑即可，不必重抓。
+     * |  | `/note/<id>/` | `/topic/<id>/` |
+     * |---|---|---|
+     * | 外壳 | `class="note-container"` | `id="topic-content"` / `class="personal-topic"` |
+     * | 标题 | `<h1>` | `<h1 class="topic-title">` |
+     * | 正文 | `#link-report > .note` | `.rich-content.topic-richtext` |
+     * | 时间 | `class="pub-date"` | `class="create-time"` |
      *
-     * 反过来，为一种没见过的页面先编几个标志出来，才是这个项目一贯要避免的事。
+     * `/topic/` 那套是量出来的，而拿到样本的路径正是这套设计想要的：上一次抓取里
+     * 它判不出来（一个标志都没中）、记了一次失败，**但页面原样进了档案**——于是
+     * 不必重抓就能校准。界面上那句「可据此重新校准标志，不必重抓」说的就是这件事。
      */
-    anyFrameAnchors: [/class="note-container"/, /id="note-\d+"/, /class="note-header/],
+    anyFrameAnchors: [
+      /class="note-container"/, /id="note-\d+"/, /class="note-header/,
+      /id="topic-content"/, /class="personal-topic"/, /class="topic-title"/,
+    ],
     itemAnchor: undefined,
     claimedCount: null,
   },
@@ -927,6 +934,60 @@ export function extractDetailLinks(html, profile) {
   let m;
   while ((m = re.exec(html)) !== null) out.add(m[1]);
   return [...out];
+}
+
+/**
+ * 日记正文里**内嵌的图片**。
+ *
+ * 这条路线在 `UNRESOLVED_ROUTES` 里挂了一阵，理由是 `source: 'no_sample'`——手上
+ * 两篇真实日记正文里一个 `<img>` 都没有，结构完全未知。现在有样本了。
+ *
+ * ## 结构（实测 `/topic/` 那种日记）
+ *
+ *     <div class="image-container image-float-center">
+ *       <div class="image-wrapper">
+ *         <img src="https://img3.doubanio.com/view/group_topic/l/public/p742323977.jpg" width="500">
+ *       </div>
+ *       <div class="image-caption">长这样咯就是</div>   ← 可有可无
+ *     </div>
+ *
+ * 走 `view/group_topic/` 命名空间——与 `/topic/` 日记同一套基础设施，也与广播里
+ * 那些讨论附图同一个来源。
+ *
+ * ## 它常常已经被抓到了，但不能因此不做
+ *
+ * 发一篇日记会生成一条广播，而那条广播卡片**把日记的配图一起渲染**——实测那两张
+ * 图正是这么被顺手抓下来的（3 张里有 2 张）。`capturedAssets` 会把它们认出来跳过，
+ * 所以不会重复下载。
+ *
+ * 但不能指望这条路：编辑日记时加的图不会再生成广播；广播卡片也只渲染前几张。
+ * **靠副作用拿到的东西不算拿到。**
+ *
+ * ## 只认容器里的图
+ *
+ * 页面上还有作者头像（`/icon/up…`）、界面雪碧图。锚在 `image-container` 上，
+ * 与作品封面那条「判位置不判长相」是同一个道理。
+ *
+ * @param {string} html
+ * @returns {{urls: string[], captions: Record<string, string>}}
+ */
+export function extractEmbeddedImages(html) {
+  if (typeof html !== 'string') return { urls: [], captions: {} };
+  /** @type {Set<string>} */
+  const urls = new Set();
+  /** @type {Record<string, string>} */
+  const captions = {};
+
+  for (const m of html.matchAll(/<div class="image-container[^"]*">([\s\S]*?)<\/div>\s*<\/div>/g)) {
+    const block = m[1];
+    const src = /<img[^>]+src="(https:\/\/[^"]+)"/.exec(block)?.[1];
+    if (!src || !isDoubanioImage(src)) continue;
+    urls.add(src);
+    // 图注是用户写的字，和正文一样不可替代。这里只带出来给上层记进 index 的 note。
+    const cap = /class="image-caption"[^>]*>\s*([^<]+)/.exec(block)?.[1]?.trim();
+    if (cap) captions[src] = cap;
+  }
+  return { urls: [...urls], captions };
 }
 
 /**

@@ -38,6 +38,7 @@ import {
   extractClaimedCount,
   extractDetailLinks,
   extractItemPairs,
+  extractEmbeddedImages,
 } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { routeName } from '../src/ui/route-names.js';
@@ -429,5 +430,68 @@ describe('对着真实档案：每种媒介都要与声称数量吻合', () => {
     assert.deepEqual(got, { movie: 2098, book: 145, music: 84, game: 601, drama: 5 });
     assert.equal(idless, 0, '有条目有时间却抽不到 id');
     assert.equal(mismatched, 0, 'ids 与 times 长度不等 —— 按下标配对就会错位');
+  });
+});
+
+describe('正文里内嵌的图', () => {
+  /**
+   * 这条路线在 `UNRESOLVED_ROUTES` 里挂过一阵（`source: 'no_sample'`）：手上两篇真实
+   * 日记正文里一个 `<img>` 都没有，结构完全未知。
+   *
+   * 拿到样本的路径正是这套设计想要的——那篇带图日记第一次抓时一个框架标志都没中，
+   * 判定为「判不出来」、条目记失败，**而页面原样进了档案**。界面上那句
+   * 「可据此重新校准标志，不必重抓」说的就是这件事。
+   */
+  const block = (src, caption) =>
+    `<div class="image-container image-float-center"><div class="image-wrapper">`
+    + `<img height="auto" src="${src}" width="500"/></div>`
+    + (caption ? `<div class="image-caption-wrapper"><div class="image-caption">${caption}</div></div>` : '')
+    + `</div>`;
+
+  test('抽出图与图注', () => {
+    const html = `<div class="rich-content topic-richtext"><p>正文</p>
+      ${block('https://img3.doubanio.com/view/group_topic/l/public/p742323977.jpg', '长这样咯就是')}
+      ${block('https://img1.doubanio.com/view/group_topic/l/public/p742324289.jpg')}</div>`;
+    const r = extractEmbeddedImages(html);
+    assert.equal(r.urls.length, 2);
+    // 图注是用户写的字，在别处没有第二份。
+    assert.equal(r.captions[r.urls[0]], '长这样咯就是');
+    assert.equal(r.captions[r.urls[1]], undefined);
+  });
+
+  test('**只认容器里的图** —— 头像与界面资源不算', () => {
+    // 与作品封面那条「判位置不判长相」是同一个道理。
+    const html = `<a><img class="pil" src="https://img3.doubanio.com/icon/up82160871-12.jpg"></a>
+      <img src="https://img1.doubanio.com/f/shire/x/pics/nav.gif">
+      ${block('https://img3.doubanio.com/view/group_topic/l/public/p1.jpg')}`;
+    assert.deepEqual(extractEmbeddedImages(html).urls,
+      ['https://img3.doubanio.com/view/group_topic/l/public/p1.jpg']);
+  });
+
+  test('没有图就是没有图，不报错', () => {
+    assert.deepEqual(extractEmbeddedImages('<div class="rich-content">纯文字</div>'),
+      { urls: [], captions: {} });
+  });
+});
+
+describe('对着那张真实的 /topic/ 日记', () => {
+  const PAGE = '/home/mewx/downloads/496284296.html';
+
+  test('判定通过 —— 两种日记的框架标志都要有', async (t) => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    if (!existsSync(PAGE)) return t.skip('样本不在这台机器上');
+    const cls = classify('note.item', readFileSync(PAGE, 'utf-8'),
+      'https://www.douban.com/topic/496284296/');
+    assert.equal(cls.verdict, 'ok');
+  });
+
+  test('抽出正文里那两张图', async (t) => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    if (!existsSync(PAGE)) return t.skip('样本不在这台机器上');
+    const { extractEmbeddedImages } = await import('../src/crawl/classifier.js');
+    const r = extractEmbeddedImages(readFileSync(PAGE, 'utf-8'));
+    assert.equal(r.urls.length, 2);
+    for (const u of r.urls) assert.match(u, /\/view\/group_topic\/l\/public\//);
+    assert.equal(r.captions[r.urls[0]], '长这样咯就是');
   });
 });

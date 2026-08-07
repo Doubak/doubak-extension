@@ -199,31 +199,33 @@ describe('范围可裁剪', () => {
 });
 
 describe('做不了的路线要写清「为什么做不了」', () => {
-  test('正文内嵌图：缺的是样本，不是想法', () => {
-    // 长文正文页已经在抓，但正文里插的图不会下载——档案里留的是指向 doubanio.com
-    // 的 URL，也就是这一段要联网、且要豆瓣还在才看得见（DESIGN F-04e 要否定的东西）。
+  test('**正文内嵌图不再是「做不了」了** —— 拿到样本就做掉了', () => {
+    // 它在 UNRESOLVED_ROUTES 里挂过一阵，`source: 'no_sample'`：当时手上两篇真实
+    // 日记正文里一个 <img> 都没有，结构完全未知。
     //
-    // 卡点是硬约束：这里每条选择器都标着「实测」。没有样本就没有锚点，只能猜，
-    // 而猜错在这个系统里是静默的（舞台剧那次：抽不到 id → 停滞检测失效 → 第 3 页
-    // 就停，`contiguous` 还报 true）。
-    const embed = UNRESOLVED_ROUTES['asset.longform_embed'];
-    assert.equal(embed.source, 'no_sample', '得能和「URL 都不知道」那种区分开');
-    assert.match(embed.reason, /样本|sample/);
-    assert.match(embed.reason, /内嵌/);
-    // 别混进 buildRoutes：那会在覆盖率报告上留一个永远为 0 的条目，看起来像 bug。
-    assert.equal(routes.find((r) => r.key === 'asset.longform_embed'), undefined);
+    // 拿到样本的路径正是这套设计想要的：那篇带图日记第一次抓时一个框架标志都没中，
+    // 判定为「判不出来」、条目记失败，**而页面原样进了档案**。于是不必重抓就能校准。
+    assert.equal(UNRESOLVED_ROUTES['asset.longform_embed'], undefined,
+      '已经做出来了，不该还挂在「做不了」的表里');
+    assert.ok(routes.some((r) => r.key === 'asset.longform_embed'));
   });
 
-  test('两种「做不了」用不同的 source', () => {
-    // `unknown` = URL 都不知道；`no_sample` = 知道在哪但量不了锚点。
-    // 混成一个的话，「去找一份样本」和「去实地发现入口」这两件很不一样的事就分不开了。
-    const kinds = new Set(Object.values(UNRESOLVED_ROUTES).map((r) => r.source));
-    assert.deepEqual([...kinds].sort(), ['no_sample', 'unknown']);
+  test('内嵌图归 assets，与广播附图同一档', () => {
+    // 用户自己上传的，删了就没有第二份。判据是谁上传的，不是长什么样。
+    const embed = routes.find((r) => r.key === 'asset.longform_embed');
+    assert.equal(embed.kind, 'assets');
+    assert.equal(embed.intent, 'asset.image.user_upload');
+    assert.equal(embed.surface, 'asset');
+    assert.equal(embed.ordered, false);
+    assert.equal(embed.pagination, undefined, '它是叶子，URL 从正文页派生');
   });
 
-  test('每一条都得说清现状，不能只写「TODO」', () => {
-    for (const [key, r] of Object.entries(UNRESOLVED_ROUTES)) {
-      assert.ok(r.reason.length > 40, `${key} 的 reason 太短，说不清为什么做不了`);
-    }
+  test('剩下的那条仍然写清了为什么做不了', () => {
+    // `interest.app`：URL 都不知道，得先实地发现——与 `no_sample` 是两回事。
+    const app = UNRESOLVED_ROUTES['interest.app'];
+    assert.equal(app.source, 'unknown');
+    assert.ok(app.reason.length > 40, 'reason 太短，说不清为什么做不了');
+    assert.equal(routes.find((r) => r.key.includes('app')), undefined);
   });
 });
+
