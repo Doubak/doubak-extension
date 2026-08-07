@@ -702,3 +702,89 @@ describe('翻页步长取本页条数 —— 因为「每页装几条」并不�
     assert.ok(events.some((e) => e.type === 'route_finished' && e.reason === 'empty_page'));
   });
 });
+
+describe('容器在、抽不出来 —— 改版的第一个征兆', () => {
+  /**
+   * 这是这套系统里最危险的一种坏法：**安静的**。
+   *
+   * 抽不到 id → 停滞检测判定「没进展」→ 第 3 页就停 → 因为没有缺口，`contiguous`
+   * 还报 true。实测过一次真实的舞台剧抓取：3 条全抓到了，coverage 却写着
+   * 「声称 3 / 抓到 0 / 连续性 ✔ 已验证」。对一份 89 页的电影列表，那就是
+   * **第 3 页截断 + 声称已验证**。
+   *
+   * 判据是两个独立信号对不上：`itemAnchor`（容器 class，表现层，说改就改）说这页
+   * 有 N 条，`idAnchor`（URL 形状，豆瓣十五年不敢动）说一条都没有。
+   */
+
+  /** 一页「容器在、URL 变了」的标记列表——豆瓣改版之后会长这样。 */
+  const drifted = (n) => {
+    let items = '';
+    for (let i = 0; i < n; i++) {
+      // class 还是老样子，但作品链接换成了另一种形状
+      items += `<div class="item comment-item"><a href="https://movie.douban.com/x/${i}/">t</a>
+        <span class="date">2026-07-2${i % 9}</span></div>`;
+    }
+    return `<html><head><title>我看过的影视</title></head><body>${NAV}
+<h1>我看过的影视(${n})</h1><div class="grid-view">${items}</div></body></html>`;
+  };
+
+  async function marksHarness(script) {
+    const h = await harness(script);
+    const fresh = new Frontier();
+    const route = h.loop._routes.get('interest.movie.collect');
+    const url = route.entryUrl({ offset: 0 });
+    fresh.enqueue({
+      url, urlKey: url, routeKey: 'interest.movie.collect',
+      intent: 'interest.list.movie.collect', cursor: { kind: 'start', value: 0 },
+    });
+    h.loop._frontier = fresh;
+    return { ...h, frontier: fresh };
+  }
+
+  test('**报出来**，而且说清是哪一页、看见了几个', async () => {
+    const { loop, events } = await marksHarness([{ body: drifted(15) }]);
+    await loop.run({ maxCaptures: 3 });
+
+    const stale = events.filter((e) => e.type === 'extractor_stale');
+    assert.equal(stale.length > 0, true, '改版了却一声不吭 —— 正是要避免的那种坏法');
+    assert.equal(stale[0].missing, 'ids');
+    assert.equal(stale[0].containerCount, 15, '要说出容器看见了几个，那是对比的另一半');
+    assert.match(stale[0].url, /collect/);
+  });
+
+  test('**只报不拦** —— 页面照样如实进档案', async () => {
+    // 这一页已经存下来了，改好抽取器重跑就能补回来。拦下来反而把一次可恢复的偏差
+    // 变成一次抓取失败。
+    const { loop, store, writer } = await marksHarness([{ body: drifted(15) }]);
+    await loop.run({ maxCaptures: 3 });
+    // 应答器对每次请求都给同一页，所以会一直翻到停滞——这里要的是「都写进去了」，
+    // 不是具体几页。
+    const idx = await readIndex(store, writer.bundleId);
+    assert.ok(idx.length >= 1);
+    for (const e of idx) assert.equal(e.verdict, 'ok', '判定不该被这件事影响');
+  });
+
+  test('正常页面不报 —— 否则告警会变成噪音', async () => {
+    const { loop, events } = await marksHarness([{ body: broadcastPage(0) }]);
+    await loop.run({ maxCaptures: 3 });
+    assert.equal(events.filter((e) => e.type === 'extractor_stale').length, 0);
+  });
+
+  test('抽得到条目、抽不到时间 —— 也报，因为它让这条线永远不能增量', async () => {
+    // 书那三条路线就这么坏了很久：日期后面跟着「读过」两个字，而模式要求日期紧接
+    // 着 `<`。水位线恒为 null、advanced 恒为 false，没有任何地方报过。
+    const html = `<html><head><title>我看过的影视</title></head><body>${NAV}
+<h1>我看过的影视(2)</h1><div class="grid-view">
+  <div class="item comment-item"><a href="https://movie.douban.com/subject/1/">t</a>
+    <span class="date2">2026-07-21 看过</span></div>
+  <div class="item comment-item"><a href="https://movie.douban.com/subject/2/">t</a>
+    <span class="date2">2026-07-22 看过</span></div>
+</div></body></html>`;
+    const { loop, events } = await marksHarness([{ body: html }]);
+    await loop.run({ maxCaptures: 3 });
+    const stale = events.filter((e) => e.type === 'extractor_stale');
+    assert.ok(stale.length >= 1);
+    assert.equal(stale[0].missing, 'times');
+    assert.ok(!stale.some((e) => e.missing === 'ids'), 'id 抽得到，不该报成 ids');
+  });
+});

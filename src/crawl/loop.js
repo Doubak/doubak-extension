@@ -458,6 +458,43 @@ export class CrawlLoop {
       this.stateFor(item.routeKey).noteTimeExtractionFailed(item.url);
     }
 
+    // ── **容器在、却什么都抽不出来 —— 报出来**
+    //
+    // 上面两条自检都要求「先抽到点东西」：一种要 ids 非空，另一种由 markFinished
+    // 兜底。中间漏着最值钱的那个信号——**条目容器明明匹配上了，抽取器却空手而归**。
+    //
+    // 这是豆瓣改版的第一个征兆，而它现在是**安静的**：ids 抽不到 → 停滞检测判定
+    // 「没进展」→ 第 3 页就停 → 因为没有缺口，`contiguous` 还报 true。实测过一次真实
+    // 的舞台剧抓取：3 条全抓到了，coverage 却写着「声称 3 / 抓到 0 / 连续性 ✔ 已验证」。
+    //
+    // 判据是**两个独立信号对不上**：`itemAnchor`（容器 class）说这页有 N 条，
+    // `idAnchor`（URL 形状）说一条都没有。拿真实档案量过，这两者在正常页面上从不
+    // 分家；而它们坏掉的方式不同——class 是表现层，改版说改就改，URL 形状是豆瓣
+    // 十五年不敢动的东西。所以「class 命中、URL 没命中」几乎只有一个解释：**改版了**。
+    //
+    // 只报不拦：这一页已经如实存进档案，改好抽取器重跑就是了（这正是把捕获与解释
+    // 分开的意义）。拦下来反而会把一次可恢复的偏差变成一次抓取失败。
+    const containerSaw = cls.itemCount ?? 0;
+    if (profile?.idAnchor && containerSaw > 0 && items.ids.length === 0) {
+      this._emit({
+        type: 'extractor_stale',
+        routeKey: item.routeKey,
+        url: item.url,
+        containerCount: containerSaw,
+        missing: 'ids',
+      });
+    } else if (profile?.timeAnchor && containerSaw > 0 && items.times.length === 0) {
+      // 时间抽不到不会截断抓取，但会让这条线**永远不能增量**（水位线恒为 null）。
+      // 书那三条路线就这么坏了很久，没有任何地方报过。
+      this._emit({
+        type: 'extractor_stale',
+        routeKey: item.routeKey,
+        url: item.url,
+        containerCount: containerSaw,
+        missing: 'times',
+      });
+    }
+
     // 写失败必须让**整场**抓取停下，不是只标这条路线失败然后继续。
     //
     // 写入器的契约是「每页都落盘」，这条契约一破，索引里的偏移量、连续性

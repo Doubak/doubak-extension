@@ -97,6 +97,15 @@ function eventNote(e) {
     return `从已经存下来的旧页面里算出 ${e.count} 张以前没抓的图（你自己上传的），`
       + '这次一并补上。它们的来源页不需要重抓。';
   }
+  if (e.type === 'extractor_stale') {
+    // **这是豆瓣改版的第一个征兆。** 两个独立信号对不上：条目容器说这页有 N 条，
+    // 而按 URL 形状抽却一条都没有。不说的话它是安静的——停滞检测会判「没进展」然后
+    // 停在第 3 页，而 contiguous 还报 ✔ 已验证。
+    const what = e.missing === 'ids' ? '条目' : '时间';
+    return `${routeName(e.routeKey)}：这一页看得见 ${e.containerCount} 个条目，`
+      + `却一个${what}都抽不出来——多半是豆瓣改了页面结构。页面本身已经原样存进档案，`
+      + '改好抽取器重跑就能补回来，不用重抓。';
+  }
   if (e.type === 'backlog_unresolved') {
     return `一条旧广播里认出了配图容器，却一张都取不出来（${e.count} 处）——`
       + '多半是豆瓣改了页面结构。这一页已经在档案里，改好抽取器后下次会自动补上。';
