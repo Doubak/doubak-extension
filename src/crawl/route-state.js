@@ -341,6 +341,25 @@ export class RouteState {
    */
   serialize() {
     return {
+      // **下界必须交还。**
+      //
+      // 它不是「开抓时算一次就用完」的参数，而是这条路线状态的一部分：`enumeration`
+      // 报 full 还是 bounded 完全取决于它（见 `effectiveEnumeration`）。
+      //
+      // 丢了会怎样，实测过一份真实档案（20260807T083529Z-0fb09c）：用户跑的是
+      // 「增量 + 重抓作品详情页」，中途重载了扩展再继续。恢复之后每条路线的下界都成了
+      // null，于是 manifest 写出来的是
+      //
+      //     interest.book.wish  enumeration=full  advanced=true  声称 82 / 抓到 15
+      //
+      // 每条列表只走了一页——那对增量是对的——**却声称自己完整枚举了整份列表**。
+      // 按 canonical/INGESTION.md §3，这个组合给下游的是 whole_route 权限，也就是
+      // 有资格断定那 67 本书被删了。
+      //
+      // 这是这份规范里最不能出的那种错：**假的完整性声明**，而且它是恢复一次就
+      // 悄悄发生的。缺口那一行的注释说的是同一件事，这里是它的另一半。
+      floor_time: this.floorTime,
+      floor_from_bundle_id: this.floorFromBundleId,
       high_water_time: this.highWater?.iso ?? null,
       high_water_raw: this.highWater?.raw ?? null,
       high_water_ids: this.highWaterIds,
@@ -371,6 +390,14 @@ export class RouteState {
   static restore(opts, saved) {
     const s = new RouteState(opts);
     if (!saved) return s;
+
+    // 存档点里的下界优先于调用方传进来的。恢复时调用方通常什么都不知道
+    // （`resolveFloors` 只在开抓时跑一次），所以这里才是权威。
+    if (saved.floor_time !== undefined) {
+      s.floorTime = saved.floor_time;
+      s._floorEpochMs = saved.floor_time ? Date.parse(saved.floor_time) : null;
+    }
+    if (saved.floor_from_bundle_id !== undefined) s.floorFromBundleId = saved.floor_from_bundle_id;
 
     const mark = (iso, raw) => (iso ? { iso, raw: raw ?? iso, epochMs: Date.parse(iso) } : null);
     s.highWater = mark(saved.high_water_time, saved.high_water_raw);

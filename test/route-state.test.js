@@ -431,3 +431,65 @@ describe('「已回溯到」不能被一条离群的旧条目钉死', () => {
     assert.equal(back.lowWater?.iso, s.lowWater.iso);
   });
 });
+
+describe('下界必须活过恢复', () => {
+  /**
+   * 这是本会话里发现的最严重的一个 bug，而且它是**恢复一次就悄悄发生的**。
+   *
+   * 实测档案 20260807T083529Z-0fb09c：用户跑的是「增量 + 重抓作品详情页」，中途重载
+   * 了扩展再继续。恢复之后每条路线的下界都成了 null，于是 manifest 写出来是
+   *
+   *     interest.book.wish  enumeration=full  advanced=true  声称 82 / 抓到 15
+   *
+   * 每条列表只走了一页——那对增量是对的——**却声称自己完整枚举了整份列表**。
+   * 按 canonical/INGESTION.md §3，这个组合给下游的是 whole_route 权限，也就是有资格
+   * 断定那 67 本书被删了。
+   *
+   * 假的完整性声明是这份规范里最不能出的错。而这次它不是判断写错了，是**一个字段
+   * 没被存进 checkpoint**。
+   */
+  test('**serialize 必须带上下界**', () => {
+    const s = state({
+      enumeration: 'full',
+      floorTime: '2026-08-01T00:00:00+08:00',
+      floorFromBundleId: '20260801T005010Z-3eef52',
+    });
+    const saved = s.serialize();
+    assert.equal(saved.floor_time, '2026-08-01T00:00:00+08:00');
+    assert.equal(saved.floor_from_bundle_id, '20260801T005010Z-3eef52');
+  });
+
+  test('**恢复之后 enumeration 仍然是 bounded**', () => {
+    // 下界丢了 → effectiveEnumeration 退回 full → 假的完整性声明。
+    const before = state({ enumeration: 'full', floorTime: '2026-08-01T00:00:00+08:00' });
+    before.observePage(page(['2026-08-04 12:00:00']));
+
+    // 恢复时调用方通常什么都不知道：resolveFloors 只在开抓时跑一次。
+    const after = RouteState.restore(
+      { routeKey: 'interest.book.wish', intent: 'i', enumeration: 'full' },
+      before.serialize(),
+    );
+    assert.equal(after.floorTime, '2026-08-01T00:00:00+08:00');
+    assert.equal(after.effectiveEnumeration, 'bounded');
+    assert.equal(after.toCrawlState(BID).enumeration, 'bounded');
+  });
+
+  test('存档点里的下界优先于调用方传进来的', () => {
+    // 恢复路径上调用方那个值是空的，所以存档点才是权威。
+    const saved = state({ enumeration: 'full', floorTime: '2026-08-01T00:00:00+08:00' }).serialize();
+    const after = RouteState.restore(
+      { routeKey: 'r', intent: 'i', enumeration: 'full', floorTime: null },
+      saved,
+    );
+    assert.equal(after.floorTime, '2026-08-01T00:00:00+08:00');
+  });
+
+  test('首次全量恢复之后仍然是 full —— 不许一律降级', () => {
+    // 反向也要守：把 bounded 当成安全默认值一律套上，会让真正的全量抓取失去
+    // 「可以推断删除」这个能力，而那是它唯一比增量多出来的东西。
+    const saved = state({ enumeration: 'full', floorTime: null }).serialize();
+    const after = RouteState.restore({ routeKey: 'r', intent: 'i', enumeration: 'full' }, saved);
+    assert.equal(after.floorTime, null);
+    assert.equal(after.effectiveEnumeration, 'full');
+  });
+});
