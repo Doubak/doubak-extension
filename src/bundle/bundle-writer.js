@@ -122,8 +122,6 @@ export class BundleWriter {
     /** 最后一条写成了的捕获。恢复时靠它算出「checkpoint 之后写下了哪些」。 */
     this._lastCaptureId = null;
 
-    // TODO(debug): 开发期计数。发布前连同 debugStats() 一起删。
-    this._debug = { captures: 0, byKind: { data: 0, assets: 0, catalog: 0 } };
   }
 
   get bundleId() {
@@ -255,8 +253,6 @@ export class BundleWriter {
     // 走到这里 WARC 与 index 两边都写成了。放在最后一步，才配得上「写成了」。
     this._lastCaptureId = captureId;
 
-    this._debug.captures += 1;
-    this._debug.byKind[kind] += 1;
 
     return { captureId, ...loc };
   }
@@ -307,10 +303,6 @@ export class BundleWriter {
     return manifest;
   }
 
-  /** TODO(debug): 与 _debug 一起删。 */
-  debugStats() {
-    return { ...this._debug, lastSeq: this._seq.last };
-  }
 }
 
 /**

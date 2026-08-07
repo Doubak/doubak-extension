@@ -195,6 +195,16 @@
       <button class="act" id="selftest">打开自检页</button>
       <div id="env"></div>
 
+      <!-- 详细日志。默认关：发布版的控制台该是干净的。
+           但**不能没有**——出问题时它是唯一能贴出来的东西。见 core/debug-log.js。 -->
+      <h2>详细日志</h2>
+      <div class="note">
+        平时不用开。抓取出了问题要来问的时候打开它，重现一次，然后把控制台里
+        <code>[doubak]</code> 开头的内容贴出来——那是唯一能看出当时发生了什么的东西。
+      </div>
+      <button class="act" id="toggle-debug">打开详细日志</button>
+      <div id="debug-state" class="note"></div>
+
     </section>
 
     <!-- 存储：删档案是**日常操作**，不是调试操作。

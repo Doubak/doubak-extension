@@ -45,6 +45,7 @@
 import { Supervisor, ALARM_NAME } from './crawl/supervisor.js';
 import { ScheduleStore } from './crawl/run-store.js';
 import { IdbKvStore } from './storage/idb-kv-store.js';
+import { makeDebugLog, loadDebugFlag } from './core/debug-log.js';
 import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
 import { FAILURES_PENDING, FINALIZE_FAILED } from './crawl/resume-policy.js';
 import { readLog, clearLog } from './crawl/event-log.js';
@@ -56,12 +57,9 @@ import {
   notifyNeedsAction, notifyDone, clearAttention, wireNotificationClicks, openPanel,
 } from './ui/notify.js';
 
-// TODO(debug): 开发期日志。发布前把 debugLog 与所有调用一起删掉。
-const DEBUG = true;
-/** @param {...unknown} args */
-function debugLog(...args) {
-  if (DEBUG) console.log('[doubak]', ...args);
-}
+// 详细日志。**默认关**，用户在面板上打开——见 core/debug-log.js 里为什么不是
+// 「发布前删掉」：这批日志是唯一的远程诊断通道，本会话里几乎每个 bug 都是靠它定位的。
+const debugLog = makeDebugLog('[doubak]');
 
 /** @type {Supervisor | null} */
 let supervisor = null;
@@ -82,7 +80,12 @@ let kv = null;
  * 正是设计里写的（DESIGN.md F-10b）。
  */
 function getKv() {
-  if (!kv) kv = new IdbKvStore();
+  if (!kv) {
+    kv = new IdbKvStore();
+    // 开关要在第一条日志之前读到。service worker 约 30 秒重启一次，所以每次
+    // 重启都会重读——用户在面板上打开之后，最多等一轮心跳就生效。
+    void loadDebugFlag(kv);
+  }
   return kv;
 }
 

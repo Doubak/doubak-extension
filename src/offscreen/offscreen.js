@@ -74,6 +74,7 @@ import { OFFSCREEN_TARGET } from './protocol.js';
 import { Exclusive } from '../crawl/exclusive.js';
 import { BundleReader } from '../bundle/bundle-reader.js';
 import { bundleIdFromDirName, bundleDirName } from '../core/ids.js';
+import { makeDebugLog, loadDebugFlag } from '../core/debug-log.js';
 import { backlogFromIndex, capturedAssets } from '../crawl/backlog.js';
 import {
   chainEntryFromManifest, pickFloors, floorsFor, newestFirst, renamedBundles,
@@ -81,12 +82,9 @@ import {
   chainOf,
 } from '../crawl/chain.js';
 
-// TODO(debug): 开发期日志。发布前连同所有调用一起删掉。
-const DEBUG = true;
-/** @param {...unknown} args */
-function debugLog(...args) {
-  if (DEBUG) console.log('[doubak/offscreen]', ...args);
-}
+// 详细日志。默认关，见 core/debug-log.js。前缀要与 service worker 区分开——
+// 两边的日志混在同一个控制台里，没有前缀就分不清是谁说的。
+const debugLog = makeDebugLog('[doubak/offscreen]');
 
 /**
  * 落盘用的专用 Worker。
@@ -335,7 +333,11 @@ function getRunStore() {
   //
   // IndexedDB 在这三种上下文里都能直接用，同源同库，谁都不需要求谁。而且这本来
   // 就是设计里写的（DESIGN.md F-10b）。
-  if (!runStore) runStore = new RunStore({ kv: new IdbKvStore(), openBundle });
+  if (!runStore) {
+    const kv = new IdbKvStore();
+    void loadDebugFlag(kv); // 开关与抓取状态同库，见 core/debug-log.js
+    runStore = new RunStore({ kv, openBundle });
+  }
   return runStore;
 }
 

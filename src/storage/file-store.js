@@ -64,9 +64,6 @@ export class MemoryFileStore {
     /** @type {Map<string, Uint8Array>} */
     this._files = new Map();
 
-    // TODO(debug): 开发期计数，用来确认「抓到一条写一条」真的每页都落盘了。
-    // 发布前连同 stats 一起删掉。
-    this._stats = { appends: 0, bytesWritten: 0 };
   }
 
   /** @param {string} name @param {Uint8Array} bytes */
@@ -84,8 +81,6 @@ export class MemoryFileStore {
       this._files.set(name, next);
     }
 
-    this._stats.appends += 1;
-    this._stats.bytesWritten += bytes.length;
   }
 
   /** @param {string} name @param {Uint8Array} bytes */
@@ -166,8 +161,4 @@ export class MemoryFileStore {
     return n;
   }
 
-  /** TODO(debug): 与 _stats 一起删。 */
-  stats() {
-    return { ...this._stats, files: this._files.size };
-  }
 }

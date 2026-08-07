@@ -70,8 +70,6 @@ export class SegmentWriter {
       this._segments.set(meta.filename, { ...meta });
     }
 
-    // TODO(debug): 开发期计数，确认轮转真的发生了。发布前删。
-    this._debug = { rotations: 0, recordsWritten: 0 };
   }
 
   /** 当前段的文件名；还没开段则为 null。 */
@@ -111,7 +109,6 @@ export class SegmentWriter {
       lastCaptureId: null,
     });
 
-    if (this._segmentNo > 1) this._debug.rotations += 1;
     return filename;
   }
 
@@ -148,7 +145,6 @@ export class SegmentWriter {
     m.firstCaptureId ??= captureId;
     m.lastCaptureId = captureId;
 
-    this._debug.recordsWritten += 1;
 
     return { segment: filename, offset, length: member.length };
   }
@@ -177,8 +173,4 @@ export class SegmentWriter {
     return out;
   }
 
-  /** TODO(debug): 与 _debug 一起删。 */
-  debugStats() {
-    return { ...this._debug, segments: this._segments.size };
-  }
 }
