@@ -840,8 +840,10 @@ async function retryFailures() {
       '没有可重试的条目',
       r.loaded === false
         ? '这次抓取已经不在内存里，也没有可恢复的存档点——它可能已经收尾或被中止了。'
+        // **不要在这里让用户去按「继续」。** `failures_pending` 状态下压根没有那个
+        // 按钮（其余部分都抓完了，没有什么可继续的），指过去就是条死路。
         : '队列里没有处于「失败」状态的条目。若这些页面是被豆瓣挡住的（软封锁），'
-          + '那不算失败：等一段时间之后用「继续」重新开始，而不是重试。',
+          + '那不算失败——它们会等到下一次抓取再试，现在重试只会更快撞上限流。',
     );
     return;
   }
@@ -902,8 +904,18 @@ async function finishWithGaps(leaves) {
 function failureActions(failures) {
   if (!failures?.length) return [];
   const ordered = failures.filter((f) => f.ordered);
+  /**
+   * **按钮上要写「继续」，因为它真的会继续。**
+   *
+   * `retryFailed` 把失败条目翻回 pending 之后会调 `drive()`——也就是说它不只重试
+   * 这几个，而是把整场抓取推下去。原来只写「重试这 N 个」，用户（重载扩展之后）
+   * 会以为还得先找一个「继续」按钮；而在**暂停**状态下更糟：那里「继续」与「重试」
+   * 并排摆着，标签不说的话看不出后者也会继续。
+   *
+   * 顺序是「继续」在前：意外的那一半应该先说。
+   */
   /** @type {Array<any>} */
-  const acts = [[`重试这 ${failures.length} 个`, retryFailures]];
+  const acts = [[`继续，并重试这 ${failures.length} 个`, retryFailures]];
   // 有分页失败就不给「就这样收尾」：跳过它等于免掉水位线赖以成立的前提，
   // 那不是用户能授权的事。与失败清单里的判断保持一致。
   if (!ordered.length) acts.push(['就这样收尾', () => finishWithGaps(failures)]);
@@ -1192,7 +1204,8 @@ function renderFailures(failures) {
   const acts = document.createElement('div');
   const retry = document.createElement('button');
   retry.className = 'act';
-  retry.textContent = `重试这 ${failures.length} 个`;
+  // 与顶部那个按钮同一句话——它们调的是同一个动作，措辞不同会让人以为是两件事。
+  retry.textContent = `继续，并重试这 ${failures.length} 个`;
   retry.onclick = async () => {
     retry.disabled = true;
     retry.textContent = '正在重试…';

@@ -1370,6 +1370,11 @@ describe('暂停状态下也要能重试', () => {
       const labels = [...dom.byId.get('actions').children].map((b) => b.textContent);
       assert.ok(labels.some((x) => x.includes('继续')), `缺「继续」：${JSON.stringify(labels)}`);
       assert.ok(labels.some((x) => x.includes('重试这 2 个')), `缺「重试」：${JSON.stringify(labels)}`);
+      // **标签必须说出它会继续。** retryFailed 翻完状态就调 drive()——它不只重试
+      // 这几个，而是把整场抓取推下去。不写出来的话，重载扩展之后用户会以为还得
+      // 先找一个「继续」按钮；而在暂停状态下「继续」与「重试」并排摆着，更看不出
+      // 后者也会继续。
+      assert.ok(labels.some((x) => x.startsWith('继续，并重试')), `重试按钮没说它会继续：${JSON.stringify(labels)}`);
       assert.ok(labels.some((x) => x.includes('就这样收尾')), `缺「收尾」：${JSON.stringify(labels)}`);
     } finally {
       dom.restore();
