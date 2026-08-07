@@ -89,6 +89,16 @@ function eventNote(e) {
   if (e.type === 'subjects_refresh') {
     return `把 ${e.count} 个作品详情页排进了队，会重新抓一遍。`;
   }
+  if (e.type === 'backlog_queued') {
+    // **这个数字必须露出来。** 增量抓取的心理预期是「只抓新增的」，突然多出上百个
+    // 请求，不解释的话看起来像跑飞了。而这些请求恰恰是最该发的那批。
+    return `从已经存下来的旧页面里算出 ${e.count} 张以前没抓的图（你自己上传的），`
+      + '这次一并补上。它们的来源页不需要重抓。';
+  }
+  if (e.type === 'backlog_unresolved') {
+    return `一条旧广播里认出了配图容器，却一张都取不出来（${e.count} 处）——`
+      + '多半是豆瓣改了页面结构。这一页已经在档案里，改好抽取器后下次会自动补上。';
+  }
   return null;
 }
 

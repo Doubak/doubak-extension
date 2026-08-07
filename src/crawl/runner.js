@@ -151,6 +151,11 @@ export class CrawlRunner {
    * @param {string[]} [opts.mediums]
    * @param {boolean} [opts.includeCatalog]
    * @param {Map<string, string | null>} [opts.floors]  上次的水位线
+   * @param {import('./backlog.js').BacklogItem[]} [opts.backlogAssets]  从**旧档案里
+   *   已经存下来的页面**上补算出来的资源（规范 §6.2.1）。广播附图这条路线是从广播页
+   *   派生的，而增量只取回水位线以上的页面——在这条路线存在之前发布的广播，其附图
+   *   就此成为死角（实测 121 张）。那些页面的字节还在档案里，所以补的办法是重算，
+   *   不是重抓。计算在 offscreen（要读 OPFS），这里只负责排队。
    * @param {string[]} [opts.refreshSubjectUrls]  要重抓的作品详情页 URL。
    *   **不能只靠「不跳过已有的」**：作品详情页由列表页派生，而增量模式下列表页
    *   只抓到下界为止，能派生出来的只有最新那几页上的作品。
@@ -174,7 +179,7 @@ export class CrawlRunner {
   async start({
     username, mediums, includeCatalog = true, floors, floorSources, previousBundleId = null,
     onlyRoutes = null, maxCaptures = null, bypassGates = false, resolveFloors = null,
-    knownSubjectUrlKeys = null, refreshSubjectUrls = null,
+    knownSubjectUrlKeys = null, refreshSubjectUrls = null, backlogAssets = null,
   }) {
     if (this._run) throw new Error('已有抓取在进行中');
 
@@ -211,6 +216,7 @@ export class CrawlRunner {
         previousBundleId = inc.previousBundleId ?? previousBundleId;
         knownSubjectUrlKeys = knownSubjectUrlKeys ?? inc.knownSubjectUrlKeys;
         refreshSubjectUrls = refreshSubjectUrls ?? inc.refreshSubjectUrls;
+        backlogAssets = backlogAssets ?? inc.backlogAssets;
       } catch (err) {
         // 挑不出来就全量。**少抓不可接受，多抓只是慢。**
         this._emit({ type: 'incremental_failed', message: String(err?.message ?? err) });
@@ -295,6 +301,43 @@ export class CrawlRunner {
         if (ok) queued += 1;
       }
       this._emit({ type: 'subjects_refresh', count: queued });
+    }
+
+    // **补抓：从旧档案里已经存下来的页面上算出来的资源**（规范 §6.2.1）。
+    //
+    // 广播附图是从广播页派生的，而增量只取回水位线以上的页面——在这条路线存在
+    // 之前发布的广播，其附图永远等不到派生的机会。那些页面的字节还在档案里，
+    // 所以补的办法是**重算**，不是重抓：实测 121 张图只需要 121 个图片请求，
+    // 零个页面请求。
+    //
+    // 算在 offscreen（要读 OPFS），这里只负责排队。
+    if (backlogAssets?.length) {
+      let queued = 0;
+      for (const it of backlogAssets) {
+        const target = routes.get(it.routeKey);
+        // 路线被裁掉了（onlyRoutes / 只抓部分分类）就不排——排了也没有判定描述。
+        if (!target) continue;
+        const ok = frontier.enqueue({
+          url: it.url,
+          urlKey: urlKey(it.url),
+          routeKey: it.routeKey,
+          intent: target.intent,
+          // **必须显式传。** loop 里的兜底是
+          // `item.enqueuedBy ?? this._lastCapture.get(routeKey) ?? null`——
+          // 不传的话 parent 会落到同路线上随便一次捕获，比 null 还糟：那是伪造的
+          // 来源，而且会污染离线重建出来的抓取图。
+          enqueuedBy: it.parentCaptureId,
+          referer: it.referer,
+          // 叶子：一张图取不到不连累其余的。
+          ordered: false,
+          priority: target.priority,
+          // **不设 gatedBy。** 它的门是它的来源，而来源已经在档案里了——
+          // 再挂一道门只会让它永远等一个跟它无关的闸。
+          gatedBy: null,
+        });
+        if (ok) queued += 1;
+      }
+      this._emit({ type: 'backlog_queued', count: queued, found: backlogAssets.length });
     }
 
     const loop = new CrawlLoop({

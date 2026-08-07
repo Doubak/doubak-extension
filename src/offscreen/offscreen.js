@@ -74,6 +74,7 @@ import { OFFSCREEN_TARGET } from './protocol.js';
 import { Exclusive } from '../crawl/exclusive.js';
 import { BundleReader } from '../bundle/bundle-reader.js';
 import { bundleIdFromDirName, bundleDirName } from '../core/ids.js';
+import { backlogFromIndex, capturedAssets } from '../crawl/backlog.js';
 import {
   chainEntryFromManifest, pickFloors, floorsFor, newestFirst, renamedBundles,
   chainCoverage, findChainHoles, diffAgainstChain, splitChains, bundlesWithKnownSubjects,
@@ -166,6 +167,77 @@ async function knownSubjects(entries) {
   return [...out];
 }
 
+/**
+ * 从已经存下来的广播页里补算出当时没抓的附图。
+ *
+ * ## 为什么需要
+ *
+ * `asset.status_photo` 是从广播页派生的，而广播是增量路线——下次只取回水位线以上的
+ * 新页面。**水位线以下那些永远不会再被请求**，于是在这条路线存在之前发布的广播，
+ * 它们的附图就此成为死角（实测 121 张，分布在 22 张老广播页上）。
+ *
+ * 但那些页面的字节就在档案里。所以补的办法是**重算**，不是重抓：121 个图片请求，
+ * 零个页面请求。对比重设水位线全量重走（175 个页面请求 + 把广播的连续性证明推倒重来）。
+ *
+ * ## 与 `knownSubjects` 是一对
+ *
+ * 同样按**账号**取而不按链取（图片没有时间序，链对它毫无意义），同样跳过读不出来的
+ * 档案。区别只在于：那个算「哪些已经有了」，这个算「哪些一直欠着」。
+ *
+ * 真正的逻辑在 `crawl/backlog.js`，是纯函数、能拿真实档案的数据测。这里只做接线：
+ * 开目录、读索引、把解压动作注进去。
+ *
+ * @param {import('../crawl/chain.js').ChainEntry[]} entries  同一个账号的全部档案
+ * @param {string} ownerUserId
+ * @returns {Promise<import('../crawl/backlog.js').BacklogItem[]>}
+ */
+async function backlogAssets(entries, ownerUserId) {
+  if (!ownerUserId) return [];
+
+  /** @type {Array<{reader: object, rows: object[]}>} */
+  const opened = [];
+  /** @type {Set<string>} */
+  const have = new Set();
+
+  for (const e of entries) {
+    try {
+      const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(e.bundleId) });
+      const reader = new BundleReader({ store, bundleId: e.bundleId });
+      const rows = await reader.index();
+      opened.push({ reader, rows });
+      // 先把「已经抓到的」全部收齐，再去算欠的——否则先扫到的那份档案会把后面
+      // 档案里已经抓过的图重新排一遍。
+      for (const u of capturedAssets(rows)) have.add(u);
+    } catch (err) {
+      // 读不出来就当没有。**失败方向是安全的**：漏认只会让这次少补几张，而这一步
+      // 每次抓取都跑，下次还会再算。抛出去则会让整场抓取起不来。
+      debugLog('读不出这份索引，存量图这次不补', e.bundleId, err);
+    }
+  }
+
+  /** @type {import('../crawl/backlog.js').BacklogItem[]} */
+  const all = [];
+  let pages = 0;
+  for (const { reader, rows } of opened) {
+    const { items, pagesRead } = await backlogFromIndex({
+      indexRows: rows,
+      readPayload: async (row) => (await reader.readEntry(row)).bodyText,
+      ownerUserId,
+      alreadyHave: new Set([...have, ...all.map((x) => x.url)]),
+      // 改版告警必须往外传：离线跑和在线跑是同一个抽取器，
+      // 「认出了容器却一张没抽到」在哪边发生都是同一件事。
+      onWarn: (evt) => relayEvent(evt),
+    });
+    all.push(...items);
+    pages += pagesRead;
+  }
+
+  if (all.length > 0 || pages > 0) {
+    debugLog(`存量补抓：读了 ${pages} 张已存的广播页，算出 ${all.length} 张还没抓的图`);
+  }
+  return all;
+}
+
 async function readChainEntries() {
   const dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
   /** @type {import('../crawl/chain.js').ChainEntry[]} */
@@ -236,6 +308,10 @@ async function incrementalOptions(account, mode = 'incremental') {
       // 承诺的是全部。
       knownSubjectUrlKeys: mode === 'refresh-subjects' ? [] : known,
       refreshSubjectUrls: mode === 'refresh-subjects' ? known : null,
+      // 存量补抓（规范 §6.2.1）。放在这里而不是更靠前，是因为它只在**增量**路径上
+      // 有意义：没有下界 = 全量 = 广播会从头重走 = 图现场就派生出来了。上面那句
+      // `if (picks.size === 0) return {}` 天然保证了这一点。
+      backlogAssets: await backlogAssets(bundlesWithKnownSubjects(entries, me), me.accountUserId),
     };
   } catch (e) {
     // 读不出来就全量。少抓不可接受，多抓只是慢。
