@@ -151,6 +151,15 @@ export class RouteState {
     /** @type {Array<{iso: string, raw: string, epochMs: number}>} 本页解析成功的时间 */
     const parsedTimes = [];
     for (const [i, raw] of times.entries()) {
+      // **「这条没有日期」不是错误。** `extractItemPairs` 把 id 与时间成对返回，
+      // 时间那一格允许为 null——实测 2098 个电影标记里有 8 个本来就没有日期。
+      //
+      // 记成 `unparsable_time` 缺口的话，那 8 条会让整条 movie.collect 永远无法推进
+      // 水位线（有缺口就不许推进），也就是**这条线永远不能增量**。而它们并没有坏。
+      //
+      // 与下面那条「解析不了」要分开：那一种是有字符串但读不懂，多半是豆瓣换了格式。
+      if (raw === null || raw === undefined || raw === '') continue;
+
       let parsed;
       try {
         parsed = parseDoubanTimestamp(raw);

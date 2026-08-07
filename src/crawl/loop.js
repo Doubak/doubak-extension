@@ -28,8 +28,7 @@ import {
   classifyAsset,
   RollingSize,
   profileForRoute,
-  extractItemIds,
-  extractItemTimes,
+  extractItemPairs,
   extractClaimedCount,
   extractSubjectLinks,
   extractCoverImage,
@@ -442,9 +441,14 @@ export class CrawlLoop {
     // 改版之后那些选择器可能已经对不上了（这次就撞过一回）。
     //
     // 抽一次而不是抽两次：这是对一份 100 KB 的 HTML 跑正则。
-    const items = profile
-      ? { ids: extractItemIds(res.bodyText, profile), times: extractItemTimes(res.bodyText, profile) }
-      : { ids: [], times: [] };
+    // **成对抽，不是分别抽两遍再按下标凑。** 两个独立的整页扫描没有任何机制保证
+    // 等长，而 `observePage` 是按下标配对的——真实档案里两个方向都发生过：
+    // 短评里贴的电影链接让 book.wish 多出一个 id；作品被删的孤儿游戏抽不到 id。
+    // 见 classifier 的 `extractItemPairs`。
+    const pairs = profile
+      ? extractItemPairs(res.bodyText, profile)
+      : { ids: [], times: [], containers: 0, idless: 0 };
+    const items = { ids: pairs.ids, times: pairs.times };
 
     // **抽得到条目、却一条时间都抽不到 —— 这是「抽取器坏了」的第二种样子。**
     //
@@ -454,7 +458,9 @@ export class CrawlLoop {
     //
     // 书就是这么坏了很久的：列表页的日期后面跟着「读过」两个字，而模式要求日期
     // 紧接着 `<`，于是三条书的路线一条时间都抽不到。没有任何地方报过。
-    if (profile?.timeAnchor && items.ids.length > 0 && items.times.length === 0) {
+    // `times` 现在与 `ids` 等长、允许有 null，所以判据是「**一个非空的都没有**」，
+    // 不是「数组为空」。少数条目没有日期是正常的（实测 2098 个电影标记里有 8 个）。
+    if (profile?.timeAnchor && items.ids.length > 0 && items.times.every((t) => !t)) {
       this.stateFor(item.routeKey).noteTimeExtractionFailed(item.url);
     }
 
@@ -474,6 +480,19 @@ export class CrawlLoop {
     //
     // 只报不拦：这一页已经如实存进档案，改好抽取器重跑就是了（这正是把捕获与解释
     // 分开的意义）。拦下来反而会把一次可恢复的偏差变成一次抓取失败。
+    // `idless` = 这一片有时间、却抽不到 id。它比「整页一个 id 都没有」更早报警：
+    // 只要有**一条**条目的 id 形状变了就会响，不必等到整页都认不出来。
+    if (pairs.idless > 0) {
+      this._emit({
+        type: 'extractor_stale',
+        routeKey: item.routeKey,
+        url: item.url,
+        containerCount: pairs.containers,
+        missing: 'ids',
+        detail: `${pairs.idless} 个条目有时间却抽不到 id`,
+      });
+    }
+
     const containerSaw = cls.itemCount ?? 0;
     if (profile?.idAnchor && containerSaw > 0 && items.ids.length === 0) {
       this._emit({
@@ -483,7 +502,8 @@ export class CrawlLoop {
         containerCount: containerSaw,
         missing: 'ids',
       });
-    } else if (profile?.timeAnchor && containerSaw > 0 && items.times.length === 0) {
+    } else if (profile?.timeAnchor && containerSaw > 0
+               && items.ids.length > 0 && items.times.every((t) => !t)) {
       // 时间抽不到不会截断抓取，但会让这条线**永远不能增量**（水位线恒为 null）。
       // 书那三条路线就这么坏了很久，没有任何地方报过。
       this._emit({

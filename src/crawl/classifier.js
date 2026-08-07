@@ -668,9 +668,27 @@ export const ROUTE_PROFILES = {
      * 「声称 3 / 抓到 0 / 差值 −3 / 连续性 ✔ 已验证」。
      *
      * 对 89 页的电影列表，那就是**第 3 页截断 + 声称已验证**。
+     *
+     * ## `/j/ilmen/thing/N/interest` —— 作品被删之后唯一还剩的 id
+     *
+     * 豆瓣删掉一个作品条目时，用户的标记**不会跟着删**：列表上留下一条孤儿，标题写
+     * 「未知游戏」/「未知电影」，配一张占位图。评分、标签、短评全都还在——那些是用户
+     * 自己写的东西，正是这个档案最该留住的部分。
+     *
+     * 电影与书的孤儿仍然带着 `/subject/N/` 链接（实测 0 条抽不到 id）。**游戏不带**：
+     * `<div class="title">未知游戏</div>` 连 `<a>` 都没有。实测 601 条游戏标记里有
+     * **7 条**是这样，全是作品被删的。
+     *
+     * 而 id 并没有丢——它在删除按钮的 `data-url` 上：
+     *
+     *     <a class="js-remove-collect" data-url="/j/ilmen/thing/37364867/interest">删除</a>
+     *
+     * 实测**601 条游戏标记全都有这个属性**，比作品链接更可靠。不认它的后果是：这 7 条
+     * 有时间没有 id，于是 `ids` 与 `times` 长度对不上，而 `observePage` 是按下标配对的
+     * ——从缺的那一条起，每个 id 都配到了别人的日期。
      */
     idAnchor:
-      /(?:\/subject\/|douban\.com\/(?:game|app)\/|\/location\/drama\/)(\d+)/g,
+      /(?:\/subject\/|douban\.com\/(?:game|app)\/|\/location\/drama\/|\/j\/ilmen\/thing\/)(\d+)/g,
     /**
      * 每条的标记日期，形如 `<span class="date">2025-05-05</span>`。
      *
@@ -1219,6 +1237,87 @@ export function extractItemIds(bodyText, route) {
  * @param {RouteProfile} route
  * @returns {string[]} 页面上出现的顺序（豆瓣列表是新→旧，所以第一个最新）
  */
+/**
+ * 按**条目容器**成对抽出 id 与时间。
+ *
+ * ## 为什么不能整页扫两遍再按下标凑
+ *
+ * `observePage` 把 `ids[i]` 与 `times[i]` 当成同一个条目。而两个独立的整页扫描
+ * **没有任何机制保证它们等长**，一旦不等长，从分歧那一处起每个 id 都配到了别人的
+ * 日期。真实档案里两个方向都发生了：
+ *
+ * | 路线 | 容器 | id | 时间 | 原因 |
+ * |---|---|---|---|---|
+ * | `interest.book.wish` | 15 | **16** | 15 | 用户短评里贴了一个电影链接 |
+ * | `interest.game.collect`（一页） | 17 | **14** | 15 | 作品被删的孤儿抽不到 id |
+ *
+ * 前者让 `captured_count` 虚高、`coverage.delta` 假报 +1——而 delta 是「豆瓣是不是
+ * 在藏东西」的唯一证据。后者让 `high_water_ids`（水位线边界的去重清单）记成别的
+ * 条目，下次增量在边界上可能漏抓。
+ *
+ * 按容器切片之后，每片最多出一个 id、一个时间，**结构上就对齐了**，不需要任何
+ * 「但愿它们一样长」的假设。
+ *
+ * ## 取每片的第一个
+ *
+ * 条目自己的链接总在最前面（`<div class="pic"><a href=…>`），用户短评在后面。
+ * 拿真实档案的五种媒介逐条量过，这个顺序没有例外。
+ *
+ * ## 多出来的容器会被自然丢掉
+ *
+ * `itemAnchor` 在游戏页上会多匹配约 100 个 `<div class="item item-tags">`——那是编辑
+ * 表单的 JS 模板，不是条目。它们既没有 id 也没有时间，切片之后自动出局，不需要为它
+ * 单独写排除规则。
+ *
+ * @param {string} bodyText
+ * @param {RouteProfile | null} route
+ * @returns {{ids: string[], times: (string|null)[], containers: number, idless: number}}
+ *   `ids` 与 `times` **保证等长**。`times[i]` 可以是 null（实测 2098 个电影标记里有
+ *   8 个没有日期，那是正常的，不是缺口）。`idless` 是「有时间却抽不到 id」的容器数
+ *   ——非 0 说明抽取器跟不上页面了。
+ */
+export function extractItemPairs(bodyText, route) {
+  const empty = { ids: [], times: [], containers: 0, idless: 0 };
+  if (typeof bodyText !== 'string' || !route?.itemAnchor || !route?.idAnchor) return empty;
+
+  const cont = new RegExp(route.itemAnchor.source, 'g');
+  /** @type {number[]} */
+  const at = [];
+  for (let m = cont.exec(bodyText); m; m = cont.exec(bodyText)) at.push(m.index);
+  if (at.length === 0) return empty;
+
+  const idRe = new RegExp(route.idAnchor.source);
+  const timeRe = route.timeAnchor ? new RegExp(route.timeAnchor.source) : null;
+
+  /** @type {string[]} */
+  const ids = [];
+  /** @type {(string|null)[]} */
+  const times = [];
+  const seen = new Set();
+  let idless = 0;
+
+  for (let i = 0; i < at.length; i++) {
+    const seg = bodyText.slice(at[i], i + 1 < at.length ? at[i + 1] : undefined);
+    const id = idRe.exec(seg)?.[1] ?? null;
+    const time = timeRe ? (timeRe.exec(seg)?.[1] ?? null) : null;
+
+    if (!id) {
+      // 有时间没有 id：这一片是个真条目，只是我们认不出它的 id。要报出来。
+      // 没时间也没 id 的那些是模板/装饰，静静丢掉就好。
+      if (time) idless += 1;
+      continue;
+    }
+    // 同一个条目在页面上可能出现多次（舞台剧每部剧有图片链接与标题链接两处）。
+    // 按容器切片之后这基本不会发生了，但保留去重，因为它的代价是零。
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    times.push(time);
+  }
+
+  return { ids, times, containers: at.length, idless };
+}
+
 export function extractItemTimes(bodyText, route) {
   if (!route?.timeAnchor) return [];
   const re = new RegExp(route.timeAnchor.source, 'g');

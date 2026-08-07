@@ -37,6 +37,7 @@ import {
   extractItemTimes,
   extractClaimedCount,
   extractDetailLinks,
+  extractItemPairs,
 } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { routeName } from '../src/ui/route-names.js';
@@ -269,5 +270,118 @@ describe('从列表页派生正文页', () => {
       assert.equal(r.entryUrl, undefined, '正文页没有入口 URL，只能从列表页派生');
       assert.ok(routeName(k) !== k, '界面上会露出内部标识');
     }
+  });
+});
+
+describe('成对抽取 —— id 与时间必须结构上对齐', () => {
+  /**
+   * `observePage` 把 `ids[i]` 与 `times[i]` 当成同一个条目。而两个独立的整页扫描
+   * **没有任何机制保证它们等长**。真实档案里两个方向都发生了：
+   *
+   * | 路线 | 容器 | id | 时间 | 原因 |
+   * |---|---|---|---|---|
+   * | `interest.book.wish` | 15 | **16** | 15 | 用户短评里贴了一个电影链接 |
+   * | `interest.game.collect` | 17 | **14** | 15 | 作品被删的孤儿抽不到 id |
+   *
+   * 前者让 `captured_count` 虚高、`coverage.delta` 假报 +1；后者让 `high_water_ids`
+   * 记成别的条目，下次增量在边界上可能漏抓。
+   */
+
+  const P = () => profileForRoute('interest.movie.collect');
+
+  const item = (inner) => `<div class="item comment-item">${inner}</div>`;
+
+  test('**短评里贴的链接不会挤进 id 列表**', () => {
+    // 条目自己的链接总在最前面（`<div class="pic"><a href=…>`），短评在后面。
+    const html = item(`<div class="pic"><a href="https://book.douban.com/subject/111/"></a></div>
+       <span class="date">2026-07-31</span>
+       <span class="comment">为什么电影条目被删了？？？https://movie.douban.com/subject/999/</span>`);
+    const r = extractItemPairs(html, P());
+    assert.deepEqual(r.ids, ['111']);
+    assert.deepEqual(r.times, ['2026-07-31']);
+  });
+
+  test('**长度永远相等**，时间那一格可以是 null', () => {
+    // 实测 2098 个电影标记里有 8 个本来就没有日期。丢掉它们会少算，
+    // 记成缺口会让整条路线永远不能推进水位线。
+    const html = item('<a href="https://movie.douban.com/subject/1/"></a>')
+      + item('<a href="https://movie.douban.com/subject/2/"></a><span class="date">2026-01-02</span>');
+    const r = extractItemPairs(html, P());
+    assert.equal(r.ids.length, r.times.length);
+    assert.deepEqual(r.ids, ['1', '2']);
+    assert.deepEqual(r.times, [null, '2026-01-02']);
+  });
+
+  test('有时间却抽不到 id —— 计进 idless，好报警', () => {
+    const html = item('<span class="date">2026-01-01</span>')
+      + item('<a href="https://movie.douban.com/subject/2/"></a><span class="date">2026-01-02</span>');
+    const r = extractItemPairs(html, P());
+    assert.equal(r.idless, 1);
+    assert.deepEqual(r.ids, ['2'], '认不出的那条不许拿别人的时间凑数');
+  });
+
+  test('没 id 也没时间的容器静静丢掉 —— 那是模板不是条目', () => {
+    // itemAnchor 在游戏页上会多匹配约 100 个 `<div class="item item-tags">`，
+    // 那是编辑表单的 JS 模板。不需要为它单独写排除规则。
+    const html = item('<label for="tags">标签</label>')
+      + item('<a href="https://movie.douban.com/subject/2/"></a><span class="date">2026-01-02</span>');
+    const r = extractItemPairs(html, P());
+    assert.equal(r.containers, 2);
+    assert.equal(r.idless, 0);
+    assert.deepEqual(r.ids, ['2']);
+  });
+
+  test('**作品被删的游戏，id 从删除按钮上取回来**', () => {
+    // 豆瓣删掉作品条目时用户的标记不会跟着删：列表上留下「未知游戏」，配占位图，
+    // 连 <a> 都没有。而评分、标签、短评全都还在——那才是最该留住的部分。
+    // id 在 `data-url="/j/ilmen/thing/N/interest"` 上，实测 601 条游戏标记全都有。
+    const p = profileForRoute('interest.game.collect');
+    const html = `<div class="common-item"><div class="title">未知游戏</div>
+      <span class="rating-star allstar40"></span><span class="date">2025-07-19</span>
+      <a class="js-remove-collect" data-url="/j/ilmen/thing/37364867/interest">删除</a></div>`;
+    const r = extractItemPairs(html, p);
+    assert.deepEqual(r.ids, ['37364867']);
+    assert.deepEqual(r.times, ['2025-07-19']);
+    assert.equal(r.idless, 0);
+  });
+});
+
+describe('对着真实档案：每种媒介都要与声称数量吻合', () => {
+  const DL = '/home/mewx/downloads/20260806/doubak-bundle-20260801T005010Z-3eef52';
+
+  test('五种媒介，抽出的条目数 = 豆瓣声称的条数', async (t) => {
+    const { existsSync, readdirSync, readFileSync } = await import('node:fs');
+    if (!existsSync(DL)) return t.skip('真实档案不在这台机器上');
+    const { gunzipSync } = await import('node:zlib');
+
+    const rows = readFileSync(`${DL}/${readdirSync(DL).find((f) => f.startsWith('index-'))}`, 'utf-8')
+      .trimEnd().split('\n').map((l) => JSON.parse(l));
+    /** @type {Record<string, Buffer>} */
+    const segs = {};
+    const body = (r) => {
+      segs[r.segment] ??= readFileSync(`${DL}/${r.segment}`);
+      const raw = gunzipSync(segs[r.segment].subarray(r.offset, r.offset + r.length));
+      const h = raw.indexOf('\r\n\r\n');
+      const len = Number(/^Content-Length: (\d+)$/m.exec(raw.subarray(0, h).toString())[1]);
+      const b = raw.subarray(h + 4, h + 4 + len);
+      return b.subarray(b.indexOf('\r\n\r\n') + 4).toString('utf-8');
+    };
+
+    const got = {};
+    let idless = 0, mismatched = 0;
+    for (const r of rows) {
+      if (!r.intent?.startsWith('interest.list')) continue;
+      const med = r.intent.split('.')[2];
+      const p = extractItemPairs(body(r), profileForRoute(r.route_key));
+      got[med] = (got[med] ?? 0) + p.ids.length;
+      idless += p.idless;
+      if (p.ids.length !== p.times.length) mismatched += 1;
+    }
+
+    // 豆瓣自己在 <h1> 里声称的数字（coverage.claimed_count 的来源）。
+    // 抽出来的条目数与它逐媒介吻合，是「抽取器跟得上页面」最直接的证据。
+    assert.deepEqual(got, { movie: 2098, book: 145, music: 84, game: 601, drama: 5 });
+    assert.equal(idless, 0, '有条目有时间却抽不到 id');
+    assert.equal(mismatched, 0, 'ids 与 times 长度不等 —— 按下标配对就会错位');
   });
 });

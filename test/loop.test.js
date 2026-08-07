@@ -494,10 +494,15 @@ describe('index 里记下条目数与时间区间', () => {
 
   test('只扫一遍 HTML —— 判定、水位线、index 共用同一次抽取', async () => {
     // 这是对一份 100 KB 的 HTML 跑正则，抽两遍没有理由。
+    //
+    // 现在连「两遍」都不是了：`extractItemPairs` 按条目容器切一次，id 与时间同时
+    // 取出——那既省一遍扫描，也让两者**结构上对齐**（分别抽两遍没有任何机制保证
+    // 等长，而 observePage 是按下标配对的）。
     const src = await (await import('node:fs/promises')).readFile(
       new URL('../src/crawl/loop.js', import.meta.url), 'utf-8');
-    assert.equal((src.match(/extractItemTimes\(/g) ?? []).length, 1);
-    assert.equal((src.match(/extractItemIds\(/g) ?? []).length, 1);
+    assert.equal((src.match(/extractItemPairs\(/g) ?? []).length, 1);
+    assert.equal((src.match(/extractItemTimes\(/g) ?? []).length, 0, '不该再分开抽');
+    assert.equal((src.match(/extractItemIds\(/g) ?? []).length, 0, '不该再分开抽');
   });
 });
 
