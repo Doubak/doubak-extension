@@ -20,7 +20,9 @@
 import { BundleReader } from '../bundle/bundle-reader.js';
 import { SCENARIOS } from '../crawl/dry-run.js';
 import { WorkerFileStore } from '../storage/worker-file-store.js';
-import { exportBundle, subdirectorySink } from '../bundle/exporter.js';
+import {
+  exportBundle, subdirectorySink, inspectDestination, NOT_PART_OF_BUNDLE,
+} from '../bundle/exporter.js';
 import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../storage/storage-usage.js';
 import { captureTitle, captureSubtitle, subjectLabel } from './capture-label.js';
 import {
@@ -197,6 +199,34 @@ const REASON_NAMES = {
   unexpected_status: '没见过的状态码',
   malformed_url: '地址解析不了',
 };
+
+/**
+ * 上次导出到哪儿了。
+ *
+ * 只为了**把话说准**：「已经有 12 个文件，覆盖吗」和「12 个已经完整、还差 8 个，
+ * 只补这 8 个」是完全不同的两句话，而后者才是实情。前者会让人以为要重来一遍。
+ *
+ * @param {{store: object, sink: object}} opts
+ */
+async function countAlreadyExported({ store, sink }) {
+  const all = await store.list();
+  const files = all.filter((f) => !NOT_PART_OF_BUNDLE.has(f));
+  let expected = new Map();
+  try {
+    const manifest = JSON.parse(new TextDecoder().decode(await store.read('manifest.json')));
+    for (const seg of manifest.segments ?? []) {
+      if (seg.filename && seg.sha256) expected.set(seg.filename, seg.sha256);
+    }
+    if (manifest.index?.filename && manifest.index?.sha256) {
+      expected.set(manifest.index.filename, manifest.index.sha256);
+    }
+  } catch { expected = new Map(); }
+
+  const got = await inspectDestination({ store, sink, files, expected });
+  let ok = 0; let okBytes = 0;
+  for (const v of got.values()) if (v.ok) { ok += 1; okBytes += v.bytes; }
+  return { ok, okBytes, total: files.length, missing: files.length - ok };
+}
 
 /** @param {number} n */
 function bytes(n) {
@@ -2156,8 +2186,8 @@ $('export').addEventListener('click', async () => {
   // 档案的上一次导出。
   const folder = bundleDirName(bundleId);
   const sink = await subdirectorySink(dir, folder);
-  const run = (overwrite) => exportBundle({
-    store, sink, overwrite,
+  const run = (opts) => exportBundle({
+    store, sink, ...opts,
     onProgress: (p) => {
       el.className = 'card run';
       const pct = p.total ? Math.round((p.done / p.total) * 100) : 100;
@@ -2172,20 +2202,32 @@ $('export').addEventListener('click', async () => {
   try {
     let r;
     try {
-      r = await run(false);
+      r = await run({});
     } catch (e) {
       if (e.code !== 'destination_not_empty') throw e;
-      // 覆盖不可撤销，必须由用户点头。走到这里说明 `${folder}/` 里已经有东西，
-      // 也就是这一份档案此前导出过——覆盖的是它自己的旧副本。
-      if (!confirm(
-        `文件夹 ${folder} 里已经有这份档案的旧副本。\n\n${e.message}\n\n`
-        + '继续会覆盖同名文件，且没有回收站。确定吗？',
-      )) {
+
+      // 走到这里说明 `${folder}/` 里已经有东西。因为目的地是**这份档案自己的
+      // 子目录**，所以那几乎一定是它上一次（可能被打断的）导出。
+      //
+      // 不再只问「要不要覆盖」——先去看清楚已经导好了几个，然后把**将要发生
+      // 什么**原原本本说出来。「已经有 12 个文件，覆盖吗」和「12 个已经导好、
+      // 还差 8 个，续导只补这 8 个」是完全不同的两句话，而后者才是实情。
+      el.className = 'card run';
+      el.textContent = '正在检查上次导到哪儿了…';
+      const done = await countAlreadyExported({ store, sink });
+
+      const msg = done.ok === 0
+        ? `文件夹 ${folder} 里有 ${done.total} 个文件，但没有一个能对上这份档案。\n\n`
+          + '继续会覆盖同名文件，且没有回收站。确定吗？'
+        : `上次导出到一半：${done.ok} 个文件已经完整（${bytes(done.okBytes)}），还差 ${done.missing} 个。\n\n`
+          + '继续只会补齐缺的那些，已经完整的不动。确定吗？';
+      if (!confirm(msg)) {
         el.className = 'card idle';
         el.textContent = '已取消，什么都没写。';
         return;
       }
-      r = await run(true);
+      // 续导隐含覆盖：校验不通过的照样重写。
+      r = await run({ resume: true });
     }
     showExportResult(r, folder);
     // 记一笔「导出过了」。派生状态，丢了不影响档案本身——只影响删除确认框说得多重。
@@ -2216,18 +2258,25 @@ function showExportResult(r, folder) {
   }
 
   el.className = 'card good';
+  // **报的是目的地现在一共有多少**，不是这一趟搬了多少。续导时后者可能是 0，
+  // 而「已导出并校验：4 个文件，0 B」会让人以为什么都没发生。
+  const totalBytes = r.bytes + (r.skippedBytes ?? 0);
+  const resumed = r.skipped
+    ? `其中 ${r.skipped} 个是上次已经导好的，本次补了 ${bytes(r.bytes)}。`
+    : '';
+
   if (r.verified) {
     // 只有这一句能说「已校验」：回读了目的地、逐个对上了 manifest 里的摘要。
-    b.textContent = `已导出并校验：${r.files.length} 个文件，${bytes(r.bytes)}`;
+    b.textContent = `已导出并校验：${r.files.length} 个文件，${bytes(totalBytes)}`;
     el.append(b, document.createTextNode(
-      `已写入子文件夹 ${folder}/。每个文件都从该文件夹重新读取并核对过，`
+      `已写入子文件夹 ${folder}/。${resumed}每个文件都从该文件夹重新读取并核对过，`
       + '字节数与 manifest 中声明的 SHA-256 全部一致。此时可以安全地删除扩展内的那一份。',
     ));
   } else {
     // 只验了字节数就别说「已校验」——那正是这个项目一直在躲的假安心。
-    b.textContent = `已导出：${r.files.length} 个文件，${bytes(r.bytes)}（仅核对了字节数）`;
+    b.textContent = `已导出：${r.files.length} 个文件，${bytes(totalBytes)}（仅核对了字节数）`;
     el.append(b, document.createTextNode(
-      `已写入子文件夹 ${folder}/。本次抓取尚未收尾，没有 manifest，`
+      `已写入子文件夹 ${folder}/。${resumed}本次抓取尚未收尾，没有 manifest，`
       + '因此只核对了每个文件的字节数，没有摘要可比对。抓取完成后重新导出一次才能做完整校验。',
     ));
   }

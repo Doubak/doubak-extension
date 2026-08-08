@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   exportBundle, fileStoreSink, NOT_PART_OF_BUNDLE, DEFAULT_CHUNK_BYTES, subdirectorySink,
+  inspectDestination,
 } from '../src/bundle/exporter.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { sha256Hex } from '../src/core/digest.js';
@@ -334,6 +335,84 @@ describe('导出', () => {
   test('默认块大小是个合理值', () => {
     assert.ok(DEFAULT_CHUNK_BYTES >= 1024 * 1024);
     assert.ok(DEFAULT_CHUNK_BYTES <= 32 * 1024 * 1024);
+  });
+});
+
+describe('中断续导', () => {
+  test('**已经导好的文件不再抄一遍**', async () => {
+    const { store } = await makeBundle();
+    const dest = new MemoryFileStore();
+
+    // 第一趟：中途取消（复制到第二个文件时停）。
+    const ac = new AbortController();
+    let n = 0;
+    await assert.rejects(() => exportBundle({
+      store, sink: fileStoreSink(dest), signal: ac.signal,
+      onProgress: (p) => { if (p.phase === 'copy' && p.done === p.total && ++n >= 1) ac.abort(); },
+    }));
+    const after1 = await dest.list();
+    assert.ok(after1.length >= 1 && after1.length < 4, `中断后应当只有部分文件，实际 ${after1.length}`);
+
+    // 第二趟：续导。已完整的跳过，缺的补上。
+    const r = await exportBundle({ store, sink: fileStoreSink(dest), resume: true });
+    assert.equal(r.problems.length, 0);
+    assert.equal(r.verified, true);
+    assert.ok(r.skipped > 0, '该有文件被跳过，否则续导没起作用');
+    assert.ok(r.skippedBytes > 0);
+  });
+
+  test('**续导结果里必须包含跳过的文件**', async () => {
+    // 不包含的话，「manifest 声明了却没导出」那条检查会把它们全报成缺失——
+    // 一次成功的续导会显示成一堆错误。
+    const { store } = await makeBundle();
+    const dest = new MemoryFileStore();
+    await exportBundle({ store, sink: fileStoreSink(dest) });
+
+    const r = await exportBundle({ store, sink: fileStoreSink(dest), resume: true });
+    assert.equal(r.problems.length, 0);
+    assert.equal(r.verified, true);
+    const names = r.files.map((f) => f.name).sort();
+    assert.deepEqual(names, ['README.txt', 'data-000001.warc.gz', 'index.ndjson', 'manifest.json']);
+    assert.equal(r.skipped, 4, '全都导好了，该全部跳过');
+    assert.equal(r.bytes, 0, '这一趟一个字节都不该搬');
+  });
+
+  test('**目的地的文件坏了就重抄，不能因为「在那儿」就跳过**', async () => {
+    // 盘满、U 盘拔掉、上次导的是别的档案——都会留下一个同名但内容不对的文件。
+    const { store, seg } = await makeBundle();
+    const dest = new MemoryFileStore();
+    await exportBundle({ store, sink: fileStoreSink(dest) });
+
+    // 把段文件改坏（长度不变，只改内容）——只看「在不在」或只看大小都逮不住。
+    const bad = new Uint8Array(seg.length);
+    bad.fill(7);
+    await dest.replace('data-000001.warc.gz', bad);
+
+    const r = await exportBundle({ store, sink: fileStoreSink(dest), resume: true });
+    assert.equal(r.problems.length, 0, '坏文件该被重抄');
+    assert.deepEqual(await dest.read('data-000001.warc.gz'), seg);
+    assert.ok(r.bytes > 0, '重抄了就该有字节数');
+  });
+
+  test('**续导是明确的选择，不会自动发生**', async () => {
+    // 目的地可能是用户随手点的一个目录。不加 resume 时照旧拦下来。
+    const { store } = await makeBundle();
+    const dest = new MemoryFileStore();
+    await dest.replace('别的东西.txt', enc.encode('x'));
+
+    await assert.rejects(
+      () => exportBundle({ store, sink: fileStoreSink(dest) }),
+      (e) => e.code === 'destination_not_empty',
+    );
+  });
+
+  test('inspectDestination：空目的地什么都不报', async () => {
+    const { store } = await makeBundle();
+    const files = (await store.list()).filter((f) => !NOT_PART_OF_BUNDLE.has(f));
+    const got = await inspectDestination({
+      store, sink: fileStoreSink(new MemoryFileStore()), files, expected: new Map(),
+    });
+    assert.equal(got.size, 0);
   });
 });
 

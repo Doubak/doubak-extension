@@ -68,6 +68,79 @@ export const DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024;
 export const NOT_PART_OF_BUNDLE = new Set(['checkpoint.json']);
 
 /**
+ * 看看目的地已经有什么，哪些是完好的。
+ *
+ * ## 为什么续导不需要一个「进度文件」
+ *
+ * **目的地目录本身就是进度。** 每个文件要么完整、要么不在——把已完整的挑出来
+ * 跳过，剩下的照抄，就是续导的全部。
+ *
+ * 记一个 `export-progress.json` 反而更糟：它会与真实情况不同步（用户手动删了
+ * 一个文件、盘满了写了一半），而**崩溃恰恰是最没机会写下状态的时刻**——
+ * 而崩溃正是续导要解决的场景。
+ *
+ * ## 中断留下的是「没有这个文件」，不是「半个文件」
+ *
+ * `createWritable()` 写的是临时文件，只在 `close()` 那一刻整体换上去。所以
+ * 抓取被打断时，目的地要么是上一次的完整内容，要么这个文件根本不存在——
+ * 不会留下一个截断的半成品。这让「完整就跳过」这条判据站得住。
+ *
+ * 但仍然**要验，不能只看在不在**：盘满、U 盘拔掉、上一次导的是别的档案，
+ * 这些都会留下一个大小或摘要对不上的同名文件。
+ *
+ * @param {object} opts
+ * @param {import('../storage/file-store.js').FileStore} opts.store
+ * @param {ExportSink} opts.sink
+ * @param {string[]} opts.files  这份档案该有的文件
+ * @param {Map<string, string>} opts.expected  manifest 声明的 sha256
+ * @param {AbortSignal} [opts.signal]
+ * @returns {Promise<Map<string, {ok: boolean, bytes: number, digestOk: boolean|null, reason?: string}>>}
+ */
+export async function inspectDestination({ store, sink, files, expected, signal }) {
+  /** @type {Map<string, {ok: boolean, bytes: number, digestOk: boolean|null, reason?: string}>} */
+  const out = new Map();
+  if (!sink.list || !sink.read) return out;
+
+  const there = new Set(await sink.list());
+  for (const name of files) {
+    throwIfAborted(signal);
+    if (!there.has(name)) continue;
+
+    const want = await store.size(name);
+    let actual;
+    try {
+      actual = await sink.read(name);
+    } catch (e) {
+      out.set(name, { ok: false, bytes: 0, digestOk: null, reason: `读不回来：${e.message}` });
+      continue;
+    }
+    if (actual.length !== want) {
+      out.set(name, {
+        ok: false, bytes: actual.length, digestOk: null,
+        reason: `字节数对不上：源 ${want}，目的地 ${actual.length}`,
+      });
+      continue;
+    }
+
+    const wantDigest = expected.get(name);
+    if (!wantDigest) {
+      // manifest 没声明它的摘要（manifest.json 自己、README.txt，或抓取没收尾）。
+      // 字节数一致就认——**并且如实记下摘要没验过**，别让它冒充「验过了」。
+      out.set(name, { ok: true, bytes: actual.length, digestOk: null });
+      continue;
+    }
+    const got = await sha256Hex(actual);
+    out.set(name, {
+      ok: got === wantDigest,
+      bytes: actual.length,
+      digestOk: got === wantDigest,
+      reason: got === wantDigest ? undefined : `摘要对不上`,
+    });
+  }
+  return out;
+}
+
+/**
  * 把一个档案目录整份复制出去。
  *
  * @param {object} opts
@@ -77,12 +150,15 @@ export const NOT_PART_OF_BUNDLE = new Set(['checkpoint.json']);
  * @param {boolean} [opts.verify]  默认 true。关掉它的唯一正当理由是用户明确
  *   接受「没验过」——而不是为了快一点。
  * @param {boolean} [opts.overwrite]  目的地非空时是否照写。默认 false。
+ * @param {boolean} [opts.resume]  续导：目的地已有且校验通过的文件跳过不抄。
+ *   隐含 overwrite（校验不通过的照样重写），所以它是一个**明确的选择**，
+ *   不会自动发生。
  * @param {(p: {phase: 'copy' | 'verify', file: string, done: number, total: number, files: number, fileIndex: number}) => void} [opts.onProgress]
  * @param {AbortSignal} [opts.signal]
  */
 export async function exportBundle({
   store, sink, chunkBytes = DEFAULT_CHUNK_BYTES, verify = true, overwrite = false,
-  onProgress = () => {}, signal,
+  resume = false, onProgress = () => {}, signal,
 }) {
   const all = await store.list();
   const files = all.filter((f) => !NOT_PART_OF_BUNDLE.has(f)).sort();
@@ -91,7 +167,7 @@ export async function exportBundle({
   // 目的地是**用户在文件选择器里随手点的**一个目录，完全可能是文档目录、
   // 甚至是上一次导出的档案。同名即覆盖，而覆盖掉的东西没有回收站。
   // 所以默认拒绝往非空目录里写，让调用方去问用户。
-  if (!overwrite && sink.list) {
+  if (!overwrite && !resume && sink.list) {
     const existing = await sink.list();
     if (existing.length > 0) {
       const err = new Error(
@@ -108,12 +184,26 @@ export async function exportBundle({
   // 没有它（抓取还没收尾）就只能验字节数，而那时必须如实这么说。
   const expected = await readExpectedDigests(store, files);
 
+  // 续导：先看目的地已经有什么。校验通过的不再抄一遍——**那正是续导的全部**，
+  // 不需要任何额外的进度状态。
+  const already = resume
+    ? await inspectDestination({ store, sink, files, expected, signal })
+    : new Map();
+
   /** @type {Array<{name: string, bytes: number}>} */
   const copied = [];
+  /** 跳过的（已经在目的地且验过）。它们仍然要出现在最终结果里。 */
+  const skipped = [];
   let index = 0;
 
   for (const name of files) {
     throwIfAborted(signal);
+    const pre = already.get(name);
+    if (pre?.ok) {
+      skipped.push({ name, bytes: pre.bytes, digestOk: pre.digestOk });
+      index += 1;
+      continue;
+    }
     const total = await store.size(name);
     const out = await sink.open(name);
     let done = 0;
@@ -143,12 +233,23 @@ export async function exportBundle({
     ? await verifyExported({ sink, copied, expected, onProgress, signal })
     : copied.map((c) => ({ ...c, sizeOk: null, digestOk: null, reason: '按要求跳过了校验' }));
 
+  // 跳过的那些**刚刚才验过**（就在 inspectDestination 里），不必再读一遍——
+  // 对 782 MB 的档案来说那是白白多花一趟。但它们必须出现在结果里，
+  // 否则「manifest 声明了却没导出」那条检查会把它们全报成缺失。
+  for (const sk of skipped) {
+    results.push({
+      name: sk.name, bytes: sk.bytes, sizeOk: true, digestOk: sk.digestOk,
+      reason: sk.digestOk === null ? '上次已导出（字节数一致，manifest 里没有摘要）' : '上次已导出，校验通过',
+      skipped: true,
+    });
+  }
+
   const problems = results.filter((r) => r.sizeOk === false || r.digestOk === false);
 
   // manifest 声明了却没被导出的文件，是最该抓的一种残缺——它在结果列表里
   // 根本不出现，因此不会被上面任何一条检查逮到。
   for (const name of expected.keys()) {
-    if (!copied.some((c) => c.name === name)) {
+    if (!copied.some((c) => c.name === name) && !skipped.some((c) => c.name === name)) {
       problems.push({
         name, bytes: 0, sizeOk: false, digestOk: false,
         reason: 'manifest 声明了这个文件，但源目录里没有',
@@ -166,7 +267,11 @@ export async function exportBundle({
 
   return {
     files: results,
+    // 这次真的搬了多少字节。**跳过的不算**——报进去会让「续导省了多少」
+    // 这件事看不出来，而那正是用户想知道的。
     bytes: copied.reduce((a, c) => a + c.bytes, 0),
+    skipped: skipped.length,
+    skippedBytes: skipped.reduce((a, c) => a + c.bytes, 0),
     problems,
     verified: verify && problems.length === 0 && allDeclaredOk,
     verifiedSizeOnly: verify && problems.length === 0 && !allDeclaredOk,
