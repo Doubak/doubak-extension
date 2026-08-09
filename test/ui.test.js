@@ -669,9 +669,34 @@ describe('面板脚本', () => {
 
   test('一行里的 URL 与右边的计数要分开', async () => {
     // `…/games5 个版本` —— 两段直接粘在一起。
+    // 样式从 panel.html 的内联 <style> 搬到了 panel.css，断言不变。
+    const css = await readRepoFile('src/ui/panel.css');
+    assert.match(css, /\.cap \{[^}]*display: flex/);
+    assert.match(css, /\.cap \{[^}]*gap:/);
+  });
+
+  test('**JS 里不许出现行内样式**', async () => {
+    // 原来有 17 处 `el.style.fontSize = '12px'` 之类，散在各处。样式一旦能在
+    // JS 里随手写，就没有任何力量阻止下一块界面再发明一套——**统一不了的根源
+    // 是没有唯一的地方，不是没人愿意统一**。
+    const js = await readRepoFile('src/ui/panel.js');
+    const hits = [...js.matchAll(/^.*\.style\.[a-zA-Z]/gm)].map((m) => m[0].trim());
+    assert.deepEqual(hits, [], `这些地方在 JS 里写样式：\n${hits.join('\n')}`);
+  });
+
+  test('**HTML 里也不许**', async () => {
     const html = await readRepoFile('src/ui/panel.html');
-    assert.match(html, /\.cap \{[^}]*display: flex/);
-    assert.match(html, /\.cap \{[^}]*gap:/);
+    assert.ok(!/ style="/.test(html), 'panel.html 里还有 style= 属性');
+  });
+
+  test('**颜色只能来自 token**，不许在规则里写死十六进制', async () => {
+    // 写死的话，改一次配色要全文搜一遍，而深色模式必然漏掉几处。
+    const css = await readRepoFile('src/ui/panel.css');
+    const body = css.slice(css.indexOf('* { box-sizing'));
+    const hex = [...body.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
+    // 允许纯白/纯黑这种在主色按钮上作前景的极端值。
+    const bad = hex.filter((h) => !/^#(fff|000|8881|8882|8883)$/i.test(h));
+    assert.deepEqual(bad, [], `这些颜色没走 token：${bad.join(' ')}`);
   });
 
   test('**不许往兄弟节点里插** —— 没人负责清，切一次档案就多留一张', async () => {

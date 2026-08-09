@@ -4,94 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>豆备</title>
-<style>
-  :root { color-scheme: light dark; --line: #8883; --danger: #a50e0e; }
-  @media (prefers-color-scheme: dark) { :root { --danger: #f7b4ae; } }
-  * { box-sizing: border-box; }
-  body {
-    font: 14px/1.6 system-ui, -apple-system, "Noto Sans CJK SC", sans-serif;
-    margin: 0; padding: 0;
-  }
-  header { padding: 18px 24px 0; border-bottom: 1px solid var(--line); }
-  h1 { font-size: 17px; margin: 0 0 2px; }
-  .sub { opacity: .65; margin: 0 0 14px; font-size: 13px; }
-
-  nav { display: flex; gap: 2px; }
-  nav button {
-    font: inherit; padding: 8px 14px; cursor: pointer;
-    background: none; border: none; border-bottom: 2px solid transparent;
-    color: inherit; opacity: .65;
-  }
-  nav button[aria-selected="true"] { opacity: 1; border-bottom-color: currentColor; font-weight: 600; }
-
-  main { padding: 20px 24px 60px; max-width: 1000px; }
-  section[hidden] { display: none; }
-  h2 { font-size: 15px; margin: 22px 0 8px; }
-  h2:first-child { margin-top: 0; }
-
-  .card { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; }
-  .idle { background: #8881; }
-  .run  { background: #e8f0fe; color: #174ea6; }
-  .warn { background: #fef7e0; color: #8a6116; }
-  .err  { background: #fce8e6; color: #a50e0e; }
-  .good { background: #e6f4ea; color: #14622b; }
-  @media (prefers-color-scheme: dark) {
-    .run  { background: #12233f; color: #a9c7f5; }
-    .warn { background: #3a2e10; color: #f5d78e; }
-    .err  { background: #3d1512; color: #f7b4ae; }
-    .good { background: #10361c; color: #a8e5b8; }
-  }
-  .card b { display: block; margin-bottom: 3px; }
-  /* 状态卡片里要换行显示正在抓的 URL；URL 很长，允许在任意处断开 */
-  .card { white-space: pre-wrap; word-break: break-all; }
-
-  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-bottom: 8px; }
-  th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); }
-  th { font-weight: 600; opacity: .7; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .muted { opacity: .55; }
-
-  .hint {
-    font-size: 12px; opacity: .8; background: #8881;
-    padding: 8px 12px; border-radius: 4px; margin-bottom: 12px;
-  }
-  button.act { font: inherit; padding: 7px 16px; cursor: pointer; margin-right: 8px; }
-  button.act:disabled { opacity: .5; cursor: default; }
-  /* 不可逆的操作要看起来不一样。用边框而不是填充色：填充的红按钮在一排按钮里
-     反而最抢眼，会把人往那儿引——而它恰恰是最不该被误点的那个。 */
-  button.act.danger { color: var(--danger); border-color: var(--danger); }
-  #log { font-family: ui-monospace, monospace; font-size: 12px; max-height: 60vh; overflow: auto; }
-  #log div { padding: 1px 0; border-bottom: 1px solid var(--line); }
-
-  .split { display: grid; grid-template-columns: minmax(240px, 1fr) 2fr; gap: 16px; }
-  @media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
-  #captures { max-height: 60vh; overflow: auto; font-size: 12px; }
-  #captures > div {
-    padding: 6px 8px; cursor: pointer; border-bottom: 1px solid var(--line);
-  }
-  .cap-main { display: flex; justify-content: space-between; gap: 8px; }
-  .cap-sub { font-size: 11px; opacity: .6; margin-top: 1px; }
-  /* 一行里「左边一段文字 + 右边一个计数」的通用排布。
-     不给它的话两段会直接粘在一起，长成 `…/games5 个版本` 这样。 */
-  .cap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
-  .cap > span:first-child { word-break: break-all; min-width: 0; }
-  .cap > .v { white-space: nowrap; }
-  .cap > div { flex-basis: 100%; }
-  .warn-text { color: #a50e0e; }
-  @media (prefers-color-scheme: dark) { .warn-text { color: #f7b4ae; } }
-  #captures div[aria-selected="true"] { background: #8882; }
-  #captures .v { font-size: 11px; opacity: .7; }
-  #preview {
-    border: 1px solid var(--line); border-radius: 4px; padding: 12px;
-    max-height: 60vh; overflow: auto;
-  }
-  #preview pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; margin: 0; }
-  #preview img { max-width: 100%; }
-</style>
+<link rel="stylesheet" href="panel.css">
 </head>
 <body>
-  <header>
-    <h1>豆备</h1>
+  <header class="site">
+    <div class="brand">
+      <img src="assets/logo.svg" alt="" width="22" height="22">
+      <h1>豆备</h1>
+      <span class="tag">Doubak</span>
+    </div>
     <p class="sub">在你自己的浏览器里备份豆瓣</p>
     <nav id="tabs">
       <button data-tab="overview" aria-selected="true">概览</button>
@@ -122,16 +43,16 @@
 
     <section id="tab-coverage" hidden>
       <div class="hint">
-        豆瓣页面上的条目数量<b style="display:inline">不能</b>用来判断备份是否完整。
+        豆瓣页面上的条目数量<b>不能</b>用来判断备份是否完整。
         豆瓣有多套内容屏蔽机制，它的计数有时统计于屏蔽之前、有时之后。
-        下表的差值是<b style="display:inline">线索</b>而非错误，完整性请看「连续性」一列。
+        下表的差值是<b>线索</b>而非错误，完整性请看「连续性」一列。
         <br>
-        <b style="display:inline">默认视角为「合起来」</b>：启用增量抓取后，单份档案的
-        「实抓」可能仅有若干新增条目，这属于正常现象——完整性是整条<b style="display:inline">链</b>的属性。
+        <b>默认视角为「合起来」</b>：启用增量抓取后，单份档案的
+        「实抓」可能仅有若干新增条目，这属于正常现象——完整性是整条<b>链</b>的属性。
       </div>
       <!-- 两个视角。增量之后，**单份档案的实抓数不再有完整性含义**——它可能只有
            3 条新的。完整性是整条链的属性。 -->
-      <div id="coverage-view" style="margin-bottom:12px"></div>
+      <div id="coverage-view"></div>
       <div id="chain"></div>
       <div id="coverage"></div>
     </section>
@@ -140,10 +61,10 @@
       <div class="hint">
         这里读的是档案本身：顺着索引把每条记录从段文件里取出来解压。
         这正是规范承诺第三方可以走的那条路径：不依赖任何声明，直接核对字节。
-        <b style="display:inline">导出之前，档案并不真正属于你</b>——它存放在扩展的存储中，
+        <b>导出之前，档案并不真正属于你</b>——它存放在扩展的存储中，
         卸载扩展或清除站点数据都会将其一并抹除，且不会另行提示。
       </div>
-      <div id="bundle-pick" style="margin-bottom:12px"></div>
+      <div id="bundle-pick"></div>
       <div id="archive-summary"></div>
       <!-- 「这是一次增量抓取」。**必须有自己的容器**：往兄弟节点里插的话没人负责
            清，切一次档案就多留一张，而留下的那张说的还是上一份档案的上游。 -->
@@ -174,7 +95,7 @@
 
     <section id="tab-debug" hidden>
       <div class="hint">
-        开发期工具。<b style="display:inline">演练</b>不发出任何网络请求：它以固定夹具驱动真实的
+        开发期工具。<b>演练</b>不发出任何网络请求：它以固定夹具驱动真实的
         分类器、队列与写入器，用于验证那些无法靠实际抓取来验证的路径（被风控拦截、要求验证、
         登录失效）。触发这些路径的唯一途径是真的去撞，而那正是需要不惜代价避免的。
       </div>
@@ -185,7 +106,7 @@
 
       <h2>小范围试跑（会真的访问豆瓣）</h2>
       <div class="hint">
-        <b style="display:inline">自然终止</b>与<b style="display:inline">人为截断</b>是两回事：
+        <b>自然终止</b>与<b>人为截断</b>是两回事：
         走到终点（到达下界，或翻完最后一页）才算完整完成，水位线才会推进；
         被条数上限截断的抓取不算完成，产出的是不完整的档案。
       </div>
@@ -212,8 +133,8 @@
          小范围试跑）。把一件日常操作放在那里，等于训练用户往那儿去找东西。 -->
     <section id="tab-storage" hidden>
       <div class="hint">
-        删除<b style="display:inline">不可逆</b>，且没有回收站。
-        <b style="display:inline">未导出过的档案，浏览器中的这一份即是唯一副本</b>——
+        删除<b>不可逆</b>，且没有回收站。
+        <b>未导出过的档案，浏览器中的这一份即是唯一副本</b>——
         卸载扩展或清除站点数据都会将其抹除。
       </div>
       <div id="storage"></div>
@@ -224,10 +145,10 @@
     <section id="tab-log" hidden>
       <div class="hint">
         存在本机（IndexedDB），最多保留 1000 条事件与 200 条抓取记录，重新打开后仍在。
-        事件与抓取记录<b style="display:inline">分开限额</b>：一次全量抓取有数千页，
+        事件与抓取记录<b>分开限额</b>：一次全量抓取有数千页，
         混在一起会把重试、停机、错误这类稀少而要紧的信号挤掉。
         完整的抓取记录在档案的 index.ndjson 中，那才是权威版本。
-        不会发送到任何地方；<b style="display:inline">里面有 URL 与用户名，贴出去之前请自行脱敏</b>。
+        不会发送到任何地方；<b>里面有 URL 与用户名，贴出去之前请自行脱敏</b>。
       </div>
       <div id="log-actions"></div>
       <div id="log"></div>

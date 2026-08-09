@@ -1,0 +1,276 @@
+/*
+ * 面板样式。
+ *
+ * ## 为什么单独成文件
+ *
+ * 原来 110 行内联在 `panel.html` 的 `<style>` 里，另有 32 处行内样式散在 JS 与
+ * HTML 中（`el.style.fontSize = …`）。于是「改一个间距」要翻三个地方，而每加一块
+ * 界面就现编一套标记——**样式不统一是症状，没地方放共享定义才是病**。
+ *
+ * 现在只有一处：下面这套 token，加上按它们写的规则。JS 里不许再出现 `.style.`
+ * （有测试守着）。
+ *
+ * ## 配色跟着 doubak.com 走
+ *
+ * 品牌绿与中性色刻度直接取自网站的 `css/main.css`。两边是**各自复制**的副本，
+ * 不是共享文件——扩展不能在运行时去网站取样式（那就成了外部依赖）。所以改配色
+ * 要改两处，而这是有意的：它们是两个独立发布的东西。
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* ── 品牌。取自 doubak-website/css/main.css */
+  --brand: #2e963d;
+  --brand-soft: #eef6f0;
+  --brand-line: #cfe3d5;
+
+  /* ── 中性 */
+  --bg: #ffffff;
+  --bg-alt: #f7faf8;
+  --surface: #ffffff;
+  --text: #1c211d;
+  --text-dim: #5b6b60;
+  --text-faint: #8a998f;
+  --line: #e2e8e4;
+
+  /* ── 语气色。
+   *
+   * 【五种语气，不是五种颜色】idle / busy / ok / warn / error 说的是这条消息
+   * 的**性质**，不是它长什么样。原来代码里到处写 `card err`、`warn-text`、
+   * `muted`，等于把外观当成了语义——换个配色就要全文搜一遍。 */
+  --tone-ok: #14622b;
+  --tone-ok-bg: #e6f4ea;
+  --tone-warn: #8a6116;
+  --tone-warn-bg: #fef7e0;
+  --tone-error: #a50e0e;
+  --tone-error-bg: #fce8e6;
+  --tone-busy: #174ea6;
+  --tone-busy-bg: #e8f0fe;
+  --tone-idle: var(--text-dim);
+  --tone-idle-bg: #8881;
+
+  /* ── 尺度。
+   *
+   * 【只有这几档，不许即兴取值】原来有 6px / 7px / 8px / 12px / 14px / 16px /
+   * 18px / 22px / 24px 混着用，没有任何一处是有理由地不同于旁边那处。 */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  --r1: 4px;
+  --r2: 8px;
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brand: #4faf62;
+    --brand-soft: #14251a;
+    --brand-line: #2a4633;
+
+    --bg: #0f1511;
+    --bg-alt: #131b16;
+    --surface: #16201a;
+    --text: #e4ebe6;
+    --text-dim: #a3b3a8;
+    --text-faint: #7b8b81;
+    --line: #253026;
+
+    --tone-ok: #a8e5b8;
+    --tone-ok-bg: #10361c;
+    --tone-warn: #f5d78e;
+    --tone-warn-bg: #3a2e10;
+    --tone-error: #f7b4ae;
+    --tone-error-bg: #3d1512;
+    --tone-busy: #a9c7f5;
+    --tone-busy-bg: #12233f;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font: 14px/1.65 var(--font);
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ── 页眉 ─────────────────────────────────────────────────────────── */
+
+header.site {
+  padding: var(--s4) var(--s5) 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-alt);
+}
+.brand { display: flex; align-items: center; gap: var(--s2); }
+/* 标识用 SVG：面板是普通网页，不受 MV3「图标只收 PNG」的限制，
+   而 SVG 在任意缩放与 DPI 下都清晰。 */
+.brand img { width: 22px; height: 22px; display: block; }
+.brand h1 { font-size: 16px; margin: 0; letter-spacing: .01em; }
+.brand .tag {
+  font-size: 12px; color: var(--text-dim); margin-left: var(--s1);
+  padding-left: var(--s2); border-left: 1px solid var(--line);
+}
+header.site .sub { color: var(--text-dim); margin: var(--s1) 0 var(--s3); font-size: 12.5px; }
+
+nav { display: flex; gap: 2px; flex-wrap: wrap; }
+nav button {
+  font: inherit; font-size: 13.5px; padding: var(--s2) var(--s3); cursor: pointer;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-dim); border-radius: var(--r1) var(--r1) 0 0;
+}
+nav button:hover { color: var(--text); background: #8881; }
+nav button[aria-selected="true"] {
+  color: var(--brand); border-bottom-color: var(--brand); font-weight: 600;
+}
+
+main { padding: var(--s5) var(--s5) 60px; max-width: 1000px; }
+section[hidden] { display: none; }
+h2 { font-size: 14.5px; margin: var(--s5) 0 var(--s2); }
+h2:first-child { margin-top: 0; }
+
+/* ── 消息卡。所有对用户说的话都走这里 ──────────────────────────────── */
+
+.card {
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r2);
+  margin-bottom: var(--s4);
+  border: 1px solid transparent;
+  /* 状态卡里要显示正在抓的 URL，很长，允许任意处断开 */
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.card > b { display: block; margin-bottom: var(--s1); font-size: 13.5px; }
+.card .detail { color: inherit; opacity: .88; }
+/* 动作按钮排在卡片里，与文字有明确间距——「给出下一步」是这套界面的硬规则，
+   所以它在样式上也该是卡片的一部分，不是散落在旁边的按钮。 */
+.card .actions { margin-top: var(--s3); display: flex; gap: var(--s2); flex-wrap: wrap; }
+
+.tone-idle  { background: var(--tone-idle-bg);  color: var(--tone-idle); }
+.tone-busy  { background: var(--tone-busy-bg);  color: var(--tone-busy); }
+.tone-ok    { background: var(--tone-ok-bg);    color: var(--tone-ok); }
+.tone-warn  { background: var(--tone-warn-bg);  color: var(--tone-warn); }
+.tone-error { background: var(--tone-error-bg); color: var(--tone-error); }
+
+/* ── 说明块 ───────────────────────────────────────────────────────── */
+
+.hint {
+  font-size: 12.5px; color: var(--text-dim);
+  background: var(--bg-alt); border: 1px solid var(--line);
+  padding: var(--s2) var(--s3); border-radius: var(--r1); margin-bottom: var(--s3);
+}
+.hint b { color: var(--text); }
+.muted { color: var(--text-dim); }
+.faint { color: var(--text-faint); }
+.small { font-size: 12px; }
+.mono { font-family: var(--mono); }
+.nowrap { white-space: nowrap; }
+
+/* ── 表格 ─────────────────────────────────────────────────────────── */
+
+table { border-collapse: collapse; width: 100%; font-size: 13px; margin-bottom: var(--s2); }
+th, td { text-align: left; padding: var(--s1) var(--s3) var(--s1) 0; border-bottom: 1px solid var(--line); }
+th { font-weight: 600; color: var(--text-dim); font-size: 12.5px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── 按钮 ─────────────────────────────────────────────────────────── */
+
+button.act {
+  font: inherit; font-size: 13.5px; padding: var(--s2) var(--s4); cursor: pointer;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--r1);
+}
+button.act:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+button.act:disabled { opacity: .45; cursor: default; }
+button.act.primary {
+  background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600;
+}
+button.act.primary:hover:not(:disabled) { filter: brightness(1.06); color: #fff; }
+/* 不可逆的操作要看起来不一样。用边框而不是填充色：填充的红按钮在一排按钮里
+   反而最抢眼，会把人往那儿引——而它恰恰是最不该被误点的那个。 */
+button.act.danger { color: var(--tone-error); border-color: var(--tone-error); }
+.buttons { display: flex; gap: var(--s2); flex-wrap: wrap; margin-bottom: var(--s3); }
+
+/* ── 档案选择列表 ─────────────────────────────────────────────────── */
+
+.picker { border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; margin-bottom: var(--s4); }
+.picker-row {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(96px, auto) 1fr auto;
+  gap: var(--s1) var(--s3);
+  align-items: baseline;
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  background: var(--surface);
+  font-size: 13px;
+}
+.picker-row:last-child { border-bottom: none; }
+.picker-row:hover { background: var(--bg-alt); }
+.picker-row[aria-selected="true"] {
+  background: var(--brand-soft);
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.picker-row .when { font-variant-numeric: tabular-nums; }
+.picker-row .rel { color: var(--text-dim); font-size: 12px; }
+.picker-row .facts { color: var(--text-dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+.picker-row .flag { font-size: 11.5px; padding: 1px var(--s2); border-radius: 999px; white-space: nowrap; }
+.flag-live { background: var(--tone-busy-bg); color: var(--tone-busy); }
+.flag-saved { background: var(--tone-ok-bg); color: var(--tone-ok); }
+.flag-unsaved { background: var(--tone-warn-bg); color: var(--tone-warn); }
+@media (max-width: 640px) {
+  .picker-row { grid-template-columns: 1fr auto; }
+}
+
+/* ── 日志与捕获列表 ───────────────────────────────────────────────── */
+
+#log { font-family: var(--mono); font-size: 12px; max-height: 60vh; overflow: auto; }
+#log div { padding: 1px 0; border-bottom: 1px solid var(--line); }
+
+.split { display: grid; grid-template-columns: minmax(240px, 1fr) 2fr; gap: var(--s4); }
+@media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
+
+#captures { max-height: 60vh; overflow: auto; font-size: 12px; border: 1px solid var(--line); border-radius: var(--r1); }
+#captures > div { padding: var(--s1) var(--s2); cursor: pointer; border-bottom: 1px solid var(--line); }
+#captures > div:hover { background: var(--bg-alt); }
+#captures div[aria-selected="true"] { background: var(--brand-soft); box-shadow: inset 3px 0 0 var(--brand); }
+#captures .v { font-size: 11px; color: var(--text-dim); }
+.cap-main { display: flex; justify-content: space-between; gap: var(--s2); }
+.cap-sub { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+/* 一行里「左边一段文字 + 右边一个计数」的通用排布。
+   不给它的话两段会直接粘在一起，长成 `…/games5 个版本` 这样。 */
+.cap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s1) var(--s3); }
+.cap > span:first-child { word-break: break-all; min-width: 0; }
+.cap > .v { white-space: nowrap; }
+.cap > div { flex-basis: 100%; }
+.warn-text { color: var(--tone-error); }
+
+#preview { border: 1px solid var(--line); border-radius: var(--r1); padding: var(--s3); max-height: 60vh; overflow: auto; }
+#preview pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; margin: 0; }
+#preview img { max-width: 100%; }
+
+/* ── 从 JS 的行内样式搬过来的几个 ────────────────────────────────────
+   原来写成 `el.style.fontSize = '12px'` 之类，散在 17 处。
+   意图其实只有这几种，收在这里之后改一次就够。 */
+
+.stack-row { display: block; margin: var(--s1) 0; }
+.breakable { word-break: break-all; white-space: pre-wrap; }
+.indent { padding-left: var(--s4); }
+.lined-row {
+  display: flex; gap: var(--s3); align-items: baseline;
+  padding: var(--s1) 0; border-bottom: 1px solid var(--line);
+}
+.lined-row > b { flex: 0 0 auto; }
+.codebox {
+  width: 100%; font: 12px var(--mono);
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--r1); padding: var(--s2);
+}

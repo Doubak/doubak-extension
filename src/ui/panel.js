@@ -25,6 +25,7 @@ import {
 } from '../bundle/exporter.js';
 import { summarizeBundles, checkDeletable, totalBytes, hasUnexported } from '../storage/storage-usage.js';
 import { captureTitle, captureSubtitle, subjectLabel } from './capture-label.js';
+import { bundlePicker, renderStatus, statusCard, button as mkButton } from './components.js';
 import {
   shouldLog, formatEntry, formatLogText, MAX_ENTRIES, MAX_FETCH_ENTRIES,
 } from '../crawl/event-log.js';
@@ -46,7 +47,6 @@ function send(msg) {
 }
 
 /** 界面上不出现内部术语。 */
-
 
 /** 档案状态。界面上不出现 `in_progress` 这种内部标识。 */
 const STATUS_NAMES = {
@@ -664,7 +664,7 @@ function setRoutesNote(text) {
     note = document.createElement('div');
     note.dataset.role = 'routes-note';
     note.className = 'muted';
-    note.style.fontSize = '12px';
+    note.className = note.className ? `${note.className} small` : 'small';
     el.append(note);
   }
   if (note.textContent !== text) note.textContent = text;
@@ -1084,19 +1084,18 @@ function renderCrawlMode() {
 
   for (const [key, label, why] of opts) {
     const row = document.createElement('label');
-    row.style.display = 'block';
-    row.style.margin = '4px 0';
+    row.className = 'stack-row';
     const radio = document.createElement('input');
     radio.type = 'radio';
     radio.name = 'crawl-mode';
     radio.checked = crawlMode === key;
     radio.onchange = () => { crawlMode = key; renderCrawlMode(); refresh(); };
     const b = document.createElement('b');
-    b.style.display = 'inline';
+
     b.textContent = ` ${label} `;
     const note = document.createElement('span');
     note.className = 'muted';
-    note.style.fontSize = '12px';
+    note.className = note.className ? `${note.className} small` : 'small';
     note.textContent = why;
     row.append(radio, b, note);
     el.append(row);
@@ -1457,7 +1456,7 @@ function renderCoverage(coverage, crawlState, bundleId) {
   if (bundleId) {
     const which = document.createElement('div');
     which.className = 'muted';
-    which.style.fontSize = '12px';
+    which.className = which.className ? `${which.className} small` : 'small';
     which.textContent = `档案 ${bundleId}`;
     el.append(which);
   }
@@ -1637,7 +1636,7 @@ async function loadArchive() {
   const active = lastStatus?.runner?.bundleId ?? lastStatus?.checkpoint?.bundle_id ?? null;
   const ids = dirs.map(bundleIdFromDirName).filter(Boolean);
 
-  renderBundlePicker(ids, active);
+  renderBundlePicker(await describeBundles(getOpfsWorker(), dirs, active));
   if (ids.length === 0) {
     currentBundleId = null;
     $('archive-summary').className = 'muted';
@@ -1653,27 +1652,79 @@ async function loadArchive() {
     : (active ?? ids[0]));
 }
 
-/** @param {string[]} ids @param {string | null} active */
-function renderBundlePicker(ids, active) {
+/**
+ * 档案选择器。
+ *
+ * ## 原来是个下拉框，装的是档案编号
+ *
+ * 八份 `20260801T005010Z-3eef52` 这样的字符串，人只能靠后六位分辨，而后六位
+ * 不携带任何意义。更别扭的是**必须先选一份才看得见它有什么，而选择本身正需要
+ * 那些信息**——鸡生蛋。
+ *
+ * 现在每一行自己说清楚：什么时候抓的、接在谁后面、多大、多少条、导出了没有。
+ * 这些数字**本来就都在**（manifest 与文件大小），只是从没被拿出来给人看。
+ *
+ * ## 读 manifest 失败不影响选择
+ *
+ * 拿不到就只显示编号——**一份读不出 manifest 的档案恰恰最需要能被选中**
+ * （用户要去看它出了什么事）。因元数据缺失而让它从列表里消失是最糟的处理。
+ *
+ * @param {Array<{id: string, at?: string|null, bytes?: number|null, captures?: number|null,
+ *   previous?: string|null, live?: boolean, exported?: boolean|null}>} items
+ */
+function renderBundlePicker(items) {
   const el = $('bundle-pick');
   el.replaceChildren();
-  if (ids.length <= 1) return;
+  if (items.length <= 1) return;
+  el.append(bundlePicker({
+    items,
+    selected: currentBundleId,
+    onPick: (id) => { if (id !== currentBundleId) openBundle(id); },
+    fmtBytes: bytes,
+  }));
+}
 
-  const label = document.createElement('span');
-  label.className = 'muted';
-  label.style.marginRight = '8px';
-  label.textContent = '档案';
-  const sel = document.createElement('select');
-  sel.style.font = 'inherit';
-  for (const id of ids) {
-    const o = document.createElement('option');
-    o.value = id;
-    o.textContent = id === active ? `${id}（进行中）` : id;
-    o.selected = id === (currentBundleId ?? active ?? ids[0]);
-    sel.append(o);
+/**
+ * 把每份档案的元数据读出来，供选择器显示。
+ *
+ * 一次读 8 份 manifest 是几毫秒的事，而它换来的是「不用点进去就知道哪份是哪份」。
+ *
+ * @param {Worker} worker @param {string[]} dirs @param {string|null} active
+ */
+async function describeBundles(worker, dirs, active) {
+  /** @type {Record<string, string|null>} */
+  let exportedAt = {};
+  try {
+    const rec = await send({ type: 'exportRecords', bundleIds: dirs.map(bundleIdFromDirName) });
+    // 记录读不出来时不许显示成「未导出」——那是替用户下一个我们没资格下的判断。
+    if (rec?.ok) exportedAt = rec.exportedAt ?? {};
+    else exportedAt = null;
+  } catch { exportedAt = null; }
+
+  const out = [];
+  for (const dir of dirs) {
+    const id = bundleIdFromDirName(dir);
+    if (!id) continue;
+    const item = { id, live: id === active, exported: exportedAt ? Boolean(exportedAt[id]) : null };
+    try {
+      const store = new WorkerFileStore({ worker, dir });
+      const names = await store.list();
+      let total = 0;
+      for (const n of names) total += await store.size(n);
+      item.bytes = total;
+      const manifest = JSON.parse(new TextDecoder().decode(await store.read('manifest.json')));
+      item.at = manifest.created_at ?? manifest.started_at ?? null;
+      item.previous = manifest.previous_bundle_id ?? null;
+      item.captures = manifest.index?.line_count ?? manifest.counts?.captures ?? null;
+    } catch {
+      // 见函数说明：读不出来照样列出来。
+    }
+    out.push(item);
   }
-  sel.onchange = () => openBundle(sel.value);
-  el.append(label, sel);
+  // 新的在上。**按时间排，不按目录名排**——目录名恰好也是时间序，但那是巧合，
+  // 不是可以依赖的性质。
+  out.sort((a, b) => ((a.at ?? '') < (b.at ?? '') ? 1 : -1));
+  return out;
 }
 
 /** @param {boolean} on */
@@ -1901,10 +1952,10 @@ function renderVanished() {
 
     const url = document.createElement('div');
     url.className = 'muted cap-sub';
-    url.style.wordBreak = 'break-all';
+    url.className = url.className ? `${url.className} breakable` : 'breakable';
     // URL 与时间之间要有明显的分隔——挤在一起时 URL 的结尾会被读成时间的一部分。
     url.textContent = `${e.url}\n抓于 ${String(e.observed_at ?? '').slice(0, 19).replace('T', ' ')}`;
-    url.style.whiteSpace = 'pre-wrap';
+
     row.append(url);
     list.append(row);
   }
@@ -2350,7 +2401,7 @@ function renderLog() {
       if (note) {
         const n = document.createElement('div');
         n.className = 'muted';
-        n.style.paddingLeft = '16px';
+        n.className = n.className ? `${n.className} indent` : 'indent';
         n.textContent = note;
         d.append(n);
       }
@@ -2377,8 +2428,7 @@ function renderLog() {
       const ta = document.createElement('textarea');
       ta.value = text;
       ta.rows = 16;
-      ta.style.width = '100%';
-      ta.style.font = '12px ui-monospace, monospace';
+      ta.className = 'codebox';
       acts.append(ta);
       ta.select();
     }
@@ -2413,7 +2463,6 @@ setInterval(() => {
   if (!document.hidden) refresh();
 }, 2000);
 
-
 // ── 调试 ────────────────────────────────────────────────────
 
 let debugLoaded = false;
@@ -2425,15 +2474,15 @@ let debugLoaded = false;
  */
 function actionRow(label, why, onClick) {
   const row = document.createElement('div');
-  row.style.cssText = 'display:flex;gap:12px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line)';
+  row.className = 'lined-row';
   const b = document.createElement('button');
   b.className = 'act';
   b.textContent = label;
-  b.style.flex = '0 0 auto';
+
   b.onclick = onClick;
   const note = document.createElement('span');
   note.className = 'muted';
-  note.style.fontSize = '12px';
+  note.className = note.className ? `${note.className} small` : 'small';
   note.textContent = why;
   row.append(b, note);
   return row;
@@ -2537,7 +2586,7 @@ async function runDryRun(key) {
   );
   const why = document.createElement('div');
   why.className = 'muted';
-  why.style.fontSize = '12px';
+  why.className = why.className ? `${why.className} small` : 'small';
   why.textContent = `预期：${SCENARIOS[key].expect}`;
   el.append(why);
 }
@@ -2660,7 +2709,7 @@ function renderStorage() {
     if (!u.deletable && u.blockedReason) {
       const why = document.createElement('span');
       why.className = 'muted';
-      why.style.fontSize = '12px';
+      why.className = why.className ? `${why.className} small` : 'small';
       why.textContent = u.blockedReason;
       cell.append(why);
     }
@@ -2674,7 +2723,7 @@ function renderStorage() {
   all.onclick = deleteAll;
   const note = document.createElement('span');
   note.className = 'muted';
-  note.style.fontSize = '12px';
+  note.className = note.className ? `${note.className} small` : 'small';
   note.textContent = hasUnexported(storageUsage)
     ? '有档案没导出过 —— 清空之后不可能找回来'
     : '所有档案都导出过了';

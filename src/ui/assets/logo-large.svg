@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-label="豆瓣备份器"><title>豆瓣备份器</title>
+  <mask id="ba" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+    <rect width="24" height="24" fill="#fff"/>
+    <path d="M 0 -5.2 C 2.3 -5.2 4 -2.9 4 0 C 4 2.9 2.3 5.2 0 5.2 C -2.1 5.2 -3.6 3 -3.6 0.1 C -3.6 -2.8 -2.1 -5.2 0 -5.2 Z" transform="translate(14.45 14.22) rotate(-20) scale(1.127)" fill="#000" stroke="#000" stroke-width="1.686" stroke-linejoin="round"/>
+    <rect x="-2.8" y="-1.95" width="1.15" height="3.9" rx="0.575" transform="translate(8.683 9.2) rotate(-20) scale(1.006)" fill="#000"/>
+  </mask>
+  <mask id="fa" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+    <rect width="24" height="24" fill="#fff"/>
+    <rect x="-2.8" y="-1.95" width="1.15" height="3.9" rx="0.575" transform="translate(14.45 14.22) rotate(-20) scale(1.127)" fill="#000"/>
+    <path d="M 65.02 30.16 L 18.57 30.16 L 18.57 46.18 L 65.02 46.18 Z M 9.11 21.78 L 74.39 21.78 L 74.39 54.56 L 9.11 54.56 Z M 2.23 4.65 L 81.27 4.65 L 81.27 13.04 L 2.23 13.04 Z M 24.34 55.95 C 27.8 60.79 30.89 66.63 33.63 73.45 L 50.16 73.45 C 53.43 68.18 56.31 62.34 58.78 55.95 L 68.28 59.21 C 65.79 64.6 63.11 69.36 60.27 73.45 L 83.5 73.45 L 83.5 81.74 L 0 81.74 L 0 73.45 L 24.34 73.45 C 22.1 69.04 19.2 64.3 15.59 59.21 Z" transform="translate(14.45 14.22) rotate(-20) scale(1.127) translate(1.05 0) scale(0.0479) translate(-41.75 -43.195)" fill="#000"/>
+  </mask>
+  <rect width="24" height="24" rx="6" fill="#2E963D"/>
+  <g fill="#FFF4D8">
+    <g mask="url(#ba)"><path d="M 0 -5.2 C 2.3 -5.2 4 -2.9 4 0 C 4 2.9 2.3 5.2 0 5.2 C -2.1 5.2 -3.6 3 -3.6 0.1 C -3.6 -2.8 -2.1 -5.2 0 -5.2 Z" transform="translate(8.683 9.2) rotate(-20) scale(1.006)"/></g>
+    <g mask="url(#fa)"><path d="M 0 -5.2 C 2.3 -5.2 4 -2.9 4 0 C 4 2.9 2.3 5.2 0 5.2 C -2.1 5.2 -3.6 3 -3.6 0.1 C -3.6 -2.8 -2.1 -5.2 0 -5.2 Z" transform="translate(14.45 14.22) rotate(-20) scale(1.127)"/></g>
+  </g>
+</svg>

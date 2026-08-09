@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-label="豆瓣备份器"><title>豆瓣备份器</title>
+  <mask id="bn" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+    <rect width="24" height="24" fill="#fff"/>
+    <path d="M 0 -5.2 C 2.3 -5.2 4 -2.9 4 0 C 4 2.9 2.3 5.2 0 5.2 C -2.1 5.2 -3.6 3 -3.6 0.1 C -3.6 -2.8 -2.1 -5.2 0 -5.2 Z" transform="translate(14.45 14.22) rotate(-20) scale(1.127)" fill="#000" stroke="#000" stroke-width="1.686" stroke-linejoin="round"/>
+    <rect x="-2.8" y="-1.95" width="1.15" height="3.9" rx="0.575" transform="translate(8.683 9.2) rotate(-20) scale(1.006)" fill="#000"/>
+  </mask>
+  <mask id="fn" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+    <rect width="24" height="24" fill="#fff"/>
+    <rect x="-2.8" y="-1.95" width="1.15" height="3.9" rx="0.575" transform="translate(14.45 14.22) rotate(-20) scale(1.127)" fill="#000"/>
+  </mask>
+  <rect width="24" height="24" rx="6" fill="#2E963D"/>
+  <g fill="#FFF4D8">
+    <g mask="url(#bn)"><path d="M 0 -5.2 C 2.3 -5.2 4 -2.9 4 0 C 4 2.9 2.3 5.2 0 5.2 C -2.1 5.2 -3.6 3 -3.6 0.1 C -3.6 -2.8 -2.1 -5.2 0 -5.2 Z" transform="translate(8.683 9.2) rotate(-20) scale(1.006)"/></g>
+    <g mask="url(#fn)"><path d="M 0 -5.2 C 2.3 -5.2 4 -2.9 4 0 C 4 2.9 2.3 5.2 0 5.2 C -2.1 5.2 -3.6 3 -3.6 0.1 C -3.6 -2.8 -2.1 -5.2 0 -5.2 Z" transform="translate(14.45 14.22) rotate(-20) scale(1.127)"/></g>
+  </g>
+</svg>

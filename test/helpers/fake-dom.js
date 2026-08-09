@@ -141,6 +141,13 @@ class FakeElement {
 
 /** @param {FakeElement} el @param {string} sel */
 function matches(el, sel) {
+  // `.cls`。组件层（components.js）用类名找元素，所以这一种也得认。
+  // **只支持单个类名**，不支持 `.a .b` 这种组合——多认一种就多一处
+  // 「测试里能过、浏览器里不行」的可能。
+  if (/^\.[\w-]+$/.test(sel)) {
+    if (!el.className) return false;
+    return String(el.className).split(/\s+/).includes(sel.slice(1));
+  }
   // `tag[data-x]`
   const attr = /^(\w+)\[([\w-]+)\]$/.exec(sel);
   if (attr) {
