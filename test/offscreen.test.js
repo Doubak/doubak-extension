@@ -342,8 +342,12 @@ describe('增量：offscreen 这一侧的接线', () => {
     // 只有一份——那一份要是刚跑了一小段的增量，此前几千个详情页就全都不认识了。
     // 真实现象：只加了一本想读的书，增量却在抓游戏详情页。
     const src = await readRepoFile('src/offscreen/offscreen.js');
-    assert.match(src, /knownSubjects\(bundlesWithKnownSubjects\(entries, me\)\)/);
+    // 断言的是**喂给 knownSubjects 的那批档案是按账号选的**，而不是某一行长什么样
+    // ——原来钉死了整个表达式，把它提成一个变量就红了，而性质一点没变。
+    assert.match(src, /const mine = bundlesWithKnownSubjects\(entries, me\)/);
+    assert.match(src, /knownSubjects\(mine\)/);
     assert.equal(src.includes('knownSubjects(newest ? chainOf('), false, '别再按链取');
+    assert.equal(/knownSubjects\(\s*chainOf\(/.test(src), false, '别再按链取');
   });
 
   test('已抓过的作品详情页只按 interest.item 认', async () => {
@@ -366,6 +370,56 @@ describe('增量：offscreen 这一侧的接线', () => {
   test('没收尾的档案不当基准 —— 它没有连续性证明', async () => {
     const src = await readRepoFile('src/offscreen/offscreen.js');
     assert.match(src, /hasManifest\(\)/);
+  });
+
+  test('**下界挑出来之后，就不许再被丢掉**', async () => {
+    // 实测代价：这段代码原来整个包在一个 try 里，下界挑好了但后面
+    // knownSubjects / backlogAssets 任何一处抛了，就一起退回全量——
+    // 一次本该几分钟的增量变成 4 小时、5880 条捕获的全量。
+    //
+    // 而且**产出的档案永久地宣称自己是一条链的起点**：previous_bundle_id 写成
+    // null 之后没法补，档案跑过就冻结了。链在那里断掉，后来的人只看到
+    // 「这里有一次全量」，看不出它本该接在谁后面。
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    const fn = src.slice(src.indexOf('async function incrementalOptions'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+
+    // 挑下界之后的那一段里，两样锦上添花的东西必须**各自**兜底。
+    //
+    // 判据是「它们落在不同的 try 块里」，而不是「附近有 try 字样」——后者
+    // 写松了：把两个合并回同一个 try，隔壁那个 catch 仍然在附近，测试照样过。
+    // 这一版是被那次反向验证逼出来的。
+    const after = body.slice(body.indexOf('if (picks.size === 0)'));
+    const blocks = after.split('try {');
+    const seg = (part) => blocks.findIndex((b) => b.includes(`await ${part}(`));
+    const a = seg('knownSubjects');
+    const b = seg('backlogAssets');
+    assert.ok(a > 0 && b > 0, '两样都该在自己的 try 里');
+    assert.notEqual(a, b, '两样在同一个 try 里 —— 一个失败会把另一个和下界一起拖下水');
+    for (const part of ['knownSubjects', 'backlogAssets']) {
+      const i = after.indexOf(`await ${part}(`);
+      assert.match(after.slice(i, i + 400), /catch/, `${part} 没有兜底`);
+    }
+    // 它们的失败只该降级，不该变成「没有下界」。
+    assert.ok(!/catch[^}]*return \{\}/.test(after), '锦上添花失败时不许 return {}');
+  });
+
+  test('**退回全量必须说出来** —— 原来是完全静默的', async () => {
+    // 原来 incrementalOptions 内部 catch 掉、返回 {}，runner 那边看到的是一次
+    // 「成功但没有下界」的调用，于是既不报 incremental_failed 也不报 incremental。
+    // 用户看到的现象是「我选了增量，它跑了四个小时」，而界面上一句解释都没有。
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    const fn = src.slice(src.indexOf('async function incrementalOptions'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+
+    // 每一条退回全量的路径都要先说一句为什么。唯一允许出现裸 `return {}` 的地方
+    // 是 fallback 这个小助手本身——它前面正好就是那句解释。
+    const helperEnd = body.indexOf('};', body.indexOf('const fallback ='));
+    const rest = body.slice(helperEnd);
+    assert.deepEqual([...rest.matchAll(/return \{\};/g)].map((m) => m[0]), [],
+      '有一条退回全量的路径绕开了 fallback，也就绕开了那句解释');
+    assert.ok([...rest.matchAll(/return fallback\(/g)].length >= 3, '至少三条退回路径');
+    assert.match(body, /relayEvent\(\{ type: 'incremental_skipped'/);
   });
 
   test('读不出来就退回全量 —— 少抓不可接受，多抓只是慢', async () => {

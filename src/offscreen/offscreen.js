@@ -256,21 +256,66 @@ async function readChainEntries() {
   return entries;
 }
 
+/**
+ * 挑增量的下界，并顺带准备几样锦上添花的东西。
+ *
+ * ## 「退回全量」不是免费的
+ *
+ * 这段代码原来整个包在一个 try 里：下界挑好了，但后面 `knownSubjects` 或
+ * `backlogAssets` 任何一处抛了，就一起退回全量。**实测代价**：一次本该几分钟的
+ * 增量变成 4 小时、5880 条捕获的全量，而且——
+ *
+ * **产出的档案永久地宣称自己是一条链的起点。** `previous_bundle_id` 写成 null
+ * 之后没法补：档案是不可逆那一步的产物，跑过就冻结了。于是链在那里断掉，
+ * 而后来的人只看到「这里有一次全量」，看不出它本该接在谁后面。
+ *
+ * 所以现在分开：**下界一旦挑出来就不许再被丢掉**，后面每一样各自兜底。
+ * 少一个 backlog 只是这一趟少补几张图（下一趟还会补），而退回全量是几小时
+ * 加一处不可逆的元数据损失——两者不是一个量级。
+ *
+ * ## 退回全量时必须说出来
+ *
+ * 原来是**完全静默**的：`incrementalOptions` 内部 catch 掉、返回 `{}`，
+ * runner 那边看到的是一次「成功但没有下界」的调用，于是既不报
+ * `incremental_failed` 也不报 `incremental`。用户看到的现象是「我选了增量，
+ * 它跑了四个小时」，而界面上没有任何一句话解释为什么。
+ *
+ * @param {{userId?: string|null, username?: string|null}} account
+ * @param {string} mode
+ */
 async function incrementalOptions(account, mode = 'incremental') {
+  /** 退回全量时，**一定要说清是为什么**。 */
+  const fallback = (reason, message) => {
+    debugLog('增量：退回全量', reason, message ?? '');
+    relayEvent({ type: 'incremental_skipped', reason, message: message ?? null });
+    return {};
+  };
+
+  let entries;
   try {
-    const entries = await readChainEntries();
-    if (entries.length === 0) return {};
+    entries = await readChainEntries();
+  } catch (e) {
+    return fallback('read_failed', String(e?.message ?? e));
+  }
+  if (entries.length === 0) return fallback('no_bundles');
 
-    // **账号必须对得上。** 别人的档案不能给你当基准：那会让你以为某段时间已经
-    // 抓过了，而实际上抓的是别人的。数字 uid 是档案的归属主键。
-    const me = {
-      accountUserId: account?.userId ?? null,
-      accountUsername: account?.username ?? null,
-    };
-    const picks = pickFloors(entries, me);
+  // **账号必须对得上。** 别人的档案不能给你当基准：那会让你以为某段时间已经
+  // 抓过了，而实际上抓的是别人的。数字 uid 是档案的归属主键。
+  const me = {
+    accountUserId: account?.userId ?? null,
+    accountUsername: account?.username ?? null,
+  };
 
-    // **改名要说给用户听。** 它会让一次抓取从增量退回全量，而用户看到的现象是
-    // 「明明抓过了，怎么又从头来」——不解释的话那看起来就是个 bug。
+  let picks;
+  try {
+    picks = pickFloors(entries, me);
+  } catch (e) {
+    return fallback('pick_failed', String(e?.message ?? e));
+  }
+
+  // **改名要说给用户听。** 它会让一次抓取从增量退回全量，而用户看到的现象是
+  // 「明明抓过了，怎么又从头来」——不解释的话那看起来就是个 bug。
+  try {
     const renamed = renamedBundles(entries, me);
     if (renamed.length) {
       relayEvent({
@@ -281,41 +326,48 @@ async function incrementalOptions(account, mode = 'incremental') {
         count: renamed.length,
       });
     }
+  } catch { /* 只是解释性的提示，失败不该影响这次抓取 */ }
 
-    if (picks.size === 0) {
-      debugLog('增量：没有可用的下界，这次是全量');
-      return {};
-    }
+  if (picks.size === 0) return fallback('no_floors');
 
-    const newest = newestFirst(entries)[0];
-    // **按账号取，不按链取。** 「这一页我是不是已经有了」与它属于哪条链无关，
-    // 见 `knownSubjects` 上的说明。
-    const known = await knownSubjects(bundlesWithKnownSubjects(entries, me));
-    debugLog('增量：', [...picks].map(([k, v]) => `${k}←${v.fromBundleId}`).join(' '));
-    return {
-      floors: floorsFor(picks),
-      floorSources: new Map([...picks].map(([k, v]) => [k, v.fromBundleId])),
-      previousBundleId: newest?.bundleId ?? null,
-      // 链上已经抓过的作品详情页。那条路线占九成体积，而「增量」对它不成立
-      // （没有时间序），所以做法是只抓这次新出现的。
-      //
-      // 用户选了「重抓作品详情页」时**不传**——那时他要的正是新版本（评分、短评
-      // 会变），跳过就完全达不到目的。
-      // 选了「重抓作品详情页」时不跳过已有的，**并且**把它们直接排进队——
-      // 只做前者的话，能重抓的只有最新几页列表上派生出来的那十几个，而选项
-      // 承诺的是全部。
-      knownSubjectUrlKeys: mode === 'refresh-subjects' ? [] : known,
-      refreshSubjectUrls: mode === 'refresh-subjects' ? known : null,
-      // 存量补抓（规范 §6.2.1）。放在这里而不是更靠前，是因为它只在**增量**路径上
-      // 有意义：没有下界 = 全量 = 广播会从头重走 = 图现场就派生出来了。上面那句
-      // `if (picks.size === 0) return {}` 天然保证了这一点。
-      backlogAssets: await backlogAssets(bundlesWithKnownSubjects(entries, me), me.accountUserId),
-    };
+  debugLog('增量：', [...picks].map(([k, v]) => `${k}←${v.fromBundleId}`).join(' '));
+  const newest = newestFirst(entries)[0];
+
+  // ── 到这里下界已经定了，下面每一样都是**锦上添花，各自兜底**。
+  const mine = bundlesWithKnownSubjects(entries, me);
+
+  /** @type {string[]} */
+  let known = [];
+  try {
+    // **按账号取，不按链取。** 「这一页我是不是已经有了」与它属于哪条链无关。
+    known = await knownSubjects(mine);
   } catch (e) {
-    // 读不出来就全量。少抓不可接受，多抓只是慢。
-    debugLog('增量：挑下界失败，退回全量', e);
-    return {};
+    // 失败的方向是安全的：不知道哪些抓过 = 这一趟把作品详情页都抓一遍。
+    // 慢，但不丢东西，而且下界还在——这一趟仍然是增量。
+    relayEvent({ type: 'incremental_degraded', part: 'known_subjects', message: String(e?.message ?? e) });
   }
+
+  let backlog = null;
+  try {
+    // 存量补抓（规范 §6.2.1）。只在增量路径上有意义：没有下界 = 全量 =
+    // 广播会从头重走 = 图现场就派生出来了。
+    backlog = await backlogAssets(mine, me.accountUserId);
+  } catch (e) {
+    // 少补几张图。**下一趟还会补**——backlog 每次抓取都跑，这正是它的设计目的。
+    relayEvent({ type: 'incremental_degraded', part: 'backlog', message: String(e?.message ?? e) });
+  }
+
+  return {
+    floors: floorsFor(picks),
+    floorSources: new Map([...picks].map(([k, v]) => [k, v.fromBundleId])),
+    previousBundleId: newest?.bundleId ?? null,
+    // 用户选了「重抓作品详情页」时**不跳过已有的**，并且把它们直接排进队——
+    // 只做前者的话，能重抓的只有最新几页列表上派生出来的那十几个，而选项
+    // 承诺的是全部。
+    knownSubjectUrlKeys: mode === 'refresh-subjects' ? [] : known,
+    refreshSubjectUrls: mode === 'refresh-subjects' ? known : null,
+    backlogAssets: backlog,
+  };
 }
 
 /** @param {string} dir */
