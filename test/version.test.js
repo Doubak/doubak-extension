@@ -81,26 +81,50 @@ describe('版本号', () => {
     );
   });
 
-  test('拿不到 manifest 时抛错，而不是编一个', () => {
-    const prev = globalThis.chrome;
+  /**
+   * 把 `fetch` 换成一个只认扩展根下资源的假货，跑一段，然后还回去。
+   *
+   * @param {(url: string) => Response | Promise<Response>} impl
+   * @param {() => Promise<void>} body
+   */
+  async function withFetch(impl, body) {
+    const prevFetch = globalThis.fetch;
+    const prevChrome = globalThis.chrome;
     try {
-      delete globalThis.chrome;
-      assert.throws(() => extensionVersion(), /版本号/);
+      globalThis.fetch = /** @type {any} */ ((u) => impl(String(u)));
+      globalThis.chrome = /** @type {any} */ ({
+        // **只给 getURL。** offscreen document 里就只有这些——见下面那条契约测试。
+        runtime: { getURL: (p) => `chrome-extension://fake/${p}` },
+      });
+      await body();
     } finally {
-      if (prev === undefined) delete globalThis.chrome;
-      else globalThis.chrome = prev;
+      globalThis.fetch = prevFetch;
+      if (prevChrome === undefined) delete globalThis.chrome;
+      else globalThis.chrome = prevChrome;
     }
+  }
+
+  test('读不到 manifest.json 时抛错，而不是编一个', async () => {
+    await withFetch(() => new Response('', { status: 404 }), async () => {
+      await assert.rejects(() => extensionVersion(), /manifest\.json/);
+    });
   });
 
-  test('有 manifest 时，读到的就是 manifest 里那个', () => {
-    const prev = globalThis.chrome;
-    try {
-      globalThis.chrome = { runtime: { getManifest: () => ({ version: manifest.version }) } };
-      assert.equal(extensionVersion(), manifest.version);
-    } finally {
-      if (prev === undefined) delete globalThis.chrome;
-      else globalThis.chrome = prev;
-    }
+  test('manifest.json 里没有 version 时也抛 —— 空字符串不算', async () => {
+    await withFetch(() => Response.json({ name: '豆备' }), async () => {
+      await assert.rejects(() => extensionVersion(), /版本号/);
+    });
+    await withFetch(() => Response.json({ version: '' }), async () => {
+      await assert.rejects(() => extensionVersion(), /版本号/);
+    });
+  });
+
+  test('读到的就是 manifest.json 里那个', async () => {
+    let asked = null;
+    await withFetch((u) => { asked = u; return Response.json(manifest); }, async () => {
+      assert.equal(await extensionVersion(), manifest.version);
+    });
+    assert.equal(asked, 'chrome-extension://fake/manifest.json', '要读的就是那一个文件');
   });
 
   test('BundleWriter 缺 producer 就抛 —— 不许有默认值兜底', () => {

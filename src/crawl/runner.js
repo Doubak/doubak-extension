@@ -54,7 +54,7 @@ export class CrawlRunner {
    *   真实抓取必须用默认值，那是按前代战绩定下来的（见 pacing.js）。
    * @param {string} [opts.producerVersion] 写进档案的 `producer.version`。
    *   **真实抓取不要传**——不传就从 manifest.json 读（见 core/version.js）。
-   *   只有测试需要传：node:test 里没有 `chrome`，读不到 manifest。
+   *   只有测试需要传：node:test 里 `fetch('/manifest.json')` 无从谈起。
    */
   constructor({
     runStore, openBundle, fetchImpl, getCk, onEvent, now,
@@ -238,6 +238,7 @@ export class CrawlRunner {
     const bundleId = newBundleId(this._now());
     const dir = bundleDirName(bundleId);
     const store = await this._openBundle(dir);
+    const producerVersion = this._producerVersion ?? await extensionVersion();
 
     const writer = new BundleWriter({
       store,
@@ -250,7 +251,7 @@ export class CrawlRunner {
       },
       producer: {
         name: 'doubak-extension',
-        version: this._producerVersion ?? extensionVersion(),
+        version: producerVersion,
         user_agent: globalThis.navigator?.userAgent,
       },
       now: this._now,
@@ -442,6 +443,7 @@ export class CrawlRunner {
     const profileUrl = `https://www.douban.com/people/${encodeURIComponent(username)}/`;
     const probe = await transport.fetch(profileUrl);
     session.preflight(probe.bodyText);
+    const producerVersion = this._producerVersion ?? await extensionVersion();
 
     const writer = new BundleWriter({
       store,
@@ -452,7 +454,7 @@ export class CrawlRunner {
       // 一场几小时的抓取必然跨越多次 worker 死亡，所以这条路径才是常态，不是例外。
       producer: {
         name: 'doubak-extension',
-        version: this._producerVersion ?? extensionVersion(),
+        version: producerVersion,
         user_agent: globalThis.navigator?.userAgent,
       },
       startSeq: repair.lastSeq,

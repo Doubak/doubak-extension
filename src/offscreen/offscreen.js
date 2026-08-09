@@ -56,10 +56,16 @@
  * | `chrome.storage` | **✗** | 所以抓取状态存 IndexedDB（`IdbKvStore`），那是普通 DOM API，不是 `chrome.*` |
  * | `chrome.permissions` | **✗** | 传输层的权限兜底在这里查不了，会返回 `null`（「查不了」而不是「有权限」）。主动那道 `permissions.onRemoved` 在 service worker 里，仍然有效 |
  * | `chrome.notifications` | **✗** | 通知一律由 service worker 发 |
+ * | `chrome.runtime.getManifest()` | **✗** | 官方原话是「只暴露 `chrome.runtime` 的**消息** API」，它不在其中。版本号改为直接 `fetch` 那个文件（`core/version.js`） |
  * | `fetch`（带 host 权限与 cookie） | ✓ | 抓取靠它 |
  *
  * 「哪个上下文有哪个 API」是 MV3 里最容易踩空的一类知识，而踩空的样子往往是一句
  * 与真实原因毫无关系的错误信息。所以列在这里。
+ *
+ * **这张表现在是可执行的**：`test/offscreen-contract.test.js` 顺着这个文件的 import
+ * 图，把每个 `chrome.<命名空间>.<成员>` 调用点对照白名单查一遍。加这条测试的直接
+ * 原因是 `getManifest` 那一行——它在面板里是好的，在 node 测试里根本不走，
+ * 于是一路进了主干，装上之后一按「开始抓取」就抛。光写在注释里的规则挡不住这个。
  */
 
 import { CrawlRunner } from '../crawl/runner.js';
