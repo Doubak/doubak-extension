@@ -80,7 +80,11 @@ describe('档案选择器', () => {
     assert.equal(rows.length, 3);
 
     const first = rows[0].textContent;
-    assert.match(first, /2026-08-07 18:35/, '要有人读得懂的时间');
+    // **只断言形状，不断言具体时刻。** humanTime 按本地时区显示（那是对的，
+    // 读它的人就在本地），所以写死 `18:35` 等于把这台机器的时区焊进测试——
+    // CI 在 UTC 上跑，渲染出来是 08:35，于是本地全绿、CI 全红。
+    // 时区换算本身由下面「时间显示」那组测试守，写法与时区无关。
+    assert.match(first, /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/, '要有人读得懂的时间');
     assert.match(first, /全量/);
     assert.match(first, /5,?880 条/);
     assert.match(first, /164 MB/);
