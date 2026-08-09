@@ -343,6 +343,46 @@ function renderAbout() {
   tbl.append(tb);
   box.append(tbl);
 
+  // ── 反馈。**放在关于的最上面，不是最下面。**
+  //
+  // 用户翻到这一页，多半是因为有什么不对劲想说；把「怎么说」压在致谢和许可
+  // 下面，等于让最有动力的那个人去滚屏。与 doubak.com 页脚同一套去处。
+  const fbTitle = document.createElement('p');
+  const fbB = document.createElement('b');
+  fbB.textContent = '出了问题，或者有想法？';
+  fbTitle.append(fbB);
+  box.append(fbTitle);
+
+  const fb = document.createElement('ul');
+  const FEEDBACK = [
+    ['提 issue', 'https://github.com/Doubak/doubak-extension/issues',
+      '最好带上「日志」页里的最后几行，以及你点了哪个按钮'],
+    ['发邮件', 'mailto:admin@doubak.com', 'admin@doubak.com'],
+    ['帮忙测试', 'https://doubak.com/#contribute', '目前只有一个账号跑过，很多分支从没被真实数据碰过'],
+  ];
+  for (const [label, href, note] of FEEDBACK) {
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = href;
+    // mailto 不该开新标签页——那会留下一个空白页。
+    if (!href.startsWith('mailto:')) { a.target = '_blank'; a.rel = 'noreferrer noopener'; }
+    a.textContent = label;
+    const n = document.createElement('span');
+    n.className = 'muted small';
+    n.textContent = ` ${note}`;
+    li.append(a, n);
+    fb.append(li);
+  }
+  box.append(fb);
+
+  const priv = document.createElement('p');
+  priv.className = 'muted small';
+  // **报错前先说清楚会带出去什么。** 不说的话，一个在意隐私的人不敢提 issue,
+  // 而他恰恰是最该被听见的那类用户。
+  priv.textContent = '提 issue 前请留意：「日志」页里可能含有你的用户名与作品链接。'
+    + '需要的话删掉那几行再贴 —— 定位问题靠的是错误信息和你点了什么，不是你的数据。';
+  box.append(priv);
+
   const credits = document.createElement('p');
   credits.className = 'muted small';
   credits.textContent = '致谢：前代命令行工具 its-my-data/doubak 抓下的那批档案，'

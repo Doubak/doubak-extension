@@ -707,6 +707,36 @@ describe('面板脚本', () => {
     assert.ok(!/v0\.\d+\.\d+/.test(body), '版本号不许写死在界面里');
   });
 
+  test('**帮助页要告诉用户怎么反馈**，并说清会带出去什么', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    const fn = js.slice(js.indexOf('function renderAbout'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    assert.match(body, /doubak-extension\/issues/, '要给提 issue 的去处');
+    assert.match(body, /mailto:/, '要给邮箱');
+    // **报错前先说清楚会带出去什么。** 不说的话，一个在意隐私的人不敢提 issue，
+    // 而他恰恰是最该被听见的那类用户。
+    assert.match(body, /日志.*用户名|用户名.*日志/s, '要提醒日志里有什么');
+    // 反馈要排在致谢与许可之前——有话要说的人不该被要求先滚屏。
+    // **比的是渲染顺序，不是文字先后**：注释里也会出现「致谢」两个字，
+    // 拿它当锚点会把注释也算进去（第一版就是这么错的）。
+    assert.ok(body.indexOf('const FEEDBACK = [') < body.indexOf('credits.textContent'),
+      '反馈该排在致谢前面');
+    // mailto 不该开新标签页。
+    assert.match(body, /startsWith\('mailto:'\)/);
+  });
+
+  test('页眉给一个去官网的口子，且与标签页分开', async () => {
+    // 它不是这个面板的一页，点了会离开——排进标签页里会让人以为是第七个页面。
+    const html = await readRepoFile('src/ui/panel.html');
+    const nav = html.slice(html.indexOf('<nav id="tabs">'), html.indexOf('</nav>'));
+    assert.match(nav, /class="to-site"[^>]*href="https:\/\/doubak\.com"/);
+    assert.match(nav, /rel="noreferrer noopener"/);
+    // 它是 <a> 不是 <button data-tab> —— 后者会被标签页切换逻辑当成一页。
+    assert.ok(!/data-tab="[^"]*"[^>]*doubak\.com/.test(nav));
+    const css = await readRepoFile('src/ui/panel.css');
+    assert.match(css, /\.to-site \{[^}]*margin-left: auto/, '要推到最右边');
+  });
+
   test('档案页：列表在左，详情在右', async () => {
     // 档案会越攒越多。竖着排的话选一份要先滚过整张列表，回头看详情又要滚回去。
     const html = await readRepoFile('src/ui/panel.html');

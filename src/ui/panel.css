@@ -304,3 +304,12 @@ button.act.danger { color: var(--tone-error); border-color: var(--tone-error); }
 #tab-help table { margin-bottom: var(--s5); }
 #tab-help td:first-child { white-space: nowrap; padding-right: var(--s4); }
 #tab-help a { color: var(--brand); }
+
+/* 导航行最右边那个去官网的链接。与标签页拉开距离，它不是第七个页面。 */
+.to-site {
+  margin-left: auto; align-self: center;
+  font-size: 12.5px; color: var(--text-dim); text-decoration: none;
+  padding: var(--s1) var(--s2); border-radius: var(--r1);
+}
+.to-site:hover { color: var(--brand); background: var(--brand-soft); }
+@media (max-width: 560px) { .to-site { margin-left: 0; } }
