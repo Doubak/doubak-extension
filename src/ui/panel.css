@@ -274,3 +274,33 @@ button.act.danger { color: var(--tone-error); border-color: var(--tone-error); }
   background: var(--surface); color: var(--text);
   border: 1px solid var(--line); border-radius: var(--r1); padding: var(--s2);
 }
+
+/* ── 左列表 + 右详情 ──────────────────────────────────────────────
+   档案会越攒越多（实测已经十几份）。竖着排的话，选一份要先滚过整张列表，
+   回头再看详情又要滚回去——而这两件事本来就是一起做的。 */
+
+.with-aside { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: var(--s5); align-items: start; }
+.with-aside > aside {
+  /* 列表自己滚，右边的详情不跟着动。 */
+  max-height: 70vh; overflow: auto;
+  position: sticky; top: var(--s3);
+}
+.with-aside > aside .picker { margin-bottom: 0; }
+.aside-main { min-width: 0; }
+/* 窄窗口下退回上下排，且列表不再吃掉一屏。 */
+@media (max-width: 860px) {
+  .with-aside { grid-template-columns: 1fr; }
+  .with-aside > aside { position: static; max-height: 40vh; }
+}
+
+/* 侧栏里空间窄，选择器换成两行排布 */
+.with-aside .picker-row { grid-template-columns: 1fr auto; gap: 2px var(--s2); }
+.with-aside .picker-row .facts { grid-column: 1 / -1; }
+
+/* ── 帮助页 ───────────────────────────────────────────────────── */
+
+.steps { padding-left: var(--s5); margin: 0 0 var(--s5); }
+.steps li { margin-bottom: var(--s3); }
+#tab-help table { margin-bottom: var(--s5); }
+#tab-help td:first-child { white-space: nowrap; padding-right: var(--s4); }
+#tab-help a { color: var(--brand); }

@@ -21,6 +21,7 @@
       <button data-tab="storage" aria-selected="false">存储</button>
       <button data-tab="log" aria-selected="false">日志</button>
       <button data-tab="debug" aria-selected="false">调试</button>
+      <button data-tab="help" aria-selected="false">帮助</button>
     </nav>
   </header>
 
@@ -64,8 +65,12 @@
         <b>导出之前，档案并不真正属于你</b>——它存放在扩展的存储中，
         卸载扩展或清除站点数据都会将其一并抹除，且不会另行提示。
       </div>
-      <div id="bundle-pick"></div>
-      <div id="archive-summary"></div>
+      <div class="with-aside">
+        <!-- 列表在左、详情在右。**档案会越攒越多**（实测已经十几份），
+             竖着排的话选一份要先滚过整张列表，回头再看详情又要滚回去。 -->
+        <aside id="bundle-pick"></aside>
+        <div class="aside-main">
+        <div id="archive-summary"></div>
       <!-- 「这是一次增量抓取」。**必须有自己的容器**：往兄弟节点里插的话没人负责
            清，切一次档案就多留一张，而留下的那张说的还是上一份档案的上游。 -->
       <div id="archive-incremental"></div>
@@ -86,6 +91,8 @@
       <!-- 增量：这一份在链上的位置，以及跨链的版本历史 -->
       <div id="archive-chain"></div>
       <div id="versions"></div>
+        </div>
+      </div>
       <h2>捕获列表</h2>
       <div class="split">
         <div id="captures" class="muted">选一个档案后显示</div>
@@ -153,6 +160,82 @@
       <div id="log-actions"></div>
       <div id="log"></div>
     </section>
+    <section id="tab-help" hidden>
+      <h2>三步走</h2>
+      <ol class="steps">
+        <li>
+          <b>先登录豆瓣。</b>
+          在另一个标签页里登录就行——这个扩展与你共用登录状态，
+          <b>密码和 Cookie 一步都不经过我们</b>，也没有服务器可以经过。
+        </li>
+        <li>
+          <b>回到「概览」，点最上面那个按钮。</b>
+          第一次是「开始抓取」，之后是「继续抓取」。默认是增量：只抓上次之后新增的，
+          几分钟就完。
+        </li>
+        <li>
+          <b>抓完去「档案」页导出。</b>
+          <b>这一步不能省。</b>没导出的档案只存在于扩展的存储里，
+          卸载扩展、清除站点数据都会把它一并抹掉，而且不会问你一句。
+        </li>
+      </ol>
+
+      <h2>每个标签页是干什么的</h2>
+      <table>
+        <thead><tr><th>标签页</th><th>什么时候用</th></tr></thead>
+        <tbody>
+          <tr><td><b>概览</b></td><td>开始／暂停／继续抓取，看它现在在做什么。平时只看这一页。</td></tr>
+          <tr><td><b>覆盖率</b></td><td>抓到了多少、有没有缺口。想知道「抓全了吗」看这里。</td></tr>
+          <tr><td><b>档案</b></td><td>选一份档案，导出、校验、删除，或者翻看里面每一条捕获。</td></tr>
+          <tr><td><b>存储</b></td><td>占了多少空间，哪些还没导出。空间不够时来这里清。</td></tr>
+          <tr><td><b>日志</b></td><td>出了问题想看细节时。平时不用看。</td></tr>
+          <tr><td><b>调试</b></td><td>开发用。演练不发任何网络请求。</td></tr>
+        </tbody>
+      </table>
+
+      <h2>几个容易犹豫的按钮</h2>
+      <table>
+        <thead><tr><th>按钮</th><th>做什么</th></tr></thead>
+        <tbody>
+          <tr><td><b>增量抓取</b></td><td>默认。只抓上次之后新增的，几分钟。<b>平时就用这个。</b></td></tr>
+          <tr><td><b>全量抓取</b></td><td>从头抓一遍，几小时。只在想重建一份基准、或者不信任上次结果时才用。</td></tr>
+          <tr><td><b>增量 + 重抓作品详情页</b></td><td>增量，外加把所有作品页重抓一遍——评分和短评会变，想要新版本时用。比增量慢很多。</td></tr>
+          <tr><td><b>导出这一份</b></td><td>把这份档案写到你自己的文件夹里。<b>写完会逐个读回来核对。</b></td></tr>
+          <tr><td><b>导出整条链</b></td><td>把这一份和它前面的历次增量一起导出，每份各占一个子目录。</td></tr>
+          <tr><td><b>验一验</b></td><td>不依赖任何声明，把每条记录从段文件里真取出来解压一遍。</td></tr>
+          <tr><td><b>删除这一份</b></td><td><b>不可逆，没有回收站。</b>删之前先确认它已经导出过。</td></tr>
+        </tbody>
+      </table>
+
+      <h2>看到这些提示时</h2>
+      <table>
+        <thead><tr><th>它说</th><th>意思与该做什么</th></tr></thead>
+        <tbody>
+          <tr><td><b>豆瓣要求验证</b></td><td>不是故障。在新标签页里完成验证，回来点「继续」。抓取已经停下了，不会硬闯。</td></tr>
+          <tr><td><b>豆瓣暂时限制了访问</b></td><td>已经停下且<b>不会重试</b>——继续请求可能导致账号被限制。等半小时以上再继续，恢复后会自动放慢。</td></tr>
+          <tr><td><b>登录状态已失效</b></td><td>不是错误。重新登录豆瓣，回来点继续，进度都在。</td></tr>
+          <tr><td><b>上次抓取被意外中断</b></td><td>已经从断点恢复了，没有数据丢失。不用管。</td></tr>
+          <tr><td><b>这次退回了全量抓取</b></td><td>找不到可用的增量基准（比如基准档案被删了）。会慢很多，但不会漏抓。</td></tr>
+        </tbody>
+      </table>
+
+      <h2>两件反直觉但重要的事</h2>
+      <div class="hint">
+        <b>豆瓣自己报的数量不能用来判断抓全了没有。</b>
+        实测同一次抓取里，电影声称 1157 条、渲染出 1157 条，而游戏声称 293 条、
+        只渲染出 288 条——缺口还在列表中间。所以「抓全了吗」要看<b>连续性</b>那一列，
+        不是看数字差。
+      </div>
+      <div class="hint">
+        <b>广播是最该先抓的。</b>
+        它发出去就不能编辑，而且删掉不留任何痕迹——没抓到就是永远没有。
+        标记和作品页则随时可以再抓一次。
+      </div>
+
+      <h2>关于</h2>
+      <div id="about"></div>
+    </section>
+
   </main>
 
   <script type="module" src="./panel.js"></script>

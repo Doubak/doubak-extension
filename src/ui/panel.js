@@ -286,7 +286,78 @@ $('tabs').addEventListener('click', (e) => {
   // 都不会发生。
   if (btn.dataset.tab === 'coverage') loadCoverage();
   if (btn.dataset.tab === 'log') loadLog();
+  // 帮助页是静态的，只有「关于」那一块要填（版本号从 manifest 读）。
+  if (btn.dataset.tab === 'help') renderAbout();
 });
+
+/**
+ * 「关于」那一块。
+ *
+ * **版本号从 manifest 读，不写死在这儿。** 写死的那个迟早会与真实版本对不上，
+ * 而一个连自己版本都报错的工具，你没法信它报的别的数字。
+ */
+function renderAbout() {
+  const el = $('about');
+  if (!el) return;
+  const m = chrome.runtime.getManifest?.() ?? {};
+  const box = document.createElement('div');
+
+  const who = document.createElement('p');
+  who.className = 'muted';
+  who.textContent = `豆备${m.version ? ` v${m.version}` : ''} —— 在你自己的浏览器里备份豆瓣。`
+    + '这是第三方工具，与豆瓣官方无关。';
+  box.append(who);
+
+  const LINKS = [
+    ['网站', 'https://doubak.com', ''],
+    ['样张', 'https://sample.doubak.com', '用作者自己的数据生成的示例站点'],
+    ['源码', 'https://github.com/Doubak', '七个仓库都在这个组织下'],
+    ['这个扩展', 'https://github.com/Doubak/doubak-extension', '抓取，产出档案'],
+    ['档案格式', 'https://github.com/Doubak/doubak-data-specs', '规范文本与 JSON Schema'],
+    ['解析器', 'https://github.com/Doubak/doubak-data-parser', '档案 → 结构化数据'],
+    ['站点生成器', 'https://github.com/Doubak/doubak-site-generator', '结构化数据 → 个人存档站'],
+  ];
+  const tbl = document.createElement('table');
+  const tb = document.createElement('tbody');
+  for (const [label, href, note] of LINKS) {
+    const tr = document.createElement('tr');
+    const th = document.createElement('td');
+    th.textContent = label;
+    const td = document.createElement('td');
+    const a = document.createElement('a');
+    a.href = href;
+    a.target = '_blank';
+    // 新标签页打开外链时必须带上它，否则对方页面能通过 window.opener 操作这一页。
+    a.rel = 'noreferrer noopener';
+    a.textContent = href.replace('https://', '');
+    td.append(a);
+    if (note) {
+      const n = document.createElement('span');
+      n.className = 'muted small';
+      n.textContent = ` ${note}`;
+      td.append(n);
+    }
+    tr.append(th, td);
+    tb.append(tr);
+  }
+  tbl.append(tb);
+  box.append(tbl);
+
+  const credits = document.createElement('p');
+  credits.className = 'muted small';
+  credits.textContent = '致谢：前代命令行工具 its-my-data/doubak 抓下的那批档案，'
+    + '是这个项目几乎所有实测结论的来源。WARC 格式与 pywb / ReplayWeb.page 生态，'
+    + '让这些档案不依赖本工具也能打开。';
+  box.append(credits);
+
+  const legal = document.createElement('p');
+  legal.className = 'muted small';
+  legal.textContent = '许可 Apache-2.0。不上传任何数据，没有服务器，也没有遥测'
+    + '——所有抓取都发生在你自己的浏览器里，用的是你自己的登录状态和网络。';
+  box.append(legal);
+
+  el.replaceChildren(box);
+}
 
 // ── 概览 ────────────────────────────────────────────────────
 

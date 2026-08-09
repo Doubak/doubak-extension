@@ -675,6 +675,50 @@ describe('面板脚本', () => {
     assert.match(css, /\.cap \{[^}]*gap:/);
   });
 
+  test('帮助页要回答「我该点哪个」', async () => {
+    // 一个工具面板最该有的一句话不是「这个按钮叫什么」，而是**「现在该点哪个」**。
+    const html = await readRepoFile('src/ui/panel.html');
+    const help = html.slice(html.indexOf('id="tab-help"'), html.indexOf('</section>', html.indexOf('id="tab-help"')));
+    assert.match(help, /三步走/, '要有一条从零开始的路径');
+    // 三步里最容易被跳过的是导出——不导出的话档案随时会连人带号一起没了。
+    assert.match(help, /导出/);
+    assert.match(help, /卸载扩展|清除站点数据/, '要说清不导出的后果');
+    // 那几个会让人犹豫的按钮要逐个解释。
+    for (const b of ['增量抓取', '全量抓取', '导出整条链', '验一验', '删除这一份']) {
+      assert.ok(help.includes(b), `帮助里没解释「${b}」`);
+    }
+    // 停机原因也要能在这儿查到——它们出现时用户最需要一句话告诉他怎么办。
+    for (const r of ['豆瓣要求验证', '登录状态已失效', '豆瓣暂时限制了访问']) {
+      assert.ok(help.includes(r), `帮助里没有「${r}」`);
+    }
+  });
+
+  test('**关于**里给出去处，且外链带 noopener', async () => {
+    const js = await readRepoFile('src/ui/panel.js');
+    const fn = js.slice(js.indexOf('function renderAbout'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    for (const u of ['doubak.com', 'sample.doubak.com', 'github.com/Doubak']) {
+      assert.ok(body.includes(u), `关于里没有 ${u}`);
+    }
+    // 新标签页打开外链时不带 noopener 的话，对方页面能通过 window.opener 操作这一页。
+    assert.match(body, /rel = 'noreferrer noopener'/);
+    // 版本号从 manifest 读——写死的那个迟早与真实版本对不上。
+    assert.match(body, /getManifest/);
+    assert.ok(!/v0\.\d+\.\d+/.test(body), '版本号不许写死在界面里');
+  });
+
+  test('档案页：列表在左，详情在右', async () => {
+    // 档案会越攒越多。竖着排的话选一份要先滚过整张列表，回头看详情又要滚回去。
+    const html = await readRepoFile('src/ui/panel.html');
+    const arch = html.slice(html.indexOf('id="tab-archive"'), html.indexOf('</section>', html.indexOf('id="tab-archive"')));
+    assert.match(arch, /class="with-aside"/);
+    assert.match(arch, /<aside id="bundle-pick">/);
+    const css = await readRepoFile('src/ui/panel.css');
+    assert.match(css, /\.with-aside \{[^}]*grid-template-columns/);
+    // 窄窗口要退回上下排，否则两列各自挤成一条。
+    assert.match(css, /max-width: 860px[\s\S]{0,200}\.with-aside \{ grid-template-columns: 1fr/);
+  });
+
   test('**JS 里不许出现行内样式**', async () => {
     // 原来有 17 处 `el.style.fontSize = '12px'` 之类，散在各处。样式一旦能在
     // JS 里随手写，就没有任何力量阻止下一块界面再发明一套——**统一不了的根源
