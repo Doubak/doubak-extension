@@ -47,6 +47,27 @@ describe('版本号', () => {
     assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   });
 
+  test('**src/ 的代码里不许出现任何形如 x.y.z 的版本字面量**', () => {
+    // 上面那条只挡得住「写死了当前版本」。而真正发生过的是**写死了一个过期版本**：
+    // manifest 涨到 0.9.0 之后，`'0.0.1'` 那三份副本与它不再相等——按上面那条判据
+    // 反而全都合规。所以这里不比对具体数值，只问「代码里还有没有版本字面量」。
+    //
+    // 注释不算：讲清那次 bug 的来龙去脉恰恰需要把 '0.0.1' 写出来。
+    const offenders = [];
+    for (const f of sources()) {
+      const text = readFileSync(f, 'utf8');
+      text.split('\n').forEach((line, i) => {
+        const code = line.replace(/\/\/.*$/, '');
+        if (/^\s*\*/.test(line) || /^\s*\/\//.test(line)) return; // 整行注释
+        if (/['"`]\d+\.\d+\.\d+[a-z0-9.-]*['"`]/.test(code)) offenders.push(`${f}:${i + 1}`);
+      });
+    }
+    assert.deepEqual(
+      offenders, [],
+      '代码里出现了版本字面量。它迟早会与 manifest 对不上，而它会被写进不可逆的档案',
+    );
+  });
+
   test('src/ 里没有任何地方把当前版本号写死', () => {
     const offenders = sources()
       .filter((f) => f !== join('src', 'core', 'version.js'))
