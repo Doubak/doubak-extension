@@ -42,6 +42,17 @@ jobs:
         working-directory: doubak-extension
         run: npm test
 
+      # **换一个时区再跑一遍。**
+      #
+      # 这条是被真事逼出来的：一条断言写死了本地时区下的时刻，本地全绿、CI 全红
+      # ——而那是运气好，CI 恰好在 UTC。要是 CI 也在同一个时区，这个 bug 会一直
+      # 潜到某个用户那里才炸。UTC+14 与任何常见时区都差到日期本身都不同。
+      - name: 换个时区再跑一遍
+        working-directory: doubak-extension
+        env:
+          TZ: Pacific/Kiritimati
+        run: npm test
+
       # 本地跑测试时，若规范仓库不在场，下面这些检查会「带原因跳过」。
       # 跳过在本地是合理的，在 CI 里则等于没测——所以显式再验一遍：
       # 规范仓库必须在，且生成的词表必须是最新的。
