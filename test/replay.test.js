@@ -23,6 +23,7 @@ import { Frontier } from '../src/crawl/frontier.js';
 import { buildCheckpoint } from '../src/crawl/run-store.js';
 import { Pacer } from '../src/crawl/pacing.js';
 import { readFileSync } from 'node:fs';
+import { TEST_PRODUCER_VERSION } from './helpers/producer.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -157,7 +158,7 @@ function harness(batchSize, { imageStatus = 200 } = {}) {
       arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
     };
   };
-  const runner = new CrawlRunner({
+  const runner = new CrawlRunner({ producerVersion: TEST_PRODUCER_VERSION,
     runStore, openBundle, fetchImpl, batchSize,
     now: () => new Date('2026-08-01T10:15:00Z'),
     pacerOptions: { intervalMs: 1, jitterRatio: 0 },

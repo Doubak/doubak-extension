@@ -15,6 +15,7 @@ import { indexFilename } from '../src/core/ids.js';
 import { TransportError } from '../src/crawl/errors.js';
 import { MAX_CONSECUTIVE_NETWORK_ERRORS } from '../src/crawl/loop.js';
 import { MAX_NETWORK_RETRIES } from '../src/crawl/frontier.js';
+import { TEST_PRODUCER } from './helpers/producer.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -71,7 +72,7 @@ async function harness(script, { maxSegmentBytes } = {}) {
   };
 
   const transport = new Transport({ gate, fetchImpl, now: () => now });
-  const writer = new BundleWriter({
+  const writer = new BundleWriter({ producer: TEST_PRODUCER,
     store,
     account: { user_id: '10001', username: 'example' },
     now: () => new Date(1750000000000 + now),

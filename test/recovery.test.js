@@ -6,6 +6,7 @@ import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { recoverBundle } from '../src/bundle/recovery.js';
 import { indexFilename, parseCaptureId } from '../src/core/ids.js';
 import { gunzip } from '../src/core/warc.js';
+import { TEST_PRODUCER } from './helpers/producer.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -30,7 +31,7 @@ function capture(over = {}) {
 /** 写 n 条捕获，返回 store 与 bundleId。 */
 async function writtenBundle(n = 3, opts = {}) {
   const store = new MemoryFileStore();
-  const writer = new BundleWriter({ store, account: { user_id: '82160871' }, ...opts });
+  const writer = new BundleWriter({ producer: TEST_PRODUCER, store, account: { user_id: '82160871' }, ...opts });
   const locs = [];
   for (let i = 0; i < n; i++) locs.push(await writer.writeCapture(capture()));
   return { store, bundleId: writer.bundleId, locs };
@@ -72,7 +73,7 @@ describe('自洽的 bundle 不需要修', () => {
 
   test('空 bundle 也能恢复', async () => {
     const store = new MemoryFileStore();
-    const writer = new BundleWriter({ store, account: { user_id: '1' } });
+    const writer = new BundleWriter({ producer: TEST_PRODUCER, store, account: { user_id: '1' } });
     const res = await recoverBundle({ store, bundleId: writer.bundleId });
     assert.equal(res.lastSeq, 0);
     assert.equal(res.lastCaptureId, null);
@@ -117,7 +118,7 @@ describe('崩在 WARC 与 index 之间 —— 孤儿记录', () => {
     // 这是「先写 WARC 后写 index」刻意接受的失败模式：孤儿记录只是浪费
     // 空间，而且可以靠截断干净地去掉。
     const store = new MemoryFileStore();
-    const writer = new BundleWriter({ store, account: { user_id: '1' } });
+    const writer = new BundleWriter({ producer: TEST_PRODUCER, store, account: { user_id: '1' } });
     await writer.writeCapture(capture());
     await writer.writeCapture(capture());
 
@@ -138,14 +139,14 @@ describe('崩在 WARC 与 index 之间 —— 孤儿记录', () => {
   test('恢复后续写不会产生重复序号', async () => {
     // 关键性质：孤儿记录被截掉了，所以复用它的序号不会与磁盘上任何东西冲突。
     const store = new MemoryFileStore();
-    const w1 = new BundleWriter({ store, account: { user_id: '1' } });
+    const w1 = new BundleWriter({ producer: TEST_PRODUCER, store, account: { user_id: '1' } });
     await w1.writeCapture(capture());
     await w1.writeCapture(capture());
     await assert.rejects(() => w1.writeCapture(capture({ verdict: '非法' })));
 
     const res = await recoverBundle({ store, bundleId: w1.bundleId });
 
-    const w2 = new BundleWriter({
+    const w2 = new BundleWriter({ producer: TEST_PRODUCER,
       store,
       account: { user_id: '1' },
       bundleId: w1.bundleId,
@@ -185,7 +186,7 @@ describe('崩在 index 写入途中 —— 半行', () => {
 
   test('整个 index 只有半行时清空', async () => {
     const store = new MemoryFileStore();
-    const writer = new BundleWriter({ store, account: { user_id: '1' } });
+    const writer = new BundleWriter({ producer: TEST_PRODUCER, store, account: { user_id: '1' } });
     const bundleId = writer.bundleId;
     await store.append(indexFilename(bundleId), enc.encode('{"partial'));
 

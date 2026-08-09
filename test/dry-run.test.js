@@ -20,6 +20,7 @@ import { RunStore } from '../src/crawl/run-store.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { indexFilename } from '../src/core/ids.js';
+import { TEST_PRODUCER_VERSION } from './helpers/producer.js';
 
 /**
  * 按后台里 `runDryRun()` 的方式跑一个剧本。
@@ -42,7 +43,7 @@ async function runScenario(key) {
   /** @type {Record<string, number>} */
   const byVerdict = {};
 
-  const runner = new CrawlRunner({
+  const runner = new CrawlRunner({ producerVersion: TEST_PRODUCER_VERSION,
     runStore: new RunStore({ kv: new MemoryKvStore(), openBundle }),
     openBundle,
     fetchImpl: dryRunFetch(key),

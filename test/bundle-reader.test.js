@@ -5,13 +5,14 @@ import { BundleReader } from '../src/bundle/bundle-reader.js';
 import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { coverageEntry, crawlStateEntry } from '../src/bundle/manifest-builder.js';
+import { TEST_PRODUCER } from './helpers/producer.js';
 
 const enc = new TextEncoder();
 
 /** 写一个有内容的 bundle，然后读回来。 */
 async function roundTrip({ withEvidence = false } = {}) {
   const store = new MemoryFileStore();
-  const writer = new BundleWriter({
+  const writer = new BundleWriter({ producer: TEST_PRODUCER,
     store,
     account: { user_id: '82160871', username: 'mewcatcher' },
   });
@@ -211,7 +212,7 @@ describe('拒绝含糊', () => {
   test('没有 index 文件时返回空，不抛', async () => {
     // 刚开始的空档案是正常状态。
     const store = new MemoryFileStore();
-    const writer = new BundleWriter({ store, account: { user_id: '1' } });
+    const writer = new BundleWriter({ producer: TEST_PRODUCER, store, account: { user_id: '1' } });
     await writer.finalize();
     const reader = new BundleReader({ store, bundleId: writer.bundleId });
     assert.deepEqual(await reader.index(), []);
@@ -294,7 +295,7 @@ describe('摘要要说清这一份接在谁后面', () => {
     // 增量档案的「捕获条数」只有新增的那些，看起来会小得离谱。界面要靠这个字段
     // 说清那是正常的——否则用户会以为抓漏了。
     const store = new MemoryFileStore();
-    const w = new BundleWriter({
+    const w = new BundleWriter({ producer: TEST_PRODUCER,
       store,
       bundleId: '20260815T000000Z-bbbbbb',
       previousBundleId: '20260731T000000Z-aaaaaa',
@@ -309,7 +310,7 @@ describe('摘要要说清这一份接在谁后面', () => {
 
   test('全量档案是 null，不是 undefined —— 界面要能直接判', async () => {
     const store = new MemoryFileStore();
-    const w = new BundleWriter({
+    const w = new BundleWriter({ producer: TEST_PRODUCER,
       store, bundleId: '20260731T000000Z-aaaaaa',
       account: { user_id: '1', username: 'e' }, now: () => new Date('2026-07-31T00:00:00Z'),
     });

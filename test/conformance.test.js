@@ -30,6 +30,7 @@ import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { coverageEntry, crawlStateEntry } from '../src/bundle/manifest-builder.js';
 import { EMPTY_SHA256 } from '../src/core/digest.js';
 import { parseDoubanTimestamp } from '../src/core/time.js';
+import { TEST_PRODUCER } from './helpers/producer.js';
 
 const execFileAsync = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -327,7 +328,7 @@ describe('写入器根本不产出违规的 bundle', () => {
 
   test('零长度载荷不得记为 ok', async () => {
     const store = new MemoryFileStore();
-    const writer = new BundleWriter({ store, account: { user_id: '1' } });
+    const writer = new BundleWriter({ producer: TEST_PRODUCER, store, account: { user_id: '1' } });
     await assert.rejects(
       () =>
         writer.writeCapture({
@@ -346,7 +347,7 @@ describe('写入器根本不产出违规的 bundle', () => {
 
   test('空响应如实标注就允许 —— 空的封锁页本来就该存下来', async () => {
     const store = new MemoryFileStore();
-    const writer = new BundleWriter({ store, account: { user_id: '1' } });
+    const writer = new BundleWriter({ producer: TEST_PRODUCER, store, account: { user_id: '1' } });
     const loc = await writer.writeCapture({
       url: 'https://www.douban.com/x',
       intent: 'broadcast.timeline',
@@ -424,7 +425,7 @@ const NAV = `<li class="nav-user-account"><a href="/accounts/logout">退出</a>
       },
     });
 
-    const writer = new BundleWriter({
+    const writer = new BundleWriter({ producer: TEST_PRODUCER,
       store,
       account: { user_id: '10001', username: 'example' },
       now: () => new Date(1750000000000 + now),

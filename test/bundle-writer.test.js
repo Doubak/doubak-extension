@@ -8,6 +8,7 @@ import { coverageEntry, crawlStateEntry } from '../src/bundle/manifest-builder.j
 import { gunzip } from '../src/core/warc.js';
 import { parseCaptureId, indexFilename } from '../src/core/ids.js';
 import { sha256Hex } from '../src/core/digest.js';
+import { TEST_PRODUCER } from './helpers/producer.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -33,7 +34,7 @@ function capture(over = {}) {
 /** @param {object} [over] */
 function makeWriter(over = {}) {
   const store = new MemoryFileStore();
-  const writer = new BundleWriter({
+  const writer = new BundleWriter({ producer: TEST_PRODUCER,
     store,
     account: { user_id: '82160871', username: 'mewcatcher' },
     now: () => AT,
@@ -125,7 +126,7 @@ describe('落盘顺序 —— 不可调换', () => {
       return origAppend(name, bytes);
     };
 
-    const writer = new BundleWriter({
+    const writer = new BundleWriter({ producer: TEST_PRODUCER,
       store,
       account: { user_id: '1' },
       now: () => AT,
@@ -340,7 +341,7 @@ describe('created_at 说的是「什么时候开始的」', () => {
     const account = { user_id: '1', username: 'x' };
 
     // 两天后「恢复」：now 完全不同，但 bundle_id 还是原来那个
-    const writer = new BundleWriter({
+    const writer = new BundleWriter({ producer: TEST_PRODUCER,
       store, account, bundleId,
       now: () => new Date('2026-08-02T12:48:02Z'),
     });
@@ -360,7 +361,7 @@ describe('created_at 说的是「什么时候开始的」', () => {
   test('新抓取时两者一致', async () => {
     const store = new MemoryFileStore();
     const at = new Date('2026-08-05T03:04:05Z');
-    const writer = new BundleWriter({
+    const writer = new BundleWriter({ producer: TEST_PRODUCER,
       store, account: { user_id: '1', username: 'x' }, now: () => at,
     });
     await writer.writeCapture(capture());

@@ -49,7 +49,10 @@ export class BundleWriter {
    * @param {{user_id: string, username?: string | null, profile_url?: string}} opts.account
    * @param {string} [opts.bundleId]
    * @param {string | null} [opts.previousBundleId]
-   * @param {{name: string, version: string, user_agent?: string, platform?: string}} [opts.producer]
+   * @param {{name: string, version: string, user_agent?: string, platform?: string}} opts.producer
+   *   **必传，没有默认值。** 这里曾经默认成 `{name: 'doubak-extension', version: '0.0.1'}`，
+   *   于是版本号涨了之后，忘记传的调用方会把一个过时的版本号静默写进 WARC 的
+   *   `software:` 头——档案不可逆，写错就永久错。缺就抛，别猜。
    * @param {string} [opts.timezoneAssumption]
    * @param {number} [opts.maxSegmentBytes]
    * @param {() => Date} [opts.now]
@@ -65,7 +68,7 @@ export class BundleWriter {
     account,
     bundleId,
     previousBundleId = null,
-    producer = { name: 'doubak-extension', version: '0.0.1' },
+    producer,
     timezoneAssumption = 'Asia/Shanghai',
     maxSegmentBytes = DEFAULT_MAX_SEGMENT_BYTES,
     now,
@@ -74,6 +77,9 @@ export class BundleWriter {
     indexStats,
   }) {
     if (!store) throw new Error('缺少 store');
+    if (!producer?.name || !producer?.version) {
+      throw new Error('缺少 producer.name/version：不能拿默认值把过时的版本号写进档案');
+    }
 
     this._store = store;
     this._now = now ?? (() => new Date());

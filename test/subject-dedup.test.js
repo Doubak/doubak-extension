@@ -29,6 +29,7 @@ import { urlKey } from '../src/core/urlkey.js';
 import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { BundleReader } from '../src/bundle/bundle-reader.js';
+import { TEST_PRODUCER } from './helpers/producer.js';
 
 const enc = new TextEncoder();
 const BUNDLE_ID = '20260731T000000Z-abcdef';
@@ -96,7 +97,7 @@ describe('重抓写进档案：capture_id 唯一，URL 不必唯一', () => {
   /** 把同一个 URL 写两遍。 */
   async function writeTwice() {
     const store = new MemoryFileStore();
-    const writer = new BundleWriter({
+    const writer = new BundleWriter({ producer: TEST_PRODUCER,
       store,
       bundleId: BUNDLE_ID,
       account: { user_id: '82160871', username: 'example' },

@@ -12,6 +12,7 @@ import { CRASH_SENTINEL_REASON } from '../src/crawl/resume-policy.js';
 import { summarizeBundles } from '../src/storage/storage-usage.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { indexFilename } from '../src/core/ids.js';
+import { TEST_PRODUCER_VERSION } from './helpers/producer.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -107,7 +108,7 @@ function harness(respond, { batchSize = 5, pacerOptions } = {}) {
     };
   };
 
-  const runner = new CrawlRunner({
+  const runner = new CrawlRunner({ producerVersion: TEST_PRODUCER_VERSION,
     runStore, openBundle, fetchImpl, batchSize,
     now: () => new Date('2026-07-29T10:15:00Z'),
     // 测试里不要真的按 1 秒节奏等——真实抓取必须用默认值。

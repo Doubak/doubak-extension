@@ -9,6 +9,7 @@ import { MemoryFileStore } from '../src/storage/file-store.js';
 import { sha256Hex } from '../src/core/digest.js';
 import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { bundleDirName } from '../src/core/ids.js';
+import { TEST_PRODUCER } from './helpers/producer.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -462,7 +463,7 @@ describe('导出整条链：每份各占一个子目录', () => {
 
   async function bundleStore(id) {
     const store = new MemoryFileStore();
-    const w = new BundleWriter({
+    const w = new BundleWriter({ producer: TEST_PRODUCER,
       store, bundleId: id, account: { user_id: '1', username: 'e' },
       now: () => new Date('2026-07-31T00:00:00Z'),
     });

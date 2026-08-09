@@ -25,6 +25,7 @@ import { Transport } from '../src/crawl/transport.js';
 import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { fixtures } from './helpers/fixtures.js';
+import { TEST_PRODUCER } from './helpers/producer.js';
 
 const enc = new TextEncoder();
 
@@ -40,7 +41,7 @@ const SUBJECT_OK = `<html><body>
  */
 async function harness({ ordered, failIf }) {
   const store = new MemoryFileStore();
-  const writer = new BundleWriter({ store, account: { user_id: '82160871', username: 'example' } });
+  const writer = new BundleWriter({ producer: TEST_PRODUCER, store, account: { user_id: '82160871', username: 'example' } });
 
   const frontier = new Frontier();
   const urls = [1, 2, 3].map((n) => `https://movie.douban.com/subject/${n}/`);

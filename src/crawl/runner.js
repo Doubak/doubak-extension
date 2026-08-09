@@ -33,6 +33,7 @@ import { buildRoutes } from './routes.js';
 import { buildCheckpoint } from './run-store.js';
 import { bundleDirName, newBundleId, parseCaptureId } from '../core/ids.js';
 import { urlKey } from '../core/urlkey.js';
+import { extensionVersion } from '../core/version.js';
 import { CRASH_SENTINEL_REASON } from './resume-policy.js';
 import { replayableCaptures } from './replay.js';
 
@@ -51,10 +52,13 @@ export class CrawlRunner {
    * @param {number} [opts.batchSize]
    * @param {object} [opts.pacerOptions] 覆盖节奏参数。**仅用于测试**——
    *   真实抓取必须用默认值，那是按前代战绩定下来的（见 pacing.js）。
+   * @param {string} [opts.producerVersion] 写进档案的 `producer.version`。
+   *   **真实抓取不要传**——不传就从 manifest.json 读（见 core/version.js）。
+   *   只有测试需要传：node:test 里没有 `chrome`，读不到 manifest。
    */
   constructor({
     runStore, openBundle, fetchImpl, getCk, onEvent, now,
-    batchSize = DEFAULT_BATCH_SIZE, pacerOptions,
+    batchSize = DEFAULT_BATCH_SIZE, pacerOptions, producerVersion,
   }) {
     this._runStore = runStore;
     this._openBundle = openBundle;
@@ -64,6 +68,7 @@ export class CrawlRunner {
     this._now = now ?? (() => new Date());
     this._batchSize = batchSize;
     this._pacerOptions = pacerOptions;
+    this._producerVersion = producerVersion;
 
     /** @type {object | null} 当前这次抓取的全部部件 */
     this._run = null;
@@ -245,7 +250,7 @@ export class CrawlRunner {
       },
       producer: {
         name: 'doubak-extension',
-        version: '0.0.1',
+        version: this._producerVersion ?? extensionVersion(),
         user_agent: globalThis.navigator?.userAgent,
       },
       now: this._now,
@@ -442,6 +447,14 @@ export class CrawlRunner {
       store,
       bundleId: pointer.bundleId,
       account: { user_id: session.account.userId, username: session.account.username ?? username },
+      // 恢复路径以前一个字都没传 producer，全靠 BundleWriter 的默认值——也就是说
+      // **崩溃恢复之后写下的每个段，`software:` 头都来自那个写死的 '0.0.1'**。
+      // 一场几小时的抓取必然跨越多次 worker 死亡，所以这条路径才是常态，不是例外。
+      producer: {
+        name: 'doubak-extension',
+        version: this._producerVersion ?? extensionVersion(),
+        user_agent: globalThis.navigator?.userAgent,
+      },
       startSeq: repair.lastSeq,
       resume: repair.resume,
       // **不传这个，被恢复过的抓取就永远收不了尾**：段的 record_count 从磁盘恢复了，

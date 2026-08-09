@@ -34,6 +34,7 @@ import { SessionGuard } from '../src/crawl/session.js';
 import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { indexFilename } from '../src/core/ids.js';
+import { TEST_PRODUCER } from './helpers/producer.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -369,7 +370,7 @@ describe('整条链路：详情页 → 抽封面 → 取图 → 进 catalog 段'
     };
 
     const transport = new Transport({ gate, fetchImpl, now: () => now });
-    const writer = new BundleWriter({
+    const writer = new BundleWriter({ producer: TEST_PRODUCER,
       store,
       account: { user_id: '10001', username: 'example' },
       now: () => new Date(1750000000000 + now),

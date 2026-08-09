@@ -23,6 +23,7 @@ import { buildRoutes } from '../src/crawl/routes.js';
 import { Frontier } from '../src/crawl/frontier.js';
 import { seedFrontier } from '../src/crawl/runner.js';
 import { PRIORITY } from '../src/crawl/routes.js';
+import { TEST_PRODUCER } from './helpers/producer.js';
 
 describe('从列表页抽作品链接', () => {
   test('五种媒介的 URL 形态都认得', () => {
@@ -255,7 +256,7 @@ describe('端到端：列表页派生出作品详情页', () => {
 
     const enc = new TextEncoder();
     const store = new MemoryFileStore();
-    const writer = new BundleWriter({ store, account: { user_id: '82160871', username: 'example' } });
+    const writer = new BundleWriter({ producer: TEST_PRODUCER, store, account: { user_id: '82160871', username: 'example' } });
 
     // 列表页上挂两个作品链接
     const LIST = fixtures.interestListPage.replace(
@@ -342,7 +343,7 @@ describe('端到端：列表页派生出作品详情页', () => {
     const session = new SessionGuard();
     session.preflight(LIST);
     const loop = new CrawlLoop({
-      frontier: f, transport, writer: new BundleWriter({
+      frontier: f, transport, writer: new BundleWriter({ producer: TEST_PRODUCER,
         store: new MemoryFileStore(), account: { user_id: '82160871', username: 'example' },
       }), session,
       pacer: new Pacer({ intervalMs: 1, jitterRatio: 0 }),
