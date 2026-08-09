@@ -308,40 +308,58 @@ function renderAbout() {
     + '这是第三方工具，与豆瓣官方无关。';
   box.append(who);
 
-  const LINKS = [
-    ['网站', 'https://doubak.com', ''],
-    ['样张', 'https://sample.doubak.com', '用作者自己的数据生成的示例站点'],
-    ['源码', 'https://github.com/Doubak', '七个仓库都在这个组织下'],
-    ['这个扩展', 'https://github.com/Doubak/doubak-extension', '抓取，产出档案'],
-    ['档案格式', 'https://github.com/Doubak/doubak-data-specs', '规范文本与 JSON Schema'],
-    ['解析器', 'https://github.com/Doubak/doubak-data-parser', '档案 → 结构化数据'],
-    ['站点生成器', 'https://github.com/Doubak/doubak-site-generator', '结构化数据 → 个人存档站'],
+  // **两类去处要分开。**
+  //
+  // 「这东西是什么、我能拿它做什么」的答案在产品页；「它是怎么写的」的答案在
+  // 代码仓库。混在一列里，想装的人会点进一个满是 JSON Schema 的仓库，
+  // 想读代码的人则要在一堆介绍里找入口——两边都没服务好。
+  const GROUPS = [
+    ['了解这个项目', [
+      ['官网', 'https://doubak.com', '它是什么、能做什么'],
+      ['样张', 'https://sample.doubak.com', '用作者自己的数据生成的示例站点'],
+      ['隐私政策', 'https://doubak.com/privacy/', '不收集、不上传、没有服务器'],
+    ]],
+    ['源码（Apache-2.0）', [
+      ['全部仓库', 'https://github.com/Doubak', '整条链路七个仓库'],
+      ['这个扩展', 'https://github.com/Doubak/doubak-extension', '抓取，产出档案'],
+      ['档案格式', 'https://github.com/Doubak/doubak-data-specs', '规范文本与 JSON Schema'],
+      ['解析器', 'https://github.com/Doubak/doubak-data-parser', '档案 → 结构化数据'],
+      ['站点生成器', 'https://github.com/Doubak/doubak-site-generator', '结构化数据 → 个人存档站'],
+    ]],
   ];
-  const tbl = document.createElement('table');
-  const tb = document.createElement('tbody');
-  for (const [label, href, note] of LINKS) {
-    const tr = document.createElement('tr');
-    const th = document.createElement('td');
-    th.textContent = label;
-    const td = document.createElement('td');
-    const a = document.createElement('a');
-    a.href = href;
-    a.target = '_blank';
-    // 新标签页打开外链时必须带上它，否则对方页面能通过 window.opener 操作这一页。
-    a.rel = 'noreferrer noopener';
-    a.textContent = href.replace('https://', '');
-    td.append(a);
-    if (note) {
-      const n = document.createElement('span');
-      n.className = 'muted small';
-      n.textContent = ` ${note}`;
-      td.append(n);
+  for (const [heading, links] of GROUPS) {
+    const h = document.createElement('p');
+    const hb = document.createElement('b');
+    hb.textContent = heading;
+    h.append(hb);
+    box.append(h);
+
+    const tbl = document.createElement('table');
+    const tb = document.createElement('tbody');
+    for (const [label, href, note] of links) {
+      const tr = document.createElement('tr');
+      const th = document.createElement('td');
+      th.textContent = label;
+      const td = document.createElement('td');
+      const a = document.createElement('a');
+      a.href = href;
+      a.target = '_blank';
+      // 新标签页打开外链时必须带上它，否则对方页面能通过 window.opener 操作这一页。
+      a.rel = 'noreferrer noopener';
+      a.textContent = href.replace('https://', '');
+      td.append(a);
+      if (note) {
+        const n = document.createElement('span');
+        n.className = 'muted small';
+        n.textContent = ` ${note}`;
+        td.append(n);
+      }
+      tr.append(th, td);
+      tb.append(tr);
     }
-    tr.append(th, td);
-    tb.append(tr);
+    tbl.append(tb);
+    box.append(tbl);
   }
-  tbl.append(tb);
-  box.append(tbl);
 
   // ── 反馈。**放在关于的最上面，不是最下面。**
   //
