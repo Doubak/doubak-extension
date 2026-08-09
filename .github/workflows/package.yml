@@ -1,0 +1,94 @@
+name: package
+
+# 打一个可以直接装的扩展包，挂在 Actions 的构建产物里。
+#
+# ## 为什么需要它
+#
+# 这个项目没有构建步骤，所以「从仓库直接加载已解压的扩展程序」一直是可行的，而且
+# 以后也仍然可行。但那要求先 clone 整个仓库——`test/` 里有真实账号的用户名与 uid，
+# `docs/` 有几十页文档，都不是装扩展需要的东西。
+#
+# 这里产出的是**照 tools/package.mjs 那份白名单挑过的那 74 个文件**，和上传应用商店
+# 的是同一份名单（名单只有一份，见那个脚本的注释）。
+#
+# ## 不给每个提交发 release
+#
+# release 是给人看的版本节点，一个提交发一个的话它就不再是节点了。所以：
+# 平时只挂构建产物（保留 90 天，点进 Actions 就能下），打了 `v*` 标签才发 release。
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 发 release 要写权限；平时的构建产物不需要，但这里是同一个 job
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # 版本号从 manifest.json 读——**这个仓库里版本号只有一个来源**（见
+      # src/core/version.js）。在 CI 里另写一个会是第四份副本。
+      - name: 读版本号
+        id: v
+        run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+
+      # 打包脚本自己会做几项上传前必须成立的检查（不许带 test/、manifest 引用到的
+      # 文件必须在包里、版本号格式）。不通过就非零退出，这一步就红。
+      - name: 打 zip（给应用商店）
+        run: node tools/package.mjs
+
+      # 摊成目录（给「加载已解压的扩展程序」）。
+      #
+      # 两份产物不是重复：应用商店收 zip，chrome://extensions 的「加载已解压」要目录。
+      # GitHub 会把上传的目录再压一层，所以下载下来解压出的就是可直接加载的那个目录。
+      - name: 摊成可直接加载的目录
+        run: node tools/package.mjs --stage dist/unpacked
+
+      - name: 上传（解压即可加载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: doubak-${{ steps.v.outputs.version }}-unpacked
+          path: dist/unpacked/
+          if-no-files-found: error
+
+      - name: 上传（应用商店用的 zip）
+        uses: actions/upload-artifact@v4
+        with:
+          name: doubak-${{ steps.v.outputs.version }}-zip
+          path: |
+            dist/doubak-${{ steps.v.outputs.version }}.zip
+            dist/doubak-${{ steps.v.outputs.version }}.files.txt
+          if-no-files-found: error
+
+      # 只有打了标签才发 release。标签名与 manifest 里的版本号必须一致——
+      # 对不上就停，别发一个自称 v0.9.0 而里面是 0.8.0 的包出去。
+      - name: 标签必须与 manifest 的版本号一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          got="${{ steps.v.outputs.version }}"
+          if [ "$tag" != "$got" ]; then
+            echo "标签是 v$tag，但 manifest.json 里是 $got" >&2
+            exit 1
+          fi
+
+      # 用 runner 自带的 gh，不引第三方 action。第三方 action 是供应链面，而这个
+      # 项目连一个运行时依赖都不收（docs/toolchain.md）——发布这一步更没有理由破例。
+      - name: 发 release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/doubak-${{ steps.v.outputs.version }}.zip" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

@@ -4,6 +4,7 @@
  *
  *   node tools/package.mjs            # 产出 dist/doubak-<版本>.zip
  *   node tools/package.mjs --list     # 只列要打进去的文件，不写盘
+ *   node tools/package.mjs --stage D  # 把同一份名单摊到目录 D（给「加载已解压的扩展程序」用）
  *
  * ## 为什么需要一个脚本
  *
@@ -22,7 +23,7 @@
  */
 
 import {
-  readFileSync, readdirSync, statSync, mkdirSync, writeFileSync, rmSync, existsSync,
+  readFileSync, readdirSync, statSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync,
 } from 'node:fs';
 import { deflateRawSync, crc32 } from 'node:zlib';
 import { join, dirname } from 'node:path';
@@ -93,6 +94,34 @@ const bytes = files.reduce((n, f) => n + statSync(join(ROOT, f)).size, 0);
 if (process.argv.includes('--list')) {
   for (const f of files) console.log(f);
   console.log(`\n${files.length} 个文件 · ${(bytes / 1024 / 1024).toFixed(2)} MB（未压缩）`);
+  process.exit(0);
+}
+
+/**
+ * `--stage <目录>`：把**同一份名单**原样摊到一个目录里。
+ *
+ * 为什么要有这个：应用商店收的是 zip，而「加载已解压的扩展程序」要的是一个**目录**。
+ * CI 里把这个目录当构建产物传上去，GitHub 会自己再压一层——下载解压出来就是可以直接
+ * 加载的那个目录，中间不用手工挑文件。
+ *
+ * 关键是名单只有一份。要是 CI 里另写一段 `cp -r`，它迟早与 `INCLUDE` 漂移，
+ * 而漂移的方向多半是「多带了 test/」——那里面有真实账号的用户名与 uid。
+ */
+const stageAt = process.argv.indexOf('--stage');
+if (stageAt !== -1) {
+  const dest = process.argv[stageAt + 1];
+  if (!dest) {
+    console.error('  ✗ --stage 后面要跟一个目录');
+    process.exit(1);
+  }
+  rmSync(dest, { recursive: true, force: true });
+  for (const f of files) {
+    mkdirSync(join(dest, dirname(f)), { recursive: true });
+    copyFileSync(join(ROOT, f), join(dest, f));
+  }
+  console.log(`${dest}`);
+  console.log(`  ${files.length} 个文件 · ${(bytes / 1024 / 1024).toFixed(2)} MB`);
+  console.log('  这个目录可以直接用 chrome://extensions 的「加载已解压的扩展程序」打开。');
   process.exit(0);
 }
 

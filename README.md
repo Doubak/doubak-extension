@@ -24,16 +24,27 @@
 零依赖、零构建步骤。仓库里的源码就是浏览器里跑的东西。
 
 ```sh
-npm test                     # 跑测试（Node 内置的测试运行器，不需要 npm install）
-node tools/package.mjs       # 打一个可上传应用商店的 zip → dist/
+npm test                       # 跑测试（Node 内置的测试运行器，不需要 npm install）
+node tools/package.mjs         # 打一个可上传应用商店的 zip → dist/
 node tools/package.mjs --list  # 只看会打包哪些文件
+node tools/package.mjs --stage dist/unpacked   # 摊成一个可直接加载的目录
 ```
 
 需要 Node ≥ 20。
 
 ### 装载到浏览器
 
-Chrome / Edge：`chrome://extensions` → 打开开发者模式 → 加载已解压的扩展程序 → 选本仓库根目录。
+两条路，装出来是同一个扩展。
+
+**从仓库直接装**：`chrome://extensions` → 打开开发者模式 → 加载已解压的扩展程序 →
+选本仓库根目录。这个项目没有构建步骤，源码就是运行的代码，所以这条路一直有效。
+
+**下一个打好的包**（不想 clone 整个仓库时）：GitHub 的
+[Actions → package](https://github.com/Doubak/doubak-extension/actions/workflows/package.yml)
+里挑一次运行，下载 `doubak-<版本>-unpacked`，解压，然后同样用「加载已解压的扩展程序」
+选那个目录。它比仓库根目录干净：只有那 74 个运行时真正需要的文件，没有 `test/`、
+没有 `docs/`。打了 `v*` 标签的版本还会在
+[Releases](https://github.com/Doubak/doubak-extension/releases) 里附一个应用商店格式的 zip。
 
 ### 浏览器自检
 
