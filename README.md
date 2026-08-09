@@ -20,7 +20,9 @@
 零依赖、零构建步骤。仓库里的源码就是浏览器里跑的东西。
 
 ```sh
-npm test          # 跑测试（用 Node 内置的测试运行器，不需要 npm install）
+npm test                     # 跑测试（Node 内置的测试运行器，不需要 npm install）
+node tools/package.mjs       # 打一个可上传应用商店的 zip → dist/
+node tools/package.mjs --list  # 只看会打包哪些文件
 ```
 
 需要 Node ≥ 20。
@@ -112,6 +114,23 @@ chrome-extension://<扩展ID>/selftest/index.html
 测试：`npm test`（零安装即可跑，59 个测试文件）。装了可选开发依赖后会额外用
 webrecorder 的 warcio 独立验证 WARC 输出；同级目录有 `doubak-data-specs`
 时会额外跑跨仓库一致性检查（规范常量的新鲜度、产出与校验器的一致性）。
+
+## 发布到 Chrome 应用商店
+
+```sh
+node tools/package.mjs
+```
+
+产出 `dist/doubak-<版本>.zip`，直接传到开发者后台。几件要知道的：
+
+- **打包用白名单，不是黑名单。** 名单在 `tools/package.mjs` 的 `INCLUDE` 里。黑名单漏一条会**多打进去一个不该有的东西且没人发现**；白名单漏一条则是扩展装上就报错 —— 后者一眼就能看见。有测试守着 `test/` `tools/` `docs/` 不许进包。
+- **`selftest/` 必须打包进去。** 它没有被 `manifest.json` 引用，只被调试页那个按钮 `getURL` 打开 —— 漏了它，那个按钮就是个死链。
+- **zip 是自己写的，不调系统 `zip`。** 与整个工具链一致（不依赖外部程序），而且时间戳一律写 0，所以**同样的源码打出逐字节相同的包** —— 才能核对「上传的到底是不是我构建的那个」。
+- **版本号只能升不能降。** 改 `manifest.json`，`package.json` 跟着改（有测试钉住两者一致）。
+
+### 提交表单要填的东西
+
+逐条权限理由见 [`docs/store-listing.md`](docs/store-listing.md) —— 那份是直接可粘贴的。隐私政策 URL 用 <https://doubak.com/privacy/>。
 
 ## 抓完之后
 

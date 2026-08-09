@@ -18,6 +18,7 @@ import { extensionVersion } from '../src/core/version.js';
 import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { TEST_PRODUCER } from './helpers/producer.js';
+import { execFileSync } from 'node:child_process';
 
 const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
@@ -114,5 +115,56 @@ describe('版本号', () => {
       account: { user_id: '1' },
       producer: TEST_PRODUCER,
     }));
+  });
+});
+
+describe('打包', () => {
+  /**
+   * 打包脚本的文件清单。`--list` 不写盘，所以测试里跑它是安全的。
+   *
+   * **在测试里跑，不在模块顶层跑。** 顶层跑的话，脚本一旦非零退出，
+   * `execFileSync` 会在加载阶段抛出，整个 describe 连同它的断言一起消失——
+   * 于是「测试变少了」而不是「测试红了」，而前者看起来像一切正常。
+   * 实测过：把 test/ 加进白名单，用例数从 1418 掉到 1414，没有一条红。
+   */
+  const listFiles = () => {
+    let out;
+    try {
+      out = execFileSync('node', ['tools/package.mjs', '--list'], { encoding: 'utf8' });
+    } catch (e) {
+      assert.fail(`打包脚本自己就没通过：\n${e.stderr || e.message}`);
+    }
+    return out.split('\n').filter((l) => l && !l.includes('个文件'));
+  };
+
+  test('**测试与开发用的东西不许进包**', () => {
+    // test/ 里有真实账号的用户名与数字 uid（刻意保留的，见 CLAUDE.md），
+    // 没必要连同扩展分发给每一个装它的人；而审核那边每多一个文件就多一分被问。
+    const leaked = listFiles().filter((f) => /^(test|tools|docs|node_modules|\.git|dist)\//.test(f));
+    assert.deepEqual(leaked, [], `这些不该出现在包里：\n${leaked.join('\n')}`);
+  });
+
+  test('**manifest 引用到的文件必须都在包里**', () => {
+    // 少一个的话，扩展装上才发现——而那时已经过了一轮审核。
+    const refs = [
+      manifest.background?.service_worker,
+      ...Object.values(manifest.icons ?? {}),
+      ...Object.values(manifest.action?.default_icon ?? {}),
+    ].filter(Boolean);
+    const listed = listFiles();
+    for (const r of refs) assert.ok(listed.includes(r), `manifest 引用了 ${r}，但它不在包里`);
+  });
+
+  test('**自检页要带上** —— 调试页那个按钮真的会打开它', () => {
+    // 不带上，那个按钮就是个死链。这一条是差点漏掉的：selftest 没有被
+    // manifest 引用，只被 panel.js 用 getURL 打开。
+    assert.ok(listFiles().includes('selftest/index.html'));
+  });
+
+  test('包里的入口就在根部，没有顶层目录', () => {
+    // Chrome 要求 manifest.json 在压缩包根部。
+    const listed = listFiles();
+    assert.ok(listed.includes('manifest.json'));
+    assert.ok(!listed.some((f) => f.startsWith('doubak')), '不该有一层同名目录');
   });
 });
