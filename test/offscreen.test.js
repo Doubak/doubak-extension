@@ -20,7 +20,7 @@ import { serializeScope } from '../src/offscreen/host.js';
 import { handleOpfsRpc, WRITE_OPS } from '../src/storage/opfs-rpc.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { PAUSE_REASONS } from '../src/crawl/resume-policy.js';
-import { readRepoFile } from './helpers/fake-dom.js';
+import { readRepoFile, readPanelSourceSync } from './helpers/fake-dom.js';
 
 /** offscreen 那侧的还原逻辑。与 offscreen.js 里的 reviveScope 同构。 */
 function reviveScope(options = {}) {
@@ -305,7 +305,7 @@ describe('「正在做什么」由做事的那一端报出来', () => {
 
   test('每个会占锁的操作都有对应的界面说法', async () => {
     const off = await readRepoFile('src/offscreen/offscreen.js');
-    const panel = await readRepoFile('src/ui/panel.js');
+    const panel = readPanelSourceSync();
     const holders = [...off.matchAll(/lock\s*\n?\s*\.?run\(\s*'([^']+)'/g)].map((m) => m[1]);
     assert.ok(holders.length >= 3, `没找到几个锁的持有者：${holders}`);
     for (const h of new Set(holders)) {

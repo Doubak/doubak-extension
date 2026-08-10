@@ -20,7 +20,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { installFakeDom, readRepoFile } from './helpers/fake-dom.js';
+import { installFakeDom, readRepoFile , readPanelSource, readPanelSourceSync } from './helpers/fake-dom.js';
 // `readRepoFile` 是异步的（返回 Promise）。同步读一份给那些只做源码约束的检查用——
 // 拿 Promise 去 assert.match 不会报类型错，只会静默地永远不匹配。
 import { readFileSync } from 'node:fs';
@@ -525,7 +525,7 @@ describe('面板脚本', () => {
     // 3347 条——那 8 条 gone 排在后面，在列表里根本画不出来。
     const html = await readRepoFile('src/ui/panel.html');
     assert.match(html, /id="vanished"/);
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /function renderVanished\(\)/);
     // 它由 renderCaptures 调用——两者共用同一份已加载的 index，不另开一条读取路径
     assert.match(js, /renderVanished\(\);[\s\S]{0,200}\$\('captures'\)/);
@@ -550,20 +550,20 @@ describe('面板脚本', () => {
     assert.match(html, /id="delete-this"/);
     // 不可逆的操作要看起来不一样
     assert.match(html, /id="delete-this"[^>]*|class="act danger"/);
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /\$\('delete-this'\)\.addEventListener/);
     // 结果要写在档案页自己的地方 —— 否则消息出现在用户看不见的标签页里
     assert.match(js, /deleteBundle\(currentBundleId, \{[\s\S]{0,200}report:/);
   });
 
   test('开抓前那一行不再说「增量还没接上」', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.equal(js.includes('增量还没接上'), false);
     assert.match(js, /function scopeText/);
   });
 
   test('覆盖率页有「合起来 / 这一份」两个视角，默认合起来', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /let coverageView = 'chain'/, '默认该是合起来');
     assert.match(js, /renderChain\(/);
     const html = await readRepoFile('src/ui/panel.html');
@@ -576,7 +576,7 @@ describe('面板脚本', () => {
     assert.match(html, /id="archive-chain"/);
     assert.match(html, /id="versions"/);
 
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     // 只读 index，不解压 —— 这两个问题的答案全在 index 里
     assert.match(js, /chainDiff/);
     assert.match(js, /function renderVersions/);
@@ -588,7 +588,7 @@ describe('面板脚本', () => {
   test('抓取方式让用户选 —— 默认增量，但不替他做决定', async () => {
     const html = await readRepoFile('src/ui/panel.html');
     assert.match(html, /id="crawl-mode"/);
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /let crawlMode = 'incremental'/, '默认该是增量');
     for (const mode of ['full', 'refresh-subjects']) {
       assert.ok(js.includes(`'${mode}'`), `少了「${mode}」这个选项`);
@@ -598,7 +598,7 @@ describe('面板脚本', () => {
   });
 
   test('中止要有额外确认，且说清不可逆的是什么', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /async function abortCrawl/);
     assert.match(js, /confirm\(/, '必须先确认');
     // **不可逆的是这次抓取，不是数据** —— 说反了用户要么不敢按，要么按了才发现丢东西
@@ -610,7 +610,7 @@ describe('面板脚本', () => {
   });
 
   test('中止用危险样式 —— 不可逆的动作要看起来不一样', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /abortCrawl\(r\.bundleId\), 'danger'/);
   });
 
@@ -642,7 +642,7 @@ describe('面板脚本', () => {
   test('恢复那几秒必须有交代 —— 不能点了没反应', async () => {
     // 报上来的：点继续之后界面五秒一动不动，然后忽然全出来了。
     // 成因是忙碌状态只在**空闲分支**里判，而这时走的是 checkpoint 分支。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const fn = js.slice(js.indexOf('async function refresh'));
     const idxBusy = fn.indexOf('const busy =');
     const idxActive = fn.indexOf("if (s.runner?.active || s.checkpoint)");
@@ -651,7 +651,7 @@ describe('面板脚本', () => {
 
   test('切换档案时把上一份的结果框清干净 —— 包括 class', async () => {
     // 只清文字会留下一个**空的红框**：看起来像出了事，却什么都不说。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const fn = js.slice(js.indexOf('async function openBundle'));
     const body = fn.slice(0, fn.indexOf('const summaryEl'));
     assert.match(body, /export-result/);
@@ -659,7 +659,7 @@ describe('面板脚本', () => {
   });
 
   test('版本历史只报个数，且个数是真的', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /function renderVersions\(count\)/);
     // 早先回的是截断到 200 条的清单，界面拿它的长度当总数 → 永远写着「200 个」
     const off = await readRepoFile('src/offscreen/offscreen.js');
@@ -694,7 +694,7 @@ describe('面板脚本', () => {
   });
 
   test('**关于**里给出去处，且外链带 noopener', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const fn = js.slice(js.indexOf('function renderAbout'));
     const body = fn.slice(0, fn.indexOf('\n}\n'));
     for (const u of ['doubak.com', 'sample.doubak.com', 'github.com/Doubak']) {
@@ -708,7 +708,7 @@ describe('面板脚本', () => {
   });
 
   test('**帮助页要告诉用户怎么反馈**，并说清会带出去什么', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const fn = js.slice(js.indexOf('function renderAbout'));
     const body = fn.slice(0, fn.indexOf('\n}\n'));
     assert.match(body, /doubak-extension\/issues/, '要给提 issue 的去处');
@@ -753,7 +753,7 @@ describe('面板脚本', () => {
     // 原来有 17 处 `el.style.fontSize = '12px'` 之类，散在各处。样式一旦能在
     // JS 里随手写，就没有任何力量阻止下一块界面再发明一套——**统一不了的根源
     // 是没有唯一的地方，不是没人愿意统一**。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const hits = [...js.matchAll(/^.*\.style\.[a-zA-Z]/gm)].map((m) => m[0].trim());
     assert.deepEqual(hits, [], `这些地方在 JS 里写样式：\n${hits.join('\n')}`);
   });
@@ -777,7 +777,7 @@ describe('面板脚本', () => {
     // 真实现象：打开一份 05:13 的全量档案，上面挂着**两张一模一样**的卡片，都写着
     // 「接在 11:21 那份后面」。一份 05:13 的档案不可能接在 11:21 后面——那两张是
     // 看别的档案时留下的，`.after()` 插进去之后没人管。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const code = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
     for (const bad of ['.after(', '.before(', 'insertAdjacent']) {
       assert.equal(code.includes(bad), false, `${bad} 插出来的节点没人负责清`);
@@ -787,7 +787,7 @@ describe('面板脚本', () => {
   test('「这是一次增量抓取」有自己的容器，且切档案时会清掉', async () => {
     const html = await readRepoFile('src/ui/panel.html');
     assert.match(html, /id="archive-incremental"/);
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     // 切档案时清掉
     assert.match(js, /\['export-result', 'verify-result', 'archive-incremental'\]/);
     // 每次渲染前也清掉（同一份档案刷新两次不该出现两张）
@@ -803,7 +803,7 @@ describe('面板脚本', () => {
     assert.equal(visible.includes('**'), false, 'panel.html 的可见文字里有 Markdown 星号');
 
     // JS 里那些会进 textContent / createTextNode / confirm 的中文串
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const bad = [];
     for (const line of js.split('\n')) {
       if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue; // 注释里随便写
@@ -815,7 +815,7 @@ describe('面板脚本', () => {
   });
 
   test('术语统一：说「已抓取多次」，不说「又抓了一次」', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const code = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
     assert.equal(code.includes('又抓了一次'), false);
     assert.ok(code.includes('已抓取多次'));
@@ -826,7 +826,7 @@ describe('面板脚本', () => {
     assert.match(html, /id="export-chain"/);
     assert.match(html, /导出这一份/, '单份那个按钮要改名，否则两个都叫「导出」分不清');
 
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     // 按当前打开的这一份取链，不是永远取最新那条
     assert.match(js, /type: 'chain', bundleId: currentBundleId/);
     // 分子目录，否则 manifest.json 互相覆盖
@@ -836,19 +836,20 @@ describe('面板脚本', () => {
     assert.equal(js.includes('directorySink(dir)'), false, '单份导出还在平铺');
     assert.match(js, /subdirectorySink\(dir, folder\)/);
     // 一份失败不中断其余
-    const fn = js.slice(js.indexOf("\$('export-chain')"));
-    const body = fn.slice(0, fn.indexOf('renderChainExportResult(el, done)'));
-    assert.match(body, /catch \(e\)[\s\S]{0,200}done\.push/, '失败也要记下来并继续');
+    // **按模块取，不按字符位置切。** 原来是从 `$('export-chain')` 第一次出现的地方
+    // 切到某个函数名——那默认了「监听器写在渲染函数前面」，而面板一拆成模块，这个
+    // 默认就不成立了（拼接顺序按文件名排）。判据不该绑在源码顺序上。
+    const exp = await readRepoFile('src/ui/panel/export.js');
+    assert.match(exp, /catch \(e\)[\s\S]{0,200}done\.push/, '失败也要记下来并继续');
   });
 
   test('导出结果逐份说清楚，不汇总成一句「成功」', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /function renderChainExportResult/);
     // 只在校验通过时才记「已导出」——没验过就说导出了，等于给一个我们没资格给的保证
-    const fn = js.slice(js.indexOf('export-chain'));
-    const body = fn.slice(0, fn.indexOf('renderChainExportResult'));
-    assert.match(body, /res\.problems\.length === 0/);
-    assert.match(body, /markExported/);
+    const exp = await readRepoFile('src/ui/panel/export.js');
+    assert.match(exp, /res\.problems\.length === 0/);
+    assert.match(exp, /markExported/);
   });
 
   test('抓取中要写出正在抓的那个 URL', async () => {
@@ -936,7 +937,7 @@ describe('面板脚本', () => {
   test('删除确认框把要失去的具体东西说出来', async () => {
     // 一句「确定删除吗？」等于什么都没说。确认框必须点明哪一份、多大、导出过没有
     // ——删除不可逆且没有回收站。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const fn = js.slice(js.indexOf('async function deleteBundle'), js.indexOf('async function deleteAll'));
 
     assert.match(fn, /confirm\(/, '删除必须先确认');
@@ -949,7 +950,7 @@ describe('面板脚本', () => {
   });
 
   test('清空全部会跳过正在抓的那份，并逐个删', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const fn = js.slice(js.indexOf('async function deleteAll'), js.indexOf('function setStorageResult'));
 
     assert.match(fn, /filter\(\(u\) => u\.deletable\)/, '正在抓的那份要保留');
@@ -961,7 +962,7 @@ describe('面板脚本', () => {
   test('只在校验通过时才记「已导出」', async () => {
     // 没验过就说「已导出」，等于给了一个我们没资格给的保证——而那个保证会被用来
     // 决定删除确认框说得多重。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const i = js.indexOf('markExported');
     const before = js.slice(Math.max(0, i - 400), i);
     assert.match(before, /problems\.length === 0/);
@@ -974,8 +975,10 @@ describe('面板脚本', () => {
     // 作品详情页、越界终止页、offset 游标等等。
     //
     // 这里只钉住「面板确实用的是那个模块」，别的交给行为测试。
-    const js = await readRepoFile('src/ui/panel.js');
-    assert.match(js, /from '\.\/capture-label\.js'/);
+    const js = readPanelSourceSync();
+    // 路径带上层：档案页现在在 `panel/archive.js`，到 `ui/capture-label.js` 要退一级。
+    // 判据问的是「有没有走那个纯函数」，不是「相对路径长什么样」。
+    assert.match(js, /from '\.{1,2}\/capture-label\.js'/);
     assert.match(js, /captureTitle\(e, routeName\)/);
     assert.match(js, /captureSubtitle\(e\)/);
     // 逻辑不该又被抄回面板里
@@ -983,7 +986,7 @@ describe('面板脚本', () => {
   });
 
   test('判定只在不是 ok 时显示 —— 一整列「正常」是噪音', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const fn = js.slice(js.indexOf('function renderCaptures'), js.indexOf('function captureTitle'));
     assert.match(fn, /e\.verdict === 'ok'/);
   });
@@ -991,7 +994,7 @@ describe('面板脚本', () => {
   test('抓完之后不清空进度表 —— 显示上一次的结果', async () => {
     // 抓完立刻变回「还没有开始」，等于把刚跑完那一次的结果扔了，而那正是用户此刻最想
     // 看的东西。数据取自最新档案的 manifest（权威记录），不是内存里的快照。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /function showLastRun/);
     assert.match(js, /crawlState/, '要读 manifest 的 crawl_state');
     assert.match(js, /low_water_time/, '「已回溯到」用最旧那一端');
@@ -1000,7 +1003,7 @@ describe('面板脚本', () => {
   test('覆盖率页有自己的加载，且先说「正在读取」', async () => {
     // 它原来只是 openBundle() 的副作用：第一次直接点进来是空白的，而空白看起来像
     // 「正在加载」——实际什么都不会发生。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /if \(btn\.dataset\.tab === 'coverage'\) loadCoverage\(\)/);
     const fn = js.slice(js.indexOf('async function loadCoverage'), js.indexOf('function renderCoverage'));
     assert.match(fn, /正在读取/);
@@ -1009,7 +1012,7 @@ describe('面板脚本', () => {
   test('日志页读的是持久化的日志，不是内存数组', async () => {
     // 原来只记面板打开期间的事件、一刷新就没，而界面上却写着「仅本地保留…导出前请自行
     // 脱敏」——同时暗示了「存下来了」和「有导出」，两个都不存在。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /type: 'readLog'/);
     assert.equal(js.includes('const logLines = []'), false, '内存数组不该还在');
     assert.match(js, /formatLogText/, '要有复制/导出');
@@ -1030,7 +1033,7 @@ describe('面板脚本', () => {
   test('覆盖率只有一条渲染路径 —— 不再是档案页的副作用', async () => {
     // 两条路径就是两个真相来源：没去过档案页时覆盖率看到的可能是另一份档案；
     // 删掉档案之后选中的 id 还指着一个不存在的目录。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const openBundleFn = js.slice(js.indexOf('async function openBundle'), js.indexOf('function renderCaptures'));
     assert.equal(openBundleFn.includes('renderCoverage'), false, '档案页不该顺手渲染覆盖率');
 
@@ -1039,7 +1042,7 @@ describe('面板脚本', () => {
   });
 
   test('两个标签页共用同一处「在看哪份档案」', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /async function loadBundleSummary/);
     assert.match(js, /summaryCache/);
   });
@@ -1047,7 +1050,7 @@ describe('面板脚本', () => {
   test('删除档案会作废缓存并取消已失效的选中', async () => {
     // 不取消的话，下一次读取会去开一个不存在的目录然后报「读不出来」，
     // 而真实情况只是它被删了。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const inv = js.slice(js.indexOf('function invalidateBundles'), js.indexOf('async function loadBundleSummary'));
     assert.match(inv, /summaryCache = null/);
     assert.match(inv, /currentBundleId = null/);
@@ -1061,7 +1064,7 @@ describe('面板脚本', () => {
 
   test('存储变化之后要重画当前打开的那一页', async () => {
     // 只作废缓存不重画的话，用户会盯着一份已经被删掉的档案的数字。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /async function refreshOpenTab/);
     const del = js.slice(js.indexOf('async function deleteBundle'), js.indexOf('async function deleteAll'));
     assert.match(del, /refreshOpenTab/);
@@ -1069,7 +1072,7 @@ describe('面板脚本', () => {
 
   test('每个 $(id) 都在 HTML 里真的存在', async () => {
     // `$()` 返回 null 之后往上一步才炸，栈里看不出缺的是哪个 id。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const html = await readRepoFile('src/ui/panel.html');
     const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
     for (const m of js.matchAll(/\$\('([^']+)'\)/g)) {
@@ -1177,7 +1180,7 @@ describe('openPanel：点图标和点通知共同的落点', () => {
 });
 
 describe('停下来之后，顶端不能是死路', () => {
-  const js = readFileSync(new URL('../src/ui/panel.js', import.meta.url), 'utf-8');
+  const js = readPanelSourceSync();
 
   test('failures_pending 刻意不给「继续」—— 但必须给别的', () => {
     // 这个状态该做的决定是「重试」还是「就这样收尾」，而那两个按钮在失败清单里。
@@ -1203,14 +1206,14 @@ describe('停下来之后，顶端不能是死路', () => {
     );
   });
 
-  test('有分页失败时不给「就这样收尾」', () => {
+  test('有分页失败时不给「就这样收尾」', async () => {
     // 跳过分页条目等于免掉水位线赖以成立的前提，那不是用户能授权的事。
     assert.match(js, /if \(!ordered\.length\) acts\.push\(\['就这样收尾'/);
   });
 });
 
 describe('只剩 checkpoint 时也不能是死路', () => {
-  const js = readFileSync(new URL('../src/ui/panel.js', import.meta.url), 'utf-8');
+  const js = readPanelSourceSync();
   const bg = readFileSync(new URL('../src/background.js', import.meta.url), 'utf-8');
 
   test('failures_pending 在 checkpoint 分支里有出路', () => {
@@ -1241,7 +1244,7 @@ describe('只剩 checkpoint 时也不能是死路', () => {
     assert.equal(/\bdrive\(\)/.test(body), false, 'ensureRunLoaded 不该顺手驱动');
   });
 
-  test('**收尾的确认放在函数里**，不在调用方', () => {
+  test('**收尾的确认放在函数里**，不在调用方', async () => {
     // 有两个入口会调它。确认写在调用方的话，迟早有一个入口忘了——而这是一个
     // 会写进 manifest、影响下次水位线的决定。
     const i = js.indexOf('async function finishWithGaps(leaves)');
@@ -1251,7 +1254,7 @@ describe('只剩 checkpoint 时也不能是死路', () => {
 });
 
 describe('出错就停在错误上，不要接着刷新掉', () => {
-  const js = readFileSync(new URL('../src/ui/panel.js', import.meta.url), 'utf-8');
+  const js = readPanelSourceSync();
 
   /** 取一个函数体（到下一个顶层 `}` 为止，够用）。 */
   const bodyOf = (name) => {
@@ -1527,14 +1530,14 @@ describe('「判不出来」不该显示成「被限制」', () => {
    * 而用户按提示去重试——重试当然还是一样的结果。
    */
   test('note 说了判不出来，就显示判不出来', async () => {
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /function verdictName\(e\)/);
     assert.match(js, /e\?\.note\?\.startsWith\('判不出来'\)/);
   });
 
   test('**三处显示判定的地方都要走它**', async () => {
     // 漏掉任何一处，同一条捕获在档案页与详情页会显示成两种不同的东西。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const direct = [...js.matchAll(/VERDICT_NAMES\[(?:e|entry)\.verdict\]/g)];
     assert.equal(direct.length, 0, `还有 ${direct.length} 处直接查表，没走 verdictName`);
     assert.ok((js.match(/verdictName\(/g) ?? []).length >= 4, '至少三处显示 + 一处定义');
@@ -1544,7 +1547,7 @@ describe('「判不出来」不该显示成「被限制」', () => {
 describe('判不出来时要说清该怎么办', () => {
   test('原因文案说的是「该怎么办」，不是「哪里不对」', async () => {
     // 用户看到判定之后要做决定，而决定只有三种：等一等重抓、改抽取器、先看一眼。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /frame_anchors_missing: '页面结构变了，重抓没用'/);
     assert.match(js, /empty_body: '空响应，可以重抓'/);
   });
@@ -1552,7 +1555,7 @@ describe('判不出来时要说清该怎么办', () => {
   test('**旧档案也要认** —— 它们只有 note，没有 verdict_reason', async () => {
     // bundle/1.2 之前判不出来的响应写成 blocked，真相在 note 里。档案是冻结的，
     // 改词表救不回它们，所以两条路都要走。
-    const js = await readRepoFile('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.match(js, /e\?\.verdict === 'unknown' \|\| e\?\.note\?\.startsWith\('判不出来'\)/);
   });
 });

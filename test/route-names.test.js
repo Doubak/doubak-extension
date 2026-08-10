@@ -19,6 +19,7 @@
  */
 
 import { test, describe } from 'node:test';
+import { readPanelSourceSync } from './helpers/fake-dom.js';
 import assert from 'node:assert/strict';
 
 import { routeName, hasRouteName, contiguityLabel } from '../src/ui/route-names.js';
@@ -130,7 +131,7 @@ describe('「连续性」那一列：进行中 ≠ 未验证', () => {
 
   test('覆盖率页与进度表用同一套说法', async () => {
     // 同一件事在两个页面上说成两样，用户会以为是两件事。
-    const panel = await readFile(new URL('../src/ui/panel.js', import.meta.url), 'utf-8');
+    const panel = readPanelSourceSync();
     assert.equal(
       panel.includes('连续性未验证'), false,
       '覆盖率页还在用自己那套措辞',

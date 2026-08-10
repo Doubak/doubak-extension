@@ -13,6 +13,7 @@
  */
 
 import { test, describe } from 'node:test';
+import { readPanelSourceSync } from './helpers/fake-dom.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
@@ -126,7 +127,7 @@ describe('接线', () => {
   });
 
   test('面板上有开关，而且说清了在哪看、什么时候生效', () => {
-    const js = read('src/ui/panel.js');
+    const js = readPanelSourceSync();
     const html = read('src/ui/panel.html');
     assert.match(html, /id="toggle-debug"/);
     assert.match(js, /setDebugFlag\(getDebugKv\(\), !debugEnabled\(\)\)/);
@@ -138,7 +139,7 @@ describe('接线', () => {
     // `new IdbKvStore()` 在拿不到 IndexedDB 时会抛（那是对的：抓取状态必须能
     // 持久化）。在模块顶层构造它，等于让一个排查用的开关有本事让 refresh() 一次
     // 都跑不起来——用户看到的是空白页，而原因与他要做的事毫无关系。
-    const js = read('src/ui/panel.js');
+    const js = readPanelSourceSync();
     assert.ok(!/^const debugKv = new IdbKvStore\(\);$/m.test(js), '别在顶层构造');
     assert.match(js, /function getDebugKv\(\)/);
     assert.match(js, /catch \{ \/\* 保持默认的关 \*\/ \}/);

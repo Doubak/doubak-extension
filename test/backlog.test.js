@@ -20,6 +20,7 @@
  */
 
 import { test, describe } from 'node:test';
+import { readPanelSourceSync } from './helpers/fake-dom.js';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
@@ -303,7 +304,7 @@ describe('接线：runner 与 offscreen', () => {
     // panel.js 里的 describeEvent 没有导出、也离不开 document，所以只能断言源码
     // ——与 ui.test.js 里那一批是同一个做法。（真要测得动，得像 route-names.js
     // 那样把文案逻辑抽成单独模块；那是另一件事。）
-    const src = readFileSync(new URL('../src/ui/panel.js', import.meta.url), 'utf-8');
+    const src = readPanelSourceSync();
     const at = src.indexOf("e.type === 'backlog_queued'");
     assert.ok(at > 0, '面板里没有处理 backlog_queued');
     const msg = src.slice(at, at + 400);

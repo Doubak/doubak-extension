@@ -25,7 +25,8 @@
  * 拿到 `null` 然后立刻炸，而那正是要抓的一类 bug。
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import { readFileSync, readdirSync } from 'node:fs';
 
 class FakeElement {
   /** @param {string} tag */
@@ -283,4 +284,31 @@ export async function installFakeDom({ html, onMessage = () => ({ ok: true }), e
 /** @param {string} rel 相对仓库根 */
 export function readRepoFile(rel) {
   return readFile(new URL(`../../${rel}`, import.meta.url), 'utf-8');
+}
+
+/**
+ * 面板的**全部源码**：壳加它底下那十个模块，拼成一段。
+ *
+ * 面板从一个 3034 行的文件拆成了 `panel.js` + `panel/*.js`，而这些断言问的是
+ * 「面板里有没有这段逻辑」，不是「它在哪个文件里」。写死某一个文件会把断言绑在
+ * 当前这一种拆法上——那样每挪一个函数就要改一片测试，而那恰好是拆分想避免的事。
+ */
+export async function readPanelSource() {
+  const dir = new URL('../../src/ui/panel/', import.meta.url);
+  const names = (await readdir(dir)).filter((f) => f.endsWith('.js')).sort();
+  const parts = await Promise.all([
+    readFile(new URL('../../src/ui/panel.js', import.meta.url), 'utf-8'),
+    ...names.map((f) => readFile(new URL(f, dir), 'utf-8')),
+  ]);
+  return parts.join('\n');
+}
+
+/** `readPanelSource()` 的同步版：`describe` 体里没法 await。 */
+export function readPanelSourceSync() {
+  const dir = new URL('../../src/ui/panel/', import.meta.url);
+  const names = readdirSync(dir).filter((f) => f.endsWith('.js')).sort();
+  return [
+    readFileSync(new URL('../../src/ui/panel.js', import.meta.url), 'utf-8'),
+    ...names.map((f) => readFileSync(new URL(f, dir), 'utf-8')),
+  ].join('\n');
 }
