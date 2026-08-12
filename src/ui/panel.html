@@ -34,7 +34,7 @@
            `setActionError`）。这一块只由用户或下一次成功的操作清掉。 -->
       <div id="notice"></div>
       <div id="state" class="card idle">正在读取状态…</div>
-      <div id="actions"></div>
+      <div id="actions" class="btn-row"></div>
       <div id="preflight"></div>
       <!-- 抓取方式。默认增量，但**必须能选** —— 用户可能想重建一份基准，
            或者不信任上一次的结果。 -->
@@ -55,7 +55,7 @@
       </div>
       <!-- 两个视角。增量之后，**单份档案的实抓数不再有完整性含义**——它可能只有
            3 条新的。完整性是整条链的属性。 -->
-      <div id="coverage-view"></div>
+      <div id="coverage-view" class="btn-row"></div>
       <div id="chain"></div>
       <div id="coverage"></div>
     </section>
@@ -162,7 +162,7 @@
         完整的抓取记录在档案的 index.ndjson 中，那才是权威版本。
         不会发送到任何地方；<b>里面有 URL 与用户名，贴出去之前请自行脱敏</b>。
       </div>
-      <div id="log-actions"></div>
+      <div id="log-actions" class="btn-row"></div>
       <div id="log"></div>
     </section>
     <section id="tab-help" hidden>

@@ -150,9 +150,22 @@ h2:first-child { margin-top: 0; }
 }
 .card > b { display: block; margin-bottom: var(--s1); font-size: 13.5px; }
 .card .detail { color: inherit; opacity: .88; }
-/* 动作按钮排在卡片里，与文字有明确间距——「给出下一步」是这套界面的硬规则，
+/*
+ * 一排并列的按钮。**凡是并排放按钮的容器都要挂 `.btn-row`。**
+ *
+ * 按钮是 inline-block，所以间距只能来自容器：JS 里 `el.append(a, b)` 之间没有
+ * 空白文本节点，两个按钮就真的严丝合缝地贴在一起。而这一点**只有并排两个以上时
+ * 才看得出来**——概览页多数时候只有一个按钮，于是这个毛病在三个容器里躺了很久，
+ * 直到覆盖率页的「合起来 / 这一份」和日志页的「复制日志 / 清空」被人一眼看出来。
+ *
+ * 所以不给单个 id 各写一条，而是一个类：新加一排按钮时挂上它就行，
+ * 而 `test/ui.test.js` 里有一条判据会去数「哪些容器装了 .act 按钮」，
+ * 漏挂的那个会红。
+ */
+.btn-row { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+/* 卡片里的那一排还要与上面的文字拉开——「给出下一步」是这套界面的硬规则，
    所以它在样式上也该是卡片的一部分，不是散落在旁边的按钮。 */
-.card .actions { margin-top: var(--s3); display: flex; gap: var(--s2); flex-wrap: wrap; }
+.card .actions { margin-top: var(--s3); }
 
 .tone-idle  { background: var(--tone-idle-bg);  color: var(--tone-idle); }
 .tone-busy  { background: var(--tone-busy-bg);  color: var(--tone-busy); }

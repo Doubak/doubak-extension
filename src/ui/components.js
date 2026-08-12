@@ -74,7 +74,7 @@ export function statusCard({ tone, title, detail, actions = [], allowNoAction = 
   }
   if (actions.length) {
     const row = document.createElement('div');
-    row.className = 'actions';
+    row.className = 'actions btn-row';
     for (const a of actions) row.append(button(a));
     el.append(row);
   }

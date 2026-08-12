@@ -616,6 +616,61 @@ describe('面板脚本', () => {
     assert.match(js, /send\(\{ type: 'start', mode: crawlMode \}\)/);
   });
 
+  test('**并排的按钮之间要有缝** —— 装 `.act` 按钮的容器都得是 `.btn-row`', async () => {
+    // 按钮是 inline-block，间距只能来自容器；而 JS 里 `el.append(a, b)` 之间没有
+    // 空白文本节点，两个按钮就严丝合缝地贴在一起。
+    //
+    // 这个毛病**只有并排两个以上时才看得见**，所以它在三个容器里躺了很久：概览页
+    // 多数时候只有一个按钮，直到覆盖率页的「合起来 / 这一份」与日志页的
+    // 「复制日志 / 清空」被人一眼看出来。
+    //
+    // 判据不写死那三个 id，而是**自己去数**：面板里凡是拿到某个容器又往里塞
+    // `.act` 按钮的地方，那个容器就得挂 `.btn-row`。下一排按钮漏挂时这里会红，
+    // 而不是等某个人再用眼睛发现一次。
+    const html = await readRepoFile('src/ui/panel.html');
+    const js = readPanelSourceSync();
+
+    // 按函数切开，然后**顺着变量走**：`const el = $('x')` 记下 el→x，
+    // 哪个变量被赋了 `.act` 的 className 记下来，最后只认 `el.append(那个变量)`。
+    //
+    // 第一版只查「同一个函数里既取了容器又造了按钮」，误报三个——`$('log')`、
+    // `$('notice')`、`$('failures')` 只是碰巧与按钮同处一个函数，按钮并不塞进它们。
+    // 一条会误报的判据比没有判据更糟：下一个人会把它删掉。
+    const fns = js.split(/\n(?=(?:export )?(?:async )?function )/);
+    const containers = new Set();
+    for (const fn of fns) {
+      /** @type {Map<string, string>} 变量名 → 容器 id */
+      const vars = new Map();
+      for (const m of fn.matchAll(/const (\w+) = \$\('([\w-]+)'\)/g)) vars.set(m[1], m[2]);
+      const buttons = new Set(
+        [...fn.matchAll(/(\w+)\.className = (?:kind === 'danger' \? )?'act/g)].map((m) => m[1]),
+      );
+      if (!vars.size || !buttons.size) continue;
+      for (const m of fn.matchAll(/(\w+)\.append\(([^)]*)\)/g)) {
+        const id = vars.get(m[1]);
+        if (!id) continue;
+        if (m[2].split(',').some((a) => buttons.has(a.trim()))) containers.add(id);
+      }
+    }
+    assert.ok(containers.size >= 3, `只扫到 ${containers.size} 个容器，扫描本身可能坏了`);
+
+    const bad = [];
+    for (const id of containers) {
+      const tag = new RegExp(`<[a-z]+ id="${id}"[^>]*>`).exec(html)?.[0];
+      // 不在 panel.html 里 = 它是 JS 造出来的节点，那由造它的地方负责。
+      if (!tag) continue;
+      if (!/class="[^"]*\bbtn-row\b/.test(tag)) bad.push(id);
+    }
+    assert.deepEqual(bad, [], `这些容器装了并排按钮却没挂 .btn-row：${bad.join(' ')}`);
+
+    // 挂了还得真有缝：类本身要给出 gap，否则上面那条只是在数 class 名。
+    const css = await readRepoFile('src/ui/panel.css');
+    const rule = /\.btn-row \{([^}]*)\}/.exec(css);
+    assert.ok(rule, 'CSS 里没有 .btn-row');
+    assert.match(rule[1], /display: flex/);
+    assert.match(rule[1], /gap: var\(--s\d\)/);
+  });
+
   test('**每个选项都说清它跳过什么** —— 跳过是这里唯一看不见的动作', async () => {
     // 跳过不产生捕获行，日志里不滚动，覆盖率页上也只是一个不再增长的数字。
     // 选项里不写，用户就没有任何地方能知道它发生过——而「它是不是漏抓了」正是
