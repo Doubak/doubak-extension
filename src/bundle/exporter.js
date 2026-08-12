@@ -156,13 +156,32 @@ export async function inspectDestination({ store, sink, files, expected, signal 
  * @param {(p: {phase: 'copy' | 'verify', file: string, done: number, total: number, files: number, fileIndex: number}) => void} [opts.onProgress]
  * @param {AbortSignal} [opts.signal]
  */
-export async function exportBundle({
+export async function exportBundle(opts) {
+  return copyBundle({ ...opts, verb: '导出' });
+}
+
+/**
+ * 搬一份档案，从一个 `FileStore` 到一个 `ExportSink`。
+ *
+ * ## 为什么导入也走这里
+ *
+ * 导入就是**把两端调个个儿**：源变成用户磁盘上的目录，目的地变成 OPFS。要做的事
+ * 一模一样——按块流式复制、回读校验、跳过已经完整的、核对 manifest 声明了却不在的
+ * 文件。写第二份实现，它们迟早会分叉，而分叉的方向是**导入那份少一项检查**：
+ * 那些检查每一条都是曾经出过事才加上的。
+ *
+ * 只有措辞不同，所以只把动词参数化。
+ *
+ * @param {object} opts
+ * @param {string} [opts.verb]  界面上叫它「导出」还是「导入」
+ */
+export async function copyBundle({
   store, sink, chunkBytes = DEFAULT_CHUNK_BYTES, verify = true, overwrite = false,
-  resume = false, onProgress = () => {}, signal,
+  resume = false, onProgress = () => {}, signal, verb = '导出',
 }) {
   const all = await store.list();
   const files = all.filter((f) => !NOT_PART_OF_BUNDLE.has(f)).sort();
-  if (files.length === 0) throw new Error('这个档案目录是空的，没有东西可导出');
+  if (files.length === 0) throw new Error(`这个档案目录是空的，没有东西可${verb}`);
 
   // 目的地是**用户在文件选择器里随手点的**一个目录，完全可能是文档目录、
   // 甚至是上一次导出的档案。同名即覆盖，而覆盖掉的东西没有回收站。
@@ -230,7 +249,7 @@ export async function exportBundle({
   }
 
   const results = verify
-    ? await verifyExported({ sink, copied, expected, onProgress, signal })
+    ? await verifyCopied({ sink, copied, expected, onProgress, signal })
     : copied.map((c) => ({ ...c, sizeOk: null, digestOk: null, reason: '按要求跳过了校验' }));
 
   // 跳过的那些**刚刚才验过**（就在 inspectDestination 里），不必再读一遍——
@@ -239,7 +258,9 @@ export async function exportBundle({
   for (const sk of skipped) {
     results.push({
       name: sk.name, bytes: sk.bytes, sizeOk: true, digestOk: sk.digestOk,
-      reason: sk.digestOk === null ? '上次已导出（字节数一致，manifest 里没有摘要）' : '上次已导出，校验通过',
+      reason: sk.digestOk === null
+        ? `上次已${verb}（字节数一致，manifest 里没有摘要）`
+        : `上次已${verb}，校验通过`,
       skipped: true,
     });
   }
@@ -284,7 +305,7 @@ export async function exportBundle({
  * 顺序是先字节数、后摘要：字节数不对的时候摘要必然也不对，先报前者能给出
  * 有用得多的信息（差了多少、差在哪个文件）。
  */
-async function verifyExported({ sink, copied, expected, onProgress, signal }) {
+async function verifyCopied({ sink, copied, expected, onProgress, signal }) {
   /** @type {Array<object>} */
   const out = [];
   let index = 0;
@@ -366,7 +387,7 @@ async function readExpectedDigests(store, files) {
 
 /** @param {AbortSignal} [signal] */
 function throwIfAborted(signal) {
-  if (signal?.aborted) throw new Error('导出已取消');
+  if (signal?.aborted) throw new Error('已取消');
 }
 
 /**

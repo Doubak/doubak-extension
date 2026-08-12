@@ -7,16 +7,38 @@
  * 可用**。窗口没有，**service worker 也没有**。所以任何要碰 OPFS 的上下文都得
  * 先起一个专用 Worker，再把操作转发进去。
  *
- * ## 为什么读写要分成两个入口
+ * ## 为什么读写要分成三个入口
  *
  * | 入口 | 谁用 | 能写吗 |
  * |---|---|---|
- * | `opfs-worker.js` | 面板（窗口） | ✗ |
+ * | `opfs-worker.js` | 面板看档案、导出 | ✗ |
  * | `opfs-rw-worker.js` | offscreen document（抓取） | ✓ |
+ * | `opfs-import-worker.js` | 面板导入 | 只能**新建文件**，碰不到已有的字节 |
  *
- * 写 OPFS 的只该有**一条**路径。多一条就多一个能破坏偏移量的入口，而整个索引
- * 都建立在偏移量可信之上。面板只是看档案，没有任何理由能写——所以它连能力都
- * 不该有，而不是「有能力但不用」。
+ * 原来只有两个，规矩是「写 OPFS 只该有一条路径」。导入把这句话逼到了台面上：
+ * 它必然是第二条写路径，而面板（窗口）是唯一能同时拿到用户磁盘和 OPFS 的地方
+ * ——`showDirectoryPicker()` 只有窗口有，offscreen 拿不到；而字节又过不了
+ * `chrome.runtime.sendMessage`（那条通道只认 JSON）。所以不存在「让 offscreen 去
+ * 导入」这个选项。
+ *
+ * 于是要问的不是「能不能多一条写路径」，而是**那条规矩到底在保护什么**：
+ * 保护的是**已有档案里的偏移量**——索引里每一条都记着 `segment @offset+length`，
+ * 而整个「第三方能顺着索引把字节取出来」的承诺都建立在它可信之上。
+ *
+ * 导入模式因此不是「弱一点的读写」，而是一条**只增不改**的规矩：
+ *
+ * > **导入只能新建文件，碰不到任何已经在那儿的字节。**
+ *
+ * 具体到操作：`append` / `replace` 的目标文件**必须原本不存在**（之后这个 worker
+ * 认下它，同一份文件的后续分块照写）；`remove` 只能删自己新建的；`truncate` 永远拒
+ * ——它是唯一能改变已写入字节位置的操作，而导入压根不需要它。
+ *
+ * 这条比「只往空目录里写」更准，也更有用：它天然允许**把上次没导完的补齐**
+ * （缺的文件是新建，已有的一个都碰不到），而「空目录」那条会把这种情况一起挡掉，
+ * 逼用户先把半份档案删掉——那正是最不该让用户去做的操作。
+ *
+ * `claimForImport(dir)` 仍然保留，但它只回答一个更窄的问题：**这个目录是不是我从零
+ * 建起来的**。只有那样的目录才允许 `destroy`，用于导到一半失败时整份回滚。
  *
  * 这条边界在**worker 一侧**执行，不是在客户端。客户端的限制只是约定，worker
  * 的拒绝才是保证。
@@ -35,25 +57,105 @@ import { OpfsFileStore } from './opfs-store.js';
 export const WRITE_OPS = new Set(['append', 'replace', 'truncate', 'remove', 'destroy']);
 
 /**
+ * 导入模式下**永远**拒绝的操作。
+ *
+ * `truncate` 是唯一能改变已写入字节位置的操作，而索引里每一条捕获都记着
+ * `segment @offset+length`。导入本身也不需要它：它只新建文件。
+ */
+const NEVER_ON_IMPORT = new Set(['truncate']);
+
+/**
+ * 导入模式的那一条规矩，逐个操作地执行。
+ *
+ * > **只能新建文件，碰不到任何已经在那儿的字节。**
+ *
+ * 判据是「这个文件此刻在不在」，去问存储本身——**不是**问调用方传了什么。调用方
+ * 说得再对也只是约定，而这里要的是保证。
+ */
+async function assertImportMayWrite({ op, dir, name, storeFor, claimed, owned }) {
+  if (NEVER_ON_IMPORT.has(op)) {
+    throw new Error(`导入用的 Worker 不接受 ${op}——它会改变已写入字节的位置，而索引全靠偏移量`);
+  }
+
+  if (op === 'destroy') {
+    if (!claimed.has(dir)) {
+      throw new Error(
+        `导入用的 Worker 不能删掉 ${dir}：它不是这次导入从零建起来的。`
+        + '否则「导入」就成了一条删档案的旁路。',
+      );
+    }
+    return;
+  }
+
+  const key = `${dir}/${name}`;
+  if (owned.has(key)) return; // 本次新建的，后续分块照写
+
+  if (await (await storeFor(dir)).exists(name)) {
+    throw new Error(
+      `导入用的 Worker 不覆盖已经存在的 ${name}（在 ${dir} 里）。`
+      + '导入只能新建文件——已有档案里的字节，它在结构上就够不着。'
+      + '如果确实想换掉这一份，请先在档案页把旧的那份删掉。',
+    );
+  }
+  if (op === 'remove') {
+    return; // 删一个不存在的文件是空操作，本来就没碰到任何字节
+  }
+  owned.add(key);
+}
+
+/**
  * 处理一条 RPC 请求，返回 `{result, transfer}`。
  *
  * @param {object} msg
  * @param {object} opts
  * @param {boolean} opts.allowWrites
+ * @param {boolean} [opts.importOnly]
+ *   导入模式：只能新建文件，碰不到任何已经在那儿的字节。理由见文件开头。
  * @param {(dir: string) => Promise<import('./file-store.js').FileStore>} opts.storeFor
+ * @param {() => Promise<string[]>} [opts.listDirs]  默认走 OPFS
+ * @param {(dir: string) => Promise<void>} [opts.destroyDir]  默认走 OPFS
+ * @param {Set<string>} [opts.claimed]  导入模式下「从零建起来的」目录
+ * @param {Set<string>} [opts.owned]    导入模式下本次新建的文件（`dir/name`）
  */
-export async function handleOpfsRpc(msg, { allowWrites, storeFor }) {
+export async function handleOpfsRpc(msg, {
+  allowWrites,
+  importOnly = false,
+  storeFor,
+  listDirs = () => OpfsFileStore.listBundleDirs(),
+  destroyDir = (d) => OpfsFileStore.destroy(d),
+  claimed = new Set(),
+  owned = new Set(),
+}) {
   const { op, dir, name, offset, length, bytes } = msg ?? {};
 
   if (WRITE_OPS.has(op) && !allowWrites) {
     throw new Error(`这个 Worker 是只读的，不接受 ${op}——写 OPFS 只走抓取那一条路径`);
   }
+  if (importOnly && WRITE_OPS.has(op)) {
+    await assertImportMayWrite({ op, dir, name, storeFor, claimed, owned });
+  }
 
   switch (op) {
     case 'listBundleDirs':
-      return { result: await OpfsFileStore.listBundleDirs() };
+      return { result: await listDirs() };
     case 'destroy':
-      return { result: await OpfsFileStore.destroy(dir) };
+      return { result: await destroyDir(dir) };
+
+    /**
+     * 记下「这个目录是我从零建起来的」。
+     *
+     * **只在目录不存在或是空的时候才成立**，而它换来的唯一权限是 `destroy`：
+     * 导到一半失败时要能把半份档案整个回滚掉，而回滚一个本来就有东西的目录会
+     * 连带删掉不属于这次导入的文件。
+     *
+     * 它**不是**写权限的开关——那条规矩是「只能新建文件」，见文件开头。
+     */
+    case 'claimForImport': {
+      if (!importOnly) throw new Error('claimForImport 只用于导入模式');
+      const existing = await (await storeFor(dir)).list();
+      if (existing.length === 0) claimed.add(dir);
+      return { result: { fresh: existing.length === 0, files: existing.length } };
+    }
 
     case 'list':
       return { result: await (await storeFor(dir)).list() };
@@ -133,13 +235,21 @@ async function withRetry(fn) {
  * @param {object} opts
  * @param {boolean} opts.allowWrites
  */
-export function serveOpfsRpc({ allowWrites }) {
+export function serveOpfsRpc({ allowWrites, importOnly = false }) {
   /** @type {Map<string, import('./file-store.js').FileStore>} */
   const open = new Map();
   const storeFor = async (dir) => {
     if (!open.has(dir)) open.set(dir, await OpfsFileStore.open(dir));
     return open.get(dir);
   };
+  /**
+   * 认领过的目录。**活在 Worker 里，不在消息里**——写在消息里的话调用方自己就能
+   * 声称认领过了，那这条边界就退回成了一句约定。
+   * @type {Set<string>}
+   */
+  const claimed = new Set();
+  /** 本次新建的文件（`dir/name`）。同上：活在 Worker 里，不在消息里。 @type {Set<string>} */
+  const owned = new Set();
 
   /**
    * 按「目录/文件」串行化。
@@ -166,7 +276,7 @@ export function serveOpfsRpc({ allowWrites }) {
     try {
       const key = `${e.data?.dir ?? ''}/${e.data?.name ?? ''}`;
       const { result, transfer = [] } = await serialize(key, () =>
-        withRetry(() => handleOpfsRpc(e.data, { allowWrites, storeFor })));
+        withRetry(() => handleOpfsRpc(e.data, { allowWrites, importOnly, storeFor, claimed, owned })));
       self.postMessage({ id, ok: true, result }, transfer);
     } catch (err) {
       // Error 本身跨不过 postMessage，只能传字符串。name 要带上——上层要靠它

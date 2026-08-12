@@ -250,7 +250,14 @@ export async function installFakeDom({ html, onMessage = () => ({ ok: true }), e
     storage: { estimate: async () => ({ usage: 0, quota: 100e9 }) },
     ...(extra.navigator ?? {}),
   });
-  set('Worker', class { constructor() { this.postMessage = () => {}; } addEventListener() {} });
+  // 默认是个空壳：不发消息、不答复。**够用是因为大多数测试根本不碰存储**，而一个
+  // 会答复的假 Worker 要拖进整个 OPFS RPC。碰存储的那几条自己传一个进来
+  // （`helpers/fake-opfs-worker.js`）——不传的话 `WorkerFileStore` 的 Promise 永远
+  // 不落地，测试会挂住而不是失败，那比失败难查得多。
+  set('Worker', extra.Worker ?? class {
+    constructor() { this.postMessage = () => {}; }
+    addEventListener() {}
+  });
   set('alert', () => {});
   set('confirm', () => false);
   // 界面会起一个 2 秒轮询。测试里不让它自己跑（那会让断言与时间赛跑），

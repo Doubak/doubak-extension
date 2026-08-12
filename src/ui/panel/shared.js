@@ -9,6 +9,7 @@
 import { NOT_PART_OF_BUNDLE, inspectDestination } from '../../bundle/exporter.js';
 import { routeName } from '../route-names.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
+import { bundleIdFromDirName } from '../../core/ids.js';
 
 export const $ = (id) => document.getElementById(id);
 
@@ -267,6 +268,55 @@ export function getOpfsWorker() {
 }
 
 /**
+ * 把 OPFS 里每份档案的文件清单与 manifest 读一遍。
+ *
+ * ## 为什么是一处而不是两处
+ *
+ * 档案清单与存储占用原来各扫一遍：一个为了「哪一份、什么时候抓的、多少条」，
+ * 一个为了「多大、导出过没有」。两遍读的是同一批目录、同一批文件大小，而档案
+ * 页与存储页合成一页之后，那就是**打开一次页面扫两遍盘**——8 份档案 7000 多个
+ * 文件，每个都要一次 `size()` 往返 Worker。
+ *
+ * 更要紧的是第二个理由：两处扫描就是两处要各自记得失效。删掉一份档案之后忘了
+ * 让其中一处失效，界面上就会同时出现「7 份」和「8 份」，而没有任何东西会报错。
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.force]  抓完、删完、导入完之后要用
+ * @returns {Promise<Array<{bundleId: string, dir: string,
+ *   files: Array<{name: string, bytes: number}>, manifest: object | null}>>}
+ */
+let bundleScan = null;
+export async function scanBundleDirs({ force = false } = {}) {
+  if (bundleScan && !force) return bundleScan;
+
+  const worker = getOpfsWorker();
+  const dirNames = await WorkerFileStore.listBundleDirs(worker);
+  const out = [];
+  for (const dir of dirNames) {
+    const bundleId = bundleIdFromDirName(dir);
+    if (!bundleId) continue;
+    const store = new WorkerFileStore({ worker, dir });
+    const files = [];
+    for (const name of await store.list()) files.push({ name, bytes: await store.size(name) });
+
+    // 读不出 manifest 的档案**照样列出来**——那种恰恰最需要能被选中（用户要去看
+     // 它出了什么事）。因元数据缺失而让它从列表里消失是最糟的处理。
+    let manifest = null;
+    try {
+      manifest = JSON.parse(new TextDecoder().decode(await store.read('manifest.json')));
+    } catch { /* 没收尾，或者坏了。两种都由调用方按 null 处理 */ }
+
+    out.push({ bundleId, dir, files, manifest });
+  }
+  bundleScan = out;
+  return out;
+}
+
+export function invalidateBundleScan() {
+  bundleScan = null;
+}
+
+/**
  * 存储用量的缓存。
  *
  * **存储页渲染它，而概览页与导出页只是让它失效**——三页都在动的东西不属于其中任何
@@ -278,7 +328,14 @@ let storageUsage = [];
 export const getStorageUsage = () => storageUsage;
 /** @param {object[]} rows */
 export const setStorageUsage = (rows) => { storageUsage = rows; };
-export const invalidateStorageUsage = () => { storageUsage = []; };
+/**
+ * 存储变了。
+ *
+ * **连目录扫描一起作废**，因为「存储变了」的每一种发生方式都会改变目录清单：
+ * 抓完一次多一个目录、导入多几个、删除少几个。只清用量不清扫描的话，档案页左边
+ * 那份清单里就**看不见刚抓完的那一份**——而那正是用户此刻要去导出的东西。
+ */
+export const invalidateStorageUsage = () => { storageUsage = []; bundleScan = null; };
 
 /**
  * 后端最近一次报的抓取状态。
@@ -292,3 +349,26 @@ let lastStatus = null;
 export const getLastStatus = () => lastStatus;
 /** @param {object | null} s */
 export const setLastStatus = (s) => { lastStatus = s; };
+
+/**
+ * 把这一层的模块级状态清回「刚打开面板」的样子。
+ *
+ * ## 为什么连 Worker 句柄也要清
+ *
+ * 各页都有自己的 `reset*()`，理由是「模块被加载 = 面板被打开」这个等号在拆分之后
+ * 不再成立。但**底座自己也有状态**，而它当时漏了：`opfsWorker` 一旦建起来就一直
+ * 挂在这里，`bundleScan` 同理。
+ *
+ * 生产环境里那没关系（一个页面一个 Worker，本来就该复用）。而在测试里，它意味着
+ * 第二次打开面板拿到的是**上一次那个 Worker**——于是断言看到的是上一个用例的档案。
+ * 实测就是这样：一个「一份档案都没有」的用例，读出来「1 份 · 401 B」。
+ *
+ * 那不只是测试的麻烦：一份没人负责清的模块级句柄，本身就是「这段状态归谁」说不清
+ * 的信号，而拆分正是为了让这件事说得清。
+ */
+export function resetShared() {
+  opfsWorker = null;
+  bundleScan = null;
+  storageUsage = [];
+  lastStatus = null;
+}

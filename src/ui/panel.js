@@ -21,7 +21,7 @@
  * 一个文件 3034 行的时候，「改导出会不会碰到抓取状态」这种问题只能靠通读回答。
  * 现在一个标签页一个模块，依赖是单向的：
  *
- *     shared ← archive ← coverage ← overview ← { export, storage, log, debug, debug-toggle }
+ *     shared ← archive ← coverage ← overview ← { export, storage, log, debug, debug-toggle } ← import
  *
  * `shared.js` 谁也不 import；`archive.js` 只 import 它。**这条方向一破，拆分就白做**
  * ——那时它只是摊成十个文件的 panel.js。`test/ui-modules.test.js` 守着这条，也守着
@@ -33,7 +33,7 @@
  * 它在做什么，顺序与拆分之前逐条对应。
  */
 
-import { $ } from './panel/shared.js';
+import { $, resetShared } from './panel/shared.js';
 import { renderAbout } from './panel/help.js';
 import { refresh, resetOverview } from './panel/overview.js';
 import { loadArchive, resetArchive } from './panel/archive.js';
@@ -42,6 +42,7 @@ import { loadLog, initLog, resetLog } from './panel/log.js';
 import { loadDebug, resetDebug } from './panel/debug.js';
 import { loadStorage, initStorage, resetStorage } from './panel/storage.js';
 import { initExport } from './panel/export.js';
+import { initImport, resetImport } from './panel/import.js';
 import { initDebugToggle } from './panel/debug-toggle.js';
 
 // ── 标签页切换 ───────────────────────────────────────────────
@@ -54,12 +55,11 @@ $('tabs').addEventListener('click', (e) => {
     b.setAttribute('aria-selected', String(on));
     $(`tab-${b.dataset.tab}`).hidden = !on;
   }
-  if (btn.dataset.tab === 'archive') loadArchive();
+  // 档案页现在也管整批（占用、导入、清空）。**存储不再是一个标签页**：它列的
+  // 是同一批档案，只换了几列，而两份清单意味着两处要各自记得失效，用户还要在两页
+  // 之间对「刚才看的是哪一份」。
+  if (btn.dataset.tab === 'archive') { loadArchive(); loadStorage(); }
   if (btn.dataset.tab === 'debug') loadDebug();
-  // 存储从调试页搬出来了：删档案是**日常操作**，不是调试操作。调试页里全是会改变
-  // 抓取行为的东西（演练、绕过门控、小范围试跑），把一件日常操作摆在那儿，等于
-  // 训练用户往那儿去找东西。
-  if (btn.dataset.tab === 'storage') loadStorage();
   // 覆盖率原来**没有自己的加载**——它只是 `openBundle()` 的副作用，所以第一次直接点
   // 进来是空白的（要先去过档案页才有东西）。空白看起来像「正在加载」，而它其实什么
   // 都不会发生。
@@ -73,13 +73,18 @@ $('tabs').addEventListener('click', (e) => {
 
 // 各页的视图状态清回「刚打开面板」的样子。**拆分之前这是隐式的**——整个面板就是
 // 一个模块，模块被加载 = 面板被打开。拆开之后这个等号不再成立，所以写出来。
+// **底座先清。** 它也有模块级状态（共用的 OPFS Worker、目录扫描缓存），而各页的
+// reset 清不到那里 —— 漏掉它的后果是第二次打开面板拿到上一次那个 Worker。
+resetShared();
 resetOverview();
 resetArchive();
 resetLog();
 resetDebug();
 resetStorage();
+resetImport();
 
 initExport();
+initImport();
 initStorage();
 initLog();
 initDebugToggle();

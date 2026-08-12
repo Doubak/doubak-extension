@@ -120,6 +120,20 @@ export class WorkerFileStore {
     return new WorkerFileStore({ worker, dir, readOnly: false })._call({ op: 'destroy' });
   }
 
+  /**
+   * 记下「这个目录是我从零建起来的」。**只对导入用的 Worker 有意义。**
+   *
+   * 它换来的唯一权限是 `destroy`——导到一半失败时整份回滚。写权限不归它管：
+   * 那条规矩是「只能新建文件」，由 Worker 逐个文件执行（见 storage/opfs-rpc.js）。
+   *
+   * @returns {Promise<{fresh: boolean, files: number}>} `fresh` 为假表示目录本来
+   *   就有东西（续传的正常形态），那时**不能** destroy，只能往里补缺的文件。
+   */
+  claimForImport() {
+    this._assertWritable('claimForImport');
+    return this._call({ op: 'claimForImport' });
+  }
+
   /** @param {string} op */
   _assertWritable(op) {
     if (this._readOnly) {

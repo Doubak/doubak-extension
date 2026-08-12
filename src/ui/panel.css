@@ -297,6 +297,26 @@ button.act.danger { color: var(--tone-error); border-color: var(--tone-error); }
 .with-aside .picker-row { grid-template-columns: 1fr auto; gap: 2px var(--s2); }
 .with-aside .picker-row .facts { grid-column: 1 / -1; }
 
+/* ── 档案页顶部那一条：整批的操作与占用 ────────────────────────────
+   「存储」原来自己占一页，列的却是同一批档案。合过来之后这一条负责整批
+   （导入、清空、总占用），下面的左列表 + 右详情负责单份。
+
+   占用那行字**跟着按钮走，不另起一行**：它说的正是「清空全部」会删掉什么，
+   而分成两行会让人先看到按钮、后看到代价。 */
+#library-bar {
+  display: flex; align-items: center; gap: var(--s3);
+  flex-wrap: wrap; margin-bottom: var(--s3);
+}
+/* 占用那行字占满剩下的空间并靠右，于是「导入」永远在最左边 —— 换过机器的用户
+   打开这一页时，那是他要找的东西。 */
+#library-bar #storage { margin-left: auto; text-align: right; }
+@media (max-width: 620px) {
+  #library-bar #storage { margin-left: 0; text-align: left; flex-basis: 100%; }
+}
+
+/* 导入清单：每份一行，「会写」的正常色，「不导」的淡出但**照样给出理由**。 */
+#import-result .cap-sub { white-space: pre-wrap; margin-top: var(--s1); }
+
 /* ── 帮助页 ───────────────────────────────────────────────────── */
 
 .steps { padding-left: var(--s5); margin: 0 0 var(--s5); }

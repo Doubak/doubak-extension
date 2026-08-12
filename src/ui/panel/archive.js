@@ -7,12 +7,13 @@
 
 import { BundleReader } from '../../bundle/bundle-reader.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
-import { bundleDirName, bundleIdFromDirName } from '../../core/ids.js';
+import { bundleDirName } from '../../core/ids.js';
 import { captureTitle, captureSubtitle, subjectLabel } from '../capture-label.js';
 import { bundlePicker } from '../components.js';
 import { routeName } from '../route-names.js';
 import {
-  $, send, bytes, table, verdictName, STATUS_NAMES, VERDICT_NAMES, getOpfsWorker, getLastStatus,
+  $, send, bytes, table, verdictName, STATUS_NAMES, VERDICT_NAMES,
+  getOpfsWorker, getLastStatus, scanBundleDirs,
 } from './shared.js';
 
 /** @type {BundleReader | null} */
@@ -67,8 +68,7 @@ export function invalidateBundles(remainingIds) {
  * @returns {Promise<{id: string, summary: object} | null>}  没有档案时返回 null
  */
 export async function loadBundleSummary({ force = false } = {}) {
-  const dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
-  const ids = dirs.map(bundleIdFromDirName).filter(Boolean);
+  const ids = (await scanBundleDirs()).map((d) => d.bundleId);
 
   // 选中的那份没了（被删了）就退回最新的一份
   if (currentBundleId && !ids.includes(currentBundleId)) currentBundleId = null;
@@ -89,9 +89,9 @@ export async function loadBundleSummary({ force = false } = {}) {
 export async function loadArchive() {
   // 抓取跑完之后 checkpoint 与指针都不再指向那份档案——所以不能只看状态，
   // 得直接去 OPFS 里数目录。否则「跑完了」恰好等于「再也导不出来」。
-  let dirs = [];
+  let scan = [];
   try {
-    dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
+    scan = await scanBundleDirs();
   } catch (e) {
     $('archive-summary').className = 'card err';
     $('archive-summary').textContent = `读不出存储：${e.message}`;
@@ -99,9 +99,9 @@ export async function loadArchive() {
   }
 
   const active = getLastStatus()?.runner?.bundleId ?? getLastStatus()?.checkpoint?.bundle_id ?? null;
-  const ids = dirs.map(bundleIdFromDirName).filter(Boolean);
+  const ids = scan.map((d) => d.bundleId);
 
-  renderBundlePicker(await describeBundles(getOpfsWorker(), dirs, active));
+  renderBundlePicker(await describeBundles(scan, active));
   if (ids.length === 0) {
     currentBundleId = null;
     $('archive-summary').className = 'muted';
@@ -152,37 +152,33 @@ function renderBundlePicker(items) {
 /**
  * 把每份档案的元数据读出来，供选择器显示。
  *
- * 一次读 8 份 manifest 是几毫秒的事，而它换来的是「不用点进去就知道哪份是哪份」。
+ * 目录清单与 manifest 由 `scanBundleDirs()` 统一读一遍（存储占用那一行也用同一份）
+ * ——同一次打开页面扫两遍盘是没有理由的，而两处扫描还意味着两处要各自记得失效。
  *
- * @param {Worker} worker @param {string[]} dirs @param {string|null} active
+ * @param {Awaited<ReturnType<typeof scanBundleDirs>>} scan @param {string|null} active
  */
-async function describeBundles(worker, dirs, active) {
+async function describeBundles(scan, active) {
   /** @type {Record<string, string|null>} */
   let exportedAt = {};
   try {
-    const rec = await send({ type: 'exportRecords', bundleIds: dirs.map(bundleIdFromDirName) });
+    const rec = await send({ type: 'exportRecords', bundleIds: scan.map((d) => d.bundleId) });
     // 记录读不出来时不许显示成「未导出」——那是替用户下一个我们没资格下的判断。
     if (rec?.ok) exportedAt = rec.exportedAt ?? {};
     else exportedAt = null;
   } catch { exportedAt = null; }
 
   const out = [];
-  for (const dir of dirs) {
-    const id = bundleIdFromDirName(dir);
-    if (!id) continue;
-    const item = { id, live: id === active, exported: exportedAt ? Boolean(exportedAt[id]) : null };
-    try {
-      const store = new WorkerFileStore({ worker, dir });
-      const names = await store.list();
-      let total = 0;
-      for (const n of names) total += await store.size(n);
-      item.bytes = total;
-      const manifest = JSON.parse(new TextDecoder().decode(await store.read('manifest.json')));
+  for (const { bundleId: id, files, manifest } of scan) {
+    const item = {
+      id,
+      live: id === active,
+      exported: exportedAt ? Boolean(exportedAt[id]) : null,
+      bytes: files.reduce((n, f) => n + f.bytes, 0),
+    };
+    if (manifest) {
       item.at = manifest.created_at ?? manifest.started_at ?? null;
       item.previous = manifest.previous_bundle_id ?? null;
       item.captures = manifest.index?.line_count ?? manifest.counts?.captures ?? null;
-    } catch {
-      // 见函数说明：读不出来照样列出来。
     }
     out.push(item);
   }

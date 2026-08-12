@@ -18,12 +18,11 @@
       <button data-tab="overview" aria-selected="true">概览</button>
       <button data-tab="coverage" aria-selected="false">覆盖率</button>
       <button data-tab="archive" aria-selected="false">档案</button>
-      <button data-tab="storage" aria-selected="false">存储</button>
       <button data-tab="log" aria-selected="false">日志</button>
       <button data-tab="debug" aria-selected="false">调试</button>
       <button data-tab="help" aria-selected="false">帮助</button>
       <!-- 去官网。**放在导航行的最右边，与标签页分开**：它不是这个面板的一页，
-           点了会离开——排进标签页里会让人以为是第七个页面。 -->
+           点了会离开——排进标签页里会让人以为是多出来的一页。 -->
       <a class="to-site" href="https://doubak.com" target="_blank" rel="noreferrer noopener">doubak.com ↗</a>
     </nav>
   </header>
@@ -61,6 +60,12 @@
       <div id="coverage"></div>
     </section>
 
+    <!-- 档案：**一份清单，不是两份。**
+         「存储」原来是独立的一页，列的却是同一批档案，只是换了几列（体积、导出状态）。
+         两处列表意味着两处要各自记得失效、各自扫一遍目录，而用户还要在两页之间对
+         「刚才看的是哪一份」。导入是第三件对档案做的事（导出、删除、导入），它没有
+         理由再开第四个地方。所以合成一页：上面是整体（占用、导入、清空），
+         左边是清单，右边是选中那一份的一切。 -->
     <section id="tab-archive" hidden>
       <div class="hint">
         这里读的是档案本身：顺着索引把每条记录从段文件里取出来解压。
@@ -68,6 +73,17 @@
         <b>导出之前，档案并不真正属于你</b>——它存放在扩展的存储中，
         卸载扩展或清除站点数据都会将其一并抹除，且不会另行提示。
       </div>
+
+      <!-- 整批的操作与占用。**导入摆在最上面**：换了机器、清过数据的用户打开这一页时，
+           下面的清单是空的，而他要找的正是这个按钮。 -->
+      <div id="library-bar">
+        <button class="act" id="import">导入档案…</button>
+        <button class="act danger" id="delete-all">清空全部</button>
+        <span id="storage" class="muted small">正在统计…</span>
+      </div>
+      <div id="import-result"></div>
+      <div id="storage-result"></div>
+
       <div class="with-aside">
         <!-- 列表在左、详情在右。**档案会越攒越多**（实测已经十几份），
              竖着排的话选一份要先滚过整张列表，回头再看详情又要滚回去。 -->
@@ -84,7 +100,7 @@
       <button class="act" id="export-chain" disabled>导出整条链</button>
       <button class="act" id="verify" disabled>验一验（逐条取出并解压）</button>
       <!-- 删除放在这里，是因为**这里才有上下文**：你刚看过它有多少条、多大、
-           导出过没有。存储页那份是批量视角，两个都要。 -->
+           导出过没有。上面那个「清空全部」是批量视角，两个都要。 -->
       <button class="act danger" id="delete-this" disabled>删除这一份</button>
       <div id="export-result"></div>
       <div id="verify-result"></div>
@@ -138,20 +154,6 @@
 
     </section>
 
-    <!-- 存储：删档案是**日常操作**，不是调试操作。
-         它原来挂在调试页下面，而调试页里全是会改变抓取行为的东西（演练、绕过门控、
-         小范围试跑）。把一件日常操作放在那里，等于训练用户往那儿去找东西。 -->
-    <section id="tab-storage" hidden>
-      <div class="hint">
-        删除<b>不可逆</b>，且没有回收站。
-        <b>未导出过的档案，浏览器中的这一份即是唯一副本</b>——
-        卸载扩展或清除站点数据都会将其抹除。
-      </div>
-      <div id="storage"></div>
-      <div id="storage-actions"></div>
-      <div id="storage-result"></div>
-    </section>
-
     <section id="tab-log" hidden>
       <div class="hint">
         存在本机（IndexedDB），最多保留 1000 条事件与 200 条抓取记录，重新打开后仍在。
@@ -182,6 +184,11 @@
           卸载扩展、清除站点数据都会把它一并抹掉，而且不会问你一句。
         </li>
       </ol>
+      <div class="hint">
+        <b>换了机器，或者清空过扩展？</b>
+        去「档案」页点<b>「导入档案…」</b>，选中以前导出的文件夹，
+        以前的档案就回来了——之后照样可以增量抓取，不必从头再来一遍。
+      </div>
 
       <h2>每个标签页是干什么的</h2>
       <table>
@@ -189,8 +196,7 @@
         <tbody>
           <tr><td><b>概览</b></td><td>开始／暂停／继续抓取，看它现在在做什么。平时只看这一页。</td></tr>
           <tr><td><b>覆盖率</b></td><td>抓到了多少、有没有缺口。想知道「抓全了吗」看这里。</td></tr>
-          <tr><td><b>档案</b></td><td>选一份档案，导出、校验、删除，或者翻看里面每一条捕获。</td></tr>
-          <tr><td><b>存储</b></td><td>占了多少空间，哪些还没导出。空间不够时来这里清。</td></tr>
+          <tr><td><b>档案</b></td><td>档案的一切都在这里：导入、导出、校验、删除、占了多少空间，以及翻看每一条捕获。</td></tr>
           <tr><td><b>日志</b></td><td>出了问题想看细节时。平时不用看。</td></tr>
           <tr><td><b>调试</b></td><td>开发用。演练不发任何网络请求。</td></tr>
         </tbody>
@@ -205,8 +211,33 @@
           <tr><td><b>增量 + 重抓作品详情页</b></td><td>增量，外加把所有作品页重抓一遍——评分和短评会变，想要新版本时用。比增量慢很多。</td></tr>
           <tr><td><b>导出这一份</b></td><td>把这份档案写到你自己的文件夹里。<b>写完会逐个读回来核对。</b></td></tr>
           <tr><td><b>导出整条链</b></td><td>把这一份和它前面的历次增量一起导出，每份各占一个子目录。</td></tr>
+          <tr><td><b>导入档案…</b></td><td>把以前导出的档案搬回扩展。选中 <code>doubak-bundle-…</code> 文件夹，
+            或者它的上一级都行。<b>动手之前会先把「将要发生什么」整份列给你看。</b></td></tr>
           <tr><td><b>验一验</b></td><td>不依赖任何声明，把每条记录从段文件里真取出来解压一遍。</td></tr>
           <tr><td><b>删除这一份</b></td><td><b>不可逆，没有回收站。</b>删之前先确认它已经导出过。</td></tr>
+          <tr><td><b>清空全部</b></td><td>同上，一次删掉所有档案。正在抓的那一份会保留。</td></tr>
+        </tbody>
+      </table>
+
+      <h2>导入为什么会说「不导」</h2>
+      <div class="hint">
+        导入<b>只会新建文件</b>，碰不到扩展里已经有的任何字节——这不是靠确认框拦着的，
+        而是写入那一层本身就做不到。所以下面这些都不是故障，是它在如实告诉你看到了什么。
+      </div>
+      <table>
+        <thead><tr><th>它说</th><th>意思与该做什么</th></tr></thead>
+        <tbody>
+          <tr><td><b>已经有了</b></td><td>扩展里这一份的文件与字节数完全一致，不必再导一遍。</td></tr>
+          <tr><td><b>补齐</b></td><td>上次导到一半。<b>只补缺的那几个文件</b>，已经在的一个都不动。</td></tr>
+          <tr><td><b>重复</b></td><td>同一份档案在你选的目录树里出现了不止一次（解压过两遍之类）。导一次就够。</td></tr>
+          <tr><td><b>编号撞了</b></td><td>扩展里已经有同编号的一份，但内容不一样。<b>不覆盖</b>——同一个编号下有两种内容，
+            说不清哪份是对的。真要换成手上这份，先把旧的删掉。</td></tr>
+          <tr><td><b>别的账号</b></td><td>这份档案属于另一个豆瓣号。两个账号混在一起之后解析器会拒绝整个目录，
+            而合过之后拆不开。确实是你自己的另一个号的话，会问你一次。</td></tr>
+          <tr><td><b>不能导</b></td><td>这个文件夹里的档案是残缺的：段文件缺了一个、字节数与 manifest 对不上、
+            或者两份档案的文件被放进了同一个目录。<b>提示里会写出具体是哪个文件。</b>
+            源文件还在你盘上，什么都没丢——把缺的找回来再导一次就行。</td></tr>
+          <tr><td><b>正在抓</b></td><td>正在抓的就是这一份。等它跑完，或者先在概览页中止。</td></tr>
         </tbody>
       </table>
 

@@ -531,18 +531,25 @@ describe('面板脚本', () => {
     assert.match(js, /renderVanished\(\);[\s\S]{0,200}\$\('captures'\)/);
   });
 
-  test('删档案是日常操作 —— 有自己的标签页，不藏在调试页里', async () => {
-    // 调试页里全是**会改变抓取行为**的东西（演练、绕过门控、小范围试跑）。
-    // 把一件日常操作摆在那儿，等于训练用户往那儿去找东西。
+  test('**档案只有一份清单** —— 导入、导出、删除、占用都在档案页', async () => {
+    // 「存储」曾经自己占一页，列的却是与档案页同一批档案，只换了几列。两份清单
+    // 意味着两处要各自记得失效，而用户还要在两页之间对「刚才看的是哪一份」。
     const html = await readRepoFile('src/ui/panel.html');
-    assert.match(html, /data-tab="storage"/, '存储该有自己的标签页');
-    assert.match(html, /id="tab-storage"/);
+    assert.equal(html.includes('data-tab="storage"'), false, '存储又变回一个独立标签页了');
+    assert.equal(html.includes('id="tab-storage"'), false);
 
-    // 存储那一块必须在存储页里，不在调试页里
-    const storageSection = html.slice(html.indexOf('id="tab-storage"'));
-    assert.match(storageSection.slice(0, 900), /id="storage"/);
-    const debugSection = html.slice(html.indexOf('id="tab-debug"'), html.indexOf('id="tab-storage"'));
-    assert.equal(debugSection.includes('id="storage"'), false, '存储还留在调试页里');
+    // 整批那几件事都在档案页里
+    const archive = html.slice(html.indexOf('id="tab-archive"'), html.indexOf('id="tab-debug"'));
+    for (const id of ['import', 'delete-all', 'storage', 'delete-this', 'export']) {
+      assert.match(archive, new RegExp(`id="${id}"`), `档案页里没有 #${id}`);
+    }
+
+    // **仍然不许藏在调试页里。** 调试页里全是会改变抓取行为的东西（演练、绕过门控、
+    // 小范围试跑），把日常操作摆在那儿等于训练用户往那儿去找东西。
+    const debugSection = html.slice(html.indexOf('id="tab-debug"'));
+    for (const id of ['storage', 'import', 'delete-all']) {
+      assert.equal(debugSection.includes(`id="${id}"`), false, `#${id} 跑到调试页里去了`);
+    }
   });
 
   test('档案页能删掉当前这一份 —— 那里才有上下文', async () => {
@@ -684,13 +691,22 @@ describe('面板脚本', () => {
     assert.match(help, /导出/);
     assert.match(help, /卸载扩展|清除站点数据/, '要说清不导出的后果');
     // 那几个会让人犹豫的按钮要逐个解释。
-    for (const b of ['增量抓取', '全量抓取', '导出整条链', '验一验', '删除这一份']) {
+    for (const b of ['增量抓取', '全量抓取', '导出整条链', '导入档案', '验一验', '删除这一份']) {
       assert.ok(help.includes(b), `帮助里没解释「${b}」`);
     }
     // 停机原因也要能在这儿查到——它们出现时用户最需要一句话告诉他怎么办。
     for (const r of ['豆瓣要求验证', '登录状态已失效', '豆瓣暂时限制了访问']) {
       assert.ok(help.includes(r), `帮助里没有「${r}」`);
     }
+
+    // **导入说「不导」的每一种都要能在帮助里查到。**
+    // 它们全都不是故障（已经有了、别的账号、档案残缺…），而一个用户看不懂的拒绝，
+    // 与一次失败在感受上没有区别 —— 他会去重试，而重试不会有任何不同。
+    for (const r of ['已经有了', '补齐', '重复', '编号撞了', '别的账号', '不能导']) {
+      assert.ok(help.includes(r), `帮助里没解释导入为什么会说「${r}」`);
+    }
+    // 帮助页里不许再提「存储」那个标签页 —— 它已经并进档案页了。
+    assert.equal(/<b>存储<\/b>/.test(help), false, '帮助里还在说有个「存储」标签页');
   });
 
   test('**关于**里给出去处，且外链带 noopener', async () => {
