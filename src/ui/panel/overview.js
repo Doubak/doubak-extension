@@ -8,6 +8,7 @@ import { BundleReader } from '../../bundle/bundle-reader.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
 import { bundleDirName, bundleIdFromDirName } from '../../core/ids.js';
 import { routeName, contiguityLabel } from '../route-names.js';
+import { CRAWL_MODES } from '../../crawl/crawl-modes.js';
 import { renderStatus, statusCard, button as mkButton } from '../components.js';
 import {
   $, send, bytes, table, BUSY_COPY, getOpfsWorker, invalidateStorageUsage,
@@ -788,23 +789,39 @@ async function abortCrawl(bundleId) {
  * **默认增量，但必须能选。** 用户可能想重建一份基准（上一次有缺口、或者不信任它），
  * 也可能想重新抓一遍作品详情页看看评分变了没有。默认帮他省时间，但不替他做决定。
  *
- * @type {'incremental' | 'full' | 'refresh-subjects'}
+ * @type {import('../../crawl/crawl-modes.js').CrawlMode}
  */
-let crawlMode = 'incremental';
+let crawlMode = CRAWL_MODES.INCREMENTAL;
 
-/** 抓取方式的三个选项。 */
+/**
+ * 抓取方式的三个选项。
+ *
+ * ## 措辞要说出「它假设了什么」，不只是「它做了什么」
+ *
+ * 这三个选项的真正区别是一句话：**上游那份东西还会不会变，这次当它变还是没变。**
+ * 说「重新抓取全部作品详情页」只说了动作，用户还得自己推出「所以评分会更新」；
+ * 说「当作可以编辑的内容都改过了」才是他要做的那个判断。
+ *
+ * 每一项都写清楚**什么会被跳过**。跳过是这个界面上唯一一件「不做事」的事，
+ * 而不做事是不会在日志里滚动出来的——不写在这里，用户没有任何地方能看见它。
+ */
 function renderCrawlMode() {
   const el = $('crawl-mode');
   el.replaceChildren();
 
   const opts = /** @type {const} */ ([
-    ['incremental', '增量抓取（推荐）',
-      '接续上次的进度：列表仅抓取新增部分，作品详情页仅抓取本次新出现的条目。耗时最短。'],
-    ['full', '全量抓取',
-      '视同从未抓取过，将重新建立一份基准档案。适用于上次抓取存在缺口或结果不可信的情形。'],
-    ['refresh-subjects', '增量抓取，并重新抓取全部作品详情页',
-      '列表仍仅抓取新增部分，但会重新抓取每一个作品详情页，用于获取评分、短评等'
-      + '可变内容的最新版本。该路线占档案约九成体积，耗时显著增加。'],
+    [CRAWL_MODES.INCREMENTAL, '增量抓取（推荐）',
+      '接续上次的进度，并假定已经抓到的东西都没有变过：列表仅抓取新增部分；'
+      + '作品详情页、日记与影评正文、图片，凡是抓过的一律跳过。耗时最短，'
+      + '对豆瓣的打扰也最小。'],
+    [CRAWL_MODES.FULL, '全量抓取',
+      '视同从未抓取过，一份跳过名单都不带，将重新建立一份自足的基准档案。'
+      + '适用于上次抓取存在缺口或结果不可信的情形。'],
+    [CRAWL_MODES.REFRESH, '增量抓取，并重新抓取可以编辑的内容',
+      '列表仍仅抓取新增部分，但会把每一个作品详情页、每一篇日记与影评正文重新抓一遍'
+      + '——用于取回评分、短评，以及你自己改过的长文。图片仍然跳过：图片地址是'
+      + '内容地址，同一个地址重抓拿回来的是同一批字节。作品详情页占档案约九成体积，'
+      + '耗时显著增加。'],
   ]);
 
   for (const [key, label, why] of opts) {
@@ -837,17 +854,21 @@ function renderCrawlMode() {
  * @param {{routes?: string[], oldest?: string | null} | null | undefined} inc
  */
 function scopeText(inc) {
-  if (crawlMode === 'full') {
+  if (crawlMode === CRAWL_MODES.FULL) {
     return '全量抓取（已选择）：视同从未抓取过，将重新建立一份基准档案';
   }
   const n = inc?.routes?.length ?? 0;
-  const subjects = crawlMode === 'refresh-subjects'
-    ? '作品详情页将全部重新抓取（已选择）'
-    : '作品详情页仅抓取本次新出现的条目';
+  // **两种增量都要把「跳过什么」说出来**，措辞对齐上面那三个选项。图这一档在两种
+  // 增量下都跳过，所以它不属于「已选择」的那半句——写成选项的样子会让人以为
+  // 换个选项就能重抓，而那件事做了也没有任何用。
+  const editable = crawlMode === CRAWL_MODES.REFRESH
+    ? '作品详情页与长文正文将全部重新抓取（已选择）'
+    : '作品详情页与长文正文仅抓取本次新出现的条目';
   if (n === 0) {
-    return `全量抓取（自最新一直抓取至最早）：尚无可供接续的档案，或上次抓取未完成。${subjects}`;
+    return `全量抓取（自最新一直抓取至最早）：尚无可供接续的档案，或上次抓取未完成。${editable}；已经抓到的图不再重抓`;
   }
-  return `增量抓取：${n} 条路线可接续上次的进度（仅抓取新增部分），其余路线仍从最新开始。${subjects}`;
+  return `增量抓取：${n} 条路线可接续上次的进度（仅抓取新增部分），其余路线仍从最新开始。`
+    + `${editable}；已经抓到的图不再重抓`;
 }
 
 /**

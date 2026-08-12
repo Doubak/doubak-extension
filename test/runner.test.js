@@ -1662,6 +1662,210 @@ describe('增量：下界真的省下了重抓', () => {
     assert.ok(seen.some((u) => u.includes('/1001/')));
   });
 
+  /**
+   * 一页广播，带一张本人上传的图。
+   *
+   * 这一页就是这次改动的现场：增量**必须**重读最新那几页广播（不然发现不了新
+   * 条目），于是页面上的图每趟都被重新派生一遍。
+   */
+  const bcWithPhoto = (photoUrl) => `<html><head><title>\n我的动态\n</title></head><body>${NAV}
+<div id="db-usr-profile"><div class="info"><h1>示例</h1></div></div>
+<div class="stream-items">
+<div class="status-item" data-sid="1" data-uid="82160871">
+  <span class="created_at" title="2026-07-20 10:00:00">x</span></div>
+<div class="new-status status-wrapper" data-uid="82160871">
+  <div class="pics-wrapper"><script>var photos = [{"image":{"raw":{"url":"${photoUrl}"}}}];</script></div>
+</div>
+</div></body></html>`;
+
+  const PHOTO = 'https://img1.doubanio.com/view/status/raw/public/p742324445.jpg';
+
+  /**
+   * 一页日记列表，上面挂着一篇。
+   *
+   * **结构照 `classifier.js` 里 `note.list` 的锚点写**——`note-item` / `note-title` /
+   * `note-date` 一个都不能少。少一个，正文页根本不会被派生出来，于是「跳过了」这条
+   * 判据就在**没有东西可跳**的情况下绿掉。这份 fixture 的第一版正是这样：反向验证
+   * （把 markCaptured 那行关掉）时测试照样绿，才发现它一直什么都没测。
+   */
+  const notesWith = (noteUrl) => `<html><head><title>我的日记</title></head><body>${NAV}
+<div id="db-usr-profile"></div><h1>我的日记</h1>
+<div class="note-list"><div class="note-item">
+<div class="note-title"><a href="${noteUrl}">一篇</a></div>
+<span class="note-date">2026-07-01 10:00:00</span>
+</div></div></body></html>`;
+
+  test('**已经抓到的图不再抓一遍** —— 图片地址是内容地址，重抓拿回来的是同一批字节', async () => {
+    // 这是真踩到的：一次增量重抓了 11 张已有的图（0.77 MB），其中 3 张已经被抓过
+    // 三遍。作品详情页有跳过名单，图没有——而图恰恰是**派生**出来的，派生这条路
+    // 上从来没有过「我是不是已经有了」这道判断。
+    const seen = [];
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('.jpg')) { seen.push(url); return 'JPEGBYTES'; }
+      return bcWithPhoto(PHOTO);
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false, bypassGates: true,
+      knownAssetUrlKeys: [PHOTO],
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.deepEqual(seen, [], '这张图档案里已经有了，不该再抓');
+  });
+
+  test('不传跳过名单就照抓 —— 反面判据，免得上一条永远绿', async () => {
+    // 上一条只断言「没抓」。抽取器要是根本没认出这张图，它也会绿——而那时真正的
+    // 结论是「测试没测到东西」。所以同一页、同一个 harness，再跑一次不带名单的。
+    const seen = [];
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('.jpg')) { seen.push(url); return 'JPEGBYTES'; }
+      return bcWithPhoto(PHOTO);
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false, bypassGates: true,
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.deepEqual(seen, [PHOTO], '不给名单就该老老实实抓一遍');
+  });
+
+  test('**跳过名单不许把存量补抓也一起挡掉**', async () => {
+    // 补抓算的正是「档案里欠着的那些图」，所以它给出的 URL 按定义就不在名单里。
+    // 但两者都走 frontier，顺序也挨着——把名单写宽一点（比如连失败的行也收进去、
+    // 或者干脆按路线名整条挡掉），补抓就会一声不吭地停摆。而补抓停摆是这套设计里
+    // 最贵的静默失败：它是「抽取器的 bug 可以事后修复」这句话的**唯一**兑现方式。
+    const seen = [];
+    const OLD = 'https://img9.doubanio.com/view/status/raw/public/p000001.jpg';
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('.jpg')) { seen.push(url); return 'JPEGBYTES'; }
+      return bcWithPhoto(PHOTO);
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false, bypassGates: true,
+      // 这一张页面上那张，已经有了
+      knownAssetUrlKeys: [PHOTO],
+      // 这一张是从旧档案里已经存下来的页面上算出来的，还欠着
+      backlogAssets: [{
+        url: OLD,
+        routeKey: 'asset.status_photo',
+        parentCaptureId: '20260801T005010Z-3eef52#000046',
+        referer: 'https://www.douban.com/people/example/statuses',
+      }],
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.deepEqual(seen, [OLD], '欠着的那张要补，已经有的那张不该重抓');
+  });
+
+  test('**长文正文默认跳过，因为增量假定什么都没变**', async () => {
+    const seen = [];
+    const NOTE = 'https://www.douban.com/note/872015292/';
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('/note/')) { seen.push(url); return `<html><body>${NAV}<div id="link-report"></div></body></html>`; }
+      if (url.includes('/notes')) return notesWith(NOTE);
+      return bcPage(0);
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false, bypassGates: true,
+      knownLongformUrlKeys: [NOTE],
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.deepEqual(seen, [], '这一篇抓过了，增量下不该再抓');
+  });
+
+  test('不传就照旧抓 —— 反面判据，证明这一篇本来是派生得出来的', async () => {
+    // 没有这一条，上面那条在「列表页压根没派生出正文页」时也会绿——而那正是它的
+    // 第一版发生的事。
+    const seen = [];
+    const NOTE = 'https://www.douban.com/note/872015292/';
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('/note/')) { seen.push(url); return `<html><body>${NAV}<div id="link-report"></div></body></html>`; }
+      if (url.includes('/notes')) return notesWith(NOTE);
+      return bcPage(0);
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false, bypassGates: true,
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.deepEqual(seen, [NOTE], '不给名单就该照旧抓正文页');
+  });
+
+  test('「重抓可以编辑的内容」要把长文**直接排进队** —— 列表只抓到下界为止', async () => {
+    // 与作品详情页同一个理由：日记正文由列表派生，而增量下列表只抓到下界为止，
+    // 能派生出来的只有最近写的那几篇。只做「不跳过已有的」，这个选项就只重抓了
+    // 几篇，而界面上写的是全部。**说到做不到比没有这个选项更糟。**
+    const seen = [];
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('/note/') || url.includes('/topic/') || url.includes('/review/')) {
+        seen.push(url);
+        return `<html><body>${NAV}<div id="link-report"></div></body></html>`;
+      }
+      return bcPage(0);
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false, bypassGates: true,
+      refreshLongform: [
+        { url: 'https://www.douban.com/note/872015292/', routeKey: 'note.item' },
+        // **`/topic/` 形状的也是日记。** 实测一个真实账号 3 篇日记里就有一篇是它。
+        { url: 'https://www.douban.com/topic/496284296/', routeKey: 'note.item' },
+        { url: 'https://www.douban.com/review/8381069/', routeKey: 'review.item' },
+      ],
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.equal(seen.length, 3, '三篇都该重抓，一篇都不许靠列表派生');
+  });
+
+  test('重抓的长文排回**索引行里写的**那条路线，不按 URL 形状猜', async () => {
+    // `/topic/` 形状的日记按形状猜会被排进 review.item——判定描述、优先级、门控
+    // 全不一样，而且不报错。所以 routeKey 是跟着 URL 一起传进来的。
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      return bcPage(0);
+    }, { batchSize: 1 });
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      refreshLongform: [
+        { url: 'https://www.douban.com/topic/496284296/', routeKey: 'note.item' },
+        { url: 'https://www.douban.com/review/8381069/', routeKey: 'review.item' },
+      ],
+    });
+    const q = runner._run.frontier.snapshot();
+    const byUrl = Object.fromEntries(q.map((x) => [x.url, x.routeKey]));
+    assert.equal(byUrl['https://www.douban.com/topic/496284296/'], 'note.item');
+    assert.equal(byUrl['https://www.douban.com/review/8381069/'], 'review.item');
+  });
+
+  test('这次不抓的路线，重抓名单里的也不排 —— 排了也没有判定描述', async () => {
+    // `onlyRoutes` 裁掉了长文那条路线时，硬排进去的条目没有对应的路线定义，
+    // 抓回来无从判定。与存量补抓同一条兜底。
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      return bcPage(0);
+    }, { batchSize: 1 });
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      onlyRoutes: ['broadcast.timeline'],
+      refreshLongform: [{ url: 'https://www.douban.com/note/1/', routeKey: 'note.item' }],
+    });
+    const q = runner._run.frontier.snapshot();
+    assert.equal(q.some((x) => x.routeKey === 'note.item'), false);
+  });
+
   test('没有下界时照旧全量 —— 判错的方向必须是多抓', async () => {
     const seen = [];
     const { runner } = harness((url) => {

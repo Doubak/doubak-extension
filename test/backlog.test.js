@@ -288,7 +288,7 @@ describe('接线：runner 与 offscreen', () => {
     // previous_bundle_id 为 null 的档案各自成链，存量图会直接失踪。
     const src = readFileSync(new URL('../src/offscreen/offscreen.js', import.meta.url), 'utf-8');
     // 同上：断言性质，不钉死那一行的写法。
-    assert.match(src, /const mine = bundlesWithKnownSubjects\(entries, me\)/);
+    assert.match(src, /const mine = bundlesForAccount\(entries, me\)/);
     assert.match(src, /backlogAssets\(mine, me\.accountUserId\)/);
     assert.equal(src.includes('backlogAssets(chainOf('), false, '别按链取');
   });

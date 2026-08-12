@@ -505,7 +505,7 @@ export function diffAgainstChain(current, others) {
 }
 
 /**
- * 哪些档案里的作品详情页算「已经抓过」。
+ * 回答「这一页我是不是已经有了」时，该看哪些档案。
  *
  * ## 按账号取，**不按链取**
  *
@@ -522,10 +522,14 @@ export function diffAgainstChain(current, others) {
  * **此前几千个就全都不认识了**，下一次增量把它们重抓一遍。用户看到的是
  * 「我只加了一本想读的书，它却在抓游戏」。
  *
+ * 原名叫 `bundlesWithKnownSubjects`。改名是因为「已经有了」现在管三档东西（作品
+ * 详情页、长文正文、用户上传的图），而按账号取这条理由对三者是同一条——名字里
+ * 留着 subjects 会让人以为另外两档需要另一套判断。
+ *
  * @param {ChainEntry[]} entries  全部档案
  * @param {{accountUserId?: string | null, accountUsername?: string | null}} me
  * @returns {ChainEntry[]}
  */
-export function bundlesWithKnownSubjects(entries, me) {
+export function bundlesForAccount(entries, me) {
   return entries.filter((e) => sameAccount(e, me));
 }

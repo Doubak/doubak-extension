@@ -596,12 +596,39 @@ describe('面板脚本', () => {
     const html = await readRepoFile('src/ui/panel.html');
     assert.match(html, /id="crawl-mode"/);
     const js = readPanelSourceSync();
-    assert.match(js, /let crawlMode = 'incremental'/, '默认该是增量');
-    for (const mode of ['full', 'refresh-subjects']) {
-      assert.ok(js.includes(`'${mode}'`), `少了「${mode}」这个选项`);
+    assert.match(js, /let crawlMode = CRAWL_MODES\.INCREMENTAL/, '默认该是增量');
+    // **三个键从同一个模块来，不在这边重打一遍字面量。** 面板发一个字符串、
+    // offscreen 比一个字符串，两边对不上时不报错——`mode === '打错的'` 只是取到
+    // false，用户选了「重抓可编辑内容」却跑出一次普通增量，界面上一切正常。
+    for (const k of ['INCREMENTAL', 'FULL', 'REFRESH']) {
+      assert.ok(js.includes(`CRAWL_MODES.${k}`), `少了「${k}」这个选项`);
     }
+    // 只看挑抓取方式的那一段。别处的 `'incremental'` 是**事件类型**（日志里那句
+    // 「N 条路线接着上次抓」），与这三个键同名而不同物——整份源码一起扫会把它
+    // 也算成违规，那种误报会让人把这条判据删掉。
+    const region = js.slice(js.indexOf('let crawlMode'));
+    const decl = region.slice(0, region.indexOf('\n}\n'));
+    assert.equal(
+      /'refresh-editable'|'incremental'|'full'/.test(decl), false,
+      '挑抓取方式这一段里不该有字面量 —— 它得和 offscreen 用同一个常量',
+    );
     // 选了什么要真的传下去
     assert.match(js, /send\(\{ type: 'start', mode: crawlMode \}\)/);
+  });
+
+  test('**每个选项都说清它跳过什么** —— 跳过是这里唯一看不见的动作', async () => {
+    // 跳过不产生捕获行，日志里不滚动，覆盖率页上也只是一个不再增长的数字。
+    // 选项里不写，用户就没有任何地方能知道它发生过——而「它是不是漏抓了」正是
+    // 这个工具最该回答清楚的问题。
+    const js = readPanelSourceSync();
+    const opts = js.slice(js.indexOf('function renderCrawlMode'));
+    const body = opts.slice(0, opts.indexOf('\n}\n'));
+    assert.match(body, /凡是抓过的一律跳过/, '增量要说清它跳过已经抓到的东西');
+    assert.match(body, /一份跳过名单都不带/, '全量要说清它什么都不跳过');
+    assert.match(body, /图片仍然跳过/, '重抓可编辑内容时，要说清图不在其列');
+    // **要说出理由，不只是结论。** 「图片仍然跳过」会立刻引出「那我怎么重抓图」，
+    // 而答案是「这件事做了也没有用」——不写的话用户会去找那个并不存在的开关。
+    assert.match(body, /内容地址|同一批字节/, '要说清为什么重抓图拿不到新东西');
   });
 
   test('中止要有额外确认，且说清不可逆的是什么', async () => {

@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import {
   chainEntryFromManifest, newestFirst, pickFloors, floorsFor, findChainHoles, chainCoverage,
   sameAccount, renamedBundles, diffAgainstChain, chainOf, splitChains, routeChainCoverage,
-  bundlesWithKnownSubjects,
+  bundlesForAccount,
 } from '../src/crawl/chain.js';
 
 const ME = '82160871';
@@ -608,7 +608,7 @@ describe('「这一页我是不是已经有了」按账号问，不按链问', (
     assert.equal(splitChains([big, small]).length, 2);
     // 但「已经抓过的详情页」两份都算
     assert.deepEqual(
-      bundlesWithKnownSubjects([big, small], me).map((e) => e.bundleId).sort(),
+      bundlesForAccount([big, small], me).map((e) => e.bundleId).sort(),
       ['BIG', 'SMALL'],
     );
   });
@@ -617,13 +617,13 @@ describe('「这一页我是不是已经有了」按账号问，不按链问', (
     const mine = bundle('MINE', []);
     const theirs = bundle('THEIRS', [], { account: '99999999', username: '别人' });
     assert.deepEqual(
-      bundlesWithKnownSubjects([mine, theirs], me).map((e) => e.bundleId),
+      bundlesForAccount([mine, theirs], me).map((e) => e.bundleId),
       ['MINE'],
     );
   });
 
   test('改过名的也不算 —— 那时 URL 里的用户名对不上', () => {
     const renamed = bundle('OLD', [], { username: '旧名字' });
-    assert.deepEqual(bundlesWithKnownSubjects([renamed], me), []);
+    assert.deepEqual(bundlesForAccount([renamed], me), []);
   });
 });

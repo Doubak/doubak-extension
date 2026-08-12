@@ -167,6 +167,21 @@ export class CrawlRunner {
    * @param {string[]} [opts.knownSubjectUrlKeys]  链上已经抓过的作品详情页。传了就
    *   不再抓一遍——那条路线占档案九成体积，而「增量」对它不成立（没有时间序）。
    *   **只能传作品详情页的 key**：列表页的 URL 每次都一样，喂进去会让这次一页都抓不成。
+   * @param {string[]} [opts.knownLongformUrlKeys]  已经抓过的日记/影评正文。与上一项
+   *   同理，区别只在于它默认**是**跳过的：日记可编辑，所以重抓有意义，但那是用户
+   *   明选「重抓可变内容」时才做的事，不是每趟都做。
+   * @param {Array<{url: string, routeKey: string}>} [opts.refreshLongform]  要重抓的长文
+   *   正文。带着 `routeKey` 一起传，**不在这里按 URL 形状猜**：日记的网址有
+   *   `/note/` 与 `/topic/` 两种形状，猜错会把它排进影评那条路线。
+   * @param {string[]} [opts.knownAssetUrlKeys]  已经抓到的图（用户上传的、封面）。
+   *   **这一项与「重抓」那个选项无关，两种增量下都该传。** 图片地址是内容地址：
+   *   同一个地址下的字节不会变，改了图会得到一个新地址。所以重抓一张已有的图
+   *   拿回来的必然是同一批字节，它不是一个选择，是纯粹的浪费。
+   *
+   *   实测这个坑的样子：`asset.status_photo` 从广播页派生，而增量必须重读最新那
+   *   几页广播（不然发现不了新条目），于是那几页上的图每趟都被重新派生一遍——
+   *   一次增量重抓 11 张已有的图，其中 3 张已经抓过三遍。派生出来的东西从来没有
+   *   经过「我是不是已经有了」这道判断。
    * @param {(account: object) => Promise<object>} [opts.resolveFloors]  **在身份确认之后**
    *   挑下界。顺序是必须的：判据是数字用户 ID，而它只有 preflight 之后才知道。
    *   读档案不是 runner 的事，所以动作由调用方注入，这里只定顺序。
@@ -185,6 +200,7 @@ export class CrawlRunner {
     username, mediums, includeCatalog = true, floors, floorSources, previousBundleId = null,
     onlyRoutes = null, maxCaptures = null, bypassGates = false, resolveFloors = null,
     knownSubjectUrlKeys = null, refreshSubjectUrls = null, backlogAssets = null,
+    knownLongformUrlKeys = null, refreshLongform = null, knownAssetUrlKeys = null,
   }) {
     if (this._run) throw new Error('已有抓取在进行中');
 
@@ -221,6 +237,9 @@ export class CrawlRunner {
         previousBundleId = inc.previousBundleId ?? previousBundleId;
         knownSubjectUrlKeys = knownSubjectUrlKeys ?? inc.knownSubjectUrlKeys;
         refreshSubjectUrls = refreshSubjectUrls ?? inc.refreshSubjectUrls;
+        knownLongformUrlKeys = knownLongformUrlKeys ?? inc.knownLongformUrlKeys;
+        refreshLongform = refreshLongform ?? inc.refreshLongform;
+        knownAssetUrlKeys = knownAssetUrlKeys ?? inc.knownAssetUrlKeys;
         backlogAssets = backlogAssets ?? inc.backlogAssets;
       } catch (err) {
         // 挑不出来就全量。**少抓不可接受，多抓只是慢。**
@@ -281,6 +300,27 @@ export class CrawlRunner {
       frontier.markCaptured(knownSubjectUrlKeys);
       this._emit({ type: 'subjects_skipped', count: knownSubjectUrlKeys.length });
     }
+
+    // **长文正文同理，但理由不同。** 作品详情页是「增量对它不成立」，日记与影评是
+    // 「它可编辑，所以重抓有意义——但那是用户明选的事，不是每趟都做」。
+    // 默认跳过是这次改的：原来每趟都重抓，4 篇时无所谓，200 篇就是每趟 200 个请求。
+    if (knownLongformUrlKeys?.length) {
+      frontier.markCaptured(knownLongformUrlKeys);
+      this._emit({ type: 'longform_skipped', count: knownLongformUrlKeys.length });
+    }
+
+    // **图这一档不跟着任何选项走。**
+    //
+    // 前两档是「要不要花时间去看有没有变」，这一档不是：图片地址是内容地址，
+    // 同一个地址下的字节不会变。重抓拿回来的必然是同一批字节。
+    //
+    // 放在 `seedFrontier` 之前，与另外两档一样——种子里没有图（图全是派生出来的），
+    // 但顺序放对了，将来有人加一条以图为种子的路线时它仍然成立。
+    if (knownAssetUrlKeys?.length) {
+      frontier.markCaptured(knownAssetUrlKeys);
+      this._emit({ type: 'assets_skipped', count: knownAssetUrlKeys.length });
+    }
+
     seedFrontier(frontier, routeDefs);
 
     // 「重抓作品详情页」：**必须把已知的那些直接排进队**，不能指望从列表页派生。
@@ -319,6 +359,39 @@ export class CrawlRunner {
         if (ok) queued += 1;
       }
       this._emit({ type: 'subjects_refresh', count: queued });
+    }
+
+    // 「重抓长文正文」：与作品详情页同一个理由，**必须直接排队**。
+    //
+    // 日记正文由 `note.list` 派生，而增量模式下列表只抓到下界为止——能派生出来的
+    // 只有下界以上那几篇。只做「不跳过已有的」，这个选项就只重抓了最近写的几篇，
+    // 而它承诺的是全部。**说到做不到比没有这个选项更糟。**
+    //
+    // `routeKey` 是**跟着 URL 一起传进来的**（取自旧档案的索引行），不在这里按
+    // URL 形状猜：日记的网址有 `/note/` 和 `/topic/` 两种形状，猜错会把一篇日记
+    // 排进影评那条路线——判定描述、优先级、门控全不一样，而且不会报错。
+    if (refreshLongform?.length) {
+      let queued = 0;
+      for (const { url, routeKey } of refreshLongform) {
+        const target = routes.get(routeKey);
+        // 路线在这次抓取里被裁掉了（onlyRoutes），或者是这个版本已经不认识的旧
+        // route_key——排了也没有判定描述，那比不排更糟。
+        if (!target) continue;
+        const ok = frontier.enqueue({
+          url,
+          urlKey: urlKey(url),
+          routeKey,
+          intent: target.intent,
+          // 与作品详情页同理：这些 URL 来自旧档案的索引，不是从这次任何一次捕获里
+          // 派生出来的，所以 null 才是事实。不传的话兜底会伪造一条同路线的边。
+          enqueuedBy: null,
+          ordered: false,
+          priority: target.priority,
+          gatedBy: bypassGates ? null : (target.requires?.[0] ?? null),
+        });
+        if (ok) queued += 1;
+      }
+      this._emit({ type: 'longform_refresh', count: queued });
     }
 
     // **补抓：从旧档案里已经存下来的页面上算出来的资源**（规范 §6.2.1）。

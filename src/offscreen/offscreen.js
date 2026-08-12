@@ -84,9 +84,13 @@ import { makeDebugLog, loadDebugFlag } from '../core/debug-log.js';
 import { backlogFromIndex, capturedAssets } from '../crawl/backlog.js';
 import {
   chainEntryFromManifest, pickFloors, floorsFor, newestFirst, renamedBundles,
-  chainCoverage, findChainHoles, diffAgainstChain, splitChains, bundlesWithKnownSubjects,
+  chainCoverage, findChainHoles, diffAgainstChain, splitChains, bundlesForAccount,
   chainOf,
 } from '../crawl/chain.js';
+import { CRAWL_MODES } from '../crawl/crawl-modes.js';
+import {
+  emptyKnownCaptures, addKnownCaptures, knownCaptureLists,
+} from '../crawl/known-captures.js';
 
 // 详细日志。默认关，见 core/debug-log.js。前缀要与 service worker 区分开——
 // 两边的日志混在同一个控制台里，没有前缀就分不清是谁说的。
@@ -126,49 +130,42 @@ function getOpfsWorker() {
  * @returns {Promise<{floors?: Map<string, string>, floorSources?: Map<string, string>, previousBundleId?: string | null}>}
  */
 /**
- * **这个账号名下所有档案里**已经抓成功的作品详情页 url_key。
+ * **这个账号名下所有档案里**已经抓成功的东西，按「重抓有没有意义」分三档。
  *
  * ## 为什么是「所有档案」，不是「这条链」
  *
  * 第一版按链算，那是错的，而且错得很贵：链回答的是**时间连续性**——「从今天往回
- * 一直到 X 没有断」。而作品详情页没有时间序（规范 §5.5.5），链对它毫无意义。
- *
- * 这里要回答的是另一个问题：**这一页我是不是已经有了**。有就不必再抓。那与它是
- * 哪一次抓的、属不属于同一条链，一点关系都没有。
+ * 一直到 X 没有断」。而这里要回答的是另一个问题：**这一页我是不是已经有了**。
+ * 有就不必再抓。那与它是哪一次抓的、属不属于同一条链，一点关系都没有。
  *
  * 按链算的后果在真实使用里立刻就出来了：`previous_bundle_id` 为 null 的档案各自
  * 成链，于是「最新那条链」常常只有一份档案——如果那一份恰好是刚跑了一小段的增量
  * （比如只抓到 18 个详情页），那么**此前几千个详情页全都不认识了**，下一次增量把
  * 它们重抓一遍。用户看到的是「我只加了一本想读的书，它却在抓游戏」。
  *
- * ## 两个限制条件
+ * ## 分档规则不在这里
  *
- * **只取 `interest.item`**：列表页的 URL 每次都一样（`collect?start=0`），把它们
- * 也算进「已经抓过」会让这次一页都抓不成。
- *
- * **只取 `verdict: ok`**：被拦下、判不出来、`gone` 的那些本来就该重抓——尤其
- * `gone`，条目可能又回来了。
+ * 三档怎么分、为什么图那一档没有「重抓」这个选项，全在 `crawl/known-captures.js`
+ * ——那是个纯函数，能在 node 里真的跑一遍。这里只做接线：开目录、读索引、
+ * 一份读不出来就跳过那一份。与 `backlog.js` 是同一个分层理由。
  *
  * @param {import('../crawl/chain.js').ChainEntry[]} entries  同一个账号的全部档案
- * @returns {Promise<string[]>}
+ * @returns {Promise<{subjects: string[], longform: Array<{url: string, routeKey: string}>, assets: string[]}>}
  */
-async function knownSubjects(entries) {
-  /** @type {Set<string>} */
-  const out = new Set();
+async function knownCaptures(entries) {
+  const acc = emptyKnownCaptures();
   for (const e of entries) {
     try {
       const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(e.bundleId) });
       const reader = new BundleReader({ store, bundleId: e.bundleId });
-      for (const x of await reader.index()) {
-        if (x.route_key === 'interest.item' && x.verdict === 'ok' && x.url_key) out.add(x.url_key);
-      }
+      addKnownCaptures(acc, await reader.index());
     } catch (err) {
       // 读不出来就当没有——**多抓不可接受的相反面**：这里漏认只会让它多抓一遍，
       // 而那是安全的方向。
-      debugLog('读不出这份索引，作品详情页会重抓', e.bundleId, err);
+      debugLog('读不出这份索引，里面的东西会重抓', e.bundleId, err);
     }
   }
-  return [...out];
+  return knownCaptureLists(acc);
 }
 
 /**
@@ -340,17 +337,17 @@ async function incrementalOptions(account, mode = 'incremental') {
   const newest = newestFirst(entries)[0];
 
   // ── 到这里下界已经定了，下面每一样都是**锦上添花，各自兜底**。
-  const mine = bundlesWithKnownSubjects(entries, me);
+  const mine = bundlesForAccount(entries, me);
 
-  /** @type {string[]} */
-  let known = [];
+  /** @type {{subjects: string[], longform: Array<{url: string, routeKey: string}>, assets: string[]}} */
+  let known = { subjects: [], longform: [], assets: [] };
   try {
     // **按账号取，不按链取。** 「这一页我是不是已经有了」与它属于哪条链无关。
-    known = await knownSubjects(mine);
+    known = await knownCaptures(mine);
   } catch (e) {
-    // 失败的方向是安全的：不知道哪些抓过 = 这一趟把作品详情页都抓一遍。
+    // 失败的方向是安全的：不知道哪些抓过 = 这一趟三档全抓一遍。
     // 慢，但不丢东西，而且下界还在——这一趟仍然是增量。
-    relayEvent({ type: 'incremental_degraded', part: 'known_subjects', message: String(e?.message ?? e) });
+    relayEvent({ type: 'incremental_degraded', part: 'known_captures', message: String(e?.message ?? e) });
   }
 
   let backlog = null;
@@ -363,15 +360,24 @@ async function incrementalOptions(account, mode = 'incremental') {
     relayEvent({ type: 'incremental_degraded', part: 'backlog', message: String(e?.message ?? e) });
   }
 
+  // 「重抓可变内容」这个模式管两档：作品详情页与长文正文。两档都**不跳过已有的**，
+  // 并且把它们直接排进队——只做前者的话，能重抓的只有最新几页列表上派生出来的
+  // 那十几个，而选项承诺的是全部。**说到做不到比没有这个选项更糟。**
+  const refresh = mode === CRAWL_MODES.REFRESH;
+
   return {
     floors: floorsFor(picks),
     floorSources: new Map([...picks].map(([k, v]) => [k, v.fromBundleId])),
     previousBundleId: newest?.bundleId ?? null,
-    // 用户选了「重抓作品详情页」时**不跳过已有的**，并且把它们直接排进队——
-    // 只做前者的话，能重抓的只有最新几页列表上派生出来的那十几个，而选项
-    // 承诺的是全部。
-    knownSubjectUrlKeys: mode === 'refresh-subjects' ? [] : known,
-    refreshSubjectUrls: mode === 'refresh-subjects' ? known : null,
+    knownSubjectUrlKeys: refresh ? [] : known.subjects,
+    refreshSubjectUrls: refresh ? known.subjects : null,
+    knownLongformUrlKeys: refresh ? [] : known.longform.map((x) => x.url),
+    refreshLongform: refresh ? known.longform : null,
+    // **图这一档不跟着模式走，两种增量下都跳过。** 重抓一张已有的图拿回来的必然是
+    // 同一批字节（图片地址是内容地址），所以「要不要重抓」在这里根本不是一个选择。
+    // 全量不走这条路径（见消息处理里的 `mode === 'full'`）：那是明说要重建一份
+    // 自足的基准档案，跳过任何东西都会让它名不副实。
+    knownAssetUrlKeys: known.assets,
     backlogAssets: backlog,
   };
 }
@@ -582,7 +588,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             // 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
             const who = opts.username ? { username: opts.username } : await r.discoverUsername();
             // 全量是**用户明说的**，那就一个下界都不挑——当作从来没抓过。
-            if (msg.mode === 'full') {
+            if (msg.mode === CRAWL_MODES.FULL) {
               return r.start({ ...opts, username: who.username });
             }
             // 增量：从既有档案里挑下界。**在身份确认之后**才挑（判据是数字 uid），

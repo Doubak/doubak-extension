@@ -328,35 +328,76 @@ describe('增量：offscreen 这一侧的接线', () => {
 
   test('用户选了全量就一个下界都不挑', async () => {
     const src = await readRepoFile('src/offscreen/offscreen.js');
-    assert.match(src, /msg\.mode === 'full'/);
+    assert.match(src, /msg\.mode === CRAWL_MODES\.FULL/);
   });
 
-  test('用户选了「重抓作品详情页」就不跳过已有的', async () => {
-    // 跳过的话完全达不到目的——他要的正是新版本（评分、短评会变）。
+  test('用户选了「重抓可以编辑的内容」，两档都不跳过已有的', async () => {
+    // 跳过的话完全达不到目的——他要的正是新版本（评分、短评会变，日记可以编辑）。
+    //
+    // **两档一起断言**：只改作品详情页那一档不会报错，只会让「重新抓取可以编辑的
+    // 内容」这句话对日记不成立——一个界面上写着、实际做不到的承诺。
     const src = await readRepoFile('src/offscreen/offscreen.js');
-    assert.match(src, /mode === 'refresh-subjects'\s*\n?\s*\?\s*\[\]/);
+    assert.match(src, /knownSubjectUrlKeys: refresh \? \[\]/);
+    assert.match(src, /knownLongformUrlKeys: refresh \? \[\]/);
+    assert.match(src, /refreshSubjectUrls: refresh \?/);
+    assert.match(src, /refreshLongform: refresh \?/);
   });
 
-  test('已抓过的作品详情页**按账号取，不按链取**', async () => {
+  test('**图那一档不跟着模式走** —— 两种增量下都跳过', async () => {
+    // 重抓一张已有的图拿回来的必然是同一批字节（图片地址是内容地址），所以它不是
+    // 一个「要不要」的选项。写成跟着 `refresh` 走的话，选了重抓可编辑内容的用户
+    // 会白下载几百张一模一样的图，而界面上没有任何一句话解释那是在干嘛。
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    assert.match(src, /knownAssetUrlKeys: known\.assets,/);
+    assert.equal(
+      /knownAssetUrlKeys: refresh/.test(src), false,
+      '图这一档不该跟着「重抓可编辑内容」走——重抓拿回来的是同一批字节',
+    );
+  });
+
+  test('已经抓过的东西**按账号取，不按链取**', async () => {
     // 按链取的话，`previous_bundle_id` 为 null 的档案各自成链，「最新那条链」常常
     // 只有一份——那一份要是刚跑了一小段的增量，此前几千个详情页就全都不认识了。
     // 真实现象：只加了一本想读的书，增量却在抓游戏详情页。
     const src = await readRepoFile('src/offscreen/offscreen.js');
-    // 断言的是**喂给 knownSubjects 的那批档案是按账号选的**，而不是某一行长什么样
+    // 断言的是**喂给 knownCaptures 的那批档案是按账号选的**，而不是某一行长什么样
     // ——原来钉死了整个表达式，把它提成一个变量就红了，而性质一点没变。
-    assert.match(src, /const mine = bundlesWithKnownSubjects\(entries, me\)/);
-    assert.match(src, /knownSubjects\(mine\)/);
-    assert.equal(src.includes('knownSubjects(newest ? chainOf('), false, '别再按链取');
-    assert.equal(/knownSubjects\(\s*chainOf\(/.test(src), false, '别再按链取');
+    assert.match(src, /const mine = bundlesForAccount\(entries, me\)/);
+    assert.match(src, /knownCaptures\(mine\)/);
+    assert.equal(/knownCaptures\(\s*chainOf\(/.test(src), false, '别再按链取');
   });
 
-  test('已抓过的作品详情页只按 interest.item 认', async () => {
-    // 把列表页也算进「已经抓过」会让这次一页都抓不成：列表页的 URL 每次都一样。
+  test('**分档规则不写在这儿** —— 写在这儿就只能拿正则去守', async () => {
+    // offscreen.js 在 node 里 import 不进来（`chrome.*`、Worker），所以写在它里面
+    // 的逻辑只能靠「拿正则比对源码」来守——而那种判据挡不住语义错误：把
+    // `verdict !== 'ok'` 写成 `!== 'okk'` 照样匹配得上一条宽松的正则。
+    //
+    // 规则搬进 `crawl/known-captures.js` 之后，「gone 的还会不会重试」这种问题
+    // 可以真的跑一遍看（test/known-captures.test.js）。这里只剩接线，
+    // 而接线正是正则守得住的那种东西。与 backlog.js 是同一个分层理由。
     const src = await readRepoFile('src/offscreen/offscreen.js');
-    const fn = src.slice(src.indexOf('async function knownSubjects'));
+    assert.match(src, /from '\.\.\/crawl\/known-captures\.js'/);
+    assert.match(src, /addKnownCaptures\(acc, await reader\.index\(\)\)/);
+    assert.match(src, /return knownCaptureLists\(acc\)/);
+    // 反面：分档判据一条都不该留在这个文件里。留一份副本，两份迟早不一样，
+    // 而不一样的那一天没有任何东西会响。
+    for (const leak of [/route_key === 'interest\.item'/, /startsWith\('asset\.'\)/,
+      /'note\.item'/, /'review\.item'/]) {
+      assert.equal(leak.test(src), false, `分档判据漏在 offscreen.js 里了：${leak}`);
+    }
+  });
+
+  test('一份档案读不出来只跳过那一份 —— 不是整趟退回全量', async () => {
+    // 累加器跨档案共用，try/catch 在循环里面：前面读进去的不会因为后面一份坏掉
+    // 而丢。放到循环外面的话，最后一份档案坏掉会让**整张跳过名单**变空，
+    // 于是这一趟把几千个作品详情页重抓一遍——而它只会表现为「怎么这么慢」。
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    const fn = src.slice(src.indexOf('async function knownCaptures'));
     const body = fn.slice(0, fn.indexOf('\n}\n'));
-    assert.match(body, /route_key === 'interest\.item'/);
-    assert.match(body, /verdict === 'ok'/);
+    const forAt = body.indexOf('for (const e of entries)');
+    const tryAt = body.indexOf('try {');
+    assert.ok(forAt >= 0 && tryAt > forAt, 'try 该在循环里面，一份坏掉不连累其余的');
+    assert.match(body, /catch/);
   });
 
   test('用 chain.js 的纯函数，不在这儿自己判', async () => {
@@ -374,7 +415,7 @@ describe('增量：offscreen 这一侧的接线', () => {
 
   test('**下界挑出来之后，就不许再被丢掉**', async () => {
     // 实测代价：这段代码原来整个包在一个 try 里，下界挑好了但后面
-    // knownSubjects / backlogAssets 任何一处抛了，就一起退回全量——
+    // knownCaptures / backlogAssets 任何一处抛了，就一起退回全量——
     // 一次本该几分钟的增量变成 4 小时、5880 条捕获的全量。
     //
     // 而且**产出的档案永久地宣称自己是一条链的起点**：previous_bundle_id 写成
@@ -392,11 +433,11 @@ describe('增量：offscreen 这一侧的接线', () => {
     const after = body.slice(body.indexOf('if (picks.size === 0)'));
     const blocks = after.split('try {');
     const seg = (part) => blocks.findIndex((b) => b.includes(`await ${part}(`));
-    const a = seg('knownSubjects');
+    const a = seg('knownCaptures');
     const b = seg('backlogAssets');
     assert.ok(a > 0 && b > 0, '两样都该在自己的 try 里');
     assert.notEqual(a, b, '两样在同一个 try 里 —— 一个失败会把另一个和下界一起拖下水');
-    for (const part of ['knownSubjects', 'backlogAssets']) {
+    for (const part of ['knownCaptures', 'backlogAssets']) {
       const i = after.indexOf(`await ${part}(`);
       assert.match(after.slice(i, i + 400), /catch/, `${part} 没有兜底`);
     }
