@@ -654,6 +654,88 @@ describe('恢复要能自足 —— 指针里带够信息', () => {
     assert.equal(s.bundleId, cp.bundle_id, '续的是同一个 bundle');
   });
 
+  /**
+   * 重载扩展之后，增量还是不是增量。
+   *
+   * 报上来的现象：开抓 12 秒后重载扩展，然后
+   *
+   *     广播  已抓 180  已回溯到 2026-01-01  进行中
+   *
+   * 一次本该几分钟的增量在往 2011 年走。而日志里只有一行行正常的 capture——
+   * **它不出声**。
+   *
+   * 下界此前只活在 `RouteState` 里跟着 checkpoint 走，而 `stateFor()` 是懒的：
+   * 一条路线要处理完一页才有状态，没状态就没有东西可存。重载发生在第一批之内时，
+   * checkpoint 里**一条路线状态都没有**，于是每条线都退回全量。
+   */
+  const FLOOR = '2026-07-25T00:00:00+08:00';
+
+  test('**还没开跑的路线，下界也要活过重载** —— 报上来的就是这一种', async () => {
+    const { runner, runStore } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), { batchSize: 2 });
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      floors: new Map([['broadcast.timeline', FLOOR]]),
+      floorSources: new Map([['broadcast.timeline', '20260809T220553Z-157e63']]),
+    });
+    // **一批都不跑。** 这正是「刚点开始就重载」——checkpoint 只有 start() 写的那一次。
+    const cp = await runStore.loadCheckpoint();
+    assert.deepEqual(cp.routes, [], '前提：这时候 checkpoint 里一条路线状态都没有');
+
+    runner._run = null; // 重载扩展
+    await runner.resume(cp);
+
+    const s = runner._run.loop.stateFor('broadcast.timeline');
+    assert.equal(s.floorTime, FLOOR, '下界丢了 —— 增量会一路抓回最早');
+    assert.equal(s.floorFromBundleId, '20260809T220553Z-157e63', '下界的出处也要跟着走');
+  });
+
+  test('**下界丢了不只是慢，是假的完整性声明**', async () => {
+    // 标记列表的 `enumeration` 写死 'full'，只有下界在时才降成 'bounded'。
+    // 丢了下界，manifest 会写着「完整枚举了这份列表」而实际只读了一页——
+    // 按 INGESTION.md §3，那给了下游断定条目被删的资格。
+    const { runner, runStore } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('statuses')) return bcPage(0);
+      return `<html><head><title>我读过的书(82)</title></head><body>${NAV}
+<div id="db-usr-profile"></div><h1>我读过的书(82)</h1><div class="grid-view"></div></body></html>`;
+    }, { batchSize: 2 });
+    await runner.start({
+      username: 'example', mediums: ['book'], includeCatalog: false, bypassGates: true,
+      floors: new Map([['interest.book.collect', FLOOR]]),
+    });
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null;
+    await runner.resume(cp);
+
+    assert.equal(
+      runner._run.loop.stateFor('interest.book.collect').effectiveEnumeration, 'bounded',
+      '恢复之后这条线自称完整枚举 —— 而它只读到下界为止',
+    );
+  });
+
+  test('**首次全量恢复之后仍然是全量** —— 不许凭空造一个下界', async () => {
+    // 反面判据。把 bounded 当安全默认值一律套上，会让真正的全量失去
+    // 「可以推断删除」这个唯一比增量多出来的能力。
+    const { runner, runStore } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), { batchSize: 2 });
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null;
+    await runner.resume(cp);
+    assert.equal(runner._run.loop.stateFor('broadcast.timeline').floorTime, null);
+  });
+
+  test('下界过得了指针那一趟 —— 它要经 IndexedDB，还要给 service worker 读', async () => {
+    // 存成 `Map` 的话过 JSON 会**静默变成 `{}`**：不报错，只是下界空了、
+    // 这一趟退回全量。offscreen 那条边界上是同一个坑（见 test/offscreen.test.js）。
+    const { runner, kv } = harness(broadcastOnly([bcPage(0)]));
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false,
+      floors: new Map([['broadcast.timeline', FLOOR]]),
+    });
+    const p = JSON.parse(JSON.stringify(await kv.get('doubak.currentRun')));
+    assert.deepEqual(new Map(p.floors ?? []), new Map([['broadcast.timeline', FLOOR]]));
+  });
+
   test('指针里没有 username 时明确报错', async () => {
     const { runner, runStore, kv } = harness(broadcastOnly([bcPage(0)]));
     await runner.start({ username: 'example', mediums: [], includeCatalog: false });

@@ -459,6 +459,27 @@ export class CrawlRunner {
         // 小范围试跑的上限也要跟着走。少了它，一次「最多抓 10 条」的调试跑在
         // 心跳恢复之后会变成一场全量抓取——而用户点的是「试一下」。
         maxCaptures,
+        // **下界也要跟着走，而且必须存在这里。**
+        //
+        // 它此前只活在 `RouteState` 里，跟着 checkpoint 走（见 route-state.js
+        // 的 `serialize`）。那对**已经开跑过**的路线是够的，对还没开跑的不够：
+        // `stateFor()` 是懒的，一条路线要处理完一页才会有状态，而没有状态就没有
+        // 东西可存——恢复时它是崭新的，下界是 null。
+        //
+        // 实测（用户报的）：开抓 12 秒后重载扩展，那时只有 6 张分类入口抓完，
+        // 广播一页都还没抓。恢复之后广播从头重走，180 页一路回到 2026-01-01——
+        // 一次本该几分钟的增量变成几小时的全量。**而且它不出声**：日志里只有
+        // 一行行正常的 capture。
+        //
+        // 更糟的是标记列表那几条：它们的 `enumeration` 写死 `'full'`，只有下界
+        // 在时才降成 `bounded`。下界丢了 = manifest 里写着「完整枚举了这份列表」
+        // 而实际只读了一页——按 INGESTION.md §3，那给了下游断定条目被删的资格。
+        // 假的完整性声明是这份规范里最不能出的错。
+        //
+        // 存成数组：这个指针要过 IndexedDB，也要给 service worker 读，而
+        // `Map` 过 JSON 会静默变成 `{}`（offscreen 那条边界上同一个坑）。
+        floors: floors ? [...floors] : null,
+        floorSources: floorSources ? [...floorSources] : null,
       });
       await this._saveCheckpoint(CRASH_SENTINEL_REASON);
     } catch (err) {
@@ -663,6 +684,13 @@ export class CrawlRunner {
       frontier, transport, writer, session, pacer, routes,
       onEvent: this._emit,
       bypassGates: Boolean(pointer.bypassGates),
+      // **下界要接回来。**
+      //
+      // 已经开跑过的路线从 `savedStates` 里拿（`RouteState.restore` 明确让存档点
+      // 优先于这里），**还没开跑的只能靠这个**——它们在 checkpoint 里连一行都没有。
+      // 不接的话它们全部退回全量：实测重载一次扩展，广播从头重走 180 页。
+      floors: new Map(pointer.floors ?? []),
+      floorSources: new Map(pointer.floorSources ?? []),
       // 界面上的「已抓」要接着数，不能每次恢复都归零。数字来自 index——
       // 内存里的计数随 service worker 一起清零，index 不会。
       priorCounts: repair.capturedByRoute,
