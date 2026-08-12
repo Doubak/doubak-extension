@@ -22,6 +22,32 @@
  * 丢掉已抓但未记账的游标，而那正是我们花力气避免的事。
  */
 
+import { Exclusive } from './exclusive.js';
+
+/** 同一时间只推进一段；失联的一段被锁接管后，不再复用它的 Promise。 */
+export function createDrive({ run, onPreempt, ...lockOptions }) {
+  let current = null;
+  const lock = new Exclusive({
+    ...lockOptions,
+    onPreempt: (info) => {
+      current = null;
+      onPreempt?.(info);
+    },
+  });
+
+  async function drive() {
+    if (current && !lock.stale) return current;
+
+    const mine = lock.run('抓取', run).finally(() => {
+      if (current === mine) current = null;
+    });
+    current = mine;
+    return current;
+  }
+
+  return { drive, lock };
+}
+
 /** 一次唤醒最多干多久。比心跳周期（30 秒）略小。 */
 export const DEFAULT_BUDGET_MS = 22_000;
 
