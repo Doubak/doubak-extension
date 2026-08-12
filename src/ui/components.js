@@ -159,6 +159,9 @@ export function bundlePicker({ items, selected, onPick, fmtBytes }) {
     row.className = 'picker-row';
     row.setAttribute('role', 'option');
     row.setAttribute('aria-selected', String(it.id === selected));
+    // 选中标记之后还要能改：选哪一份是**开档案的时候**才定下的，而这张列表在那
+    // 之前就画好了。见 `markPicked()`。
+    row.dataset.id = it.id;
     row.tabIndex = 0;
 
     // 时间。**人读的格式**，不是 ISO 编号——`20260801T005010Z` 与

@@ -616,6 +616,24 @@ describe('面板脚本', () => {
     assert.match(js, /send\(\{ type: 'start', mode: crawlMode \}\)/);
   });
 
+  test('**抓完之后把档案页的清单作废** —— 中止那条路早就这么做了', async () => {
+    // 两条路径同一类事件，却是两种行为：中止会把摘要与目录扫描一起清掉，
+    // 正常跑完只清了摘要。于是抓完之后档案页左边看不见刚出炉的那一份——
+    // 而导出正是此刻唯一该做的事。
+    //
+    // 判据钉在 `showLastRun()` 里：那是**唯一**每次回到空闲都会跑、而且手上正好
+    // 有「最新那份档案的编号」的地方。
+    const js = readPanelSourceSync();
+    const fn = js.slice(js.indexOf('async function showLastRun'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    assert.match(body, /bundleScanKnows\(id\)/, '要拿最新那一份去问缓存认不认识');
+    assert.match(body, /invalidateStorageUsage\(\)/, '不认识就该把清单作废');
+    assert.match(body, /refreshOpenTab\(\)/, '正开着档案页的话要当场重画');
+    // 中止那条路径是这条规则的另一半，两边都得在。
+    const ab = js.slice(js.indexOf('async function abortCrawl'));
+    assert.match(ab.slice(0, ab.indexOf('\n}\n')), /invalidateStorageUsage\(\)/);
+  });
+
   test('**并排的按钮之间要有缝** —— 装 `.act` 按钮的容器都得是 `.btn-row`', async () => {
     // 按钮是 inline-block，间距只能来自容器；而 JS 里 `el.append(a, b)` 之间没有
     // 空白文本节点，两个按钮就严丝合缝地贴在一起。

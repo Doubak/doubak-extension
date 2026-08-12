@@ -11,7 +11,7 @@ import { routeName, contiguityLabel } from '../route-names.js';
 import { CRAWL_MODES } from '../../crawl/crawl-modes.js';
 import { renderStatus, statusCard, button as mkButton } from '../components.js';
 import {
-  $, send, bytes, table, BUSY_COPY, getOpfsWorker, invalidateStorageUsage,
+  $, send, bytes, table, BUSY_COPY, getOpfsWorker, invalidateStorageUsage, bundleScanKnows,
   getLastStatus, setLastStatus,
 } from './shared.js';
 import { loadArchive, invalidateSummary } from './archive.js';
@@ -559,6 +559,25 @@ async function showLastRun() {
     const dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
     const id = dirs.map(bundleIdFromDirName).find(Boolean);
     if (!id) return;
+
+    // **抓完之后，档案页要能看见刚出炉的那一份。**
+    //
+    // 报上来的现象：抓完弹了「完成」的通知，覆盖率页已经写着「合起来 4 份档案」，
+    // 而档案页左边的清单里只有 3 份——也就是**刚抓完的那一份导不出来**，而导出
+    // 正是此刻唯一该做的事。两页对同一批档案给出不同的数字，比两页都过期更糟：
+    // 这个工具全部的说服力就在于它报的数是准的。
+    //
+    // 成因是缺了一次作废：中止那条路径两个缓存都清（见 `abortCrawl`），而正常
+    // 跑完只清了摘要，目录扫描留着上一次的。同一类事件，两种行为。
+    //
+    // 判据是**数据**而不是「什么时候该重扫」：这一行拿到的 `id` 是刚从 OPFS 数出来
+    // 的最新一份，缓存里没有它就是过期了。这样不必去枚举所有会让它过期的时机
+    // （抓完、导入、删除、面板藏起来又回来），漏一种就少一次刷新。
+    if (!bundleScanKnows(id)) {
+      invalidateStorageUsage();
+      // 正开着档案页的话要当场重画——不然用户得先切走再切回来。
+      void refreshOpenTab();
+    }
 
     const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(id) });
     const reader = new BundleReader({ store, bundleId: id });

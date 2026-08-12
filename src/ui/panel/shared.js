@@ -334,6 +334,22 @@ export function invalidateBundleScan() {
 }
 
 /**
+ * 缓存里认不认识这份档案。
+ *
+ * **判据是数据，不是状态机。** 「什么时候该重扫」有一堆答案（抓完了、导入完了、
+ * 删完了、面板藏起来又回来了），漏一种就是一次陈旧的清单；而「最新那份在不在缓存
+ * 里」只有一个答案，而且**它就是用户看到的那个毛病本身**。
+ *
+ * 没有缓存时返回 true：没有缓存就没有陈旧的东西，下一次扫描本来就是新的。
+ *
+ * @param {string | null | undefined} bundleId
+ */
+export function bundleScanKnows(bundleId) {
+  if (!bundleScan || !bundleId) return true;
+  return bundleScan.some((d) => d.bundleId === bundleId);
+}
+
+/**
  * 存储用量的缓存。
  *
  * **存储页渲染它，而概览页与导出页只是让它失效**——三页都在动的东西不属于其中任何

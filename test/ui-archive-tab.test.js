@@ -154,6 +154,81 @@ describe('档案页（真的跑一遍）', () => {
     }
   });
 
+  test('**左边清单要标出现在开着的是哪一份**', async () => {
+    // 画列表发生在**决定开哪一份之前**：那时 `currentBundleId` 还是 null，于是
+    // 整张列表一行都不高亮，而右边已经显示着某一份的内容。用户看到的是
+    // 「右边有东西，左边看不出是哪一行」——点回那一行还没有任何反应（它本来就是
+    // 当前那份），于是像坏了。
+    const { dom } = await openArchiveTab({
+      bundles: {
+        [`doubak-bundle-${ID}`]: bundleFiles(ID),
+        [`doubak-bundle-${OLDER}`]: bundleFiles(OLDER),
+      },
+    });
+    try {
+      const rows = dom.byId.get('bundle-pick').querySelectorAll('.picker-row');
+      assert.equal(rows.length, 2, '两份档案该画出两行');
+      const on = rows.filter((r) => r.getAttribute('aria-selected') === 'true');
+      assert.equal(on.length, 1, `高亮的行有 ${on.length} 行，该正好 1 行`);
+      assert.equal(on[0].dataset.id, ID, '高亮的该是右边正在显示的那一份（最新的）');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('点另一份，高亮跟着走 —— 点击那条路径根本不重画列表', async () => {
+    const { dom } = await openArchiveTab({
+      bundles: {
+        [`doubak-bundle-${ID}`]: bundleFiles(ID),
+        [`doubak-bundle-${OLDER}`]: bundleFiles(OLDER),
+      },
+    });
+    try {
+      const rows = dom.byId.get('bundle-pick').querySelectorAll('.picker-row');
+      const other = rows.find((r) => r.dataset.id === OLDER);
+      assert.ok(other, '找不到另一份那一行');
+      other.dispatch('click', {});
+      await new Promise((r) => setTimeout(r, 20));
+
+      const on = rows.filter((r) => r.getAttribute('aria-selected') === 'true');
+      assert.deepEqual(on.map((r) => r.dataset.id), [OLDER], '高亮没跟着点击走');
+      assert.match(dom.byId.get('archive-summary').textContent, new RegExp(OLDER),
+        '右边也该换成刚点的那一份');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('**刚抓完的那一份要能在档案页看见** —— 判据是数据，不是「什么时候该重扫」', async () => {
+    // 报上来的现象：抓完弹了「完成」，覆盖率页已经写着「合起来 4 份档案」，
+    // 而档案页左边只有 3 份——也就是刚抓完的那一份**导不出来**，而导出正是此刻
+    // 唯一该做的事。两页对同一批档案给出不同的数字，比两页都过期更糟。
+    //
+    // 成因是缺了一次作废：中止那条路径把目录扫描一起清掉，正常跑完只清了摘要。
+    // 修法不去枚举「什么时候该重扫」（抓完、导入、删除、面板藏起来又回来——漏一种
+    // 就少一次刷新），而是问缓存认不认识最新那一份。
+    const { dom } = await openArchiveTab({
+      bundles: { [`doubak-bundle-${ID}`]: bundleFiles(ID) },
+    });
+    try {
+      const { bundleScanKnows } = await import('../src/ui/panel/shared.js');
+      assert.equal(bundleScanKnows(ID), true, '缓存里明明有这一份');
+      assert.equal(
+        bundleScanKnows('20260812T121552Z-b10d6c'), false,
+        '刚抓完的那一份不在缓存里 —— 这正是要被认出来的「过期」',
+      );
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('没有缓存时不算过期 —— 下一次扫描本来就是新的', async () => {
+    // 反面判据。返回 false 的话，面板一开就会白扫一遍，而那是这一页最贵的动作。
+    const { resetShared, bundleScanKnows } = await import('../src/ui/panel/shared.js');
+    resetShared();
+    assert.equal(bundleScanKnows('20260812T121552Z-b10d6c'), true);
+  });
+
   test('**总占用把两份加起来**，不是只报选中的那一份', async () => {
     const { dom } = await openArchiveTab({
       bundles: {

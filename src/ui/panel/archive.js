@@ -196,9 +196,32 @@ export function setArchiveButtons(on) {
   $('delete-this').disabled = !on;
 }
 
+/**
+ * 把左边列表里的高亮挪到某一份上。
+ *
+ * ## 为什么不是画列表时一次定好
+ *
+ * `loadArchive()` 里画列表在**决定开哪一份之前**：那时 `currentBundleId` 还是
+ * null（首次打开、或者刚删过），于是整张列表一行都不高亮，而右边明明已经显示着
+ * 某一份的内容。用户看到的是「右边有东西，左边看不出是哪一行」——点回那一行还
+ * 没有任何反应（它本来就是当前那份），于是像坏了。
+ *
+ * 换个顺序也能修，但把高亮交给 `openBundle()` 更稳：**选中状态跟着「真的开了
+ * 哪一份」走**，而不是跟着某一次渲染的时序走。点击那条路径（`onPick` → 直接
+ * `openBundle`，根本不重画列表）也就一起对了。
+ *
+ * @param {string} bundleId
+ */
+function markPicked(bundleId) {
+  for (const row of $('bundle-pick').querySelectorAll('.picker-row')) {
+    row.setAttribute('aria-selected', String(row.dataset.id === bundleId));
+  }
+}
+
 /** @param {string} bundleId */
 export async function openBundle(bundleId) {
   currentBundleId = bundleId;
+  markPicked(bundleId);
   // **上一份档案的操作结果要清干净，class 也要清。**
   //
   // 只清 textContent 的话会留下一个**空的红框**——比留着错误信息更糟：它看起来
