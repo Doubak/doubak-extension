@@ -97,6 +97,30 @@ function showExportResult(r, folder) {
       + '因此只核对了每个文件的字节数，没有摘要可比对。抓取完成后重新导出一次才能做完整校验。',
     ));
   }
+
+  // **在这儿指一下路。** 导完之后「接下来干什么」是必然会冒出来的问题，而在此之前
+  // 面板里唯一提到下游的地方是帮助页那张仓库链接表——那是一排代码仓库，不是一句
+  // 「你可以这么做」。用户走到这一步，手上有一个文件夹和一个疑问。
+  //
+  // 只放一句话加一个跳转，不在这里铺开步骤：这一页已经很满了（导入、导出、校验、
+  // 删除、用量、捕获检查器…），而那些内容属于帮助页。
+  const next = document.createElement('p');
+  next.className = 'small muted';
+  next.append(document.createTextNode('档案已经在你手里了。想把它解析成结构化数据、'
+    + '再生成一个可搜索的存档站点，见帮助页的'));
+  const a = document.createElement('a');
+  a.href = '#';
+  a.textContent = '「导出之后：把档案变成能读的东西」';
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    // **点一下帮助那个按钮，而不是自己复制一遍切换逻辑。** 那段逻辑还负责
+    // `renderAbout()` 之类的按需加载；另写一份迟早会与它分叉，而分叉的样子是
+    // 「从这儿跳过去的帮助页，和自己点过去的不一样」。
+    $('tabs').querySelector('button[data-tab="help"]')?.click();
+    $('downstream')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  next.append(a, document.createTextNode('。这两步都在你自己的机器上跑，同样不联网。'));
+  el.append(next);
 }
 
 /** 绑事件。**由 panel.js 显式调用**，不靠 import 的副作用——那种绑定顺序看不出来。 */

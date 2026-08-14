@@ -214,6 +214,51 @@
         以前的档案就回来了——之后照样可以增量抓取，不必从头再来一遍。
       </div>
 
+      <h2 id="downstream">导出之后：把档案变成能读的东西</h2>
+      <div class="hint">
+        扩展只负责第一步——把页面原样存成档案。之后要把它解析成结构化数据、
+        再生成一个可搜索的个人存档站点，用的是另外两个工具，都在你自己的机器上跑，
+        <b>同样不联网</b>。它们是独立的程序：档案已经在你手里了，
+        这两步什么时候做、做不做，都不影响档案本身。
+      </div>
+      <ol class="steps" id="downstream-steps">
+        <li>
+          <b>解析：档案 → 结构化数据。</b>
+          产出五个 NDJSON（标记、作品、广播、长文、豆列），
+          <code>jq</code> 直接就能查。纯函数、不联网，改错了重跑一遍就是。
+        </li>
+        <li>
+          <b>生成站点：结构化数据 → 可搜索的网页。</b>
+          出来的是一份完全离线也能看的个人存档站，
+          长什么样见 <a href="https://sample.doubak.com" target="_blank" rel="noreferrer">sample.doubak.com</a>。
+        </li>
+      </ol>
+      <div class="hint">
+        <b>命令以各自仓库的 README 为准。</b>
+        下面这两条是照着写这个页面时的版本抄的，方便复制；
+        工具会更新，而这个页面不会跟着更新，所以真要动手时请以 README 为准——
+        那里才是唯一说了算的地方。
+      </div>
+      <table id="downstream-cmds">
+        <thead><tr><th>做什么</th><th>命令（仅供参考）</th><th>说了算的地方</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>解析</td>
+            <td><code>node bin/parse.js &lt;导出的文件夹&gt; &lt;产出目录&gt;</code></td>
+            <td><a href="https://github.com/Doubak/doubak-data-parser#readme" target="_blank" rel="noreferrer">doubak-data-parser 的 README</a></td>
+          </tr>
+          <tr>
+            <td>生成站点</td>
+            <td><code>npm run site &lt;上一步的产出目录&gt; &lt;导出的文件夹&gt;</code></td>
+            <td><a href="https://github.com/Doubak/doubak-site-generator#readme" target="_blank" rel="noreferrer">doubak-site-generator 的 README</a></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="hint">
+        需要 Node 20 以上。两个仓库都是零依赖、零构建步骤，
+        <code>git clone</code> 下来就能跑，不必 <code>npm install</code>。
+      </div>
+
       <h2>每个标签页是干什么的</h2>
       <table>
         <thead><tr><th>标签页</th><th>什么时候用</th></tr></thead>

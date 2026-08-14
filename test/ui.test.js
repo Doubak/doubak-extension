@@ -1768,3 +1768,45 @@ describe('判不出来时要说清该怎么办', () => {
     assert.match(js, /e\?\.verdict === 'unknown' \|\| e\?\.note\?\.startsWith\('判不出来'\)/);
   });
 });
+
+describe('导出之后该做什么 —— 面板要说得出来', () => {
+  const html = readFileSync(new URL('../src/ui/panel.html', import.meta.url), 'utf-8');
+
+  test('帮助页有这一节，且带 id（导出结果那句话要跳过来）', () => {
+    assert.match(html, /<h2 id="downstream">导出之后/);
+  });
+
+  test('**命令旁边必须给出「说了算的地方」**', () => {
+    // 命令会过期，而这个页面不会跟着更新。真正的出路是把权威指向 README，
+    // 而不是指望这里的命令一直对——所以两条命令各自都要有一个 README 链接。
+    const sec = html.slice(html.indexOf('id="downstream"'), html.indexOf('每个标签页是干什么的'));
+    for (const repo of ['doubak-data-parser', 'doubak-site-generator']) {
+      assert.match(sec, new RegExp(`https://github\\.com/Doubak/${repo}#readme`), `${repo} 的 README 没链上`);
+    }
+    assert.match(sec, /以各自仓库的 README 为准|以 README 为准/, '要写明谁说了算');
+  });
+
+  test('**说清这两步同样不联网**', () => {
+    // 「装个东西、跑个命令」在一个以「数据不出设备」为卖点的工具里会引起合理的
+    // 怀疑。不说的话，最谨慎的那批用户会停在这里。
+    const sec = html.slice(html.indexOf('id="downstream"'), html.indexOf('每个标签页是干什么的'));
+    assert.match(sec, /不联网/);
+  });
+
+  test('导出成功之后指一下路，但不在档案页铺开步骤', () => {
+    const exp = readFileSync(new URL('../src/ui/panel/export.js', import.meta.url), 'utf-8');
+    assert.match(exp, /data-tab="help"/, '要能跳到帮助页');
+    assert.match(exp, /downstream/, '要滚到那一节');
+    // 档案页已经很满（导入/导出/校验/删除/用量/捕获检查器…），步骤属于帮助页。
+    assert.doesNotMatch(exp, /node bin\/parse\.js/, '命令不该在档案页出现第二份');
+  });
+
+  test('**不许用口语**（docs/ui.md 8.5）', () => {
+    // 这是一个关于「档案能不能被信任」的工具，口语化的措辞会削弱它本来要传达的
+    // 确定性。「然后呢」这类标题就是被这条挡掉的。
+    const sec = html.slice(html.indexOf('id="downstream"'), html.indexOf('每个标签页是干什么的'));
+    for (const word of ['然后呢', '搞定', '咋', '啥']) {
+      assert.ok(!sec.includes(word), `出现了口语词：${word}`);
+    }
+  });
+});
