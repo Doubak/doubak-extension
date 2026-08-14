@@ -1040,7 +1040,13 @@ describe('面板脚本', () => {
     // 只在校验通过时才记「已导出」——没验过就说导出了，等于给一个我们没资格给的保证
     const exp = await readRepoFile('src/ui/panel/export.js');
     assert.match(exp, /res\.problems\.length === 0/);
-    assert.match(exp, /markExported/);
+    // 走 `noteExported`（shared.js）——它把「记一笔」与「让界面跟上」绑在一起，
+    // 所以 `markExported` 不再直接出现在导出路径里。
+    assert.match(exp, /noteExported/);
+    assert.doesNotMatch(
+      exp, /type:\s*'markExported'/,
+      '导出路径不该再直接发 markExported —— 那样就能忘记刷新，而那正是出过的问题',
+    );
   });
 
   test('抓取中要写出正在抓的那个 URL', async () => {
@@ -1154,9 +1160,18 @@ describe('面板脚本', () => {
     // 没验过就说「已导出」，等于给了一个我们没资格给的保证——而那个保证会被用来
     // 决定删除确认框说得多重。
     const js = readPanelSourceSync();
-    const i = js.indexOf('markExported');
-    const before = js.slice(Math.max(0, i - 400), i);
-    assert.match(before, /problems\.length === 0/);
+    // 两条导出路径都要有这道闸。判据从「找 markExported」改成「找 noteExported」，
+    // 因为记账与刷新已经合成了一个入口。
+    // `await noteExported(` 才是调用点；`export async function noteExported(` 是定义，
+    // 而 readPanelSource 读的是整个目录，两者都会命中。
+    const spots = [...js.matchAll(/await noteExported\(/g)].map((m) => m.index);
+    assert.ok(spots.length >= 2, `导出路径应当有两处（单份、整条链），实际 ${spots.length}`);
+    for (const i of spots) {
+      assert.match(
+        js.slice(Math.max(0, i - 400), i), /problems\.length === 0/,
+        '有一处没有先检查校验结果就记「已导出」',
+      );
+    }
   });
 
   test('捕获列表的措辞逻辑抽成了纯函数，并且真的被用上', async () => {

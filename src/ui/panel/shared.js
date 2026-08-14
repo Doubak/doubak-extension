@@ -379,6 +379,28 @@ export const setStorageUsage = (rows) => { storageUsage = rows; };
 export const invalidateStorageUsage = () => { storageUsage = []; bundleScan = null; };
 
 /**
+ * 记一笔「这份导出过了」，**并且让界面跟上**。
+ *
+ * 两件事必须绑在一起。分开写的后果实测过：整条链的导出调了失效与刷新，单份导出
+ * 只调了 `markExported`——于是导完一份之后，那行
+ *
+ *     17 份 · 462.9 MB · ⚠ 其中 1 份没有导出记录，浏览器里这一份可能是唯一的副本
+ *
+ * 还停在原处。用户刚刚把它导出去了，界面却仍然说它可能是唯一的副本。这不是显示
+ * 滞后，是**在一件与数据安全有关的事情上说了假话**，而且方向正是最容易让人再导
+ * 一次的那个。
+ *
+ * 所以调用方只有这一个入口，`markExported` 不再单独出现在别处。**下一个写导出
+ * 路径的人不会有机会忘记刷新**——那正是这次出问题的方式。
+ *
+ * @param {string} bundleId
+ */
+export async function noteExported(bundleId) {
+  await send({ type: 'markExported', bundleId, at: new Date().toISOString() });
+  invalidateStorageUsage();
+}
+
+/**
  * 后端最近一次报的抓取状态。
  *
  * 概览页每两秒刷新它，而档案页与存储页读它——「这一份是不是正在被写」决定了能不能

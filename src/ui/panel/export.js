@@ -8,7 +8,7 @@ import { exportBundle, subdirectorySink } from '../../bundle/exporter.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
 import { bundleDirName } from '../../core/ids.js';
 import {
-  $, send, bytes, table, countAlreadyExported, getOpfsWorker, invalidateStorageUsage,
+  $, send, bytes, table, countAlreadyExported, getOpfsWorker, noteExported,
 } from './shared.js';
 import { refreshOpenTab } from './overview.js';
 import { reader, currentBundleId } from './archive.js';
@@ -152,9 +152,7 @@ export function initExport() {
         done.push({ bundleId: id, result: res, error: null });
         // 只在**校验通过**时记「已导出」——没验过就说导出了，等于给一个我们没资格
         // 给的保证（删除确认框会据此决定说得多重）。
-        if (res.problems.length === 0) {
-          await send({ type: 'markExported', bundleId: id, at: new Date().toISOString() });
-        }
+        if (res.problems.length === 0) await noteExported(id);
       } catch (e) {
         // **一份失败不中断其余的。** 用户要的是尽可能多地搬走，而不是在第三份上
         // 停下、前两份还留在原地不知道成没成。
@@ -163,7 +161,7 @@ export function initExport() {
     }
 
     renderChainExportResult(el, done);
-    invalidateStorageUsage();
+    // `noteExported` 已经失效过缓存了，这里只要重画。
     await refreshOpenTab();
   });
 
@@ -247,7 +245,12 @@ export function initExport() {
       // 记一笔「导出过了」。派生状态，丢了不影响档案本身——只影响删除确认框说得多重。
       // 只在**校验通过**时记：没验过就说「已导出」，等于给了一个我们没资格给的保证。
       if (r.problems.length === 0) {
-        await send({ type: 'markExported', bundleId, at: new Date().toISOString() });
+        // **导完这一份要让界面跟上。** 原来这里只记了一笔就完了，于是那行
+        // 「⚠ 其中 N 份没有导出记录，浏览器里这一份可能是唯一的副本」还停在原处
+        // ——用户刚把它导出去，界面却仍然说它可能是唯一的副本。整条链的导出一直
+        // 是刷新的，单份的没刷，两条路走了不同的做法。
+        await noteExported(bundleId);
+        await refreshOpenTab();
       }
     } catch (e) {
       el.className = 'card err';
