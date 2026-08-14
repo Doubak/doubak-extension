@@ -699,6 +699,16 @@ export const ROUTE_PROFILES = {
     // 只能靠连续性证明，不能增量——如实标出来，别让下游以为有下界可用。
     timeAnchor: null,
     claimedCount: null,
+    // 翻页器。**这一页自己说它是第几页、一共几页**：
+    //
+    //     <div class="paginator">…<span class="thispage" data-total-page="3">1</span>…
+    //
+    // 实测（真实抓取的字节，6 份豆列 18 页）：多页豆列的**每一页**都写这个，包括
+    // 翻过头的那些空页；单页豆列则整个 `div.paginator` 都不存在。
+    //
+    // 用它而不是用 `start/25+1` 去算页码，是因为设计里那条「绝不相信保存下来的页码，
+    // 按内容重新定位」——页码由页面自己说，算出来的那个只是我们的假设。
+    paginator: /<span class="thispage"[^>]*data-total-page="(\d+)"[^>]*>\s*(\d+)\s*</,
   },
 
   'note.item': {
@@ -1431,6 +1441,28 @@ export function extractItemIds(bodyText, route) {
  *   8 个没有日期，那是正常的，不是缺口）。`idless` 是「有时间却抽不到 id」的容器数
  *   ——非 0 说明抽取器跟不上页面了。
  */
+/**
+ * 这一页自己声明的「第几页 / 共几页」。
+ *
+ * **只信当前这一页说的，不缓存第一页的结论。** 一份豆列在抓取期间可以变长变短，
+ * 而每一页都带着它当时的总数——拿第一页的数字去判断第五页，就是拿一个过期的假设
+ * 当事实。这也是「按内容重新定位」那条规则的同一个应用。
+ *
+ * @param {string} bodyText
+ * @param {object} route  路线判定档案
+ * @returns {{page: number, totalPages: number} | null} 没有翻页器就返回 null
+ */
+export function extractPagination(bodyText, route) {
+  if (typeof bodyText !== 'string' || !route?.paginator) return null;
+  const m = new RegExp(route.paginator.source).exec(bodyText);
+  if (!m) return null;
+  const totalPages = Number(m[1]);
+  const page = Number(m[2]);
+  if (!Number.isInteger(page) || !Number.isInteger(totalPages)) return null;
+  if (page < 1 || totalPages < 1) return null;
+  return { page, totalPages };
+}
+
 export function extractItemPairs(bodyText, route) {
   const empty = { ids: [], times: [], containers: 0, idless: 0 };
   if (typeof bodyText !== 'string' || !route?.itemAnchor || !route?.idAnchor) return empty;

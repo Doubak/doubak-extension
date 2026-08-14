@@ -35,6 +35,7 @@ import {
   extractStatusPhotos,
   extractEmbeddedImages,
   extractDetailLinks,
+  extractPagination,
 } from './classifier.js';
 import { SessionError } from './session.js';
 import { TransportError } from './errors.js';
@@ -1095,6 +1096,34 @@ export class CrawlLoop {
         type: 'route_finished',
         routeKey: item.routeKey,
         reason: 'stalled',
+        highWater: state.highWater?.iso ?? null,
+      });
+      return;
+    }
+
+    // ── 这一页自己说它是最后一页了吗
+    //
+    // 豆列详情页带着 `<span class="thispage" data-total-page="N">K</span>`。K 到了 N
+    // 就没有下一页——**这是豆瓣自己的声明，不是我们从条目数推出来的**，所以不碰
+    // 「不满一页就是末页」那条已经被证伪的判据（游戏列表实测中段就有空洞）。
+    //
+    // 实测这一趟：6 份豆列 18 次请求，其中 **9 次拿回来是空页**。翻页器能省掉的正是
+    // 那些注定落空的请求，而这个项目对每一个发出去的请求都算账。
+    //
+    // **判据用当前这一页的数字，不用第一页的。** 一份豆列在抓取期间可以变长变短，
+    // 每一页都带着它当时的总数；拿第一页的结论去判第五页，是拿过期的假设当事实。
+    //
+    // 只在**有**翻页器时才据此收尾。没有翻页器不等于「只有一页」——那是从 6 份豆列
+    // 推出来的，样本太小；没有就退回原来的走法（走到空页为止），行为与从前一致。
+    const pg = extractPagination(res.bodyText, profile);
+    if (pg && pg.page >= pg.totalPages) {
+      state.markFinished();
+      this._emit({
+        type: 'route_finished',
+        routeKey: item.routeKey,
+        reason: 'last_page',
+        page: pg.page,
+        totalPages: pg.totalPages,
         highWater: state.highWater?.iso ?? null,
       });
       return;

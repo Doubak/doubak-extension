@@ -1,0 +1,2480 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="ua-webkit">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="renderer" content="webkit">
+    <meta name="referrer" content="always">
+    <meta name="google-site-verification" content="ok0wCgT20tBBgo9_zat2iAcimtN4Ftf5ccsh092Xeyw" />
+    <title>计算机-人工智能实践</title>
+    
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="Sun, 6 Mar 2005 01:00:00 GMT">
+    
+  <meta name="mobile-agent" content="format=html5; url=https://m.douban.com/doulist/42193343">
+
+    <script >var _head_start = new Date();</script>
+    <script src="https://img1.doubanio.com/f/vendors/0511abe9863c2ea7084efa7e24d1d86c5b3974f1/js/jquery-1.10.2.min.js"></script>    <script src="https://img1.doubanio.com/f/vendors/e258329ca4b2122b4efe53fddc418967441e0e7f/js/douban.js"></script>
+    <link href="https://img1.doubanio.com/f/vendors/fae7e145bf16b2f427ba0fe7ef3d47c04af3a6c0/css/douban.css" rel="stylesheet" type="text/css">
+    <style type="text/css">
+      
+  h1 {
+    display: flex;
+    align-items: center;
+  }
+  h1 .is-private {
+    content: " ";
+    display: inline-block;
+    background-image: url('https://img2.doubanio.com/cuphead/sns-static/legacy/doulist/pics/lock-gray.png');
+    width: 11px;
+    height: 11px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    margin-left: 10px;
+    vertical-align: middle;
+  }
+  .doulist-interactions { overflow: hidden; *zoom: 1; margin-bottom: 20px; margin-top: 20px; }
+  .doulist-panel { float: right; overflow: hidden; }
+  .doulist_item p {word-break: break-all;}
+  .bn-cancel { margin-left:1em; }
+  .ul { width:100%; }
+  div.filters { margin-top: 20px; color: #666 }
+  p.ul { margin-top: 3px }
+  p.indent { text-indent: 2em; }
+  .empty-doulist { margin-top: 20px; }
+  .dlistp p{margin-top:4px;border-bottom:1px #ddd dashed;padding-bottom:4px}
+  .text-paragraph { text-indent: 2em; }
+  .aside h2 {margin-top:30px;}
+  .form-desc textarea { display: block; width:98%;height:65px;margin-top:3px; }
+  .doulist-admin { float: left; }
+  .remove-doulist-item-comment { margin-left: 10px;}
+  .doulist-tip { color: #999; }
+  .doulist-tip h2 { margin-top: 0; }
+
+  .minisubmit { vertical-align: baseline; }
+  .minisubmit:hover { background: #37a; }
+  .sort-tab { margin-top: 20px; color: #999; text-align: right; }
+  .sort-tab a:link,
+  .sort-tab a:visited { color: #999; }
+  .sort-tab a:hover { color: #fff; }
+  .doulist-add-subject-btn { margin-right: 10px; float: right; }
+  .lnk-doulist-add-subject {
+      font-size: 12px;
+      color: #fff;
+      line-height: 1;
+      padding: 7px 8px 7px 15px;
+      border-radius: 2px;
+      display: block;
+      float: left;
+      background: #42bd56 no-repeat url("https://img2.doubanio.com/cuphead/sns-static/legacy/doulist/pics/plus-white.png") 8px 8px / 10px;
+  }
+  .lnk-doulist-add-subject::first-letter {
+    visibility: hidden;
+  }
+  .lnk-doulist-add-subject:link,
+  .lnk-doulist-add-subject:visited {
+      color: #fff;
+  }
+  .lnk-doulist-add-subject:hover {
+      color: #fff;
+      background: #42bd56 no-repeat url("https://img2.doubanio.com/cuphead/sns-static/legacy/doulist/pics/plus-white.png") 8px 8px / 10px;
+      border-color: #28A228;
+  }
+  .rec-sec { float: right }
+  .rec-sec a{
+      padding: 3px 8px 2px;
+      border-radius: 2px;
+  }
+  .doulist-admin{
+    font-size: 0;
+    overflow: hidden;
+  }
+  .doulist-admin a{
+    font-size: 13px;
+  }
+  .doulist-admin input[type="submit"]{
+    line-height: 1.2;
+  }
+  .doulist-followers-link-text{
+    color: #9b9b9b;
+    background: #fff;
+  }
+  .doulist-followers-link-wrapper{
+    font-size: 13px;
+    padding-right: 10px;
+  }
+  .doulist-followers-link-wrapper .doulist-followers-link{
+    padding-right: 0;
+  }
+  .doulist-admin-split{
+    display: inline-block;
+    width: 1px;
+    height: 13px;
+    background: #cccccc;
+    vertical-align: sub;
+    position: relative;
+    top: 1px;
+    margin: 0 10px;
+  }
+  .can-play {
+    clear: both;
+    border-top: 1px solid #ededed;
+    margin-top: 10px;
+    padding-top: 10px;
+    line-height: 16px;
+    color: #666;
+  }
+  .can-play input[type=checkbox] {
+    vertical-align: middle;
+    margin-top: -3px;
+  }
+  .can-play span {
+    display: inline-block;
+    color: #999;
+    padding-right: 20px;
+    vertical-align: top;
+    background: no-repeat url("https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/pics/ic_play_web@2x.png") right center / 16px
+  }
+  a.edit-feat-disabled {
+    color: #999;
+  }
+  a.edit-feat-disabled:hover {
+    background: #aaa;
+    color: #fff;
+  }
+  #link-report { text-align: right }
+
+
+    </style>
+    
+  <link rel="stylesheet" href="https://img3.doubanio.com/cuphead/sns-static/legacy/doulist/css/list.bb587.css">
+  <link rel="stylesheet" href="https://img3.doubanio.com/cuphead/sns-static/common/base/icons_topic.cc9e2.css">
+  
+
+  <script type="text/javascript" src="https://img1.doubanio.com/f/vendors/43c21c5607ffe86759538789a60360c06532b4bf/js/do.js" data-cfg-autoload="false"></script>
+
+    <link rel="stylesheet" href="https://img1.doubanio.com/misc/mixed_static/4db33f38db94e324.css">
+    <script></script>
+
+    <link rel="shortcut icon" href="https://img1.doubanio.com/f/shire/de01f10f57b2ae751224c6d1a193bafd2f02dd89/pics/favicon.ico" type="image/x-icon">
+</head>
+
+<body>
+  
+  <link rel="stylesheet" href="https://img3.doubanio.com/cuphead/sns-static/common/base/init.4f2f3.css">
+  
+    <script type="text/javascript">var _body_start = new Date();</script>
+    
+  
+
+
+
+    <link href="//img3.doubanio.com/dae/accounts/resources/f8b2226/shire/bundle.css" rel="stylesheet" type="text/css">
+
+
+
+<div id="db-global-nav" class="global-nav">
+  <div class="bd">
+    
+<div class="top-nav-info">
+  <ul>
+    <li>
+    <a id="top-nav-doumail-link" href="https://www.douban.com/doumail/">豆邮</a>
+    </li>
+    <li class="nav-user-account">
+      <a target="_blank" href="https://accounts.douban.com/passport/setting/" class="bn-more">
+        <span>MewX的账号</span><span class="arrow"></span>
+      </a>
+      <div class="more-items">
+        <table cellpadding="0" cellspacing="0">
+          <tbody>
+            <tr>
+              <td>
+                <a href="https://www.douban.com/mine/">个人主页</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a target="_blank" href="https://www.douban.com/mine/orders/">我的订单</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a target="_blank" href="https://www.douban.com/mine/wallet/">我的钱包</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a target="_blank" href="https://accounts.douban.com/passport/setting/">账号管理</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a href="https://www.douban.com/accounts/logout?source=main&ck=dpDq">退出</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+  </ul>
+</div>
+
+  <div class="top-nav-reminder">
+    <a href="https://www.douban.com/notification/" class="lnk-remind">提醒</a>
+    <div id="top-nav-notimenu" class="more-items">
+      <div class="bd">
+        <p>加载中...</p>
+      </div>
+    </div>
+  </div>
+
+    <div class="top-nav-doubanapp">
+  <a href="https://www.douban.com/doubanapp/app?channel=top-nav" class="lnk-doubanapp">下载豆瓣客户端</a>
+  <div id="doubanapp-tip">
+    <a href="https://www.douban.com/doubanapp/app?channel=qipao" class="tip-link">豆瓣 <span class="version">6.0</span> 全新发布</a>
+    <a href="javascript: void 0;" class="tip-close">×</a>
+  </div>
+  <div id="top-nav-appintro" class="more-items">
+    <p class="appintro-title">豆瓣</p>
+    <p class="qrcode">扫码直接下载</p>
+    <div class="download">
+      <a href="https://www.douban.com/doubanapp/redirect?channel=top-nav&direct_dl=1&download=iOS">iPhone</a>
+      <span>·</span>
+      <a href="https://www.douban.com/doubanapp/redirect?channel=top-nav&direct_dl=1&download=Android" class="download-android">Android</a>
+    </div>
+  </div>
+</div>
+
+    
+
+
+<div class="global-nav-items">
+  <ul>
+    <li class="on">
+      <a href="https://www.douban.com"  data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-main&quot;,&quot;uid&quot;:&quot;82160871&quot;}">豆瓣</a>
+    </li>
+    <li class="">
+      <a href="https://book.douban.com" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-book&quot;,&quot;uid&quot;:&quot;82160871&quot;}">读书</a>
+    </li>
+    <li class="">
+      <a href="https://movie.douban.com" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-movie&quot;,&quot;uid&quot;:&quot;82160871&quot;}">电影</a>
+    </li>
+    <li class="">
+      <a href="https://music.douban.com" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-music&quot;,&quot;uid&quot;:&quot;82160871&quot;}">音乐</a>
+    </li>
+    <li class="">
+      <a href="https://www.douban.com/podcast/" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-podcast&quot;,&quot;uid&quot;:&quot;82160871&quot;}">播客</a>
+    </li>
+    <li class="">
+      <a href="https://www.douban.com/location" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-location&quot;,&quot;uid&quot;:&quot;82160871&quot;}">同城</a>
+    </li>
+    <li class="">
+      <a href="https://www.douban.com/group" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-group&quot;,&quot;uid&quot;:&quot;82160871&quot;}">小组</a>
+    </li>
+    <li class="">
+      <a href="https://read.douban.com&#47;?dcs=top-nav&amp;dcm=douban" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-read&quot;,&quot;uid&quot;:&quot;82160871&quot;}">阅读</a>
+    </li>
+    <li class="">
+      <a href="https://fm.douban.com&#47;?from_=shire_top_nav" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-fm&quot;,&quot;uid&quot;:&quot;82160871&quot;}">FM</a>
+    </li>
+    <li class="">
+      <a href="https://time.douban.com&#47;?dt_time_source=douban-web_top_nav" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-time&quot;,&quot;uid&quot;:&quot;82160871&quot;}">时间</a>
+    </li>
+    <li class="">
+      <a href="https://market.douban.com&#47;?utm_campaign=douban_top_nav&amp;utm_source=douban&amp;utm_medium=pc_web" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-market&quot;,&quot;uid&quot;:&quot;82160871&quot;}">豆品</a>
+    </li>
+  </ul>
+</div>
+
+  </div>
+</div>
+<script>
+  ;window._GLOBAL_NAV = {
+    USER_ID: "82160871",
+    UPLOAD_AUTH_TOKEN: "82160871:c4174b7a26ce83d20f15cc05689d72d300315bed",
+    SSE_TOKEN: "ff9babff21cc039ce541c2f48e7164bc3766eca6",
+    SSE_TIMESTAMP: "1786747136",
+    DOUBAN_URL: "https://www.douban.com",
+    N_NEW_NOTIS: 0,
+    N_NEW_DOUMAIL: 0
+  };
+</script>
+
+
+
+    <script src="//img3.doubanio.com/dae/accounts/resources/f8b2226/shire/bundle.js" defer="defer"></script>
+
+
+
+
+  
+
+
+
+    <link href="//img3.doubanio.com/dae/accounts/resources/f8b2226/sns/bundle.css" rel="stylesheet" type="text/css">
+
+
+
+<div id="db-nav-sns" class="nav">
+  <div class="nav-wrap">
+    <div class="nav-primary">
+     
+      <div class="nav-logo">
+        <a href="https://www.douban.com">豆瓣社区</a>
+      </div>
+
+      <div class="nav-search">
+  <form action="https://www.douban.com/search" method="get">
+	<fieldset>
+      <legend>搜索：</legend>
+	  <label for="inp-query">搜索你感兴趣的内容和人...</label>
+	  <div class="inp">
+	    <input type="hidden" name="source" value="suggest">
+		<input id="inp-query" name="q" size="22" maxlength="60" autocomplete="off" value="">
+	  </div>
+	  <div class="inp-btn"><input type="submit" value="搜索"></div>
+	</fieldset>
+  </form>
+</div>
+
+      
+
+<div class="nav-items">
+  <ul>
+    <li><a href="https://www.douban.com">首页</a></li>
+	<li><a href="https://www.douban.com/mine/">我的豆瓣</a></li>
+      <li>
+        <a href="https://www.douban.com/explore">
+          浏览发现
+        </a>
+      </li>
+      <li>
+        <a href="https://www.douban.com/gallery">
+          话题广场
+          <img src="https://img3.doubanio.com/f/shire/e49eca1517424a941871a2667a8957fd6c72d632/pics/new_menu.gif" alt="new" style="position: absolute; top: -7px; right: -13px;" />
+        </a>
+      </li>
+  </ul>
+</div>
+
+    </div>
+  </div>
+</div>
+
+
+
+    <script src="//img3.doubanio.com/dae/accounts/resources/f8b2226/sns/bundle.js" defer="defer"></script>
+
+
+
+
+
+    <div id="wrapper">
+        
+
+        
+<div id="content">
+    
+  <h1>
+    <span>计算机-人工智能实践</span>
+  </h1>
+
+    <div class="grid-16-8 clearfix">
+        
+        
+        <div class="article">
+               
+  
+  
+  <div id="doulist-info" class="mod">
+    <div class="doulist-cover"><img src="https://img2.doubanio.com/dae/merged_cover/img_handler/doulist_cover/round_rec/42193343-20151209002621"></div>
+    <div class="hd">
+      <a href="https://www.douban.com/people/mewcatcher/" class="avatar">
+        <img src="https://img3.doubanio.com/icon/u82160871-12.jpg" width="24" height="24" alt="MewX" />
+      </a>
+
+      <div class="meta">
+        来自: <a href="https://www.douban.com/people/mewcatcher/">
+          MewX
+            (Sydney)
+        </a>
+        <span class="time">
+          2015-09-22 11:00:35创建
+            &nbsp;&nbsp;2015-12-09 00:26:21更新
+        </span>
+      </div>
+    </div>
+
+    <div class="bd">
+
+      
+      <div class="doulist-about">
+        关于个人可以完成的人工智能实例的书籍，人工智能是大趋势。
+        <br />
+      </div>
+    </div>
+
+  </div>
+
+  
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/7cfebe884a5cdb1d5f2baadc9e79ff60ade3b4a3/reports.css" />
+  <style>
+    .btn-report {
+      color: #bbb;
+      cursor: pointer;
+      font-size: 13px;
+    }
+  </style>
+  <script src="https://img1.doubanio.com/f/vendors/bd6325a12f40c34cbf2668aafafb4ccd60deab7e/vendors.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/2f91ba0a4f9ddec58167a76425f65c13365adf57/reports.js"></script>
+  <script>
+    (function () {
+      var roots = document.querySelectorAll("#link-report");
+      roots.forEach(function (root) {
+        var btn = document.createElement('span');
+        btn.className = 'btn-report';
+        btn.innerHTML = "投诉";
+        btn.addEventListener('click', function () {
+          if (window.DOUBAN_VENDORS && window.DOUBAN_VENDORS.openReportModal) {
+            window.DOUBAN_VENDORS.openReportModal({
+              reportUrl: "https://www.douban.com/doulist/42193343/" || root.getAttribute('data-url'),
+              types: ["content"]
+            })
+          }
+        });
+        root.appendChild(btn);
+      })
+    })()
+  </script>
+
+  
+  <div class="doulist-interactions">
+    <div class="doulist-panel">
+        
+  
+
+
+
+
+
+
+
+    <script>
+        var rec_url = 'https://www.douban.com/share/recommend?'
+    </script>
+        <script type="text/javascript" src="https://img1.doubanio.com/f/vendors/05ffd0a0780e265c973eb54ccd3254b9deb56eaa/js/dshare.js"></script>
+
+    <div class="rec-sec">
+
+    <span class="rec">
+
+<a data-user_id="82160871" href="https://www.douban.com/share/recommend?sanity_key=_0283d&amp;apikey=&amp;object_kind=1020&amp;name=%E8%AE%A1%E7%AE%97%E6%9C%BA-%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD%E5%AE%9E%E8%B7%B5&amp;image=http%3A%2F%2Fimg2.doubanio.com%2Fdae%2Fmerged_cover%2Fimg_handler%2Fdoulist_cover%2Fround_rec%2F42193343-20151209002621&amp;target_action=0&amp;redir=https%3A%2F%2Fwww.douban.com%2Fdoulist%2F42193343%2F&amp;object_id=42193343&amp;heading=%E6%8E%A8%E8%8D%90%E5%88%B0%E8%B1%86%E7%93%A3&amp;target_type=rec&amp;btn_text=%E6%8E%A8%E8%8D%90&amp;href=https%3A%2F%2Fwww.douban.com%2Fdoulist%2F42193343%2F&amp;action_props=%7B%22doulist_title%22%3A%22%E8%AE%A1%E7%AE%97%E6%9C%BA-%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD%E5%AE%9E%E8%B7%B5%22%2C%22doulist_url%22%3A%22https%3A%5C%2F%5C%2Fwww.douban.com%5C%2Fdoulist%5C%2F42193343%5C%2F%22%7D&amp;curl=&amp;type=&amp;properties=%7B%7D&amp;desc=%E5%85%B3%E4%BA%8E%E4%B8%AA%E4%BA%BA%E5%8F%AF%E4%BB%A5%E5%AE%8C%E6%88%90%E7%9A%84%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD%E5%AE%9E%E4%BE%8B%E7%9A%84%E4%B9%A6%E7%B1%8D%EF%BC%8C%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD%E6%98%AF%E5%A4%A7%E8%B6%8B%E5%8A%BF%E3%80%82" share-id="42193343" data-mode="plain" data-name="计算机-人工智能实践" data-type="" data-desc="关于个人可以完成的人工智能实例的书籍，人工智能是大趋势。" data-href="https://www.douban.com/doulist/42193343/" data-image="https://img2.doubanio.com/dae/merged_cover/img_handler/doulist_cover/round_rec/42193343-20151209002621" data-properties="{}" data-redir="https://www.douban.com/doulist/42193343/vote?ck=dpDq" data-text="" data-apikey="" data-curl="" data-count="10" data-object_kind="1020" data-object_id="42193343" data-target_type="rec" data-target_action="0" data-action_props="{&#34;doulist_title&#34;:&#34;计算机-人工智能实践&#34;,&#34;doulist_url&#34;:&#34;https:\/\/www.douban.com\/doulist\/42193343\/&#34;}" data-btn_text="推荐" data-heading="推荐到豆瓣" data-sanity_key="_0283d" class="lnk-sharing lnk-douban-sharing">推荐</a>
+</span>
+</div>
+
+
+        
+    <div class="doulist-add-subject-btn">
+      
+
+
+
+<link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+<link rel="stylesheet" href="https://img2.doubanio.com/cuphead/sns-static/legacy/doulist/css/doulist_add_subject.3a3de.css" />
+<link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css" />
+<script src="https://img1.doubanio.com/f/vendors/3f6bfbf287470b91aacba40f0b19cb2056910f2e/js/core/do/loader.js"></script>
+<script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+
+
+<a class="lnk-doulist-add-subject"
+  data-id="42193343"
+  data-title="添加图书"
+  data-category="book"
+  data-cate-en-name="book"
+  href="javascript:void(0);">+&nbsp;添加图书</a>
+
+<script src="https://img1.doubanio.com/f/vendors/83bca8d432d48187d8a5fd37520713a02432102a/js/doulist/doulist_add_subject.js"></script>
+<script>
+  $(function(){
+    if (window.popup) {
+      $('.lnk-doulist-add-subject').trigger('click');
+    }
+  })
+</script>
+
+    </div>
+
+    </div>
+
+      <div class="doulist-admin">
+        
+  
+    <span class="doulist-followers-link-wrapper">
+      <a href="https://www.douban.com/doulist/42193343/?type=followers#main" class="doulist-followers-link">6</a>
+      <span class="doulist-followers-link-text">人关注</span>
+    </span>
+
+    <a href="https://www.douban.com/doulist/42193343/edit">修改</a>
+    <i class="doulist-admin-split"></i>
+
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="dl_sort" value="1" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="编辑顺序" title="" />
+</form>
+
+    <i class="doulist-admin-split"></i>
+
+  
+<form method="POST" action="remove" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="确定要删除吗" />
+</form>
+
+
+  <script type="text/javascript">
+    DOULIST_ID = 42193343;
+    ck ="dpDq";
+  </script>
+
+      </div>
+
+      
+  
+
+  </div>
+
+  
+  <div class="doulist-filter">
+    <a href="https://www.douban.com/doulist/42193343/" class="active">全部<span>(12)</span></a>
+        <span>·</span>
+        <a href="https://www.douban.com/doulist/42193343/?sort=time&amp;sub_type=5" class="">我没读过的书<span>(12)</span></a>
+        <span>·</span>
+        <a href="https://www.douban.com/doulist/42193343/?sort=time&amp;sub_type=6" class="">我读过的书<span>(0)</span></a>
+  </div>
+
+  
+  <div class="clearfix"></div>
+          
+  <div id="241681210" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="10750155"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/10750155/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=10750155&amp;cat=1001"
+     data-title="数学之美"
+     data-picture="https://img9.doubanio.com/view/subject/l/public/s9114855.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-10750155-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/10750155/" target="_blank">
+        <img src="https://img9.doubanio.com/view/subject/l/public/s9114855.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/10750155/" target="_blank">
+        数学之美
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar45"></span>
+            <span class="rating_nums">8.7</span>
+            <span>(13006人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: 吴军
+            <br />
+          出版社: 人民邮电出版社
+            <br />
+          出版年: 2012-5-1
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+    <div class="comment-item content" data-cid="241681210">
+      <blockquote class="comment">
+        <span>评语：</span>很有趣的机器学习科普书~
+      </blockquote>
+    </div>
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#241681210" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="241681210" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="10750155" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-12-09 00:26:21</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+        <span class="count like-count" data-count="1">(1)</span>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+          
+  <div id="236980061" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="24703171"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/24703171/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=24703171&amp;cat=1001"
+     data-title="机器学习实战"
+     data-picture="https://img2.doubanio.com/view/subject/l/public/s26696371.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-24703171-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/24703171/" target="_blank">
+        <img src="https://img2.doubanio.com/view/subject/l/public/s26696371.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/24703171/" target="_blank">
+        机器学习实战
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar40"></span>
+            <span class="rating_nums">8.0</span>
+            <span>(1322人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: Peter Harrington
+            <br />
+          出版社: 人民邮电出版社
+            <br />
+          出版年: 2013-6
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+    <div class="comment-item content" data-cid="236980061">
+      <blockquote class="comment">
+        <span>评语：</span>注重实践的一本书
+      </blockquote>
+    </div>
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#236980061" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="236980061" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="24703171" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-11-01 00:44:12</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+          
+  <div id="236947854" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="3738543"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/3738543/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=3738543&amp;cat=1001"
+     data-title="软计算"
+     data-picture="https://img1.doubanio.com/view/subject/l/public/s6023358.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-3738543-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/3738543/" target="_blank">
+        <img src="https://img1.doubanio.com/view/subject/l/public/s6023358.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/3738543/" target="_blank">
+        软计算
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar00"></span>
+            <span class="rating_nums"></span>
+            <span>(4人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: 普拉蒂哈
+            <br />
+          出版年: 2009-1
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+    <div class="comment-item content" data-cid="236947854">
+      <blockquote class="comment">
+        <span>评语：</span>很薄的书，快餐一样导论
+      </blockquote>
+    </div>
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#236947854" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="236947854" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="3738543" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-10-31 20:44:48</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+          
+  <div id="234032830" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="25881740"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/25881740/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=25881740&amp;cat=1001"
+     data-title="机器学习导论（原书第2版）"
+     data-picture="https://img2.doubanio.com/view/subject/l/public/s27276921.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-25881740-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/25881740/" target="_blank">
+        <img src="https://img2.doubanio.com/view/subject/l/public/s27276921.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/25881740/" target="_blank">
+        机器学习导论（原书第2版）
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar35"></span>
+            <span class="rating_nums">7.4</span>
+            <span>(26人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: [土耳其] Ethem Alpaydin
+            <br />
+          出版社: 机械工业出版社
+            <br />
+          出版年: 2014-4
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#234032830" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="234032830" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="25881740" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-10-12 22:35:14</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+          
+  <div id="233989690" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="26319332"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/26319332/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=26319332&amp;cat=1001"
+     data-title="人工智能：计算agent基础"
+     data-picture="https://img1.doubanio.com/view/subject/l/public/s28000969.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-26319332-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/26319332/" target="_blank">
+        <img src="https://img1.doubanio.com/view/subject/l/public/s28000969.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/26319332/" target="_blank">
+        人工智能：计算agent基础
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar00"></span>
+            <span class="rating_nums"></span>
+            <span>(8人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: [加]普尔（David L.Poole） / [加]麦克沃思 (Alan K.Mackworth)
+            <br />
+          出版社: 机械工业出版社
+            <br />
+          出版年: 2015-1-1
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+    <div class="comment-item content" data-cid="233989690">
+      <blockquote class="comment">
+        <span>评语：</span>新出的入门书~但是Agent不用的话就不用看了
+      </blockquote>
+    </div>
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#233989690" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="233989690" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="26319332" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-10-12 17:00:08</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+          
+  <div id="230858794" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="1831698"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/1831698/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=1831698&amp;cat=1001"
+     data-title="游戏编程中的人工智能技术"
+     data-picture="https://img9.doubanio.com/view/subject/l/public/s1722354.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-1831698-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/1831698/" target="_blank">
+        <img src="https://img9.doubanio.com/view/subject/l/public/s1722354.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/1831698/" target="_blank">
+        游戏编程中的人工智能技术
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar40"></span>
+            <span class="rating_nums">8.1</span>
+            <span>(80人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: 布克兰德
+            <br />
+          出版社: 清华大学出版社
+            <br />
+          出版年: 2006-5
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+    <div class="comment-item content" data-cid="230858794">
+      <blockquote class="comment">
+        <span>评语：</span>应该在游戏AI案例&#39;那本书之前看，入门性书籍，不厚
+      </blockquote>
+    </div>
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#230858794" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="230858794" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="1831698" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-09-22 11:32:23</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+          
+  <div id="230857702" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="2046630"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/2046630/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=2046630&amp;cat=1001"
+     data-title="人工智能"
+     data-picture="https://img1.doubanio.com/view/subject/l/public/s5753849.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-2046630-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/2046630/" target="_blank">
+        <img src="https://img1.doubanio.com/view/subject/l/public/s5753849.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/2046630/" target="_blank">
+        人工智能
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar40"></span>
+            <span class="rating_nums">7.6</span>
+            <span>(72人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: 耐格纳威斯基
+            <br />
+          出版社: 机械工业出版社
+            <br />
+          出版年: 2007-4
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+    <div class="comment-item content" data-cid="230857702">
+      <blockquote class="comment">
+        <span>评语：</span>高级算法书，算是入门
+      </blockquote>
+    </div>
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#230857702" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="230857702" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="2046630" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-09-22 11:24:38</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+          
+  <div id="230857514" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="1933034"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/1933034/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=1933034&amp;cat=1001"
+     data-title="人工智能"
+     data-picture="https://img9.doubanio.com/view/subject/l/public/s5788526.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-1933034-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/1933034/" target="_blank">
+        <img src="https://img9.doubanio.com/view/subject/l/public/s5788526.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/1933034/" target="_blank">
+        人工智能
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar45"></span>
+            <span class="rating_nums">8.5</span>
+            <span>(107人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: （美）卢格尔（Luger，G.F.）
+            <br />
+          出版社: 机械工业出版社
+            <br />
+          出版年: 2006-10
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#230857514" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="230857514" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="1933034" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-09-22 11:23:16</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+          
+  <div id="230855189" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="26308917"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/26308917/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=26308917&amp;cat=1001"
+     data-title="超级智能"
+     data-picture="https://img9.doubanio.com/view/subject/l/public/s28030694.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-26308917-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/26308917/" target="_blank">
+        <img src="https://img9.doubanio.com/view/subject/l/public/s28030694.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/26308917/" target="_blank">
+        超级智能
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar35"></span>
+            <span class="rating_nums">6.9</span>
+            <span>(449人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: 尼克•波斯特洛姆 (Nick Bostrom) / 尼克·博斯特罗姆
+            <br />
+          出版社: 中信出版社
+            <br />
+          出版年: 2015-1-1
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+    <div class="comment-item content" data-cid="230855189">
+      <blockquote class="comment">
+        <span>评语：</span>漫谈类书，不知道怎么样~
+      </blockquote>
+    </div>
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#230855189" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="230855189" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="26308917" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-09-22 11:07:37</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+          
+  <div id="230854703" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="26546914"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/26546914/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=26546914&amp;cat=1001"
+     data-title="科学的极致"
+     data-picture="https://img1.doubanio.com/view/subject/l/public/s28231109.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-26546914-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/26546914/" target="_blank">
+        <img src="https://img1.doubanio.com/view/subject/l/public/s28231109.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/26546914/" target="_blank">
+        科学的极致
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar40"></span>
+            <span class="rating_nums">8.1</span>
+            <span>(418人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: 集智俱乐部
+            <br />
+          出版社: 人民邮电出版社
+            <br />
+          出版年: 2015-7
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#230854703" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="230854703" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="26546914" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-09-22 11:05:55</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+          
+  <div id="230854359" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="5952531"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/5952531/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=5952531&amp;cat=1001"
+     data-title="神经网络与机器学习（原书第3版）"
+     data-picture="https://img3.doubanio.com/view/subject/l/public/s4615363.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-5952531-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/5952531/" target="_blank">
+        <img src="https://img3.doubanio.com/view/subject/l/public/s4615363.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/5952531/" target="_blank">
+        神经网络与机器学习（原书第3版）
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar40"></span>
+            <span class="rating_nums">8.4</span>
+            <span>(139人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: [加] Simon Haykin
+            <br />
+          出版社: 机械工业出版社
+            <br />
+          出版年: 2011-3
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+    <div class="comment-item content" data-cid="230854359">
+      <blockquote class="comment">
+        <span>评语：</span>经典之作
+      </blockquote>
+    </div>
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#230854359" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="230854359" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="5952531" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-09-22 11:03:42</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+          
+  <div id="230854076" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+
+  <div class="bd doulist-subject">
+      
+
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="19930152"
+     data-cate="1001"
+     data-canview="True"
+     data-url="https://book.douban.com/subject/19930152/"
+     data-isurlsubject="false"
+     data-catename="图书"
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=19930152&amp;cat=1001"
+     data-title="游戏人工智能编程案例精粹"
+     data-picture="https://img1.doubanio.com/view/subject/l/public/s22782570.jpg"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1001-19930152-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+
+    <div class="source">
+      来自：豆瓣读书
+    </div>
+    
+    <div class="post">
+      <a href="https://book.douban.com/subject/19930152/" target="_blank">
+        <img src="https://img1.doubanio.com/view/subject/l/public/s22782570.jpg"/>
+      </a>
+    </div>
+    <div class="title">
+      <a href="https://book.douban.com/subject/19930152/" target="_blank">
+        游戏人工智能编程案例精粹
+      </a>
+    </div>
+      
+        <div class="rating">
+            <span class="allstar40"></span>
+            <span class="rating_nums">8.2</span>
+            <span>(77人评价)</span>
+        </div>
+
+
+    <div class="abstract">
+      
+          作者: Mat Buckland
+            <br />
+          出版社: 人民邮电出版社
+            <br />
+          出版年: 2012-9
+    </div>
+  </div>
+  
+
+
+        
+  
+  <div class="ft">
+    <div class="comment-item content" data-cid="230854076">
+      <blockquote class="comment">
+        <span>评语：</span>适合入门思维
+      </blockquote>
+    </div>
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/42193343/#230854076" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="230854076" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1001" />
+        <input type="hidden" name="delete_id" value="19930152" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2015-09-22 11:01:47</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+
+
+  
+  <script>
+    /**
+     * @form 是表单的 jquery 对象
+     * @data 是需要验证的字符串
+     * @callback 是验证有敏感词时的回调函数
+     */
+    function checkBannedKeyword(form, data, callback){
+      $.post_withck('/j/censor', data, function(ret){
+        if (ret.ban == true) {
+           callback();
+           return false;
+        }
+        form.append('<input type="hidden" name="dl_submit" value="更新评语" />');
+        form.submit();
+      }, 'json');
+    }
+
+    $('#dl_submit').click(function(e){
+      e.preventDefault();
+      var $textarea = $('form.form-desc textarea[name=dl_comment]'),
+        data = {key: $textarea.val()};
+
+        checkBannedKeyword($('form.form-desc'), data, function(){
+          $('textarea[name=dl_comment]').parent().append($('<div style="width:360px;color:#ff3300;padding-top:10px;">你的评语中有被禁止的内容</div>'));
+      });
+    });
+
+    $('.can-play input[type=checkbox]').change(function() {
+      var $this = $(this);
+      window.location.href = $this.attr('data-url')
+    })
+  </script>
+
+  
+    
+    
+
+    
+
+
+
+
+
+        </div>
+        <div class="aside">
+                
+  
+
+
+
+
+  
+  <div class="doulist-tip mod">
+      
+    <h2>
+        什么是书单
+            &nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;
+    </h2>
+
+      <div class="intro">
+        <p>书单是收集图书的工具，创建书单后，在豆瓣看到符合书单主题的图书时可以将它放入书单，方便以后找到。</p>
+        <p>你还可以看看其他人的收集，关注你感兴趣的书单。</p>
+      </div>
+  </div>
+
+  
+    <!-- douban ad begin -->
+    <div id="dale_book_doulist_top_right"></div>
+    <!-- douban ad end -->
+
+
+
+  
+    <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/d3286d0338321a30703fd7b45f473a45b01115e9/css/ui/tag.css">
+    
+
+    <div class="tags">
+        
+    <h2>
+        这个书单的标签
+            &nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;
+    </h2>
+
+            <a href="https://www.douban.com/tag/计算机/?focus=doulist" class="tag">计算机</a>
+            <a href="https://www.douban.com/tag/人工智能/?focus=doulist" class="tag">人工智能</a>
+            <a href="https://www.douban.com/tag/软件/?focus=doulist" class="tag">软件</a>
+            <a href="https://www.douban.com/tag/算法/?focus=doulist" class="tag">算法</a>
+    </div>
+
+  
+    <p class="pl2">
+      &gt; <a href="https://www.douban.com/doulist/42193343/comments/">给这个书单留言</a>
+    </p>
+
+  
+  
+
+      
+    <h2>
+        MewX的其它豆列
+            &nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;
+            <span class="pl">&nbsp;(
+                
+                    <a href="https://www.douban.com/people/mewcatcher/doulists/all" target="_self">全部</a>
+                ) </span>
+    </h2>
+
+
+  <div class="doulist-other">
+    <ul>
+        <li>
+	    <a href="https://www.douban.com/doulist/54002196/">我的收藏</a>
+	</li>
+        <li>
+	    <a href="https://www.douban.com/doulist/45473911/">游戏购买小账本</a>
+	        <span class="pl">&nbsp;(1人关注)</span>
+	</li>
+        <li>
+	    <a href="https://www.douban.com/doulist/42193343/">计算机-人工智能实践</a>
+	        <span class="pl">&nbsp;(6人关注)</span>
+	</li>
+        <li>
+	    <a href="https://www.douban.com/doulist/3913537/">计算机-软件逆向工程</a>
+	        <span class="pl">&nbsp;(18人关注)</span>
+	</li>
+        <li>
+	    <a href="https://www.douban.com/doulist/12791625/">值得反复阅读的书</a>
+	        <span class="pl">&nbsp;(1人关注)</span>
+	</li>
+    </ul>
+  </div>
+  <br />
+
+
+
+        </div>
+        <div class="extra">
+            
+  <div id="dale_doulist_bottom"></div>
+
+        </div>
+    </div>
+</div>
+
+        
+  <div id="footer">
+    
+
+<span id="icp" class="fleft gray-link">
+    &copy; 2005-2026 douban.com, all rights reserved 北京豆网科技有限公司
+</span>
+
+<a href="https://www.douban.com/hnypt/variformcyst.py" style="display: none;"></a>
+
+<span class="fright">
+    <a href="https://www.douban.com/about">关于豆瓣</a>
+    · <a href="https://www.douban.com/jobs">在豆瓣工作</a>
+    · <a href="https://www.douban.com/about?topic=contactus">联系我们</a>
+    · <a href="https://www.douban.com/about/legal">法律声明</a>
+    · <a href="https://help.douban.com/" target="_blank">帮助中心</a>
+    · <a href="https://www.douban.com/doubanapp/">移动应用</a>
+</span>
+
+  </div>
+
+    </div>
+    
+    
+
+    <script type="text/javascript" src="https://img1.doubanio.com/misc/mixed_static/1321386ea791f962.js"></script>
+    
+    
+
+  <!-- douban ad begin -->
+  
+
+
+
+
+    
+<script type="text/javascript">
+    (function (global) {
+        var newNode = global.document.createElement('script'),
+            existingNode = global.document.getElementsByTagName('script')[0],
+            adSource = '//erebor.douban.com/',
+            userId = '82160871',
+            browserId = 'Pm_7AxF6oF0',
+            criteria = '3:/doulist/42193343/',
+            preview = '',
+            debug = false,
+            adSlots = ['dale_book_doulist_top_right', 'dale_doulist_bottom'];
+
+        global.DoubanAdRequest = {src: adSource, uid: userId, bid: browserId, crtr: criteria, prv: preview, debug: debug};
+        global.DoubanAdSlots = (global.DoubanAdSlots || []).concat(adSlots);
+
+        newNode.setAttribute('type', 'text/javascript');
+        newNode.setAttribute('src', '//img1.doubanio.com/dzRxZWkxOC9mL2FkanMvYzNiMGY1M2M4NGE4NjZiODRjMTdlMThiZGMwZGY2Nzk5YjBjYzBiNy9hZC5yZWxlYXNlLmpz?company_token=kX69T8w1wyOE-dale');
+        newNode.setAttribute('async', true);
+        existingNode.parentNode.insertBefore(newNode, existingNode);
+    })(this);
+</script>
+
+
+
+
+
+
+  <!-- douban ad end -->
+
+    
+  
+
+
+
+
+
+
+
+
+
+<script type="text/javascript">
+var _paq = window._paq || [];
+  _paq.push(['setUserId', '82160871']);
+_paq.push(['trackPageView']);
+_paq.push(['enableLinkTracking']);
+(function() {
+    var p=(('https:' == document.location.protocol) ? 'https' : 'http'), u=p+'://fundin.douban.com/';
+    _paq.push(['setTrackerUrl', u+'piwik']);
+    _paq.push(['setSiteId', '100001']);
+    var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+    g.type='text/javascript';
+    g.defer=true;
+    g.async=true;
+    g.src=p+'://img3.doubanio.com/dae/fundin/piwik.js?s=3';
+    s.parentNode.insertBefore(g,s);
+})();
+</script>
+
+<script type="text/javascript">
+var _gaq = _gaq || [];
+_gaq.push(['_setAccount', 'UA-7019765-1']);
+_gaq.push(['_setCampNameKey', 'dcn']);
+_gaq.push(['_setCampSourceKey', 'dcs']);
+_gaq.push(['_setCampMediumKey', 'dcm']);
+_gaq.push(['_setCampTermKey', 'dct']);
+_gaq.push(['_setCampContentKey', 'dcc']);
+_gaq.push(['_addOrganic', 'baidu', 'word']);
+_gaq.push(['_addOrganic', 'soso', 'w']);
+_gaq.push(['_addOrganic', '3721', 'name']);
+_gaq.push(['_addOrganic', 'youdao', 'q']);
+_gaq.push(['_addOrganic', 'so.360.cn', 'q']);
+_gaq.push(['_addOrganic', 'vnet', 'kw']);
+_gaq.push(['_addOrganic', 'sogou', 'query']);
+_gaq.push(['_addIgnoredOrganic', '豆瓣']);
+_gaq.push(['_addIgnoredOrganic', 'douban']);
+_gaq.push(['_addIgnoredOrganic', '豆瓣网']);
+_gaq.push(['_addIgnoredOrganic', 'www.douban.com']);
+_gaq.push(['_setDomainName', '.douban.com']);
+
+
+    _gaq.push(['_setCustomVar', 1, 'responsive_view_mode', 'desktop', 3]);
+
+_gaq.push(['_trackPageview']);
+_gaq.push(['_trackPageLoadTime']);
+    _gaq.push(['_setVar', '8216']);
+
+window._ga_init = function() {
+    var ga = document.createElement('script');
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    ga.setAttribute('async', 'true');
+    document.documentElement.firstChild.appendChild(ga);
+};
+if (window.addEventListener) {
+    window.addEventListener('load', _ga_init, false);
+} else {
+    window.attachEvent('onload', _ga_init);
+}
+</script>
+
+
+
+
+
+
+
+
+  <script>_SPLITTEST=''</script>
+</body>
+
+</html>
+
+

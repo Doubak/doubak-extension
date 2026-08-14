@@ -24,7 +24,9 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { profileForRoute, extractDetailLinks, extractItemPairs } from '../src/crawl/classifier.js';
+import {
+  profileForRoute, extractDetailLinks, extractItemPairs, extractPagination,
+} from '../src/crawl/classifier.js';
 import { buildRoutes } from '../src/crawl/routes.js';
 
 const fixture = (n) => readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf-8');
@@ -33,6 +35,11 @@ const INDEX = fixture('doulists-index.html');
 const WITH_COMMENTS = fixture('doulist-detail-comments.html');
 const BOOKMARKS = fixture('doulist-detail-bookmarks.html');
 const PRIVATE = fixture('doulist-detail-private.html');
+// **这两份是真实抓取到的字节**（bundle 20260814T223824Z-4b82f3），不是浏览器另存的。
+// 上面那四份是另存的，够用来校准结构；而翻页这条判据关系到「还要不要再发一个请求」，
+// 必须对着真的抓回来的东西验。
+const PAGINATED = fixture('doulist-detail-paginated.html');
+const SINGLE = fixture('doulist-detail-singlepage.html');
 
 const routes = buildRoutes({ username: 'mewcatcher' });
 const listRoute = routes.find((r) => r.key === 'doulist.list');
@@ -204,5 +211,57 @@ describe('豆列：条目里真正值钱的是评语', () => {
   test('评语与豆瓣写的简介必须分开 —— 一个是你写的，一个不是', () => {
     assert.match(WITH_COMMENTS, /<div class="abstract">/, '简介是目录数据');
     assert.ok(comments(WITH_COMMENTS)[0].length > 0, '评语是用户数据');
+  });
+});
+
+describe('豆列：翻页器决定还要不要再发一个请求', () => {
+  const profile = profileForRoute('doulist.item');
+
+  test('多页豆列：读得出「第几页 / 共几页」', () => {
+    // 真实抓取的字节：<span class="thispage" data-total-page="3">1</span>
+    assert.deepEqual(extractPagination(PAGINATED, profile), { page: 1, totalPages: 3 });
+  });
+
+  test('单页豆列没有翻页器，返回 null', () => {
+    // **null 不等于「只有一页」。** 实测 6 份豆列里单页的都没有翻页器，但那是 n=6，
+    // 不足以据此收尾——没有翻页器时退回原来的走法（走到空页为止）。
+    assert.equal(extractPagination(SINGLE, profile), null);
+  });
+
+  test('**判据取当前页的数字，不取第一页的**', () => {
+    // 一份豆列在抓取期间可以变长变短，每一页都带着它当时的总数。拿第一页的结论
+    // 去判第五页，是拿一个过期的假设当事实。所以这个函数只吃一页的 HTML，
+    // 压根没有「记住上次」的余地——这一条靠形状保证，不靠纪律。
+    const p2 = PAGINATED.replace('data-total-page="3">1<', 'data-total-page="9">7<');
+    assert.deepEqual(extractPagination(p2, profile), { page: 7, totalPages: 9 });
+  });
+
+  test('残缺或不合理的翻页器一律当没有', () => {
+    // 认不出来就退回原来的走法，而不是猜一个数——猜错的方向是**提前收尾**，
+    // 那等于静默截断。
+    assert.equal(extractPagination('<span class="thispage">1</span>', profile), null);
+    assert.equal(extractPagination('<span class="thispage" data-total-page="0">0</span>', profile), null);
+    assert.equal(extractPagination(null, profile), null);
+    assert.equal(extractPagination(PAGINATED, { paginator: undefined }), null);
+  });
+
+  test('循环在「这一页说自己是最后一页」时收尾', () => {
+    const src = readFileSync(new URL('../src/crawl/loop.js', import.meta.url), 'utf-8');
+    const fn = src.slice(src.indexOf('_enqueueNextPage('), src.indexOf('function itemTimeRange'));
+    assert.match(fn, /pg\.page >= pg\.totalPages/);
+    // **必须排在算下一页地址之前**，否则省不掉那个请求——而省掉它正是这条的全部目的。
+    assert.ok(
+      fn.indexOf('pg.page >= pg.totalPages') < fn.indexOf('const nextUrl'),
+      '这道判断要在算下一页之前',
+    );
+  });
+
+  test('**没有翻页器时不许自作主张收尾**', () => {
+    // 「没有翻页器 ⇒ 只有一页」是从 6 份豆列推出来的。这个仓库在「拿手上的样本推出
+    // 一个封闭集合」上已经错过四次，而这一次猜错的后果是每份豆列只存前 25 条，
+    // 而且不报错。
+    const src = readFileSync(new URL('../src/crawl/loop.js', import.meta.url), 'utf-8');
+    const fn = src.slice(src.indexOf('_enqueueNextPage('), src.indexOf('function itemTimeRange'));
+    assert.match(fn, /if \(pg &&/, '判断必须先确认 pg 存在');
   });
 });
