@@ -88,6 +88,23 @@ export class Exclusive {
     return this._held !== null;
   }
 
+  /**
+   * 当前持有者的**代号**；没被占则为 null。
+   *
+   * 代号本来只在内部用来分辨「放的是不是自己那把锁」。把它露出来，是因为
+   * 外面也需要问同一个问题：**我手上那一段，还是当前这一段吗？**
+   *
+   * 只靠 `stale` 回答不了。`stale` 问的是「现在这个持有者还活着吗」，而
+   * `get stale()` 以 `this._held !== null` 开头——一旦锁被放掉，它就永远是
+   * false。于是「持有者换人了」和「持有者已经放手了」这两种情况，从 `stale`
+   * 看过去与「一切正常」一模一样。代号变了就是变了，三种情况一次说清。
+   *
+   * 这不是假想的顾虑：#3 记的那次卡死正是这么来的（见 driver.js 的 `createDrive`）。
+   */
+  get gen() {
+    return this._held?.gen ?? null;
+  }
+
   /** 持有者已经多久没吭声（毫秒）。没被占则为 0。 */
   get silentMs() {
     return this._held ? this._now() - this._held.beat : 0;

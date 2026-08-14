@@ -8,23 +8,90 @@ import {
 } from '../src/crawl/driver.js';
 import { HEARTBEAT_PERIOD_MINUTES } from '../src/crawl/supervisor.js';
 
-test('失联的驱动被接管后会启动新的一段', async () => {
-  let now = 0;
-  let runs = 0;
-  const { drive, lock } = createDrive({
-    staleAfterMs: 100,
-    now: () => now,
-    run: () => {
-      runs += 1;
-      if (runs === 1) return new Promise(() => {});
-    },
+/**
+ * 「我手上这一段还是当前那一段吗」——四种情形，一个比较。
+ *
+ * 头一条是 #3 带来的回归测试（@Colafornia），复现的是真实抓取里那次卡死：
+ * 电影列表抓到 30 条之后不再推进，暂停再继续只留下 `preempted · stale_holder`
+ * 和 `resumed` 两行日志，一个请求都没有再发出去。原样保留，因为它钉住的正是
+ * 那条路径；其余三条补齐另外三种代号变化（理由见 driver.js 的 createDrive）。
+ */
+describe('createDrive：一段的身份认代号，不认「有没有 promise」', () => {
+  /** @param {{staleAfterMs?: number}} [opts] */
+  function harness({ staleAfterMs = 100 } = {}) {
+    let now = 0;
+    let runs = 0;
+    /** @type {(() => void)[]} */
+    const settle = [];
+    const made = createDrive({
+      staleAfterMs,
+      now: () => now,
+      run: () => {
+        runs += 1;
+        return new Promise((resolve) => settle.push(() => resolve(undefined)));
+      },
+    });
+    return {
+      ...made,
+      runs: () => runs,
+      advance: (ms) => { now += ms; },
+      settleAll: () => { settle.splice(0).forEach((f) => f()); },
+    };
+  }
+
+  test('失联的驱动被接管后会启动新的一段', async () => {
+    let now = 0;
+    let runs = 0;
+    const { drive, lock } = createDrive({
+      staleAfterMs: 100,
+      now: () => now,
+      run: () => {
+        runs += 1;
+        if (runs === 1) return new Promise(() => {});
+      },
+    });
+
+    void drive();
+    now = 101;
+    await lock.run('恢复抓取', () => {});
+    void drive();
+    assert.equal(runs, 2);
   });
 
-  void drive();
-  now = 101;
-  await lock.run('恢复抓取', () => {});
-  void drive();
-  assert.equal(runs, 2);
+  test('心跳重入不会再开一段 —— 重复唤醒是常态，不是冲突', async () => {
+    const h = harness();
+    const a = h.drive();
+    const b = h.drive();
+    assert.equal(h.runs(), 1, '不许因为又醒了一次就再开一段');
+    h.settleAll();
+    await Promise.all([a, b]);
+  });
+
+  test('上一段正常跑完放了锁，下一次唤醒开新的一段', async () => {
+    const h = harness();
+    const first = h.drive();
+    h.settleAll();
+    await first;
+
+    // 放锁之后 `lock.gen` 是 null。**这就是当年漏掉的那一步**：`stale` 以
+    // `_held !== null` 开头，锁一空它就永远是 false，只看它就会把上一段的
+    // promise 一直返回下去。
+    assert.equal(h.lock.gen, null);
+    const second = h.drive();
+    assert.equal(h.runs(), 2);
+    h.settleAll();
+    await second;
+  });
+
+  test('卡死但还没人抢占时，自己就会接管', () => {
+    const h = harness();
+    void h.drive();
+    assert.equal(h.runs(), 1);
+    h.advance(101); // 判死，但锁还握在那一段手里
+    void h.drive();
+    assert.equal(h.runs(), 2, '判死了就该自己抢过来重开，不能等别的操作来救');
+    h.settleAll();
+  });
 });
 
 /**
