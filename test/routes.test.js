@@ -6,6 +6,7 @@ import {
   buildUnverifiedApiRoutes,
   checkPrerequisites,
   UNRESOLVED_ROUTES,
+  UNSUPPORTED_CATEGORIES,
   PRIORITY,
 } from '../src/crawl/routes.js';
 
@@ -170,13 +171,25 @@ describe('出处必须标注', () => {
   });
 });
 
-describe('没有可用 URL 的路线单独列出', () => {
-  test('app 的列表路线仍是未知', () => {
+describe('「还没查清」与「上游没有了」必须分开列', () => {
+  test('app 记在不支持那张表里，不是未解决那张', () => {
     // 混进 buildRoutes 会让覆盖率报告出现一个永远为 0 的条目，看起来像 bug。
-    const app = UNRESOLVED_ROUTES['interest.app'];
-    assert.equal(app.source, 'unknown');
-    assert.match(app.reason, /未知/);
+    //
+    // 而混进 UNRESOLVED_ROUTES 更糟：那张表的意思是「还没查清」，于是一件已经有
+    // 定论的事会永远显得像个待办，下一个人再对着真实豆瓣查一遍——那是这个项目
+    // 最贵的一种确认。
+    assert.equal(UNRESOLVED_ROUTES['interest.app'], undefined, '它已经有定论了');
+    const app = UNSUPPORTED_CATEGORIES.app;
+    assert.ok(app, 'app 要出现在「明确不支持」那张表里');
+    assert.match(app.reason, /404/, '理由要写出实测到的现象');
+    assert.match(app.measuredAt, /^\d{4}-\d{2}-\d{2}$/, '没有日期的实测结论过两年没人敢信');
     assert.equal(routes.find((r) => r.key.includes('app')), undefined);
+  });
+
+  test('不支持不等于用户的标记就丢了 —— 理由里要说清这一点', () => {
+    // app 的标记会生成广播，而广播是照抓的。丢的只是那个已经 404 的作品页。
+    // 不写清楚的话，「不支持 app」读起来像「你的 app 标记备份不了」。
+    assert.match(UNSUPPORTED_CATEGORIES.app.reason, /广播/);
   });
 });
 
@@ -220,12 +233,11 @@ describe('做不了的路线要写清「为什么做不了」', () => {
     assert.equal(embed.pagination, undefined, '它是叶子，URL 从正文页派生');
   });
 
-  test('剩下的那条仍然写清了为什么做不了', () => {
-    // `interest.app`：URL 都不知道，得先实地发现——与 `no_sample` 是两回事。
-    const app = UNRESOLVED_ROUTES['interest.app'];
-    assert.equal(app.source, 'unknown');
-    assert.ok(app.reason.length > 40, 'reason 太短，说不清为什么做不了');
-    assert.equal(routes.find((r) => r.key.includes('app')), undefined);
+  test('未解决那张表现在是空的 —— 但它得留着', () => {
+    // 最后一条（`interest.app`）已经有定论，挪进了 UNSUPPORTED_CATEGORIES。
+    // 表空了不等于该删：下一条查不清的路线还得有地方放，而「查不清」与
+    // 「上游没有了」混成一张表之后就再也分不开了。
+    assert.deepEqual(Object.keys(UNRESOLVED_ROUTES), []);
   });
 });
 
