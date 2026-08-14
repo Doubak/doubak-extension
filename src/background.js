@@ -214,8 +214,10 @@ async function drive() {
     //
     // 抓到的数据本身没事（都落盘了），坏的只是收尾这一步。所以：停下来、
     // 写进调度镜像（心跳据此不再自动重试）、并且把话说给用户听。
+    /** @type {any} */
+    let fin;
     try {
-      await withOffscreen({ op: 'finish', status: 'complete' });
+      fin = await withOffscreen({ op: 'finish', status: 'complete' });
     } catch (err) {
       // **「已经没有进行中的抓取了」不是收尾失败。** 上面那道判断挡的是「收尾正在
       // 进行」，这里挡的是「收尾已经做完了」——同一条缝的两侧，两边都得认。
@@ -230,7 +232,9 @@ async function drive() {
       return { ...r.result, stoppedBy: FINALIZE_FAILED, finalizeError: String(err?.message ?? err) };
     }
     await getSupervisor().finishRun();
-    await notifyDone(r.result, { kv: getKv() });
+    // **把刚写好的 manifest 一起给通知。** `r.result` 里的计数只属于这一次唤醒
+    // （预算 22 秒），而通知说的是整场抓取——见 notify.js 里那段。
+    await notifyDone({ ...r.result, manifest: fin?.manifest }, { kv: getKv() });
   } else if (r.result.done && awaitingHuman) {
     // 豆瓣在拒绝我们，而不是我们抓不下来。该做的是等、降速、再试——所以走
     // `blocked` 那条路（界面上有「现在试试」按钮），不是「有几个页面抓不下来」。

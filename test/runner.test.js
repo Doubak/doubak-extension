@@ -415,6 +415,37 @@ describe('暂停 → 继续', () => {
     assert.equal(after, before, `恢复之后归零了：${before} → ${after}`);
   });
 
+  test('**恢复之后仍然知道自己接在谁后面** —— 否则一次增量把自己写成了新链的起点', async () => {
+    // 上游原来只活在 `ManifestBuilder` 里，也就是只活在**这一次**的 BundleWriter 里。
+    // 而 `resume()` 会重造一个，于是恢复之后这次抓取忘了自己是增量，收尾时写下
+    // `previous_bundle_id: null`。
+    //
+    // 这不是显示问题：下游按 `previous_bundle_id` 分链（chain.js），于是这一份与
+    // 它真正的上游被拆成两条链，而「从今天往回一直到 X 有没有断」从此答不对。
+    // **档案是冻结的**，写错了就永远错——存档里那份莫名其妙的链起点就是这么来的。
+    //
+    // 触发条件是这套架构的常态之一：offscreen 被回收，或者用户重载了扩展。
+    const PREV = '20260728T101500Z-abcdef';
+    const { runner, runStore } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), { batchSize: 2 });
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false, previousBundleId: PREV,
+    });
+    await runner.runBatch();
+
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null; // offscreen 被回收
+    await runner.resume(cp);
+
+    assert.equal(runner.status().previousBundleId, PREV,
+      '恢复之后界面已经不知道这是一次增量了');
+
+    let done = false;
+    for (let i = 0; i < 10 && !done; i++) ({ done } = await runner.runBatch());
+    const manifest = await runner.finish('complete');
+    assert.equal(manifest.previous_bundle_id, PREV,
+      '收尾时把上游丢了 —— 这份档案从此是一条链的起点，而且改不回来');
+  });
+
   test('暂停再继续，不许跳过当前这条路线的后续页', async () => {
     // 报上来的日志：
     //   04:46:16 paused

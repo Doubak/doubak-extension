@@ -124,14 +124,27 @@ export const NOTIFIED_KEY = 'doubak.notifiedReason';
 export async function notifyDone(result = {}, { kv } = {}) {
   await clearAttention({ kv });
 
-  const n = result.captured ?? 0;
+  // **数的是整份档案，不是最后那一段。**
+  //
+  // `result.captured` 来自 `driveWithinBudget`，而它只统计**这一次唤醒**里跑的那几批
+  // ——预算 22 秒。一场抓取由几十上百次唤醒接力完成，所以那个数说的是最后 22 秒，
+  // 却被写成了「抓到 N 个页面」。用户报的样子：通知说抓了 4 页，档案里躺着 29 页。
+  //
+  // 权威的数在刚写好的 manifest 里：index 有多少行，这份档案就有多少条捕获。
+  const m = result.manifest;
+  const n = m?.index?.line_count ?? result.captured ?? 0;
+  // 不是 ok 的那些（被拦下、已删除、认不出来）也在档案里，但它们不是「抓到了」。
+  // 这个数同样按整份档案算——每 22 秒报一次的失败数是纯噪音。
+  const notOk = m?.counts?.by_verdict
+    ? Object.entries(m.counts.by_verdict).reduce((a, [k, v]) => a + (k === 'ok' ? 0 : v), 0)
+    : (result.failed ?? 0);
   await show(DONE_ID, {
     title: '备份完成',
     // 提醒导出，因为**没导出之前档案不算用户的**：它挂在扩展的存储里，
     // 卸载扩展或清站点数据都会把它一次性抹掉，而且不会问一句。
     message:
       `抓到 ${n} 个页面` +
-      (result.failed ? `，${result.failed} 个失败` : '') +
+      (notOk ? `，其中 ${notOk} 条不是正常抓到的` : '') +
       '。请打开面板导出到本机文件夹：导出之前，档案仅存在于浏览器的存储中。',
   });
 }

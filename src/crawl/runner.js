@@ -463,7 +463,7 @@ export class CrawlRunner {
 
     this._run = {
       bundleId, dir, store, writer, frontier, loop, pacer, routes, session,
-      maxCaptures, capturedSoFar: 0,
+      maxCaptures, capturedSoFar: 0, previousBundleId,
     };
 
     // 指针先落盘，再写崩溃哨兵——顺序反了的话，哨兵会无处可写。
@@ -502,6 +502,20 @@ export class CrawlRunner {
         // `Map` 过 JSON 会静默变成 `{}`（offscreen 那条边界上同一个坑）。
         floors: floors ? [...floors] : null,
         floorSources: floorSources ? [...floorSources] : null,
+        // **上游也必须存在这里，理由和下界一模一样。**
+        //
+        // 它此前只活在 `ManifestBuilder` 里，也就是只活在**这一次**的 BundleWriter
+        // 里。而 `resume()` 会重造一个 BundleWriter——恢复之后那次抓取就不知道自己
+        // 接在谁后面了，收尾时写下 `previous_bundle_id: null`。
+        //
+        // 后果不是显示问题：那份档案从此**是一条链的起点**。它明明只抓了上次之后
+        // 新增的那部分，却声称自己是一次全量——下游按 `previous_bundle_id` 分链
+        // （chain.js），于是这一份与它真正的上游被拆成两条链，而「从今天往回一直到
+        // X 有没有断」这个问题从此答不对。档案是冻结的，写错了就永远错。
+        //
+        // 触发条件正是这套架构的常态之一：offscreen 被回收，或者用户重载了扩展。
+        // 抓取途中重载正是开发期最常做的事，所以这条路径远不是边角情形。
+        previousBundleId,
       });
       await this._saveCheckpoint(CRASH_SENTINEL_REASON);
     } catch (err) {
@@ -575,6 +589,8 @@ export class CrawlRunner {
       },
       startSeq: repair.lastSeq,
       resume: repair.resume,
+      // 见 `setCurrentRun` 里那段：不传的话，被恢复过的增量会把自己写成一条新链的起点。
+      previousBundleId: pointer.previousBundleId ?? null,
       // **不传这个，被恢复过的抓取就永远收不了尾**：段的 record_count 从磁盘恢复了，
       // 而 index 的计数器从零开始，`finalize()` 的交叉核对必然失败。而一场几小时的
       // 抓取必然跨越很多次 worker 死亡，也就是说正常的完整抓取一次都收不了尾。
@@ -735,6 +751,7 @@ export class CrawlRunner {
       // 对一个「调试用的兜底上限」来说这是可以接受的，但不能不写——见上。
       maxCaptures: pointer.maxCaptures ?? null,
       capturedSoFar: 0,
+      previousBundleId: pointer.previousBundleId ?? null,
     };
     this._emit({ type: 'resumed', bundleId: pointer.bundleId, lastSeq: repair.lastSeq });
     return { bundleId: pointer.bundleId };
@@ -1019,6 +1036,10 @@ export class CrawlRunner {
         lastError: it.lastError ?? null,
       })),
       bundleId,
+      // **manifest 要到收尾才写**，所以抓取途中界面无从知道这一次是不是增量。
+      // 不报的话，档案页只能按「没有 previous_bundle_id」渲染成「全量」——
+      // 那不是缺一个值，那是一句错话。
+      previousBundleId: this._run.previousBundleId ?? null,
       counts: frontier.counts(),
       intervalMs: pacer.intervalMs,
       backoffLevel: pacer.level,

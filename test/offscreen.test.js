@@ -203,6 +203,64 @@ describe('通知文案', () => {
   });
 });
 
+describe('「备份完成」报的是整份档案', () => {
+  test('**数 manifest，不数最后那一段唤醒**', async () => {
+    // 报上来的现象：通知说「抓到 4 个页面」，而档案里躺着 29 页。
+    //
+    // `driveWithinBudget` 只统计**这一次唤醒**里跑的那几批（预算 22 秒），而一场
+    // 抓取由几十上百次唤醒接力完成。那个数本身没错，错在它被当成了整场抓取的数。
+    const calls = [];
+    const g = /** @type {any} */ (globalThis);
+    const prev = g.chrome;
+    g.chrome = {
+      notifications: {
+        create: async (id, opts) => { calls.push(opts); },
+        clear: async () => {},
+      },
+      // `show()` 要用它取图标；少了它 create 会抛，而那个异常是被吞掉的 ——
+      // 于是 calls 空着，断言报的是「消息里没有那句话」，指向完全错误的方向。
+      runtime: { getURL: (x) => x },
+      action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {} },
+    };
+    try {
+      const { notifyDone } = await import('../src/ui/notify.js');
+      await notifyDone({
+        captured: 4, failed: 0,          // 最后那 22 秒
+        manifest: {
+          index: { line_count: 29 },
+          counts: { by_verdict: { ok: 27, gone: 2 } },
+        },
+      });
+      const msg = calls.at(-1)?.message ?? '';
+      assert.match(msg, /抓到 29 个页面/, `报的是最后一段唤醒的数：${msg}`);
+      assert.match(msg, /2 条不是正常抓到的/, '非 ok 的那些也该按整份档案算');
+      assert.match(msg, /导出/, '没导出之前档案不算用户的');
+    } finally {
+      g.chrome = prev;
+    }
+  });
+
+  test('没有 manifest 时退回旧的数，而不是显示 0', async () => {
+    // 收尾失败那条路径拿不到 manifest。那时候少报一点，好过报一个 0——
+    // 「抓到 0 个页面」会让人以为整场抓取白跑了。
+    const calls = [];
+    const g = /** @type {any} */ (globalThis);
+    const prev = g.chrome;
+    g.chrome = {
+      notifications: { create: async (id, o) => { calls.push(o); }, clear: async () => {} },
+      runtime: { getURL: (x) => x },
+      action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {} },
+    };
+    try {
+      const { notifyDone } = await import('../src/ui/notify.js');
+      await notifyDone({ captured: 7 });
+      assert.match(calls.at(-1)?.message ?? '', /抓到 7 个页面/);
+    } finally {
+      g.chrome = prev;
+    }
+  });
+});
+
 describe('通知去重', () => {
   test('同一个原因只弹一次', async () => {
     // 心跳每 30 秒醒一次，每次都会重新判断「该不该恢复」。不去重的话同一件事每
