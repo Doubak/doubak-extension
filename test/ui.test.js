@@ -527,8 +527,28 @@ describe('面板脚本', () => {
     assert.match(html, /id="vanished"/);
     const js = readPanelSourceSync();
     assert.match(js, /function renderVanished\(\)/);
-    // 它由 renderCaptures 调用——两者共用同一份已加载的 index，不另开一条读取路径
-    assert.match(js, /renderVanished\(\);[\s\S]{0,200}\$\('captures'\)/);
+
+    // 两者共用同一份已加载的 index，不另开一条读取路径。
+    //
+    // 原来这条判据钉的是「`renderVanished()` 之后 200 个字符内出现 `$('captures')`」
+    // ——也就是钉住了「它俩在同一个函数里、挨着写」。那个函数后来被拆开了（捕获
+    // 列表收到按钮后面，而「已删除」必须一直看得见），判据就跟着红了，尽管它想说
+    // 的那件事一点没变。**钉行为，别钉排版。**
+    const fn = js.slice(js.indexOf('function renderVanished'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    assert.match(body, /entries\.filter/, '要用已经读好的 index');
+    assert.equal(/new BundleReader|reader\.index\(\)/.test(body), false,
+      '不许自己再读一遍 index —— 那就是第二条读取路径');
+
+    // 而且它**不跟着捕获列表收起来**：整份档案里最不可替代的就是「豆瓣上已经没有了」
+    // 的那几条，收起来之后它只剩「判定分布」里的一个数字。
+    const open = js.slice(js.indexOf('async function openBundle'));
+    const openBody = open.slice(0, open.indexOf('\n}\n'));
+    const vanishedAt = openBody.indexOf('renderVanished()');
+    const gated = openBody.indexOf('if (capturesOpen)');
+    assert.ok(vanishedAt > 0, 'openBundle 里没有画「已删除」那一块');
+    assert.ok(gated > 0, '找不到收起/展开那道判断，这条判据失去了意义');
+    assert.ok(vanishedAt < gated, '「已删除」被收到「翻看捕获」后面去了');
   });
 
   test('**档案只有一份清单** —— 导入、导出、删除、占用都在档案页', async () => {
@@ -687,6 +707,61 @@ describe('面板脚本', () => {
     assert.ok(rule, 'CSS 里没有 .btn-row');
     assert.match(rule[1], /display: flex/);
     assert.match(rule[1], /gap: var\(--s\d\)/);
+
+    // **写死在 HTML 里的那些按钮，上面那段一个都看不见** —— 它顺的是 JS 变量。
+    // 档案页的四个（导出这一份 / 导出整条链 / 验一验 / 删除这一份）就是裸着的：
+    // 标签之间的换行塌成一个词间空格，看起来「有点缝」，于是没人当成毛病。
+    // 所以这里换一种数法：数嵌套。
+    // 判据是**紧挨着**，不是「同一个父元素里有两个」：调试页的「打开自检页」与
+    // 「打开详细日志」同属一个 <section>，中间隔着标题和说明块，各自单独成行——
+    // 按数量算会把它们判成一排，而那种误报正是上面那半段栽过的跟头。
+    const bare = [];
+    let found = 0;
+    {
+      const src = html.replace(/<!--[\s\S]*?-->/g, '');
+      const VOID = new Set(['br', 'img', 'input', 'meta', 'link', 'hr']);
+      /** @type {{ tag: string, at: number }[]} */
+      const stack = [];
+      /** @type {{ parent: number, from: number, to: number }[]} 每个 .act 按钮 */
+      const acts = [];
+      for (const m of src.matchAll(/<(\/?)([a-z][\w-]*)([^>]*)>/g)) {
+        const [, slash, tag, attrs] = m;
+        if (slash) { while (stack.length && stack.pop().tag !== tag); continue; }
+        if (VOID.has(tag) || attrs.endsWith('/')) continue;
+        if (tag === 'button' && /\bclass="[^"]*\bact\b/.test(attrs) && stack.length) {
+          const close = src.indexOf('</button>', m.index);
+          acts.push({ parent: stack[stack.length - 1].at, from: m.index, to: close + 9 });
+        }
+        stack.push({ tag, at: m.index });
+      }
+      const rows = new Set();
+      for (let i = 1; i < acts.length; i += 1) {
+        const [a, b] = [acts[i - 1], acts[i]];
+        // 同一个爹，而且两者之间只有空白 —— 那它们会落在同一行上
+        if (a.parent === b.parent && src.slice(a.to, b.from).trim() === '') rows.add(a.parent);
+      }
+      found = rows.size;
+      for (const at of rows) {
+        const open = /<[a-z][\w-]*[^>]*>/.exec(src.slice(at))[0];
+        if (!/class="[^"]*\bbtn-row\b/.test(open)) bare.push(open);
+      }
+    }
+    assert.ok(found >= 2, `只数到 ${found} 处并排按钮，这个扫描八成坏了`);
+    assert.deepEqual(bare, [], `HTML 里这些容器并排放了按钮却没挂 .btn-row：\n${bare.join('\n')}`);
+  });
+
+  test('「翻看捕获」要与上下两段分开 —— 它是门，不是其中一段的一部分', async () => {
+    // 这里原来是 `<h2>捕获列表</h2>`。标题自带上留白，把「这一份档案的详情」与
+    // 「逐条核对字节」分成两段；换成按钮之后那点留白一起没了，于是它紧贴着上面的
+    // 操作结果和下面的捕获区，看起来像属于其中某一段。
+    const html = await readRepoFile('src/ui/panel.html');
+    const css = await readRepoFile('src/ui/panel.css');
+    assert.match(html, /id="captures-bar"[^>]*class="[^"]*\bbtn-row\b/,
+      '那一条要挂 btn-row（并排按钮的缝由它给）');
+    const rule = /#captures-bar \{([^}]*)\}/.exec(css);
+    assert.ok(rule, 'CSS 里没有 #captures-bar');
+    assert.match(rule[1], /border-top/, '要有一条分界线，光靠 margin 看不出这是两段');
+    assert.match(rule[1], /margin-top: var\(--s\d\)/);
   });
 
   test('**每个选项都说清它跳过什么** —— 跳过是这里唯一看不见的动作', async () => {
@@ -1103,7 +1178,7 @@ describe('面板脚本', () => {
 
   test('判定只在不是 ok 时显示 —— 一整列「正常」是噪音', async () => {
     const js = readPanelSourceSync();
-    const fn = js.slice(js.indexOf('function renderCaptures'), js.indexOf('function captureTitle'));
+    const fn = js.slice(js.indexOf('function renderCaptureList'), js.indexOf('function captureTitle'));
     assert.match(fn, /e\.verdict === 'ok'/);
   });
 
@@ -1150,7 +1225,10 @@ describe('面板脚本', () => {
     // 两条路径就是两个真相来源：没去过档案页时覆盖率看到的可能是另一份档案；
     // 删掉档案之后选中的 id 还指着一个不存在的目录。
     const js = readPanelSourceSync();
-    const openBundleFn = js.slice(js.indexOf('async function openBundle'), js.indexOf('function renderCaptures'));
+    // 切到这个函数自己的末尾，不要切到「下一个函数的名字」——那种切法会在下一次
+    // 改名或挪动顺序时静默地扩大或缩小范围。
+    const open = js.slice(js.indexOf('async function openBundle'));
+    const openBundleFn = open.slice(0, open.indexOf('\n}\n'));
     assert.equal(openBundleFn.includes('renderCoverage'), false, '档案页不该顺手渲染覆盖率');
 
     const loadCov = js.slice(js.indexOf('async function loadCoverage'), js.indexOf('function renderCoverage'));

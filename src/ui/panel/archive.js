@@ -7,7 +7,7 @@
 
 import { BundleReader } from '../../bundle/bundle-reader.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
-import { bundleDirName } from '../../core/ids.js';
+import { bundleDirName, bundleIdTime } from '../../core/ids.js';
 import { captureTitle, captureSubtitle, subjectLabel } from '../capture-label.js';
 import { bundlePicker } from '../components.js';
 import { routeName } from '../route-names.js';
@@ -15,6 +15,15 @@ import {
   $, send, bytes, table, verdictName, STATUS_NAMES, VERDICT_NAMES,
   getOpfsWorker, getLastStatus, scanBundleDirs,
 } from './shared.js';
+
+/**
+ * 捕获检查器是不是展开着。
+ *
+ * **跨档案保留**：逐条核对字节的人一定会连着看好几份，每换一份都收回去，就等于
+ * 每换一份都要再点一次。模块级变量而不是每次渲染重算——它是用户的选择，不是
+ * 从数据推出来的状态。
+ */
+let capturesOpen = false;
 
 /** @type {BundleReader | null} */
 export let reader = null;
@@ -98,10 +107,14 @@ export async function loadArchive() {
     return;
   }
 
-  const active = getLastStatus()?.runner?.bundleId ?? getLastStatus()?.checkpoint?.bundle_id ?? null;
+  const st = getLastStatus();
+  const active = st?.runner?.bundleId ?? st?.checkpoint?.bundle_id ?? null;
   const ids = scan.map((d) => d.bundleId);
 
-  renderBundlePicker(await describeBundles(scan, active));
+  // 正在抓的那一份没有 manifest，上游只能从 runner 的状态里拿。
+  // runner 不在（只有 checkpoint、offscreen 还没起来）时它是 undefined ——
+  // **那是「还不知道」，不是「没有上游」**，两者在选择器里长得不一样。
+  renderBundlePicker(await describeBundles(scan, active, st?.runner?.previousBundleId));
   if (ids.length === 0) {
     currentBundleId = null;
     $('archive-summary').className = 'muted';
@@ -155,9 +168,11 @@ function renderBundlePicker(items) {
  * 目录清单与 manifest 由 `scanBundleDirs()` 统一读一遍（存储占用那一行也用同一份）
  * ——同一次打开页面扫两遍盘是没有理由的，而两处扫描还意味着两处要各自记得失效。
  *
- * @param {Awaited<ReturnType<typeof scanBundleDirs>>} scan @param {string|null} active
+ * @param {Awaited<ReturnType<typeof scanBundleDirs>>} scan
+ * @param {string|null} active
+ * @param {string|null|undefined} livePrevious  正在抓的那一份的上游（manifest 还没写）
  */
-async function describeBundles(scan, active) {
+async function describeBundles(scan, active, livePrevious) {
   /** @type {Record<string, string|null>} */
   let exportedAt = {};
   try {
@@ -179,13 +194,61 @@ async function describeBundles(scan, active) {
       item.at = manifest.created_at ?? manifest.started_at ?? null;
       item.previous = manifest.previous_bundle_id ?? null;
       item.captures = manifest.index?.line_count ?? manifest.counts?.captures ?? null;
+    } else if (item.live) {
+      // 抓着的那一份：上游从 runner 拿。`undefined` 留着不动 —— 见 components.js，
+      // 「还不知道」与「全量」是两行不同的字。
+      item.previous = livePrevious;
     }
+    // **manifest 是收尾时才写的，所以正在抓的那一份没有时间。**
+    //
+    // 少了它，下面那句排序会把它当成空字符串——比任何真实时间都小，于是**新的
+    // 那一份沉到最底下**。十七份档案、侧栏还是 70vh 带滚动条，它就落在看不见的
+    // 地方；而右边偏偏默认打开的就是它（`loadArchive()` 优先选 active）。
+    // 用户看到的是「右边显示着一份抓取中的档案，左边整张列表里找不到它」，
+    // 于是合理地判断成「列表没刷新」——而列表其实是新的，只是顺序把它藏了。
+    //
+    // 退路不是猜，是**同一个时刻的另一种写法**：`bundle_id` 的前缀就是创建时刻
+    // （`newBundleId(now)` 生成），而 `bundle-writer.js` 写 `created_at` 时用的
+    // 也正是 `bundleIdTime(bundleId)`。所以这两条路给出的是同一个数。
+    item.at ??= bundleIdTime(id)?.toISOString() ?? null;
     out.push(item);
   }
   // 新的在上。**按时间排，不按目录名排**——目录名恰好也是时间序，但那是巧合，
   // 不是可以依赖的性质。
-  out.sort((a, b) => ((a.at ?? '') < (b.at ?? '') ? 1 : -1));
+  //
+  // **比的是时刻，不是字符串。** RFC 3339 允许带时区偏移，而 manifest 里写的正是
+  // 本地偏移（实测一份真档案：`2026-08-02T22:48:02+10:00`）。按字符串比，
+  // 那一刻会被判成晚于 `2026-08-02T13:00:00Z`——而它其实早了 12 分钟。
+  // 同一台机器上换个时区、或者跨一次夏令时，列表顺序就会悄悄错乱。
+  // 认不出来的排在最后：没有时间是一种未知，不是「很早以前」。
+  const ms = (x) => { const t = Date.parse(x?.at ?? ''); return Number.isNaN(t) ? -Infinity : t; };
+  out.sort((a, b) => ms(b) - ms(a));
   return out;
+}
+
+/**
+ * 让「翻看捕获」这个按钮说出它现在是什么状态。
+ *
+ * 按钮上带条数：**收起来的东西也要能被数出来**——否则「这份档案里有多少条」
+ * 就只能靠展开一次才知道，而那正是这个按钮想省掉的动作。
+ */
+function syncCapturesToggle() {
+  const btn = $('captures-toggle');
+  const sec = $('captures-section');
+  btn.disabled = !entries.length;
+  btn.setAttribute('aria-expanded', String(capturesOpen));
+  sec.hidden = !capturesOpen;
+  const n = entries.length ? `（${entries.length.toLocaleString('zh-CN')} 条）` : '';
+  btn.textContent = (capturesOpen ? '收起捕获' : '翻看捕获') + n;
+}
+
+/** 绑「翻看捕获」。展开时才第一次渲染，收起来不清空——再展开是免费的。 */
+export function initCapturesToggle() {
+  $('captures-toggle').addEventListener('click', () => {
+    capturesOpen = !capturesOpen;
+    syncCapturesToggle();
+    if (capturesOpen) renderCaptureList();
+  });
 }
 
 /** @param {boolean} on */
@@ -300,7 +363,20 @@ export async function openBundle(bundleId) {
     setArchiveButtons(true);
     // **不在这里渲染覆盖率。** 那会是第二条路径，也就是第二个真相来源——覆盖率页
     // 自己有加载器，切过去时会从同一处读。
-    renderCaptures();
+    //
+    // 「已经没有了」的那几条与链上的差异**不跟着捕获列表收起来**。
+    //
+    // 它们原来长在 `renderCaptures()` 里，而那个函数其实在做三件互不相干的事。
+    // 一起收起来的话，整份档案里最不可替代的那点信息（豆瓣上已经删掉的条目）
+    // 就只剩「判定分布」里的一个数字——而 panel.html 里那条注释写的正是它不该
+    // 只以一个数字出现。
+    renderVanished();
+    void loadChainDiff();
+
+    // 捕获列表本身收起来时不画：那是五百个 DOM 节点，每换一份档案重画一遍。
+    // **收起来的东西不该继续付钱。**
+    syncCapturesToggle();
+    if (capturesOpen) renderCaptureList();
   } catch (e) {
     summaryEl.className = 'card err';
     summaryEl.textContent = `读不出这个档案：${e.message}`;
@@ -467,13 +543,7 @@ function renderVanished() {
  * 扔掉之后再想知道就得把记录取出来解压、再跑一遍选择器——而豆瓣改版之后那些选择器
  * 可能已经对不上了。
  */
-function renderCaptures() {
-  // 「已经没有了」的那几条单独列一块。**捕获列表只渲染前 500 行**，而真实档案有
-  // 3347 条——那 8 条 gone 排在后面，在列表里根本画不出来。
-  renderVanished();
-  // 链上的差异（新增 / 又抓了一次）与版本历史。异步，拿到之后就地补标。
-  void loadChainDiff();
-
+function renderCaptureList() {
   const el = $('captures');
   el.replaceChildren();
   el.className = '';
@@ -613,4 +683,5 @@ export function resetArchive() {
   entries = [];
   currentBundleId = null;
   summaryCache = null;
+  capturesOpen = false;
 }

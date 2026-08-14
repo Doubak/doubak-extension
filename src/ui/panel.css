@@ -210,6 +210,8 @@ button.act.primary:hover:not(:disabled) { filter: brightness(1.06); color: #fff;
 /* 不可逆的操作要看起来不一样。用边框而不是填充色：填充的红按钮在一排按钮里
    反而最抢眼，会把人往那儿引——而它恰恰是最不该被误点的那个。 */
 button.act.danger { color: var(--tone-error); border-color: var(--tone-error); }
+/* 图标按钮：一个字符宽，与文字按钮同高（padding 上下照旧，左右收窄）。 */
+button.act.icon { padding: var(--s2) var(--s2); line-height: 1; min-width: 2em; }
 .buttons { display: flex; gap: var(--s2); flex-wrap: wrap; margin-bottom: var(--s3); }
 
 /* ── 档案选择列表 ─────────────────────────────────────────────────── */
@@ -300,11 +302,29 @@ button.act.danger { color: var(--tone-error); border-color: var(--tone-error); }
 }
 .with-aside > aside .picker { margin-bottom: 0; }
 .aside-main { min-width: 0; }
+/* 那一排按钮下面紧跟着导出/校验的结果卡，而卡片只有下外边距。 */
+.aside-main > .btn-row { margin-bottom: var(--s3); }
 /* 窄窗口下退回上下排，且列表不再吃掉一屏。 */
 @media (max-width: 860px) {
   .with-aside { grid-template-columns: 1fr; }
   .with-aside > aside { position: static; max-height: 40vh; }
 }
+
+/* 「翻看捕获」那一条。
+ *
+ * **它是一条分界线，不是一个按钮。** 这里原来是 `<h2>捕获列表</h2>`，标题自带
+ * 24px 的上留白，把「这一份档案的详情」和「逐条核对字节」分成两段。换成按钮之后
+ * 那点留白一起没了，于是它紧贴着上面的操作结果、下面的捕获区，看起来像是属于
+ * 其中某一段——而它恰恰是两段之间的门。
+ *
+ * 所以补的不是 margin 而是分界：一条上边框 + 两侧的呼吸。
+ */
+#captures-bar {
+  margin-top: var(--s6);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+}
+#captures-section { margin-top: var(--s4); }
 
 /* 侧栏里空间窄，选择器换成两行排布 */
 .with-aside .picker-row { grid-template-columns: 1fr auto; gap: 2px var(--s2); }
@@ -316,10 +336,10 @@ button.act.danger { color: var(--tone-error); border-color: var(--tone-error); }
 
    占用那行字**跟着按钮走，不另起一行**：它说的正是「清空全部」会删掉什么，
    而分成两行会让人先看到按钮、后看到代价。 */
-#library-bar {
-  display: flex; align-items: center; gap: var(--s3);
-  flex-wrap: wrap; margin-bottom: var(--s3);
-}
+   缝隙由 `.btn-row` 给（这一条也挂着它），这里只补它自己那份：与下面拉开。
+   写死过一次 `gap: var(--s3)`，于是「导入档案… / 清空全部」比别处宽 4px ——
+   一处按钮排布只能有一个出处，否则差值小到没人会去查，只会觉得哪里不对。 */
+#library-bar { margin-bottom: var(--s3); }
 /* 占用那行字占满剩下的空间并靠右，于是「导入」永远在最左边 —— 换过机器的用户
    打开这一页时，那是他要找的东西。 */
 #library-bar #storage { margin-left: auto; text-align: right; }

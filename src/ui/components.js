@@ -169,7 +169,15 @@ export function bundlePicker({ items, selected, onPick, fmtBytes }) {
     row.append(span('when', it.at ? humanTime(it.at) : '时间不详'));
 
     // 这一份是怎么来的。增量要说清接在谁后面：链断了的话这里就看得出来。
-    row.append(span('rel', it.previous ? `增量 ← ${shortId(it.previous)}` : '全量'));
+    //
+    // **三种状态，不是两种。** `previous_bundle_id` 写在 manifest 里，而 manifest
+    // 要到收尾才写——所以正在抓的那一份读不出上游。原来的写法把「读不出来」和
+    // 「没有上游」合成一个假值，于是一次正在跑的增量被标成「全量」：那不是缺一个
+    // 值，那是一句错话，而且正好错在用户最会盯着看的那一行上。
+    row.append(span('rel',
+      it.previous ? `增量 ← ${shortId(it.previous)}`
+        : it.previous === null ? '全量'
+          : '还不知道'));
 
     const facts = [];
     if (it.captures != null) facts.push(`${it.captures.toLocaleString('zh-CN')} 条`);

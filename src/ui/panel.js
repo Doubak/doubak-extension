@@ -36,7 +36,7 @@
 import { $, resetShared } from './panel/shared.js';
 import { renderAbout } from './panel/help.js';
 import { refresh, resetOverview } from './panel/overview.js';
-import { loadArchive, resetArchive } from './panel/archive.js';
+import { loadArchive, resetArchive, initCapturesToggle } from './panel/archive.js';
 import { loadCoverage } from './panel/coverage.js';
 import { loadLog, initLog, resetLog } from './panel/log.js';
 import { loadDebug, resetDebug } from './panel/debug.js';
@@ -86,6 +86,7 @@ resetImport();
 initExport();
 initImport();
 initStorage();
+initCapturesToggle();
 initLog();
 initDebugToggle();
 

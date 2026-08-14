@@ -76,10 +76,14 @@
 
       <!-- 整批的操作与占用。**导入摆在最上面**：换了机器、清过数据的用户打开这一页时，
            下面的清单是空的，而他要找的正是这个按钮。 -->
-      <div id="library-bar">
+      <div id="library-bar" class="btn-row">
         <button class="act" id="import">导入档案…</button>
         <button class="act danger" id="delete-all">清空全部</button>
         <span id="storage" class="muted small">正在统计…</span>
+        <!-- 重扫。**这不是主路径**：清单该失效的时候会自己失效（见 overview.js 里
+             那两处判据）。它是留给判据没覆盖到的情形的——从别的地方动了 OPFS、
+             或者我们哪天又漏了一种时机。所以是个小图标，不是一个按钮。 -->
+        <button class="act icon" id="rescan" title="重新扫描存储" aria-label="重新扫描存储">↻</button>
       </div>
       <div id="import-result"></div>
       <div id="storage-result"></div>
@@ -96,12 +100,17 @@
       <!-- 两个导出都建**各自的子目录**（doubak-bundle-<编号>）。平铺的话每份的
            manifest.json 与 README.txt 会互相覆盖，用户的下载目录里就只剩最后一次
            导出的那一份。 -->
-      <button class="act" id="export" disabled>导出这一份</button>
-      <button class="act" id="export-chain" disabled>导出整条链</button>
-      <button class="act" id="verify" disabled>验一验（逐条取出并解压）</button>
-      <!-- 删除放在这里，是因为**这里才有上下文**：你刚看过它有多少条、多大、
-           导出过没有。上面那个「清空全部」是批量视角，两个都要。 -->
-      <button class="act danger" id="delete-this" disabled>删除这一份</button>
+      <!-- 并排的按钮一律装进 `.btn-row`。写在 HTML 里的这四个曾经是裸的：
+           标签之间的换行塌成一个词间空格（约 4px），既不等于别处的 8px，
+           也会随字号变——「看起来差不多」正是这类毛病能躺很久的原因。 -->
+      <div class="btn-row">
+        <button class="act" id="export" disabled>导出这一份</button>
+        <button class="act" id="export-chain" disabled>导出整条链</button>
+        <button class="act" id="verify" disabled>验一验（逐条取出并解压）</button>
+        <!-- 删除放在这里，是因为**这里才有上下文**：你刚看过它有多少条、多大、
+             导出过没有。上面那个「清空全部」是批量视角，两个都要。 -->
+        <button class="act danger" id="delete-this" disabled>删除这一份</button>
+      </div>
       <div id="export-result"></div>
       <div id="verify-result"></div>
       <!-- 「豆瓣上已经没有了」的那几条。整份档案里最不可替代的信息，
@@ -112,10 +121,25 @@
       <div id="versions"></div>
         </div>
       </div>
-      <h2>捕获列表</h2>
-      <div class="split">
-        <div id="captures" class="muted">选一个档案后显示</div>
-        <div id="preview" class="muted">从左边选一条查看原始内容</div>
+      <!-- 捕获检查器：**默认收起来**。
+           这一页原来有三张各自能滚的列表（档案清单、捕获列表、原文预览），一屏
+           之内三个滚动条，而其中两个属于同一件事：逐条核对字节。那件事是规范承诺
+           第三方可以走的路径，重要，但**不是每天要做的事**——日常路径是「挑一份、
+           看它有多少、导出去」。收起来之后这一页只剩一张列表。
+           展开状态跨档案保留：正在逐条核对的人一定会连着看好几份，每换一份都收
+           回去就等于每换一份都要再点一次。 -->
+      <div id="captures-bar" class="btn-row">
+        <button class="act" id="captures-toggle" aria-expanded="false"
+                aria-controls="captures-section" disabled>翻看捕获</button>
+      </div>
+      <div id="captures-section" hidden>
+        <div class="hint">
+          逐条从段文件里取出并解压，不依赖任何声明。这正是规范承诺第三方可以走的那条路径。
+        </div>
+        <div class="split">
+          <div id="captures" class="muted">选一个档案后显示</div>
+          <div id="preview" class="muted">从左边选一条查看原始内容</div>
+        </div>
       </div>
     </section>
 

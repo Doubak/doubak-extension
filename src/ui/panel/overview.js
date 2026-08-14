@@ -184,6 +184,21 @@ export async function refresh() {
   const s = await send({ type: 'status' });
   setLastStatus(s);
 
+  // **一次抓取开始，就多出一个目录。**
+  //
+  // `showLastRun()` 里那条同样的判据只在回到空闲时跑，管的是「刚抓完的那一份」。
+  // 而目录是**开工那一刻**就建好的：抓取跑着的几个小时里，档案页左边那份清单
+  // 一直是开工之前的样子，上面那行占用却已经把它算进去了——于是「17 份」配着
+  // 一张 16 行的清单，两个数出自同一次扫描的两个时刻。
+  //
+  // 判据仍然是数据：正在抓的那一份缓存认不认识。认识就什么都不做，所以这一句
+  // 每两秒跑一次也只会真正触发一次。
+  const live = s?.runner?.bundleId ?? s?.checkpoint?.bundle_id ?? null;
+  if (live && !bundleScanKnows(live)) {
+    invalidateStorageUsage();
+    void refreshOpenTab();
+  }
+
   if (!s?.ok) {
     setState('err', '连不上后台', s?.error ?? '');
     setActions([['重试', refresh]]);

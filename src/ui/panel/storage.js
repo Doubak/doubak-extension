@@ -18,6 +18,7 @@ import { summarizeBundles, checkDeletable, totalBytes } from '../../storage/stor
 import {
   $, send, bytes,
   getStorageUsage, setStorageUsage, scanBundleDirs, invalidateBundleScan, getLastStatus,
+  invalidateStorageUsage,
 } from './shared.js';
 import {
   loadArchive, invalidateBundles, setArchiveButtons, clearSelection, currentBundleId,
@@ -185,6 +186,23 @@ function setStorageResult(cls, text) {
 /** 绑事件。 */
 export function initStorage() {
   $('delete-all').addEventListener('click', deleteAll);
+
+  // 重扫：**把缓存扔掉再画一遍**，不是「再渲染一次」——后者会拿同一份陈旧数据
+  // 重画出同样的东西，而按钮按下去毫无变化正是最让人不信任的一种反馈。
+  //
+  // 直接叫 `loadArchive()`，不走 `refreshOpenTab()`：这个按钮**只长在档案页上**，
+  // 所以「现在开着哪一页」不是个问题——去问它只会引入一个只可能答错的依赖。
+  $('rescan').addEventListener('click', async () => {
+    const btn = $('rescan');
+    btn.disabled = true;
+    try {
+      invalidateStorageUsage();
+      await loadStorage();
+      await loadArchive();
+    } finally {
+      btn.disabled = false;
+    }
+  });
 
   $('delete-this').addEventListener('click', async () => {
     if (!currentBundleId) return;
