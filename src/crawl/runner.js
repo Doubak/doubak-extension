@@ -769,6 +769,20 @@ export class CrawlRunner {
     // 「另一头正在收尾」是 MV3 下的常态（心跳与界面各叫一次 drive），不是故障。
     if (this._finishing) return { ...NO_WORK, finishing: true };
 
+    // **同一时刻只许有一批。**
+    //
+    // 到这里为止，「不会有两批并行」全靠上面那把锁——而锁恰恰是刚出过问题的地方
+    // （#3：被抢占的那一段并不会自己消失）。驱动层现在会让被顶掉的那一圈在批次
+    // 边界退出，但那是**协作式**的：它得先跑回边界。真在这中间又有人叫一次
+    // `runBatch`，两批就会消费同一个 frontier、写同一个写入器。
+    //
+    // 与其指望上游守规矩，不如在这儿让它不可能发生。等它，然后如实说这一段什么
+    // 都没干——和上面收尾那条同一个形状，调用方已经会处理。
+    if (this._batch) {
+      await this._batch.catch(() => {});
+      return { ...NO_WORK, done: false };
+    }
+
     const p = this._runOneBatch();
     this._batch = p;
     try {

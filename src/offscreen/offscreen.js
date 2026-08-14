@@ -70,14 +70,13 @@
 
 import { CrawlRunner } from '../crawl/runner.js';
 import { RunStore } from '../crawl/run-store.js';
-import { driveWithinBudget } from '../crawl/driver.js';
+import { createDrive, driveWithinBudget } from '../crawl/driver.js';
 import { MemoryKvStore } from '../storage/kv-store.js';
 import { IdbKvStore } from '../storage/idb-kv-store.js';
 import { appendEvent } from '../crawl/event-log.js';
 import { WorkerFileStore } from '../storage/worker-file-store.js';
 import { dryRunFetch } from '../crawl/dry-run.js';
 import { OFFSCREEN_TARGET } from './protocol.js';
-import { Exclusive } from '../crawl/exclusive.js';
 import { BundleReader } from '../bundle/bundle-reader.js';
 import { bundleIdFromDirName, bundleDirName } from '../core/ids.js';
 import { makeDebugLog, loadDebugFlag } from '../core/debug-log.js';
@@ -450,7 +449,17 @@ function relayEvent(e) {
  *
  * 抓取全都在这一个 document 里跑，所以这一个锁就够——不需要跨上下文的协调。
  */
-const lock = new Exclusive({
+const { drive, lock } = createDrive({
+  run: ({ stillMine }) => driveWithinBudget({
+    runner: getRunner(),
+    // 被判死并抢占之后，这一圈在下一个批次边界自己退出——否则它和接管它的那一段
+    // 会同时消费一个 frontier。见 driver.js 里那段说明。
+    stillMine,
+    onEvent: (e) => {
+      lock.touch();
+      debugLog('驱动', e.type);
+    },
+  }),
   onPreempt: ({ name, silentMs }) => {
     // 抢占意味着上一段真的卡死了。**必须留下痕迹**——静默夺锁会把「抓取卡了
     // 20 分钟」变成一件谁也不知道发生过的事。
@@ -461,39 +470,6 @@ const lock = new Exclusive({
     relayEvent({ type: 'preempted', reason: 'stale_holder', message: msg, silentMs });
   },
 });
-
-/** 正在推进的那一段，挡住同一件事的重入。 */
-let driving = null;
-
-async function drive() {
-  // 心跳可能在上一段还没跑完时又来一次。这里返回**同一个** promise 而不是报错：
-  // 重复唤醒是 MV3 的常态，不该被当成冲突。
-  //
-  // **但卡死的那一段不能一直被返回。** 它的 `.finally()` 永远不会执行，于是
-  // `driving` 永远不为空——此后每一次心跳都拿到同一个永不结算的 promise，
-  // 看起来像「在跑」，实际上一页都不会再抓。锁那边判死了，这里也得跟着放手，
-  // 否则抢占出来的锁没人去用。
-  if (driving && !lock.stale) return driving;
-  if (driving) driving = null;
-
-  const mine = lock
-    .run('抓取', () =>
-      driveWithinBudget({
-        runner: getRunner(),
-        onEvent: (e) => {
-          lock.touch();
-          debugLog('驱动', e.type);
-        },
-      }))
-    // **只清自己那一份。** 被判死的那一段万一晚一步醒过来，无条件清空会把
-    // 正在跑的这一段的记号抹掉，于是下一次心跳又开一段——两段并行，正好是
-    // 这里要防的事。与锁那边看代号是同一个道理。
-    .finally(() => {
-      if (driving === mine) driving = null;
-    });
-  driving = mine;
-  return driving;
-}
 
 /**
  * 演练：真实链路、零网络请求。

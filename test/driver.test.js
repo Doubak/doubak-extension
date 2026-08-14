@@ -3,8 +3,120 @@ import assert from 'node:assert/strict';
 
 import { readFile } from 'node:fs/promises';
 
-import { driveWithinBudget, DEFAULT_BUDGET_MS, MAX_IDLE_BATCHES } from '../src/crawl/driver.js';
+import {
+  createDrive, driveWithinBudget, DEFAULT_BUDGET_MS, MAX_IDLE_BATCHES,
+} from '../src/crawl/driver.js';
 import { HEARTBEAT_PERIOD_MINUTES } from '../src/crawl/supervisor.js';
+
+/**
+ * 「我手上这一段还是当前那一段吗」——四种情形，一个比较。
+ *
+ * 头一条是 #3 带来的回归测试（@Colafornia），复现的是真实抓取里那次卡死：
+ * 电影列表抓到 30 条之后不再推进，暂停再继续只留下 `preempted · stale_holder`
+ * 和 `resumed` 两行日志，一个请求都没有再发出去。原样保留，因为它钉住的正是
+ * 那条路径；其余三条补齐另外三种代号变化（理由见 driver.js 的 createDrive）。
+ */
+describe('createDrive：一段的身份认代号，不认「有没有 promise」', () => {
+  /** @param {{staleAfterMs?: number}} [opts] */
+  function harness({ staleAfterMs = 100 } = {}) {
+    let now = 0;
+    let runs = 0;
+    /** @type {(() => void)[]} */
+    const settle = [];
+    const made = createDrive({
+      staleAfterMs,
+      now: () => now,
+      run: () => {
+        runs += 1;
+        return new Promise((resolve) => settle.push(() => resolve(undefined)));
+      },
+    });
+    return {
+      ...made,
+      runs: () => runs,
+      advance: (ms) => { now += ms; },
+      settleAll: () => { settle.splice(0).forEach((f) => f()); },
+    };
+  }
+
+  test('失联的驱动被接管后会启动新的一段', async () => {
+    let now = 0;
+    let runs = 0;
+    const { drive, lock } = createDrive({
+      staleAfterMs: 100,
+      now: () => now,
+      run: () => {
+        runs += 1;
+        if (runs === 1) return new Promise(() => {});
+      },
+    });
+
+    void drive();
+    now = 101;
+    await lock.run('恢复抓取', () => {});
+    void drive();
+    assert.equal(runs, 2);
+  });
+
+  test('心跳重入不会再开一段 —— 重复唤醒是常态，不是冲突', async () => {
+    const h = harness();
+    const a = h.drive();
+    const b = h.drive();
+    assert.equal(h.runs(), 1, '不许因为又醒了一次就再开一段');
+    h.settleAll();
+    await Promise.all([a, b]);
+  });
+
+  test('上一段正常跑完放了锁，下一次唤醒开新的一段', async () => {
+    const h = harness();
+    const first = h.drive();
+    h.settleAll();
+    await first;
+
+    // 放锁之后 `lock.gen` 是 null。**这就是当年漏掉的那一步**：`stale` 以
+    // `_held !== null` 开头，锁一空它就永远是 false，只看它就会把上一段的
+    // promise 一直返回下去。
+    assert.equal(h.lock.gen, null);
+    const second = h.drive();
+    assert.equal(h.runs(), 2);
+    h.settleAll();
+    await second;
+  });
+
+  test('卡死但还没人抢占时，自己就会接管', () => {
+    const h = harness();
+    void h.drive();
+    assert.equal(h.runs(), 1);
+    h.advance(101); // 判死，但锁还握在那一段手里
+    void h.drive();
+    assert.equal(h.runs(), 2, '判死了就该自己抢过来重开，不能等别的操作来救');
+    h.settleAll();
+  });
+
+  test('被顶掉的那一段，`stillMine()` 从此为假', async () => {
+    // 修好卡死**之后**才出现的形态：以前是一段都跑不起来，现在是一活一僵。
+    /** @type {(() => boolean)[]} */
+    const probes = [];
+    let now = 0;
+    const { drive } = createDrive({
+      staleAfterMs: 100,
+      now: () => now,
+      run: ({ stillMine }) => {
+        probes.push(stillMine);
+        return new Promise(() => {}); // 卡住，永不结算
+      },
+    });
+
+    void drive();
+    assert.equal(probes[0](), true, '刚开的这一段当然是当前那一段');
+
+    now = 101;
+    void drive(); // 判死 → 抢占 → 第二段
+    assert.equal(probes.length, 2);
+    assert.equal(probes[0](), false, '被顶掉的那一圈必须能认出自己已经不是当前的了');
+    assert.equal(probes[1](), true);
+  });
+});
 
 /**
  * 假 runner：每批花 batchCostMs，跑满 totalBatches 后报 done。
@@ -85,6 +197,23 @@ describe('预算内持续推进', () => {
 
     assert.equal(batchCount(), 2);
     assert.equal(r.stoppedBy, 'blocked');
+  });
+
+  test('被顶掉之后在批次边界退出，不再开下一批', async () => {
+    const { runner, nowRef, batchCount } = fakeRunner({ totalBatches: 100, batchCostMs: 10 });
+    const events = [];
+    const r = await driveWithinBudget({
+      runner,
+      now: nowRef,
+      budgetMs: 60_000,
+      stillMine: () => false, // 这一圈已经被顶掉了
+      onEvent: (e) => events.push(e),
+    });
+
+    // 第一批照跑完——**不打断进行中的一批**，那会丢掉已抓未记账的游标。
+    assert.equal(batchCount(), 1, '认出被顶掉之后不许再开下一批');
+    assert.equal(r.stoppedBy, 'preempted');
+    assert.ok(events.some((e) => e.type === 'segment_superseded'), '悄悄退出等于没发生过');
   });
 
   test('预算耗尽会发事件', async () => {
