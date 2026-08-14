@@ -8,7 +8,7 @@ name: package
 # 以后也仍然可行。但那要求先 clone 整个仓库——`test/` 里有真实账号的用户名与 uid，
 # `docs/` 有几十页文档，都不是装扩展需要的东西。
 #
-# 这里产出的是**照 tools/package.mjs 那份白名单挑过的那 74 个文件**，和上传应用商店
+# 这里产出的是**照 tools/package.mjs 那份白名单挑过的那 89 个文件**，和上传应用商店
 # 的是同一份名单（名单只有一份，见那个脚本的注释）。
 #
 # ## 不给每个提交发 release
@@ -41,14 +41,30 @@ jobs:
         id: v
         run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
 
+      # 标签名与 manifest 里的版本号必须一致——对不上就停，别发一个自称 v0.9.0 而
+      # 里面是 0.8.0 的包出去。放在打包**之前**：这一步注定要红的话，没必要先花几十秒
+      # 打一个不会被用的包。
+      - name: 标签必须与 manifest 的版本号一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          got="${{ steps.v.outputs.version }}"
+          if [ "$tag" != "$got" ]; then
+            echo "标签是 v$tag，但 manifest.json 里是 $got" >&2
+            exit 1
+          fi
+
       # 打包脚本自己会做几项上传前必须成立的检查（不许带 test/、manifest 引用到的
       # 文件必须在包里、版本号格式）。不通过就非零退出，这一步就红。
+      #
+      # **每次推送都打**，哪怕平时没人下载它：打 zip 这条路要是只在发版当天才第一次
+      # 跑，它就是在最不该出问题的那天第一次出问题。
       - name: 打 zip（给应用商店）
         run: node tools/package.mjs
 
       # 摊成目录（给「加载已解压的扩展程序」）。
       #
-      # 两份产物不是重复：应用商店收 zip，chrome://extensions 的「加载已解压」要目录。
+      # 与上一步不是重复：应用商店收 zip，chrome://extensions 的「加载已解压」要目录。
       # GitHub 会把上传的目录再压一层，所以下载下来解压出的就是可直接加载的那个目录。
       - name: 摊成可直接加载的目录
         run: node tools/package.mjs --stage dist/unpacked
@@ -60,35 +76,59 @@ jobs:
           path: dist/unpacked/
           if-no-files-found: error
 
-      - name: 上传（应用商店用的 zip）
-        uses: actions/upload-artifact@v4
-        with:
-          name: doubak-${{ steps.v.outputs.version }}-zip
-          path: |
-            dist/doubak-${{ steps.v.outputs.version }}.zip
-            dist/doubak-${{ steps.v.outputs.version }}.files.txt
-          if-no-files-found: error
-
-      # 只有打了标签才发 release。标签名与 manifest 里的版本号必须一致——
-      # 对不上就停，别发一个自称 v0.9.0 而里面是 0.8.0 的包出去。
-      - name: 标签必须与 manifest 的版本号一致
-        if: startsWith(github.ref, 'refs/tags/v')
+      # 文件清单进运行摘要，不再单独传一份产物。
+      #
+      # 这里曾经把 zip 本身也传上来，但 upload-artifact **一定**会再压一层
+      # （`compression-level: 0` 只是不 deflate，外面仍然是个 zip），下下来是 zip 套 zip。
+      # 而那份 zip 没有消费者：想装来试的人要的是上面那个目录，上传应用商店用的是
+      # release 上挂的那份（release 的附件是原样上传，不会被再压一层）。
+      # 真正有用的只有「这次打进去了哪些文件」，而那是一段文本，摘要页直接能看。
+      - name: 清单写进运行摘要
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          got="${{ steps.v.outputs.version }}"
-          if [ "$tag" != "$got" ]; then
-            echo "标签是 v$tag，但 manifest.json 里是 $got" >&2
-            exit 1
-          fi
+          list="dist/doubak-${{ steps.v.outputs.version }}.files.txt"
+          {
+            echo "### 包内容 v${{ steps.v.outputs.version }}"
+            echo
+            echo "<details><summary>$(wc -l < "$list") 个文件</summary>"
+            echo
+            echo '```'
+            cat "$list"
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # 用 runner 自带的 gh，不引第三方 action。第三方 action 是供应链面，而这个
       # 项目连一个运行时依赖都不收（docs/toolchain.md）——发布这一步更没有理由破例。
+      #
+      # `--notes-file` 与 `--generate-notes` 可以并用：GitHub 的接口会把自动生成的提交
+      # 清单接在给定正文**后面**。所以下面这段装法说明总在最上面。
+      #
+      # 正文走 heredoc 落成文件，而不是塞进 `--notes "..."`：那样一段文本要同时躲开
+      # YAML 的块缩进和 shell 的引号（里面有反引号），两层都能悄悄错。`<<'EOF'` 是引号
+      # 版，里面一律按字面处理——所以正文里不写版本号，免得引进一层展开。
       - name: 发 release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cat > dist/release-notes.md <<'EOF'
+          ## 怎么装
+
+          下面那个 `.zip` 是给应用商店的格式，**Chrome 不能直接装 zip**。请：
+
+          1. 下载并解压；
+          2. 打开 `chrome://extensions`，右上角打开「开发者模式」；
+          3. 点「加载已解压的扩展程序」，选解压出来的那个目录（里面应当直接就是 `manifest.json`）。
+
+          Edge 同理（`edge://extensions`）。
+
+          装好之后点扩展图标，面板里有一步步的指引。抓下来的东西只待在你自己的浏览器里，在你把它导出到本机文件夹之前，不会去任何别的地方。
+
+          ---
+          EOF
           gh release create "$GITHUB_REF_NAME" \
             "dist/doubak-${{ steps.v.outputs.version }}.zip" \
             --title "$GITHUB_REF_NAME" \
-            --generate-notes
+            --generate-notes \
+            --notes-file dist/release-notes.md
