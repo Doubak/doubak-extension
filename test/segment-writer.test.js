@@ -6,6 +6,7 @@ import { SegmentWriter, DEFAULT_MAX_SEGMENT_BYTES } from '../src/bundle/segment-
 import { buildWarcRecord, gunzip } from '../src/core/warc.js';
 import { newWarcRecordId, captureId } from '../src/core/ids.js';
 import { sha256Hex } from '../src/core/digest.js';
+import { gunzipSegmentText } from './helpers/gunzip-segment.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -63,14 +64,12 @@ describe('开段', () => {
     await writer.append(record('x'), captureId(BID, 1));
 
     const raw = await store.read(`data-${BID}-00001.warc.gz`);
-    // 段首那条 member 就是 warcinfo
-    const text = dec.decode(await gunzip(raw.slice(0, 200)).catch(() => new Uint8Array()));
-    // 直接从整段解压更稳妥
-    const whole = dec.decode(await gunzip(raw));
+    // 整段解压要用多 member 的解压器：`gunzip()` 走 DecompressionStream，按规范
+    // 只认单个 member（见 test/helpers/gunzip-segment.js）。
+    const whole = gunzipSegmentText(raw);
     assert.match(whole, /WARC-Type: warcinfo/);
     assert.match(whole, new RegExp(`WARC-Filename: data-${BID}-00001\\.warc\\.gz`));
     assert.match(whole, new RegExp(`isPartOf: ${BID}`));
-    void text;
   });
 
   test('段文件已存在时拒绝覆盖', async () => {
@@ -203,7 +202,7 @@ describe('轮转', () => {
     for (let i = 1; i <= 12; i++) await writer.append(record(`内容 ${i}`.repeat(4)), captureId(BID, i));
 
     const second = `data-${BID}-00002.warc.gz`;
-    const whole = dec.decode(await gunzip(await store.read(second)));
+    const whole = gunzipSegmentText(await store.read(second));
     assert.match(whole, /WARC-Type: warcinfo/);
     assert.match(whole, new RegExp(`WARC-Filename: ${second.replace(/\./g, '\\.')}`));
   });

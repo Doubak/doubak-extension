@@ -10,6 +10,7 @@ import {
   gunzip,
 } from '../src/core/warc.js';
 import { sha1Base32 } from '../src/core/digest.js';
+import { gunzipSegment } from './helpers/gunzip-segment.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -198,8 +199,12 @@ describe('gzip member', () => {
       at += m.length;
     }
 
-    // 整体解压 == 三条记录首尾相接
-    const whole = await gunzip(segment);
+    // 整体解压 == 三条记录首尾相接。
+    //
+    // **要用多 member 的解压器。** `gunzip()` 走 DecompressionStream，按规范只认单个
+    // member，喂整段一定抛——三家浏览器一直如此，Node 到 24.19.0 才跟上。整段可读是
+    // RFC 1952 的性质（zcat / pywb / ReplayWeb.page 靠它），不是那个 API 的性质。
+    const whole = gunzipSegment(segment);
     const expectedWhole = new Uint8Array(recs.reduce((n, r) => n + r.length, 0));
     let w = 0;
     for (const r of recs) {
@@ -212,6 +217,9 @@ describe('gzip member', () => {
     const one = await gunzip(segment.slice(locs[1].offset, locs[1].offset + locs[1].length));
     assert.deepEqual(one, recs[1]);
     assert.match(dec.decode(one), /second record/);
+
+    // 「整段喂给 `gunzip()` 必须抛」那条约束在 environment.test.js —— 它要看运行时
+    // 有没有实现规范，属于环境自检，不属于这里。
   });
 
   test('偏移量错位时解压失败 —— 撕裂的尾部因此可被检测', async () => {
