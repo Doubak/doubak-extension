@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="ua-webkit">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="renderer" content="webkit">
+    <meta name="referrer" content="always">
+    <meta name="google-site-verification" content="ok0wCgT20tBBgo9_zat2iAcimtN4Ftf5ccsh092Xeyw" />
+    <title>SELECTS</title>
+    
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="Sun, 6 Mar 2005 01:00:00 GMT">
+    
+  <meta name="mobile-agent" content="format=html5; url=https://m.douban.com/doulist/162349128">
+
+    <script >var _head_start = new Date();</script>
+    <script src="https://img1.doubanio.com/f/vendors/0511abe9863c2ea7084efa7e24d1d86c5b3974f1/js/jquery-1.10.2.min.js"></script>    <script src="https://img1.doubanio.com/f/vendors/e258329ca4b2122b4efe53fddc418967441e0e7f/js/douban.js"></script>
+    <link href="https://img1.doubanio.com/f/vendors/fae7e145bf16b2f427ba0fe7ef3d47c04af3a6c0/css/douban.css" rel="stylesheet" type="text/css">
+    <style type="text/css">
+      
+  h1 {
+    display: flex;
+    align-items: center;
+  }
+  h1 .is-private {
+    content: " ";
+    display: inline-block;
+    background-image: url('https://img2.doubanio.com/cuphead/sns-static/legacy/doulist/pics/lock-gray.png');
+    width: 11px;
+    height: 11px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    margin-left: 10px;
+    vertical-align: middle;
+  }
+  .doulist-interactions { overflow: hidden; *zoom: 1; margin-bottom: 20px; margin-top: 20px; }
+  .doulist-panel { float: right; overflow: hidden; }
+  .doulist_item p {word-break: break-all;}
+  .bn-cancel { margin-left:1em; }
+  .ul { width:100%; }
+  div.filters { margin-top: 20px; color: #666 }
+  p.ul { margin-top: 3px }
+  p.indent { text-indent: 2em; }
+  .empty-doulist { margin-top: 20px; }
+  .dlistp p{margin-top:4px;border-bottom:1px #ddd dashed;padding-bottom:4px}
+  .text-paragraph { text-indent: 2em; }
+  .aside h2 {margin-top:30px;}
+  .form-desc textarea { display: block; width:98%;height:65px;margin-top:3px; }
+  .doulist-admin { float: left; }
+  .remove-doulist-item-comment { margin-left: 10px;}
+  .doulist-tip { color: #999; }
+  .doulist-tip h2 { margin-top: 0; }
+
+  .minisubmit { vertical-align: baseline; }
+  .minisubmit:hover { background: #37a; }
+  .sort-tab { margin-top: 20px; color: #999; text-align: right; }
+  .sort-tab a:link,
+  .sort-tab a:visited { color: #999; }
+  .sort-tab a:hover { color: #fff; }
+  .doulist-add-subject-btn { margin-right: 10px; float: right; }
+  .lnk-doulist-add-subject {
+      font-size: 12px;
+      color: #fff;
+      line-height: 1;
+      padding: 7px 8px 7px 15px;
+      border-radius: 2px;
+      display: block;
+      float: left;
+      background: #42bd56 no-repeat url("https://img2.doubanio.com/cuphead/sns-static/legacy/doulist/pics/plus-white.png") 8px 8px / 10px;
+  }
+  .lnk-doulist-add-subject::first-letter {
+    visibility: hidden;
+  }
+  .lnk-doulist-add-subject:link,
+  .lnk-doulist-add-subject:visited {
+      color: #fff;
+  }
+  .lnk-doulist-add-subject:hover {
+      color: #fff;
+      background: #42bd56 no-repeat url("https://img2.doubanio.com/cuphead/sns-static/legacy/doulist/pics/plus-white.png") 8px 8px / 10px;
+      border-color: #28A228;
+  }
+  .rec-sec { float: right }
+  .rec-sec a{
+      padding: 3px 8px 2px;
+      border-radius: 2px;
+  }
+  .doulist-admin{
+    font-size: 0;
+    overflow: hidden;
+  }
+  .doulist-admin a{
+    font-size: 13px;
+  }
+  .doulist-admin input[type="submit"]{
+    line-height: 1.2;
+  }
+  .doulist-followers-link-text{
+    color: #9b9b9b;
+    background: #fff;
+  }
+  .doulist-followers-link-wrapper{
+    font-size: 13px;
+    padding-right: 10px;
+  }
+  .doulist-followers-link-wrapper .doulist-followers-link{
+    padding-right: 0;
+  }
+  .doulist-admin-split{
+    display: inline-block;
+    width: 1px;
+    height: 13px;
+    background: #cccccc;
+    vertical-align: sub;
+    position: relative;
+    top: 1px;
+    margin: 0 10px;
+  }
+  .can-play {
+    clear: both;
+    border-top: 1px solid #ededed;
+    margin-top: 10px;
+    padding-top: 10px;
+    line-height: 16px;
+    color: #666;
+  }
+  .can-play input[type=checkbox] {
+    vertical-align: middle;
+    margin-top: -3px;
+  }
+  .can-play span {
+    display: inline-block;
+    color: #999;
+    padding-right: 20px;
+    vertical-align: top;
+    background: no-repeat url("https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/pics/ic_play_web@2x.png") right center / 16px
+  }
+  a.edit-feat-disabled {
+    color: #999;
+  }
+  a.edit-feat-disabled:hover {
+    background: #aaa;
+    color: #fff;
+  }
+  #link-report { text-align: right }
+
+
+    </style>
+    
+  <link rel="stylesheet" href="https://img3.doubanio.com/cuphead/sns-static/legacy/doulist/css/list.bb587.css">
+  <link rel="stylesheet" href="https://img3.doubanio.com/cuphead/sns-static/common/base/icons_topic.cc9e2.css">
+  
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <meta name="baiduspider" content="noindex,nofollow,noarchive" />
+
+  <script type="text/javascript" src="https://img1.doubanio.com/f/vendors/43c21c5607ffe86759538789a60360c06532b4bf/js/do.js" data-cfg-autoload="false"></script>
+
+    <link rel="stylesheet" href="https://img1.doubanio.com/misc/mixed_static/58d4eb5e2da9f468.css">
+    <script></script>
+
+    <link rel="shortcut icon" href="https://img1.doubanio.com/f/shire/de01f10f57b2ae751224c6d1a193bafd2f02dd89/pics/favicon.ico" type="image/x-icon">
+</head>
+
+<body>
+  
+  <link rel="stylesheet" href="https://img3.doubanio.com/cuphead/sns-static/common/base/init.4f2f3.css">
+  
+    <script type="text/javascript">var _body_start = new Date();</script>
+    
+  
+
+
+
+    <link href="//img3.doubanio.com/dae/accounts/resources/f8b2226/shire/bundle.css" rel="stylesheet" type="text/css">
+
+
+
+<div id="db-global-nav" class="global-nav">
+  <div class="bd">
+    
+<div class="top-nav-info">
+  <ul>
+    <li>
+    <a id="top-nav-doumail-link" href="https://www.douban.com/doumail/">豆邮</a>
+    </li>
+    <li class="nav-user-account">
+      <a target="_blank" href="https://accounts.douban.com/passport/setting/" class="bn-more">
+        <span>MewX的账号</span><span class="arrow"></span>
+      </a>
+      <div class="more-items">
+        <table cellpadding="0" cellspacing="0">
+          <tbody>
+            <tr>
+              <td>
+                <a href="https://www.douban.com/mine/">个人主页</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a target="_blank" href="https://www.douban.com/mine/orders/">我的订单</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a target="_blank" href="https://www.douban.com/mine/wallet/">我的钱包</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a target="_blank" href="https://accounts.douban.com/passport/setting/">账号管理</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a href="https://www.douban.com/accounts/logout?source=main&ck=dpDq">退出</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+  </ul>
+</div>
+
+  <div class="top-nav-reminder">
+    <a href="https://www.douban.com/notification/" class="lnk-remind">提醒</a>
+    <div id="top-nav-notimenu" class="more-items">
+      <div class="bd">
+        <p>加载中...</p>
+      </div>
+    </div>
+  </div>
+
+    <div class="top-nav-doubanapp">
+  <a href="https://www.douban.com/doubanapp/app?channel=top-nav" class="lnk-doubanapp">下载豆瓣客户端</a>
+  <div id="doubanapp-tip">
+    <a href="https://www.douban.com/doubanapp/app?channel=qipao" class="tip-link">豆瓣 <span class="version">6.0</span> 全新发布</a>
+    <a href="javascript: void 0;" class="tip-close">×</a>
+  </div>
+  <div id="top-nav-appintro" class="more-items">
+    <p class="appintro-title">豆瓣</p>
+    <p class="qrcode">扫码直接下载</p>
+    <div class="download">
+      <a href="https://www.douban.com/doubanapp/redirect?channel=top-nav&direct_dl=1&download=iOS">iPhone</a>
+      <span>·</span>
+      <a href="https://www.douban.com/doubanapp/redirect?channel=top-nav&direct_dl=1&download=Android" class="download-android">Android</a>
+    </div>
+  </div>
+</div>
+
+    
+
+
+<div class="global-nav-items">
+  <ul>
+    <li class="on">
+      <a href="https://www.douban.com"  data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-main&quot;,&quot;uid&quot;:&quot;82160871&quot;}">豆瓣</a>
+    </li>
+    <li class="">
+      <a href="https://book.douban.com" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-book&quot;,&quot;uid&quot;:&quot;82160871&quot;}">读书</a>
+    </li>
+    <li class="">
+      <a href="https://movie.douban.com" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-movie&quot;,&quot;uid&quot;:&quot;82160871&quot;}">电影</a>
+    </li>
+    <li class="">
+      <a href="https://music.douban.com" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-music&quot;,&quot;uid&quot;:&quot;82160871&quot;}">音乐</a>
+    </li>
+    <li class="">
+      <a href="https://www.douban.com/podcast/" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-podcast&quot;,&quot;uid&quot;:&quot;82160871&quot;}">播客</a>
+    </li>
+    <li class="">
+      <a href="https://www.douban.com/location" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-location&quot;,&quot;uid&quot;:&quot;82160871&quot;}">同城</a>
+    </li>
+    <li class="">
+      <a href="https://www.douban.com/group" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-group&quot;,&quot;uid&quot;:&quot;82160871&quot;}">小组</a>
+    </li>
+    <li class="">
+      <a href="https://read.douban.com&#47;?dcs=top-nav&amp;dcm=douban" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-read&quot;,&quot;uid&quot;:&quot;82160871&quot;}">阅读</a>
+    </li>
+    <li class="">
+      <a href="https://fm.douban.com&#47;?from_=shire_top_nav" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-fm&quot;,&quot;uid&quot;:&quot;82160871&quot;}">FM</a>
+    </li>
+    <li class="">
+      <a href="https://time.douban.com&#47;?dt_time_source=douban-web_top_nav" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-time&quot;,&quot;uid&quot;:&quot;82160871&quot;}">时间</a>
+    </li>
+    <li class="">
+      <a href="https://market.douban.com&#47;?utm_campaign=douban_top_nav&amp;utm_source=douban&amp;utm_medium=pc_web" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-market&quot;,&quot;uid&quot;:&quot;82160871&quot;}">豆品</a>
+    </li>
+  </ul>
+</div>
+
+  </div>
+</div>
+<script>
+  ;window._GLOBAL_NAV = {
+    USER_ID: "82160871",
+    UPLOAD_AUTH_TOKEN: "82160871:c4174b7a26ce83d20f15cc05689d72d300315bed",
+    SSE_TOKEN: "fa076892586fd797a0e53dab53086a6388e99070",
+    SSE_TIMESTAMP: "1786712291",
+    DOUBAN_URL: "https://www.douban.com",
+    N_NEW_NOTIS: 0,
+    N_NEW_DOUMAIL: 0
+  };
+</script>
+
+
+
+    <script src="//img3.doubanio.com/dae/accounts/resources/f8b2226/shire/bundle.js" defer="defer"></script>
+
+
+
+
+  
+
+
+
+    <link href="//img3.doubanio.com/dae/accounts/resources/f8b2226/sns/bundle.css" rel="stylesheet" type="text/css">
+
+
+
+<div id="db-nav-sns" class="nav">
+  <div class="nav-wrap">
+    <div class="nav-primary">
+     
+      <div class="nav-logo">
+        <a href="https://www.douban.com">豆瓣社区</a>
+      </div>
+
+      <div class="nav-search">
+  <form action="https://www.douban.com/search" method="get">
+	<fieldset>
+      <legend>搜索：</legend>
+	  <label for="inp-query">搜索你感兴趣的内容和人...</label>
+	  <div class="inp">
+	    <input type="hidden" name="source" value="suggest">
+		<input id="inp-query" name="q" size="22" maxlength="60" autocomplete="off" value="">
+	  </div>
+	  <div class="inp-btn"><input type="submit" value="搜索"></div>
+	</fieldset>
+  </form>
+</div>
+
+      
+
+<div class="nav-items">
+  <ul>
+    <li><a href="https://www.douban.com">首页</a></li>
+	<li><a href="https://www.douban.com/mine/">我的豆瓣</a></li>
+      <li>
+        <a href="https://www.douban.com/explore">
+          浏览发现
+        </a>
+      </li>
+      <li>
+        <a href="https://www.douban.com/gallery">
+          话题广场
+          <img src="https://img3.doubanio.com/f/shire/e49eca1517424a941871a2667a8957fd6c72d632/pics/new_menu.gif" alt="new" style="position: absolute; top: -7px; right: -13px;" />
+        </a>
+      </li>
+  </ul>
+</div>
+
+    </div>
+  </div>
+</div>
+
+
+
+    <script src="//img3.doubanio.com/dae/accounts/resources/f8b2226/sns/bundle.js" defer="defer"></script>
+
+
+
+
+
+    <div id="wrapper">
+        
+
+        
+<div id="content">
+    
+  <h1>
+    <span>SELECTS</span>
+      <i class="is-private"></i>
+  </h1>
+
+    <div class="grid-16-8 clearfix">
+        
+        
+        <div class="article">
+               
+  
+  
+  <div id="doulist-info" class="mod">
+    <div class="doulist-cover"><img src="https://img1.doubanio.com/view/elanor_image/raw/public/1434N719.jpg"></div>
+    <div class="hd">
+      <a href="https://www.douban.com/people/mewcatcher/" class="avatar">
+        <img src="https://img3.doubanio.com/icon/u82160871-12.jpg" width="24" height="24" alt="MewX" />
+      </a>
+
+      <div class="meta">
+        来自: <a href="https://www.douban.com/people/mewcatcher/">
+          MewX
+            (Sydney)
+        </a>
+        <span class="time">
+          2025-08-22 16:23:09创建
+            &nbsp;&nbsp;2026-08-14 20:57:32更新
+        </span>
+      </div>
+    </div>
+
+    <div class="bd">
+
+      
+      <div class="doulist-about">
+        迁移自原个人主页&quot;SELECTS&quot;
+        <br />
+      </div>
+    </div>
+
+  </div>
+
+  
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/7cfebe884a5cdb1d5f2baadc9e79ff60ade3b4a3/reports.css" />
+  <style>
+    .btn-report {
+      color: #bbb;
+      cursor: pointer;
+      font-size: 13px;
+    }
+  </style>
+  <script src="https://img1.doubanio.com/f/vendors/bd6325a12f40c34cbf2668aafafb4ccd60deab7e/vendors.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/2f91ba0a4f9ddec58167a76425f65c13365adf57/reports.js"></script>
+  <script>
+    (function () {
+      var roots = document.querySelectorAll("#link-report");
+      roots.forEach(function (root) {
+        var btn = document.createElement('span');
+        btn.className = 'btn-report';
+        btn.innerHTML = "投诉";
+        btn.addEventListener('click', function () {
+          if (window.DOUBAN_VENDORS && window.DOUBAN_VENDORS.openReportModal) {
+            window.DOUBAN_VENDORS.openReportModal({
+              reportUrl: "https://www.douban.com/doulist/162349128/" || root.getAttribute('data-url'),
+              types: ["content"]
+            })
+          }
+        });
+        root.appendChild(btn);
+      })
+    })()
+  </script>
+
+  
+  <div class="doulist-interactions">
+    <div class="doulist-panel">
+        
+    <div class="doulist-add-subject-btn">
+      
+
+
+
+<link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+<link rel="stylesheet" href="https://img2.doubanio.com/cuphead/sns-static/legacy/doulist/css/doulist_add_subject.3a3de.css" />
+<link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css" />
+<script src="https://img1.doubanio.com/f/vendors/3f6bfbf287470b91aacba40f0b19cb2056910f2e/js/core/do/loader.js"></script>
+<script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+
+
+<a class="lnk-doulist-add-subject"
+  data-id="162349128"
+  data-title="添加内容"
+  data-category="common"
+  data-cate-en-name="www"
+  href="javascript:void(0);">+&nbsp;添加内容</a>
+
+<script src="https://img1.doubanio.com/f/vendors/83bca8d432d48187d8a5fd37520713a02432102a/js/doulist/doulist_add_subject.js"></script>
+<script>
+  $(function(){
+    if (window.popup) {
+      $('.lnk-doulist-add-subject').trigger('click');
+    }
+  })
+</script>
+
+    </div>
+
+    </div>
+
+      <div class="doulist-admin">
+        
+  
+
+    <a href="https://www.douban.com/doulist/162349128/edit">修改</a>
+    <i class="doulist-admin-split"></i>
+
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="dl_sort" value="1" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="编辑顺序" title="" />
+</form>
+
+    <i class="doulist-admin-split"></i>
+
+  
+<form method="POST" action="remove" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="确定要删除吗" />
+</form>
+
+
+  <script type="text/javascript">
+    DOULIST_ID = 162349128;
+    ck ="dpDq";
+  </script>
+
+      </div>
+
+  </div>
+
+  
+  <div class="doulist-filter">
+    <a href="https://www.douban.com/doulist/162349128/" class="active">全部<span>(1)</span></a>
+        <span>·</span>
+        <a href="https://www.douban.com/doulist/162349128/?sort=time&amp;sub_type=10" class="">图文<span>(1)</span></a>
+  </div>
+
+  
+  <div class="clearfix"></div>
+          
+  <div id="1653992509" class="doulist-item" >
+    <div class="mod">
+      
+  <div class="hd">
+  </div>
+
+      
+  
+  
+  
+  <div class="bd doulist-note">
+    
+
+
+    <div class="doulist-add-btn">
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css">
+  <link rel="stylesheet" href="https://img1.doubanio.com/cuphead/sns-static/legacy/doulist/css/new_doulist_button.cea0d.css">
+  <script src="https://img1.doubanio.com/f/vendors/f25ae221544f39046484a823776f3aa01769ee10/js/ui/dialog.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/11f479636130b4cbf060328f00b74c38f2ffc792/js/lib/html_escape.js"></script>
+  <script src="https://img1.doubanio.com/f/vendors/86584d81d107ee25715089a1fc811f915cc36f14/js/doulist/doulist_dialog.js"></script>
+  
+
+  
+  <a href="javascript:void(0)"
+     data-id="7500205"
+     data-cate="1012"
+     data-canview="True"
+     data-url="https://www.douban.com/review/7500205/"
+     data-isurlsubject="false"
+     data-catename=""
+     data-link="https://www.douban.com/people/mewcatcher/doulists/all?add=7500205&amp;cat=1012"
+     data-title="噗，搬运一下组里用来做测试的攻略吧 - CROSS†CHANNEL汉化版攻略"
+     data-picture="https://img1.doubanio.com/f/vendors/a28ac64f34a48acd8d058b67be0be50a3d6315f3/pics/doulist_article.png"
+     class="lnk-doulist-add"
+     onclick="moreurl(this, { 'from-doulist':'doulist-btn-1012-7500205-82160871'})">
+      <i></i>添加到豆列
+  </a>
+    </div>
+
+    <div class="source">
+        来自：豆瓣评论
+    </div>
+
+
+
+
+    <div class="meta">
+      
+
+        <a href="https://www.douban.com/people/mewcatcher/" target="_blank">MewX</a>
+    </div>
+    <div class="title">
+      <a href="https://www.douban.com/review/7500205/" target="_blank">
+          噗，搬运一下组里用来做测试的攻略吧 - CROSS†CHANNEL汉化版攻略
+      </a>
+    </div>
+
+      
+
+
+    <div class="abstract">
+      欢迎&amp;感谢大家帮忙推广这部作品的汉化版啦—— 谨代表全组成员 敬上  CROSS†CHANNEL汉化项目主页：www.crosschannel.cn  ------------------------------  *可能与游戏中的选项翻译不太一样    CROSS † CHANNEL  　去天台  　让她赎罪  　袭胸  　帮忙  　去参加社团活动  　不去  　犯傻   崩壊／純化   　　　見里 　去天台  　看内裤  　掀裙子  　去天台  　帮忙  　去参加社团活动  　帮忙医治  　逼迫	  　继续逼迫...
+    </div>
+
+
+  </div>
+
+
+        
+  
+  <div class="ft">
+
+    <div class="actions">
+          
+  <div class="doulist-item-opt">
+    
+<form method="POST" action="https://www.douban.com/doulist/162349128/#1653992509" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="edit" value="1653992509" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j  cls_abnormal" value="修改" title="" />
+</form>
+
+    &nbsp;
+    
+<form method="POST" action="" class="miniform"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+        <input type="hidden" name="delete_kind" value="1012" />
+        <input type="hidden" name="delete_id" value="7500205" />
+        <input type="hidden" name="start" value="0" />
+    <input type="submit" class="minisubmit j a_confirm_link cls_abnormal" value="删除" title="真的要删除吗" />
+</form>
+
+  </div>
+
+      <time class="time">2025-08-22 16:23:09</time>
+        <a href="javascript: void 0;" class="btn btn-like " data-action-type="like">赞</a>
+
+      <a href="javascript: void 0;" class="btn btn-action-reply" data-action-type="showComments" data-count="0">回复</a>
+
+    </div>
+
+    <div class="others">
+      <div class="comments">
+        <div class="comments-items"></div>
+        <a href="javascript:void(0);" class="btn" data-action-type="showComments" style="display: none;">加载更多</a>
+          <form method="post" action="" class="comment-form"><div style="display:none;"><input type="hidden" name="ck" value="dpDq"/></div>
+            <input maxlength="280" type="text" name="text" class="comment-text" data-type="status-comment">
+            <span class="bn-flat"><input type="submit" value="回复" data-type="status-comment"></span>
+            <a href="javascript:void(0);" class="add-more-comments">继续回复</a>
+          </form>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/e8a7261937da62636d22ca4c579efc4a4d759b1b/css/ui/dialog.css" />
+  <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/711f22c7157a02a5bdbea90f346551312413d4ed/css/report_dialog.css">
+  <script src="https://img1.doubanio.com/f/vendors/b864fd1373fb67da4f192d2cae761a0eeb225fa8/js/lib/tagsug.js"></script>
+  
+
+  
+
+    </div>
+  </div>
+
+
+
+  
+  <script>
+    /**
+     * @form 是表单的 jquery 对象
+     * @data 是需要验证的字符串
+     * @callback 是验证有敏感词时的回调函数
+     */
+    function checkBannedKeyword(form, data, callback){
+      $.post_withck('/j/censor', data, function(ret){
+        if (ret.ban == true) {
+           callback();
+           return false;
+        }
+        form.append('<input type="hidden" name="dl_submit" value="更新评语" />');
+        form.submit();
+      }, 'json');
+    }
+
+    $('#dl_submit').click(function(e){
+      e.preventDefault();
+      var $textarea = $('form.form-desc textarea[name=dl_comment]'),
+        data = {key: $textarea.val()};
+
+        checkBannedKeyword($('form.form-desc'), data, function(){
+          $('textarea[name=dl_comment]').parent().append($('<div style="width:360px;color:#ff3300;padding-top:10px;">你的评语中有被禁止的内容</div>'));
+      });
+    });
+
+    $('.can-play input[type=checkbox]').change(function() {
+      var $this = $(this);
+      window.location.href = $this.attr('data-url')
+    })
+  </script>
+
+  
+    
+    
+
+    
+
+
+
+
+
+        </div>
+        <div class="aside">
+                
+  
+
+
+
+
+  
+  <div class="doulist-tip mod">
+      
+    <h2>
+        什么是豆列
+            &nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;
+    </h2>
+
+      <div class="intro">
+        <p>豆列是收集好东西的工具。</p>
+        <p>在豆瓣上看到喜欢的内容，都可以收到你自己的豆列里，方便以后找到。</p>
+        <p>你还可以关注感兴趣的豆列，看看其他人收集的好东西。</p>
+      </div>
+  </div>
+
+  
+    <!-- douban ad begin -->
+    <div id="dale_mixed_doulist_top_right"></div>
+    <!-- douban ad end -->
+
+
+
+  
+    <link rel="stylesheet" href="https://img1.doubanio.com/f/vendors/d3286d0338321a30703fd7b45f473a45b01115e9/css/ui/tag.css">
+    
+
+    <div class="tags">
+        
+    <h2>
+        这个豆列的标签
+            &nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;
+    </h2>
+
+    </div>
+
+  
+    <p class="pl2">
+      &gt; <a href="https://www.douban.com/doulist/162349128/comments/">给这个豆列留言</a>
+    </p>
+
+  
+  
+
+      
+    <h2>
+        MewX的其它豆列
+            &nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;&nbsp;&middot;
+            <span class="pl">&nbsp;(
+                
+                    <a href="https://www.douban.com/people/mewcatcher/doulists/all" target="_self">全部</a>
+                ) </span>
+    </h2>
+
+
+  <div class="doulist-other">
+    <ul>
+        <li>
+	    <a href="https://www.douban.com/doulist/54002196/">我的收藏</a>
+	</li>
+        <li>
+	    <a href="https://www.douban.com/doulist/45473911/">游戏购买小账本</a>
+	        <span class="pl">&nbsp;(1人关注)</span>
+	</li>
+        <li>
+	    <a href="https://www.douban.com/doulist/42193343/">计算机-人工智能实践</a>
+	        <span class="pl">&nbsp;(6人关注)</span>
+	</li>
+        <li>
+	    <a href="https://www.douban.com/doulist/3913537/">计算机-软件逆向工程</a>
+	        <span class="pl">&nbsp;(18人关注)</span>
+	</li>
+        <li>
+	    <a href="https://www.douban.com/doulist/12791625/">值得反复阅读的书</a>
+	        <span class="pl">&nbsp;(1人关注)</span>
+	</li>
+    </ul>
+  </div>
+  <br />
+
+
+
+        </div>
+        <div class="extra">
+            
+  <div id="dale_doulist_bottom"></div>
+
+        </div>
+    </div>
+</div>
+
+        
+  <div id="footer">
+    
+
+<span id="icp" class="fleft gray-link">
+    &copy; 2005-2026 douban.com, all rights reserved 北京豆网科技有限公司
+</span>
+
+<a href="https://www.douban.com/hnypt/variformcyst.py" style="display: none;"></a>
+
+<span class="fright">
+    <a href="https://www.douban.com/about">关于豆瓣</a>
+    · <a href="https://www.douban.com/jobs">在豆瓣工作</a>
+    · <a href="https://www.douban.com/about?topic=contactus">联系我们</a>
+    · <a href="https://www.douban.com/about/legal">法律声明</a>
+    · <a href="https://help.douban.com/" target="_blank">帮助中心</a>
+    · <a href="https://www.douban.com/doubanapp/">移动应用</a>
+</span>
+
+  </div>
+
+    </div>
+    
+    
+
+    <script type="text/javascript" src="https://img1.doubanio.com/misc/mixed_static/6af1b01f7af17dad.js"></script>
+    
+    
+
+  <!-- douban ad begin -->
+  
+
+
+
+
+    
+<script type="text/javascript">
+    (function (global) {
+        var newNode = global.document.createElement('script'),
+            existingNode = global.document.getElementsByTagName('script')[0],
+            adSource = '//erebor.douban.com/',
+            userId = '82160871',
+            browserId = 'Pm_7AxF6oF0',
+            criteria = '3:/doulist/162349128/',
+            preview = '',
+            debug = false,
+            adSlots = ['dale_mixed_doulist_top_right', 'dale_doulist_bottom'];
+
+        global.DoubanAdRequest = {src: adSource, uid: userId, bid: browserId, crtr: criteria, prv: preview, debug: debug};
+        global.DoubanAdSlots = (global.DoubanAdSlots || []).concat(adSlots);
+
+        newNode.setAttribute('type', 'text/javascript');
+        newNode.setAttribute('src', '//img1.doubanio.com/dzRxZWkxOC9mL2FkanMvYzNiMGY1M2M4NGE4NjZiODRjMTdlMThiZGMwZGY2Nzk5YjBjYzBiNy9hZC5yZWxlYXNlLmpz?company_token=kX69T8w1wyOE-dale');
+        newNode.setAttribute('async', true);
+        existingNode.parentNode.insertBefore(newNode, existingNode);
+    })(this);
+</script>
+
+
+
+
+
+
+  <!-- douban ad end -->
+
+    
+  
+
+
+
+
+
+
+
+
+
+<script type="text/javascript">
+var _paq = window._paq || [];
+  _paq.push(['setUserId', '82160871']);
+_paq.push(['trackPageView']);
+_paq.push(['enableLinkTracking']);
+(function() {
+    var p=(('https:' == document.location.protocol) ? 'https' : 'http'), u=p+'://fundin.douban.com/';
+    _paq.push(['setTrackerUrl', u+'piwik']);
+    _paq.push(['setSiteId', '100001']);
+    var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+    g.type='text/javascript';
+    g.defer=true;
+    g.async=true;
+    g.src=p+'://img3.doubanio.com/dae/fundin/piwik.js?s=3';
+    s.parentNode.insertBefore(g,s);
+})();
+</script>
+
+<script type="text/javascript">
+var _gaq = _gaq || [];
+_gaq.push(['_setAccount', 'UA-7019765-1']);
+_gaq.push(['_setCampNameKey', 'dcn']);
+_gaq.push(['_setCampSourceKey', 'dcs']);
+_gaq.push(['_setCampMediumKey', 'dcm']);
+_gaq.push(['_setCampTermKey', 'dct']);
+_gaq.push(['_setCampContentKey', 'dcc']);
+_gaq.push(['_addOrganic', 'baidu', 'word']);
+_gaq.push(['_addOrganic', 'soso', 'w']);
+_gaq.push(['_addOrganic', '3721', 'name']);
+_gaq.push(['_addOrganic', 'youdao', 'q']);
+_gaq.push(['_addOrganic', 'so.360.cn', 'q']);
+_gaq.push(['_addOrganic', 'vnet', 'kw']);
+_gaq.push(['_addOrganic', 'sogou', 'query']);
+_gaq.push(['_addIgnoredOrganic', '豆瓣']);
+_gaq.push(['_addIgnoredOrganic', 'douban']);
+_gaq.push(['_addIgnoredOrganic', '豆瓣网']);
+_gaq.push(['_addIgnoredOrganic', 'www.douban.com']);
+_gaq.push(['_setDomainName', '.douban.com']);
+
+
+    _gaq.push(['_setCustomVar', 1, 'responsive_view_mode', 'desktop', 3]);
+
+_gaq.push(['_trackPageview']);
+_gaq.push(['_trackPageLoadTime']);
+    _gaq.push(['_setVar', '8216']);
+
+window._ga_init = function() {
+    var ga = document.createElement('script');
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    ga.setAttribute('async', 'true');
+    document.documentElement.firstChild.appendChild(ga);
+};
+if (window.addEventListener) {
+    window.addEventListener('load', _ga_init, false);
+} else {
+    window.attachEvent('onload', _ga_init);
+}
+</script>
+
+
+
+
+
+
+
+
+  <script>_SPLITTEST=''</script>
+</body>
+
+</html>
+
+

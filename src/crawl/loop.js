@@ -868,7 +868,12 @@ export class CrawlLoop {
    * @param {string} captureId
    */
   _enqueueLongformItems(item, res, captureId) {
-    const targetKey = { 'note.list': 'note.item', 'review.list': 'review.item' }[item.routeKey];
+    // 豆列走同一条路：索引页 → 详情页，URL 从页面上原样取。
+    const targetKey = {
+      'note.list': 'note.item',
+      'review.list': 'review.item',
+      'doulist.list': 'doulist.item',
+    }[item.routeKey];
     if (!targetKey) return;
     const target = this._routes.get(targetKey);
     if (!target) return;
@@ -888,7 +893,10 @@ export class CrawlLoop {
       if (ok) enqueued += 1;
     }
     if (enqueued > 0) {
-      this._emit({ type: 'longform_enqueued', routeKey: targetKey, count: enqueued, from: item.url });
+      // 事件类型跟着目标走：把豆列报成 `longform_enqueued`，日志里那句人话就会说错
+      // 是什么东西——而日志是用户回答「它到底在抓什么」的唯一地方。
+      const type = targetKey === 'doulist.item' ? 'doulist_enqueued' : 'longform_enqueued';
+      this._emit({ type, routeKey: targetKey, count: enqueued, from: item.url });
     }
   }
 
@@ -1041,7 +1049,10 @@ export class CrawlLoop {
    * 14、14、13 条，槽位 15），把短页当末页会把列表拦腰截断。
    */
   _enqueueNextPage(item, route, profile, res, captureId, items) {
-    if (!route.entryUrl || !route.pagination) return;
+    // `nextPageUrl` 是给**派生出来又自己分页**的路线用的（豆列详情页：URL 来自索引
+    // 页，而每一份豆列自己还有 25 条一页的翻页）。它不能用 `entryUrl`——有 `entryUrl`
+    // 就会被当成种子路线，而它没有路线级的入口地址。
+    if (!(route.entryUrl || route.nextPageUrl) || !route.pagination) return;
 
     const state = this.stateFor(item.routeKey);
     const claimed = profile ? extractClaimedCount(res.bodyText, profile) : null;
@@ -1113,7 +1124,15 @@ export class CrawlLoop {
     }
 
     const nextValue = Number(cur) + step;
-    const nextUrl = route.entryUrl({ offset: nextValue });
+    const nextUrl = route.nextPageUrl
+      ? route.nextPageUrl(item, nextValue)
+      : route.entryUrl({ offset: nextValue });
+    // 派生路线算不出下一页就停在这儿——硬拼一个地址等于凭空发一个注定 404 的请求。
+    if (!nextUrl) {
+      state.markFinished();
+      this._emit({ type: 'route_finished', routeKey: item.routeKey, reason: 'no_next_page' });
+      return;
+    }
 
     this._frontier.enqueue({
       url: nextUrl,

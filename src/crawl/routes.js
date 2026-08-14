@@ -278,6 +278,69 @@ export function buildRoutes({
   //
   // 与广播附图同一档：**用户自己上传的，删了就没有第二份**，所以归 `assets`。
   //
+  // ── 豆列 ──────────────────────────────────────────────────────────────────
+  //
+  // **值得抓的不是清单，是挂在每条上的「评语」。** 实测三份真实自建豆列 24/25、
+  // 9/15、9/12 条带评语，其中一份是带价格和购买渠道的游戏消费流水。其余字段
+  // （标题、简介、评分、封面）全是豆瓣的目录数据，随处可得。
+  //
+  // **只抓自己编的（`doulists/all`），不抓关注的（`doulists/collect`）。**
+  // 关注的那半边里，一份 25 条的样本 0 条评语、每条都指向他人的 `/review/`——
+  // 那是个纯书签夹，内容属于第三方。而且那一页会混进 `doubanapp/dispatch?uri=
+  // /subject_collection/...`，那是豆瓣自己编的榜单，走另一套移动端渲染（实测
+  // 一页 1.27 MB）。两者都记在 spec 的 known_unsupported 里。
+  //
+  // **条目的目标页也不抓**：豆列页自身已经带了标题/简介/评分/封面（都在 `data-*`
+  // 属性上），渲染不需要目标页；跟进去抓等于把大量第三方内容拖进档案。
+  routes.push({
+    key: 'doulist.list',
+    // **必须带 ownership。** 「我编的」与「我关注的」是两类完全不同的东西，而
+    // intent 是不可恢复的三个字段之一（bundle 一旦有人跑过就冻结）。现在只抓
+    // created，但这个后缀今天就得写对。
+    intent: 'doulist.list.created',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.LONGFORM + 2,
+    source: 'archive',
+    enumeration: 'full',
+    safetyNet: 'contiguity',
+    // 与日记同理：这一页装几条是未知的（手上样本 6 条，一页装下，翻页器没出现）。
+    // 猜大了会跨过中间的条目静默漏抓。
+    pagination: { kind: 'start', step: 'items', first: 0 },
+    entryUrl: ({ offset }) =>
+      `https://www.douban.com/people/${enc(username)}/doulists/all?start=${offset}`,
+    note: '自己编的豆列；条目评语是这条路线的全部价值',
+  });
+
+  routes.push({
+    key: 'doulist.item',
+    intent: 'doulist.item',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.LONGFORM + 3,
+    source: 'archive',
+    enumeration: 'full',
+    safetyNet: 'contiguity',
+    // **这一条自己也分页，而且基址是每个豆列各自的。**
+    //
+    // 与 note.item / interest.item 不同：那两条是叶子，一个 URL 一页完事。豆列
+    // 详情页每页 25 条，超过就得翻——实测 25 条的那份，豆瓣自己的翻页器给出
+    // `?start=25` 与 `?start=50`。**页长是量出来的，不是猜的**，所以这里可以写死
+    // 25（日记那条写不死，因为那边的页长至今未知）。
+    //
+    // **刻意不给 `entryUrl`。** 有 `entryUrl` 就会被当成种子路线（见 runner 的
+    // `seedFrontier`），而这一条的 URL 全部来自索引页——与 note.item / interest.item
+    // 同理。翻页改用 `nextPageUrl`，它拿的是**当前这一页自己的地址**。
+    pagination: { kind: 'start', step: 25, first: 0 },
+    /** @param {{url?: string}} item @param {number} offset */
+    nextPageUrl: (item, offset) => {
+      const base = String(item?.url ?? '').split('?')[0].replace(/\/+$/, '');
+      if (!/\/doulist\/\d+$/.test(base)) return null;
+      return `${base}/?start=${offset}`;
+    },
+    note: '单个豆列的内容页，用户写的评语在这里',
+  });
+
   // 这条路线在 UNRESOLVED_ROUTES 里挂过一阵（`source: 'no_sample'`）——当时手上两篇
   // 真实日记正文里一个 `<img>` 都没有，结构完全未知。拿到样本的路径正是这套设计
   // 想要的：那篇带图日记第一次抓时判不出来、记了失败，**但页面原样进了档案**。

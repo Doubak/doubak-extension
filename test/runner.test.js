@@ -57,9 +57,19 @@ const REVIEWS_EMPTY = `<html><head><title>我的评论(0)</title></head><body>${
 <h1>我的评论(0)</h1><div class="review-list chart "></div></body></html>`;
 
 /** 长文那两条路线的空页，其余情况返回 null。 */
+/**
+ * 空的豆列索引页。框架标志按 5 份真实页面量出来的 `class="doulist-list"` 写。
+ *
+ * 与日记同理：不给这一页，豆列那条路线会拿到广播页、被判成「框架不全」——那是
+ * 判定在正确工作，不是这些用例要测的东西。
+ */
+const DOULISTS_EMPTY = `<html><head><title>我创建的豆列</title></head><body>${NAV}
+<ul class="doulist-list"></ul></body></html>`;
+
 function longformEmpty(url) {
   if (url.includes('/notes?')) return NOTES_EMPTY;
   if (url.includes('/reviews?')) return REVIEWS_EMPTY;
+  if (url.includes('/doulists/')) return DOULISTS_EMPTY;
   return null;
 }
 

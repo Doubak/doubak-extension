@@ -633,6 +633,74 @@ export const ROUTE_PROFILES = {
    * 与作品详情页同理：手上只有一份真实样本，而豆瓣对不同形态的日记很可能有不同模板。
    * 要求全中会把好页面判成故障；这三个标志封锁页与错误页一个都不会有，够用了。
    */
+  /**
+   * 豆列索引页（`/people/<u>/doulists/all`）。
+   *
+   * 锚点全部对着 3 份真实索引页量过（我创建的豆列 / 书单 / 我关注的片单），三份的
+   * 结构**完全一致**——所谓「豆列/片单/书单/地点豆列 各有各的样子」并不成立，类型
+   * 只体现在一个图标 class 上（`doulist-category-icon doulist-{common,book,movie}`），
+   * 而书单/片单不过是同一批的过滤视图（实测：书单那 3 个 id 就是豆列里的那 3 个）。
+   *
+   * **`claimedCount` 是 null，这是刻意的。** 页面上确实有一排数字（豆列 18 / 片单 5 /
+   * 书单 8 / 地点豆列 3），但它们**不是这条路线的分母**：那是「我创建的 + 我关注的」
+   * 合计，而这条路线只抓创建的（实测索引页只列出 6 条）。拿它当声称数会写出一份
+   * 「声称 18 / 抓到 6」的永久假账——而 bundle 是冻结的，假账改不掉。
+   *
+   * 顺带一个佐证：档案主人实测「地点豆列(3)」点进去是 0 条。那排数字自己就不可信。
+   */
+  'doulist.list': {
+    urlAnchor: /\/people\/[^/]+\/doulists\//,
+    frameAnchors: [/class="doulist-list"/],
+    itemAnchor: /class="doulist-cover"/,
+    // **每个条目有两处 `/doulist/N` 链接**（封面一处、标题一处），实测 6 条抽出 12 个。
+    // `extractItemIds` 按首次出现去重，与舞台剧那次（3 部剧抽出 6 个 id）同一个坑。
+    idAnchor: /douban\.com\/doulist\/(\d+)/g,
+    timeAnchor: /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})&nbsp;更新/g,
+    claimedCount: null,
+    // 标题那一处链接。封面上还有一处一模一样的地址，限定在 `<h3>` 里就不必依赖去重。
+    //
+    // **只认 `/doulist/N`，这会漏掉「我关注的」那半边的一部分条目**——实测 5 条里
+    // 有 3 条是 `doubanapp/dispatch?uri=/subject_collection/...`（豆瓣自己编的榜单，
+    // 另一套移动端渲染）。这条路线只抓自己编的，那边不会出现，所以今天不成问题；
+    // 将来真要抓 `doulists/collect`，这里会**静默少 3 条**，得先解决那个形状。
+    detailLink: /<h3>\s*<a href="(https:\/\/www\.douban\.com\/doulist\/\d+\/?)"/g,
+  },
+
+  /**
+   * 单个豆列的内容页（`/doulist/<id>/`）。
+   *
+   * 对着 5 份真实豆列量过（3 份自建带评语、1 份纯书签夹、1 份私密），条目数
+   * 25/25/12/15/1，下面每个锚点的命中数都等于条目数，`id="doulist-info"` 与 `<h1>`
+   * 恒为 1。
+   *
+   * **抽取面在 `a.lnk-doulist-add` 的 `data-*` 上**，不在渲染出来的标题块上：那些
+   * 属性带着 id、类型码、目标 URL、标题、封面，是这一页最稳的一处。tofu 也是这么
+   * 抽的——两套实现独立选中同一处，是这个判断可靠的旁证。
+   *
+   * 注意容器写的是 `<div id="770340559" class="doulist-item">`：**id 在 class 前面**，
+   * 所以选择器不能假设属性顺序（与 `class='pl'` / `class="pl"` 那次同类）。
+   */
+  'doulist.item': {
+    urlAnchor: /\/doulist\/\d+/,
+    frameAnchors: [/id="doulist-info"/],
+    // **锚点必须从 `<div` 开始，不能只写 `class="doulist-item"`。**
+    //
+    // `extractItemPairs` 是按 itemAnchor 的**匹配位置**把页面切成一片片的，然后在每
+    // 一片里找 id。而这一页的容器写作 `<div id="770340559" class="doulist-item" >`
+    // ——id 在 class 前面。只匹配 `class=` 的话，切片起点落在 id 后面，于是每一片里
+    // 都找不到 id：实测 25 条抽出 **0** 条，而且 `idless` 也是 0（没有时间锚点），
+    // 连 extractor_stale 都不会响。
+    //
+    // 「id 在 class 前面」这条本身是知道的，没想到它是从这个角度咬人的。
+    itemAnchor: /<div\s+id="\d+"\s+class="doulist-item"/,
+    // 条目自身的 id（这条「收藏动作」的 id），不是目标作品的 id。
+    idAnchor: /<div\s+id="(\d+)"\s+class="doulist-item"/g,
+    // 豆列条目**没有时间**。写 null 而不是硬凑一个：没有时间就没有水位线，这条线
+    // 只能靠连续性证明，不能增量——如实标出来，别让下游以为有下界可用。
+    timeAnchor: null,
+    claimedCount: null,
+  },
+
   'note.item': {
     urlAnchor: /\/(?:note|topic)\/\d+/,
     /**
