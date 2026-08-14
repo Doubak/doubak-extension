@@ -80,7 +80,7 @@ const LOGIN = `<html><head><title>\n登录豆瓣\n</title></head><body>验证码
 /**
  * @param {(url: string, n: number) => string} respond  按 URL 与调用序号给页面
  */
-function harness(respond, { batchSize = 5, pacerOptions } = {}) {
+function harness(respond, { batchSize = 5, pacerOptions, onFetch } = {}) {
   const kv = new MemoryKvStore();
   /** @type {Map<string, MemoryFileStore>} */
   const dirs = new Map();
@@ -95,6 +95,9 @@ function harness(respond, { batchSize = 5, pacerOptions } = {}) {
   const events = [];
   const fetchImpl = async (url) => {
     calls.push(url);
+    // 让测试可以**把一个请求按在半空中**。并发的那几条判据非这样不可：
+    // 「收尾与一批同时发生」在真实时序里只有几十毫秒的窗口，撞运气撞不出来。
+    if (onFetch) await onFetch(url);
     // 应答器可以返回字符串，也可以返回 `{status, body}`——后者用于测非 200
     // 的情形（分类不存在、被下线）。
     const r = respond(url, n++);
@@ -599,6 +602,138 @@ describe('不允许并发两次抓取', () => {
     const { runner } = harness(() => PROFILE);
     await assert.rejects(() => runner.runBatch(), /没有进行中/);
     await assert.rejects(() => runner.finish(), /没有进行中/);
+  });
+});
+
+/**
+ * 收尾与「还在跑的那一批」不能同时发生。
+ *
+ * ## 这条缝是怎么开的
+ *
+ * service worker 那边有两股力量各自会叫「推进」：心跳（每 30 秒）与界面上的按钮。
+ * 而「推进」与「收尾」是**两条消息**——第一股看到跑完了、发出收尾，第二股恰好在
+ * 这中间又叫了一次推进。offscreen 里的互斥锁只管推进，收尾与中止**刻意不加锁**
+ * （中止必须在抓取正跑着的时候也能按下去）。
+ *
+ * 于是 `writer.finalize()`（封段、算 sha256、写 manifest）会与一批抓取重叠。
+ */
+describe('收尾期间不许还有一批在跑', () => {
+  /** 把第一个广播页的请求按在半空中，直到测试放手。 */
+  function heldHarness() {
+    let release = () => {};
+    const held = new Promise((r) => { release = r; });
+    let once = false;
+    const h = harness(broadcastOnly([bcPage(20, 0), bcPage(20, 20)]), {
+      batchSize: 5,
+      onFetch: async (url) => {
+        if (!once && url.includes('statuses')) { once = true; await held; }
+      },
+    });
+    return { ...h, release, held: () => once };
+  }
+
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+
+  test('**manifest 与文件必须对得上** —— 这是档案唯一的自证', async () => {
+    // 修之前实测：manifest 写「902 字节 / 1 条」，而段文件里躺着 4181 字节、
+    // index 里 5 行。sha256 是按封段那一刻算的，所以这份档案**通不过自己的校验**，
+    // 而多出来的那 4 条捕获对任何遵循规范的读取方都不存在——它们既不在 manifest
+    // 里，也不在 index 的行数里。这不是控制台里一条报错，是一份坏掉的档案。
+    const { runner, dirs, release } = heldHarness();
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+
+    const batch = runner.runBatch();       // 卡在第一个广播页上
+    await tick();
+    const finishing = runner.finish('aborted');   // 中止：不加锁，此刻就会封段
+    await tick();
+    release();                              // 放手：这一批继续跑，还要写好几条
+    await batch;
+    const manifest = await finishing;
+
+    const store = [...dirs.values()][0];
+    const seg = manifest.segments[0];
+    const bytes = (await store.read(seg.filename)).byteLength;
+    assert.equal(bytes, seg.bytes,
+      `manifest 说 ${seg.bytes} 字节，文件里是 ${bytes} 字节 —— 封段之后又写进去了东西`);
+
+    const idx = dec.decode(await store.read(manifest.index.filename));
+    const lines = idx.split('\n').filter(Boolean).length;
+    assert.equal(lines, manifest.index.line_count,
+      `manifest 说 index ${manifest.index.line_count} 行，文件里是 ${lines} 行`);
+    assert.equal(lines, seg.record_count, 'index 行数要与段里的记录数一致');
+  });
+
+  test('**中止要等那一批落地**，不是抢在它前面封段', async () => {
+    // 判据是顺序本身：收尾必须在这一批之后结算。写成「等一小会儿」的话，
+    // 机器慢一点就红，而它红的时候没人知道是真坏了还是又慢了。
+    const { runner, release } = heldHarness();
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+
+    const order = [];
+    const batch = runner.runBatch().then(() => order.push('批次'));
+    await tick();
+    const finishing = runner.finish('aborted').then(() => order.push('收尾'));
+    await tick();
+    assert.deepEqual(order, [], '这时候两边都不该结算 —— 请求还按在半空中');
+    release();
+    await Promise.all([batch, finishing]);
+    assert.deepEqual(order, ['批次', '收尾'], '收尾抢在了批次前面');
+  });
+
+  test('收尾期间再叫一次推进：报 done，不报错', async () => {
+    // 这就是「第二股力量」撞上来的样子。抛错的话，`void drive()` 那条路上没人接，
+    // 控制台里就是一句 Uncaught (in promise)；而更糟的是它**跑了一批**。
+    const { runner, release } = heldHarness();
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+
+    const batch = runner.runBatch();
+    await tick();
+    const finishing = runner.finish('aborted');
+    await tick();
+
+    const second = await runner.runBatch();
+    assert.equal(second.finishing, true, '要说清「另一头在收尾」，别把它伪装成跑完了');
+    assert.equal(second.done, true, '驱动层靠它干净让出去');
+    assert.equal(second.captured, 0);
+    assert.equal(second.failed, 0);
+
+    release();
+    await batch;
+    await finishing;
+  });
+
+  test('收尾被拒之后**闸门要重新打开**', async () => {
+    // 收尾会因为「还有抓不下来的条目」而拒绝，而那之后用户正是要去重试它们。
+    // 闸门关着不放的话，此后每一批都直接报 done——这次抓取再也推不动，
+    // 而界面上看不出任何原因（没有报错，只是永远「跑完了」）。
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      const lf = longformEmpty(url);
+      if (lf) return lf;
+      if (!url.includes('statuses')) return bcPage(0);
+      // 广播页给一张认不出来的页面：判定失败 → 有抓不下来的条目
+      return { status: 500, body: '<html>豆瓣挂了</html>' };
+    }, { batchSize: 3 });
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    for (let i = 0; i < 5 && !(await runner.runBatch()).done; i++);
+
+    await assert.rejects(() => runner.finish('complete'), /抓不下来|挡住/);
+    const after = await runner.runBatch();
+    assert.notEqual(after.finishing, true, '闸门没开回来 —— 这次抓取从此推不动了');
+  });
+
+  test('收完了之后再叫收尾，带的是错误码 `no_run`', async () => {
+    // 上层要拿它把「另一头已经收完了」与真正的收尾失败分开：后者要停下整场抓取
+    // 并弹通知，而这个什么都不用做。**判据是错误码不是那句话**——文案会改，
+    // 而改了之后失效的东西是看不见的。
+    const { runner } = harness(broadcastOnly([bcPage(0)]));
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+    await runner.runBatch();
+    await runner.finish('aborted');
+
+    const err = await runner.finish('complete').then(() => null, (e) => e);
+    assert.ok(err, '已经收过尾了，再收一次要报错');
+    assert.equal(err.reason, 'no_run');
   });
 });
 

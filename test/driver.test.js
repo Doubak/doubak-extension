@@ -1,6 +1,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { readFile } from 'node:fs/promises';
+
 import { driveWithinBudget, DEFAULT_BUDGET_MS, MAX_IDLE_BATCHES } from '../src/crawl/driver.js';
 import { HEARTBEAT_PERIOD_MINUTES } from '../src/crawl/supervisor.js';
 
@@ -50,6 +52,31 @@ describe('预算内持续推进', () => {
 
     assert.equal(batchCount(), 1, '哪怕一批就超预算，也要让它做完');
     assert.equal(r.done, false);
+  });
+
+  test('**另一头在收尾：一批都不跑，如实报上去**', async () => {
+    // 心跳与界面各会叫一次推进，而「推进」与「收尾」是两条消息，中间有缝。
+    // 撞进这条缝的那一次要什么都不做：不跑批（收尾正在封段，这时抓到的东西会
+    // 落在封条外面），也不能把 `done` 报成「干净跑完」——上层看到那个会跟着
+    // 再收尾一次，而档案已经封好了，于是弹出一句「收尾失败」。
+    let n = 0;
+    const runner = {
+      async runBatch() {
+        n += 1;
+        return { captured: 0, failed: 0, done: true, stoppedBy: null, finishing: true };
+      },
+    };
+    const r = await driveWithinBudget({ runner, now: () => 0, budgetMs: 60_000 });
+
+    assert.equal(r.finishing, true, '这个状态必须传到上层，否则它无从分辨');
+    assert.equal(n, 1, '认出来就该立刻退出');
+    assert.equal(r.captured, 0);
+  });
+
+  test('平常那些批次不带 finishing —— 免得上层永远什么都不做', async () => {
+    const { runner, nowRef } = fakeRunner({ totalBatches: 2, batchCostMs: 10 });
+    const r = await driveWithinBudget({ runner, now: nowRef, budgetMs: 60_000 });
+    assert.equal(r.finishing, false);
   });
 
   test('被停机时立刻退出', async () => {
@@ -153,5 +180,73 @@ describe('空转检测：一批什么都没推进，下一批也不会', () => {
     const r = await driveWithinBudget({ runner, now: () => 0 });
     assert.equal(r.done, true);
     assert.equal(r.stoppedBy, null);
+  });
+});
+
+/**
+ * 上面那个 `finishing` 只有被 background 认了才有用。
+ *
+ * background.js 在 node:test 里导入不了（顶层全是 `chrome.*`），所以判据只能读源码。
+ * 这类判据的老毛病是钉在一句文案上，改一个字就悄悄失效——所以这里钉的是**错误码**
+ * 与**字段名**，那两样改了必须同时改这里。
+ */
+describe('service worker 那边要认这条缝', () => {
+  const read = () => readFile(new URL('../src/background.js', import.meta.url), 'utf-8');
+
+  test('`finishing` 要在判「跑完了」之前就早退', async () => {
+    const bg = await read();
+    const fn = bg.slice(bg.indexOf('async function drive()'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+
+    const early = body.indexOf('r.result.finishing');
+    const doneBranch = body.indexOf('r.result.done &&');
+    assert.ok(early > 0, 'drive() 里没有认出「另一头在收尾」');
+    assert.ok(doneBranch > 0, '找不到判「跑完了」的那一支，这条判据失去了意义');
+    assert.ok(early < doneBranch,
+      '认「正在收尾」必须在判「跑完了」之前 —— 放在后面等于没放，那一支已经去收尾了');
+    assert.match(body.slice(early, doneBranch), /return/, '认出来之后要什么都不做地返回');
+  });
+
+  test('`no_run` 不算收尾失败', async () => {
+    // 「已经收完了」与「收尾这一步坏了」是两回事：后者要停下整场抓取并弹通知
+    // （心跳据此不再自动重试），前者什么都不用做。混在一起的话，一次成功的抓取
+    // 最后一屏是红的。
+    const bg = await read();
+    const fn = bg.slice(bg.indexOf('async function drive()'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    const catchAt = body.indexOf('} catch (err) {');
+    assert.ok(catchAt > 0, '找不到收尾的 catch');
+    const tail = body.slice(catchAt);
+    const guard = tail.indexOf("reason === 'no_run'");
+    const pause = tail.indexOf('FINALIZE_FAILED');
+    assert.ok(guard > 0, '收尾的 catch 里没有认 no_run');
+    assert.ok(guard < pause, 'no_run 要在记 FINALIZE_FAILED 之前就返回');
+  });
+
+  test('错误码要能过 offscreen 那条边', async () => {
+    // `reason` 是挂在 Error 上的，而消息通道只认 JSON——不显式带过去就只剩一句话。
+    const host = await readFile(new URL('../src/offscreen/host.js', import.meta.url), 'utf-8');
+    assert.match(host, /err\)\.reason = r\.reason/, 'host 要把错误码装回 Error 上');
+    const off = await readFile(new URL('../src/offscreen/offscreen.js', import.meta.url), 'utf-8');
+    assert.match(off, /reason: typeof e\?\.reason === 'string'/, 'offscreen 要把错误码送过界');
+  });
+
+  test('甩出去的推进要有人接 —— 否则只剩一条没人认领的红字', async () => {
+    // `void drive()` 一旦 reject，浏览器把它记成 Uncaught (in promise)，显示在扩展
+    // 详情页上，指着 `drive()` 的最后一行——那行什么错都没有，它只是这个 async
+    // 函数的栈帧。用户看到「扩展报错了」，而没有任何线索指向真正发生的事。
+    //
+    // 判据是**数出来**的：文件里不许再出现没接住的 `drive()`。写死三处调用点的话，
+    // 第四处照样会漏。
+    // 先去掉注释：`driveDetached` 的说明里就写着 `void drive()` 这几个字，
+    // 而一条会被自己的说明判红的判据活不过一个星期。
+    const bg = (await read())
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const bare = [...bg.matchAll(/void drive\(\)/g)];
+    assert.deepEqual(bare.map((m) => m.index), [],
+      '有没接住的 void drive() —— 用 driveDetached()');
+    assert.match(bg, /function driveDetached\(\)[\s\S]{0,200}?\.catch\(/,
+      'driveDetached 必须真的接住，而不只是换个名字');
   });
 });

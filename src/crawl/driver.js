@@ -33,7 +33,7 @@ export const DEFAULT_BUDGET_MS = 22_000;
  * @param {number} [opts.budgetMs]
  * @param {() => number} [opts.now]
  * @param {(evt: object) => void} [opts.onEvent]
- * @returns {Promise<{batches: number, captured: number, failed: number, done: boolean, stoppedBy: string | null, unresolvedFailures: number, unresolvedOrderedFailures: number, awaitingHuman: number}>}
+ * @returns {Promise<{batches: number, captured: number, failed: number, done: boolean, stoppedBy: string | null, finishing: boolean, unresolvedFailures: number, unresolvedOrderedFailures: number, awaitingHuman: number}>}
  */
 /**
  * 连续多少批毫无进展就判定空转。
@@ -61,9 +61,14 @@ export async function driveWithinBudget({
   let unresolvedFailures = 0;
   let unresolvedOrderedFailures = 0;
   let awaitingHuman = 0;
+  /** 另一头正在收尾，这一段一批都没跑。见 runner.runBatch。 */
+  let finishing = false;
 
   while (true) {
     const r = await runner.runBatch();
+    // **不能接着往下走。** 下面那段会把 `done` 读成「干净跑完」，于是这一头也去
+    // 叫一次收尾——而收尾正在另一头进行。如实报上去，让调用方什么都别做。
+    if (r.finishing) { finishing = true; done = true; break; }
     batches += 1;
     captured += r.captured;
     failed += r.failed;
@@ -113,7 +118,7 @@ export async function driveWithinBudget({
   }
 
   return {
-    batches, captured, failed, done, stoppedBy,
+    batches, captured, failed, done, stoppedBy, finishing,
     unresolvedFailures, unresolvedOrderedFailures, awaitingHuman,
   };
 }

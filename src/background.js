@@ -196,6 +196,14 @@ async function drive() {
   // 2900 张封面会全部进 awaiting_human。
   const awaitingHuman = r.result.awaitingHuman ?? 0;
 
+  // **另一头正在收尾：这一头什么都不该做。**
+  //
+  // 叫推进的有两股力量（心跳、界面上的按钮），而「推进」与「收尾」是两条消息，
+  // 中间有缝：第一股看到跑完了、发出收尾，第二股恰好在这时又叫了一次推进。
+  // 不认这个状态的话，第二股会跟着判「跑完了」并再收尾一次，而那时档案已经封好，
+  // 于是弹出一句「收尾失败」——一次成功的抓取，最后一屏是红的。
+  if (r.result.finishing) return r.result;
+
   if (r.result.done && !r.result.stoppedBy && !r.result.unresolvedFailures && !awaitingHuman) {
     // **收尾失败不能变成无限重试。**
     //
@@ -209,6 +217,13 @@ async function drive() {
     try {
       await withOffscreen({ op: 'finish', status: 'complete' });
     } catch (err) {
+      // **「已经没有进行中的抓取了」不是收尾失败。** 上面那道判断挡的是「收尾正在
+      // 进行」，这里挡的是「收尾已经做完了」——同一条缝的两侧，两边都得认。
+      // 判据是错误码而不是那句话：文案随时会改，而改了之后失效的东西是看不见的。
+      if (/** @type {any} */ (err)?.reason === 'no_run') {
+        debugLog('收尾', '另一头已经收完了，这一次什么都不做');
+        return r.result;
+      }
       debugLog('收尾失败', err);
       await getSupervisor().pauseRun(FINALIZE_FAILED, { last_error: String(err?.message ?? err) });
       await notifyNeedsAction(FINALIZE_FAILED, { kv: getKv() });
@@ -236,6 +251,25 @@ async function drive() {
     await notifyNeedsAction(r.result.stoppedBy, { kv: getKv() });
   }
   return r.result;
+}
+
+/**
+ * 把推进甩出去，**并且接住它**。
+ *
+ * 这三处（开始、继续、重试）都不能等 `drive()`——它要跑二十几秒，而界面等的是
+ * 「我知道了」。但 `void drive()` 是没人接的：一旦它 reject，浏览器只能把它记成
+ *
+ *     Uncaught (in promise) Error: …
+ *
+ * 显示在扩展详情页的错误列表里，指着 `drive()` 的最后一行——那行什么错都没有，
+ * 它只是这个 async 函数的栈帧。用户看到的是「扩展报错了」，而没有任何线索。
+ *
+ * 会 reject 的是真实存在的情形：offscreen 在消息还没答复时被拆掉（重载扩展、
+ * 浏览器回收），`sendMessage` 就报「通道关了」。那不是要用户处理的事——心跳会
+ * 把它接上——但它必须留下痕迹，而不是变成一条没人认领的红字。
+ */
+function driveDetached() {
+  return drive().catch((err) => debugLog('推进失败（甩出去的那一次）', err));
 }
 
 wireNotificationClicks();
@@ -444,7 +478,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           });
           await getSupervisor().startRun({ bundle_id: started.bundleId });
           await clearAttention({ kv: getKv() });
-          void drive(); // 不等它，立刻答复界面
+          void driveDetached(); // 不等它，立刻答复界面
           sendResponse({ ok: true, bundleId: started.bundleId, account: started.account });
           break;
         }
@@ -458,7 +492,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           // 再弹一条「需要你处理：你手动暂停了抓取」——而用户刚点的正是继续。
           await getSupervisor().resumeRun();
           await clearAttention({ kv: getKv() });
-          void drive();
+          void driveDetached();
           sendResponse({ ok: true });
           break;
         }
@@ -503,7 +537,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
             : { count: 0 };
           if (r.count > 0) {
             await clearAttention({ kv: getKv() });
-            void drive();
+            void driveDetached();
           }
           sendResponse({ ok: true, count: r.count, loaded });
           break;

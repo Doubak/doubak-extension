@@ -40,6 +40,16 @@ import { replayableCaptures } from './replay.js';
 /** 一批抓多少条。见文件开头的权衡说明。 */
 export const DEFAULT_BATCH_SIZE = 25;
 
+/**
+ * 「这一批什么都没干」。字段要齐：驱动层会把它们累加进本次唤醒的结果，
+ * 少一个就是 `undefined + n` = NaN，而 NaN 一路飘到界面上是没人看得懂的。
+ */
+const NO_WORK = Object.freeze({
+  captured: 0, failed: 0, stoppedBy: null,
+  unresolvedFailures: 0, unresolvedOrderedFailures: 0, awaitingHuman: 0,
+  done: true, truncated: false,
+});
+
 export class CrawlRunner {
   /**
    * @param {object} opts
@@ -72,6 +82,18 @@ export class CrawlRunner {
 
     /** @type {object | null} 当前这次抓取的全部部件 */
     this._run = null;
+
+    /**
+     * 正在跑的那一批，以及「已经在收尾了」。**这两个字段是一道闸门**，见 `finish()`。
+     *
+     * 收尾会 `writer.finalize()`：封段、算摘要、写 manifest。而这一段时间里如果还有
+     * 一批在跑，它抓到的页面会**接在已经封好的段后面**——manifest 里那份 sha256
+     * 与字节数从此对不上文件，而 index 也多出几行没人认领的记录。实测：manifest
+     * 写 902 字节 / 1 条，文件里躺着 4181 字节 / 5 条。档案通不过自己的校验，
+     * 而多出来的那 4 条对任何遵循规范的读取方都不存在。
+     */
+    this._batch = null;
+    this._finishing = false;
 
     // **整个 runner 共用一个闸门。**
     //
@@ -725,7 +747,30 @@ export class CrawlRunner {
    */
   async runBatch() {
     if (!this._run) throw new Error('没有进行中的抓取');
-    const { loop, frontier } = this._run;
+    // 收尾已经开始了：**这一批根本不能开工**。等它跑完再说没有用——收尾正在封段，
+    // 而这一批抓到的东西会落在封条外面。报 `done` 让驱动层干净地让出去，别报错：
+    // 「另一头正在收尾」是 MV3 下的常态（心跳与界面各叫一次 drive），不是故障。
+    if (this._finishing) return { ...NO_WORK, finishing: true };
+
+    const p = this._runOneBatch();
+    this._batch = p;
+    try {
+      return await p;
+    } finally {
+      // 只清自己那一份：晚一步醒来的旧批次不该抹掉别人的记号。
+      if (this._batch === p) this._batch = null;
+    }
+  }
+
+  /** @returns {Promise<any>} */
+  async _runOneBatch() {
+    // **把这一次抓取抓在手里，不要跨 await 再去读 `this._run`。**
+    // 那正是原来的写法，而 `finish()` 会把它置空——于是这一批回来时炸在
+    // 「Cannot read properties of null (reading 'capturedSoFar')」。上面那道闸门
+    // 已经不让这件事发生了，但读局部变量本身就没有这个形状，闸门万一被绕过也不会
+    // 变成一句看不懂的 TypeError。
+    const run = this._run;
+    const { loop, frontier } = run;
 
     // 安全阀：剩余额度小于一批时，只跑剩下那么多。
     //
@@ -733,19 +778,19 @@ export class CrawlRunner {
     // `Math.max(0, undefined - undefined)` 是 NaN，`while (0 < NaN)` 直接为假，
     // 于是一批里一个请求都不发；而 NaN 又通不过 `hitCap` 的比较，`done` 保持为假，
     // 驱动循环便以每秒几十次的速度空转。这条在 `resume()` 漏写字段时真的发生过。
-    const cap = this._run.maxCaptures;
+    const cap = run.maxCaptures;
     const remaining = Number.isFinite(cap)
-      ? Math.max(0, cap - (this._run.capturedSoFar ?? 0))
+      ? Math.max(0, cap - (run.capturedSoFar ?? 0))
       : Infinity;
     const r = await loop.run({ maxItems: Math.min(this._batchSize, remaining) });
-    this._run.capturedSoFar += r.captured + r.failed;
+    run.capturedSoFar += r.captured + r.failed;
 
     // 每批之后落一次 checkpoint。worker 被杀最多丢掉这一批的游标，而捕获
     // 本身早就落盘了，恢复时按 index 重建即可。
     const stopped = frontier.stopped;
     await this._saveCheckpoint(stopped ? frontier.stopReason : CRASH_SENTINEL_REASON);
 
-    const hitCap = Number.isFinite(cap) && this._run.capturedSoFar >= cap;
+    const hitCap = Number.isFinite(cap) && run.capturedSoFar >= cap;
     // 用 hasReady() 而不是 next()：后者会把条目标成 in_flight，拿它当判断用
     // 会白白消耗一个条目并让它永远卡住，进而堵死整条路线。
     const done = stopped || hitCap || !frontier.hasReady();
@@ -770,7 +815,38 @@ export class CrawlRunner {
    *   而水位线正建立在那上面，不是用户点一下就能免掉的。
    */
   async finish(status = 'complete', { acceptLeafGaps = false } = {}) {
-    if (!this._run) throw new Error('没有进行中的抓取');
+    if (!this._run) {
+      // **「已经收完尾了」不是收尾失败。** service worker 那边会有两股力量各叫一次
+      // 推进（心跳、界面），两股都可能看到「跑完了」并跟着叫一次收尾。带上错误码，
+      // 让上层能把它与真正的收尾失败分开——后者要停下整场抓取并弹通知，而这个
+      // 什么都不用做。
+      const e = new Error('没有进行中的抓取');
+      /** @type {any} */ (e).reason = 'no_run';
+      throw e;
+    }
+    this._finishing = true;
+    try {
+      return await this._finish(status, acceptLeafGaps);
+    } finally {
+      // **失败也要开闸。** 收尾会因为「还有抓不下来的条目」而拒绝，而那之后用户
+      // 正是要去重试那些条目——闸门关着的话，此后每一批都直接报 done，
+      // 这次抓取再也推不动，而界面上看不出任何原因。
+      this._finishing = false;
+    }
+  }
+
+  /**
+   * @param {'complete' | 'aborted'} status
+   * @param {boolean} acceptLeafGaps
+   */
+  async _finish(status, acceptLeafGaps) {
+    // **等在跑的那一批落地。** 封段与写记录不能同时发生：finalize 之后再落下来的
+    // 捕获会接在封条外面，manifest 的 sha256 与字节数从此对不上文件。
+    // 等多久是有界的：闸门已经关上，不会再有新的一批；而 `abort()` 在这之前就
+    // `stop()` 过 frontier，重试要先过 `frontier.next()`，停了就取不出东西。
+    // 于是最坏情况是一个正在飞的请求超时（30 秒），常态是一两秒。
+    // 「中止慢了一下」换的是「manifest 与文件对得上」，这笔账没有第二种算法。
+    await this._batch?.catch(() => {});
     const { loop, writer, frontier } = this._run;
 
     // **有未解决的失败就不许标 complete。**
