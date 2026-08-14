@@ -94,6 +94,26 @@ export function transitionFor(verdict) {
 }
 
 /**
+ * 连续多少页**一条都没有**就算走到头了。
+ *
+ * 与上面那个阈值分开，因为两件事的证据强度不一样：
+ *
+ * - 「整页都是重复」是**正常现象**——头部插入会把条目推向后面的页，所以要连续
+ *   3 页才敢下结论；
+ * - 「整页一条都没有」在列表中段说不通。实测的审查抑制是**部分**的（游戏/玩过
+ *   声称 293、渲染 288，第 7、14、17 页渲染 14/14/13 条），从没见过整页为空。
+ *
+ * 那为什么不是 1？因为「从没见过」是从**一个账号**上看到的，而这个项目在
+ * 「从手上的样本推出一个封闭集合」这件事上已经错过四次。取 2：一页空还继续走，
+ * 连着两页空才收——多花一个请求，换掉「万一中段真有整页为空就静默截断」那个
+ * 不可恢复的结果。
+ *
+ * 实测的浪费：8 条的游戏列表会请求 start=15 / 30 / 45（三页全空，第三页才
+ * 触发那个阈值 3）。这条把它收到两个。
+ */
+export const EMPTY_PAGE_THRESHOLD = 2;
+
+/**
  * 停滞检测。
  *
  * 终止条件是「连续 N 页无进展」，不是「本页无新条目」，更不是「本页条目数
@@ -101,6 +121,8 @@ export function transitionFor(verdict) {
  *
  * 「无进展」的定义是**这一页没有带来任何新的条目 ID**。整页重复是正常的
  * （头部插入会把条目推向后面的页），所以要连续多页才算停滞。
+ *
+ * **空页另算**，见 `EMPTY_PAGE_THRESHOLD`。
  */
 export class StallDetector {
   /** @param {number} [threshold] 连续多少页无进展才算停滞 */
@@ -110,6 +132,8 @@ export class StallDetector {
     }
     this._threshold = threshold;
     this._consecutiveNoProgress = 0;
+    /** 连续多少页**一条都没有**。与上面那个分开数，见 `EMPTY_PAGE_THRESHOLD`。 */
+    this._consecutiveEmpty = 0;
     /** @type {Set<string>} */
     this._seenIds = new Set();
     this._pages = 0;
@@ -119,7 +143,7 @@ export class StallDetector {
    * 记录一页的条目 ID。
    *
    * @param {string[]} ids 本页出现的条目 ID
-   * @returns {{newIds: number, duplicates: number, stalled: boolean}}
+   * @returns {{newIds: number, duplicates: number, stalled: boolean, emptyRun: number}}
    */
   observePage(ids) {
     this._pages += 1;
@@ -134,10 +158,17 @@ export class StallDetector {
     if (newIds === 0) this._consecutiveNoProgress += 1;
     else this._consecutiveNoProgress = 0;
 
+    // **数的是「这一页有没有条目」，不是「有没有新条目」。** 整页重复的页面不是
+    // 空页——它恰恰证明列表还在，只是这一段已经读过了。
+    if (ids.length === 0) this._consecutiveEmpty += 1;
+    else this._consecutiveEmpty = 0;
+
     return {
       newIds,
       duplicates: ids.length - newIds,
-      stalled: this._consecutiveNoProgress >= this._threshold,
+      stalled: this._consecutiveNoProgress >= this._threshold
+        || this._consecutiveEmpty >= EMPTY_PAGE_THRESHOLD,
+      emptyRun: this._consecutiveEmpty,
     };
   }
 
@@ -151,6 +182,10 @@ export class StallDetector {
     return {
       threshold: this._threshold,
       consecutiveNoProgress: this._consecutiveNoProgress,
+      // **空页计数也要存。** 不存的话它在每次恢复之后归零，而 service worker 一场
+      // 抓取要死很多次——于是「连着两页空」永远凑不满，这条判据形同虚设。
+      // 与 `seenIds` 是同一个道理，那次踩过。
+      consecutiveEmpty: this._consecutiveEmpty,
       seenIds: [...this._seenIds],
       pages: this._pages,
     };
@@ -160,6 +195,7 @@ export class StallDetector {
   static restore(s) {
     const d = new StallDetector(s?.threshold ?? 3);
     d._consecutiveNoProgress = s?.consecutiveNoProgress ?? 0;
+    d._consecutiveEmpty = s?.consecutiveEmpty ?? 0;
     d._seenIds = new Set(s?.seenIds ?? []);
     d._pages = s?.pages ?? 0;
     return d;

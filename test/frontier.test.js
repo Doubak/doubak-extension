@@ -416,6 +416,43 @@ describe('停滞检测：终止靠它，不靠「本页没有新条目」', () =
     assert.equal(d.uniqueCount, 44);
   });
 
+  test('连着两页一条都没有就收 —— 空页与「整页重复」不是一回事', () => {
+    // 8 条的游戏列表实测会请求 start=15 / 30 / 45：三页全空，第三页才凑满阈值 3。
+    // 对一个「每个请求都算账」的工具来说，那是注定拿不到任何东西的请求。
+    const d = new StallDetector(3);
+    assert.equal(d.observePage(['1', '2', '3']).stalled, false);
+    assert.equal(d.observePage([]).stalled, false, '**一页空还不算**——中段万一真有整页为空，停在这儿就是静默截断');
+    assert.equal(d.observePage([]).stalled, true, '连着两页空才收');
+  });
+
+  test('空页计数会被有条目的页重置 —— 哪怕那一页全是重复的', () => {
+    // 「整页重复」证明列表还在，只是这一段读过了；它跟「一条都没有」是两种页面。
+    const d = new StallDetector(3);
+    d.observePage(['1', '2']);
+    assert.equal(d.observePage([]).emptyRun, 1);
+    assert.equal(d.observePage(['1', '2']).emptyRun, 0, '有条目就重置，重复也算有');
+  });
+
+  test('一空一有地交替走，不会被空页阈值收掉', () => {
+    // 这里必须用**新**条目，否则会撞上另一条阈值（连续 3 页无进展）而停——
+    // 那是它该做的事，但会把这条测试想验的东西盖掉。第一版就是这么写错的。
+    const d = new StallDetector(3);
+    assert.equal(d.observePage(['1', '2']).stalled, false);
+    assert.equal(d.observePage([]).stalled, false);
+    assert.equal(d.observePage(['3', '4']).stalled, false, '有新条目，两个计数都清零');
+    assert.equal(d.observePage([]).stalled, false, '空页重新数起，不该被上一轮带停');
+  });
+
+  test('空页计数必须活过 checkpoint', () => {
+    // 与 seenIds 同一个道理，那次踩过：service worker 一场抓取要死很多次，
+    // 计数每次归零的话，「连着两页空」永远凑不满，这条判据形同虚设。
+    const d = new StallDetector(3);
+    d.observePage(['1']);
+    d.observePage([]);
+    const back = StallDetector.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(back.observePage([]).stalled, true, '恢复之后第二页空就该收');
+  });
+
   test('统计新增与重复', () => {
     const d = new StallDetector();
     const r = d.observePage(['1', '2', '3']);
