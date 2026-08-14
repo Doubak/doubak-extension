@@ -174,8 +174,12 @@ export function bundlePicker({ items, selected, onPick, fmtBytes }) {
     // 要到收尾才写——所以正在抓的那一份读不出上游。原来的写法把「读不出来」和
     // 「没有上游」合成一个假值，于是一次正在跑的增量被标成「全量」：那不是缺一个
     // 值，那是一句错话，而且正好错在用户最会盯着看的那一行上。
+    //
+    // **这里不用箭头。** 一个箭头在这一行里有两种读法（「接自它」还是「产出它」），
+    // 而这一行只讲一份档案、根本不需要方向符号——写成话就没有歧义。链条那张图另说，
+    // 那里箭头是有方向约定的（见 docs/ui.md「链条画成什么样」）。
     row.append(span('rel',
-      it.previous ? `增量 ← ${shortId(it.previous)}`
+      it.previous ? `增量 · 接自 ${shortId(it.previous)}`
         : it.previous === null ? '全量'
           : '还不知道'));
 

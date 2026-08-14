@@ -94,7 +94,10 @@ describe('档案选择器', () => {
   test('增量要说清接在谁后面 —— 链断了才看得出来', async () => {
     const { bundlePicker } = await load();
     const el = bundlePicker({ items, selected: null, onPick: () => {}, fmtBytes });
-    assert.match(el.querySelectorAll('.picker-row')[1].textContent, /增量 ← 9f5719/);
+    // **不用箭头**：单独一行只讲一份档案，箭头在这里有两种读法（接自它 / 产出它），
+    // 写成话就没有歧义。链条那张图才有方向约定，见 docs/ui.md「链条画成什么样」。
+    assert.match(el.querySelectorAll('.picker-row')[1].textContent, /增量 · 接自 9f5719/);
+    assert.doesNotMatch(el.querySelectorAll('.picker-row')[1].textContent, /[←→]/);
   });
 
   test('**「未导出」要显眼**', async () => {

@@ -110,7 +110,12 @@ async function renderChain() {
   head.className = 'card idle';
   const hb = document.createElement('b');
   hb.textContent = chainHeadline(bundles);
-  head.append(hb, document.createTextNode(bundles.map((b) => b.bundleId).join(' ← ')));
+  // 箭头指向**更早的那一份**，也就是 `previous_bundle_id` 真正的指向：每一份档案
+  // 记着自己接在谁后面。`bundles` 是新→旧，所以从左往右读就是往回走，箭头朝右。
+  //
+  // 原来这里写的是 `←`，配上新→旧的顺序，读出来是「旧的产出了新的」——方向反了。
+  // 一张链条图上，读者唯一要靠的就是方向。约定写在 docs/ui.md「链条画成什么样」。
+  head.append(hb, document.createTextNode(bundles.map((b) => b.bundleId).join(' → ')));
   el.append(head);
 
   el.append(table(
