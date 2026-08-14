@@ -17,6 +17,7 @@
 - **[docs/ui.md](docs/ui.md)** —— 界面设计：说什么话、怎么显示进度才不撒谎
 - **[docs/permissions.md](docs/permissions.md)** —— 权限审计：声明了什么、刻意不要什么、
   以及「哪个执行上下文有哪个 API」那张咬过人的表
+- **[docs/release.md](docs/release.md)** —— 怎么发一个版本，以及版本号为什么值得小心
 - 档案格式定义在另一个仓库：[`doubak-data-specs`](https://github.com/Doubak/doubak-data-specs)
 
 ## 开发
@@ -34,17 +35,24 @@ node tools/package.mjs --stage dist/unpacked   # 摊成一个可直接加载的�
 
 ### 装载到浏览器
 
-两条路，装出来是同一个扩展。
+三条路，装出来是同一个扩展。
 
-**从仓库直接装**：`chrome://extensions` → 打开开发者模式 → 加载已解压的扩展程序 →
-选本仓库根目录。这个项目没有构建步骤，源码就是运行的代码，所以这条路一直有效。
+**下一个发布版**（多数人走这条）：从
+[Releases](https://github.com/Doubak/doubak-extension/releases) 拿 `doubak-<版本>.zip`，
+**解压**，然后 `chrome://extensions` → 打开开发者模式 → 加载已解压的扩展程序 → 选解压
+出来的那个目录。注意那份 zip 是应用商店的提交格式，**Chrome 不能直接装 zip**，必须先解压。
 
-**下一个打好的包**（不想 clone 整个仓库时）：GitHub 的
+**从仓库直接装**：同样是「加载已解压的扩展程序」，选本仓库根目录。这个项目没有构建
+步骤，源码就是浏览器里跑的东西，所以这条路一直有效——代价是它带着 `test/` 和 `docs/`，
+不是分发出去的那份。
+
+**试 main 上还没发版的改动**：GitHub 的
 [Actions → package](https://github.com/Doubak/doubak-extension/actions/workflows/package.yml)
-里挑一次运行，下载 `doubak-<版本>-unpacked`，解压，然后同样用「加载已解压的扩展程序」
-选那个目录。它比仓库根目录干净：只有那 89 个运行时真正需要的文件，没有 `test/`、
-没有 `docs/`。打了 `v*` 标签的版本还会在
-[Releases](https://github.com/Doubak/doubak-extension/releases) 里附一个应用商店格式的 zip。
+里挑一次运行，下载 `doubak-<版本>-unpacked`，解压即可加载。它只有那 89 个运行时真正
+需要的文件。**下载构建产物需要登录 GitHub**（匿名取是 401），所以面向用户的地方一律
+指向 Releases。
+
+发版流程见 [`docs/release.md`](docs/release.md)。
 
 ### 浏览器自检
 
@@ -134,11 +142,15 @@ webrecorder 的 warcio 独立验证 WARC 输出；同级目录有 `doubak-data-s
 
 ## 发布到 Chrome 应用商店
 
+完整流程（改版本号 → 打标签 → CI 建 release → 核对哈希）在
+[`docs/release.md`](docs/release.md)。打了 `v*` 标签之后 release 上挂的那份 zip 就是提交
+用的，不需要另外打。想在本地打一份：
+
 ```sh
 node tools/package.mjs
 ```
 
-产出 `dist/doubak-<版本>.zip`，直接传到开发者后台。几件要知道的：
+产出 `dist/doubak-<版本>.zip`。几件要知道的：
 
 - **打包用白名单，不是黑名单。** 名单在 `tools/package.mjs` 的 `INCLUDE` 里。黑名单漏一条会**多打进去一个不该有的东西且没人发现**；白名单漏一条则是扩展装上就报错 —— 后者一眼就能看见。有测试守着 `test/` `tools/` `docs/` 不许进包。
 - **`selftest/` 必须打包进去。** 它没有被 `manifest.json` 引用，只被调试页那个按钮 `getURL` 打开 —— 漏了它，那个按钮就是个死链。
