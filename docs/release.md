@@ -34,6 +34,7 @@ git commit -am "站点：徽标跟到 v1.2.0" && git push
 ```
 
 下载按钮不用管——它指的是 `/releases/latest`，自己会跟（那也正是它这么写的理由）。
+「安装到 Chrome」那个按钮也不用管，它指向商店；但**商店里的包要你自己去传**（见下）。
 
 这一步没有任何东西会提醒你：CI 在两个仓库里各跑各的，站点上写着旧版本号照样一路
 绿灯。跨仓库的步骤就是这样丢的，所以写在这儿。
@@ -123,6 +124,12 @@ git tag -d v1.2.0
 
 ## 上传应用商店
 
-Release 上那份 zip 就是提交用的，不需要另外打。表单里每个权限都要写「为什么需要」，
-可直接粘贴的答案在 [`store-listing.md`](store-listing.md)——改权限的时候，那份、
+已上架：<https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
+
+Release 上那份 zip 就是提交用的，不需要另外打。**上架之后每次发版都要再传一次**
+——商店里的版本不会跟着 GitHub 的 release 自己走，而站点上的「安装到 Chrome」指向
+的是商店。忘了传的后果是：站点说 v1.0.3，用户装到的是 v1.0.2，而两边都没有任何
+东西会提醒你。
+
+表单里每个权限都要写「为什么需要」，可直接粘贴的答案在 [`store-listing.md`](store-listing.md)——改权限的时候，那份、
 [`permissions.md`](permissions.md) 和 `manifest.json` 是一起改的。

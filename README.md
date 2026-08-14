@@ -36,12 +36,18 @@ node tools/package.mjs --stage dist/unpacked   # 摊成一个可直接加载的�
 
 ### 装载到浏览器
 
-三条路，装出来是同一个扩展。
+四条路，装出来是同一个扩展。
 
-**下一个发布版**（多数人走这条）：从
+**从 Chrome 应用商店装**（多数人走这条）：
+<https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
+（链接只写扩展 ID、不带名字那一段——带名字的形式在改名之后会失效）。Edge 也能从
+这里装。
+
+**下一个发布版**（不想走商店时）：从
 [Releases](https://github.com/Doubak/doubak-extension/releases) 拿 `doubak-<版本>.zip`，
 **解压**，然后 `chrome://extensions` → 打开开发者模式 → 加载已解压的扩展程序 → 选解压
 出来的那个目录。注意那份 zip 是应用商店的提交格式，**Chrome 不能直接装 zip**，必须先解压。
+它与商店里的是同一个包：同一条 CI 打出来，时间戳清零，逐字节相同。
 
 **从仓库直接装**：同样是「加载已解压的扩展程序」，选本仓库根目录。这个项目没有构建
 步骤，源码就是浏览器里跑的东西，所以这条路一直有效——代价是它带着 `test/` 和 `docs/`，
@@ -149,6 +155,8 @@ webrecorder 的 warcio 独立验证 WARC 输出；同级目录有 `doubak-data-s
 时会额外跑跨仓库一致性检查（规范常量的新鲜度、产出与校验器的一致性）。
 
 ## 发布到 Chrome 应用商店
+
+**已上架**：<https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
 
 完整流程（改版本号 → 打标签 → CI 建 release → 核对哈希）在
 [`docs/release.md`](docs/release.md)。打了 `v*` 标签之后 release 上挂的那份 zip 就是提交
