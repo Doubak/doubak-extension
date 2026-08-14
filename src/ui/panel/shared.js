@@ -96,9 +96,17 @@ export function eventNote(e) {
     // **这是豆瓣改版的第一个征兆。** 两个独立信号对不上：条目容器说这页有 N 条，
     // 而按 URL 形状抽却一条都没有。不说的话它是安静的——停滞检测会判「没进展」然后
     // 停在第 3 页，而 contiguous 还报 ✔ 已验证。
-    const what = e.missing === 'ids' ? '条目' : '时间';
-    return `${routeName(e.routeKey)}：这一页看得见 ${e.containerCount} 个条目，`
-      + `却一个${what}都抽不出来——多半是豆瓣改了页面结构。页面本身已经原样存进档案，`
+    //
+    // **两个字段都要防着缺。** 它们经 `formatEntry` 的白名单存进日志，而白名单漏
+    // 一个字段是不报错的。缺 `missing` 时不许猜：原来那个三元判断会倒向「时间」，
+    // 于是一次 id 失败被念成时间失败——那是**编造一个错误的结论**，比不说更糟。
+    const what = e.missing === 'ids' ? '条目'
+      : e.missing === 'times' ? '时间'
+        : null;
+    const saw = typeof e.containerCount === 'number' ? `${e.containerCount} 个` : '若干';
+    const tail = what ? `却一个${what}都抽不出来` : '却抽不到该有的东西';
+    return `${routeName(e.routeKey)}：这一页看得见 ${saw}条目，${tail}`
+      + '——多半是豆瓣改了页面结构。页面本身已经原样存进档案，'
       + '改好抽取器重跑就能补回来，不用重抓。';
   }
   if (e.type === 'backlog_unresolved') {

@@ -18,6 +18,8 @@ import {
   LOG_KEY, FETCH_LOG_KEY, MAX_ENTRIES, MAX_FETCH_ENTRIES,
 } from '../src/crawl/event-log.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
+// 日志里那句人话由界面那边生成——判据必须跨过这条边界，因为丢字段正是在这中间发生的。
+import { eventNote } from '../src/ui/panel/shared.js';
 
 describe('只记 index.ndjson 里没有的事件', () => {
   test('page 不进日志 —— 它跟 capture 一一对应，记两遍没意义', () => {
@@ -132,6 +134,68 @@ describe('一条日志留什么', () => {
   test('URL 也截断', () => {
     const r = formatEntry({ type: 'error', url: `https://x/${'y'.repeat(1000)}` }, 'now');
     assert.equal(r.url.length, 300);
+  });
+
+  /**
+   * **存进日志再念出来，不许出现 undefined。**
+   *
+   * `formatEntry` 是白名单，而 `eventNote` 会去读事件上的字段——白名单漏一个，
+   * 不报错，只是那句人话缺一块。实测漏过：`extractor_stale` 的 containerCount 与
+   * missing 都没进白名单，于是日志里写着
+   *
+   *     这一页看得见 undefined 个条目，却一个时间都抽不出来
+   *
+   * 两处都错。`undefined` 只是难看，**「时间」才是要命的**：原事件说的是 id 抽不
+   * 出来，而 `missing` 一空，那边的三元判断倒向了「时间」——一条印着错误结论的
+   * 诊断比没有更糟，它看起来像证据。而 `extractor_stale` 恰恰是「豆瓣是不是改版
+   * 了」的第一个信号，是最不该含糊的一条。
+   *
+   * 所以判据放在这里而不是补一个字段就算：**实时事件与存过之后念出来的必须一致**。
+   */
+  test('存进日志再念出来，不许出现 undefined，也不许换个说法', () => {
+    /** 每种会被 eventNote 翻译的事件，各给一条**字段齐全**的实例。 */
+    const samples = [
+      { type: 'incremental_rebased', reason: 'renamed', was: 'old', now: 'new', count: 1 },
+      { type: 'incremental', routes: ['a', 'b'] },
+      { type: 'incremental_failed' },
+      { type: 'no_watermark', routeKey: 'broadcast.timeline', message: '没有水位线' },
+      { type: 'subjects_skipped', count: 12 },
+      { type: 'subjects_refresh', count: 12 },
+      { type: 'longform_skipped', count: 3 },
+      { type: 'longform_refresh', count: 3 },
+      { type: 'assets_skipped', count: 7 },
+      { type: 'backlog_queued', count: 121 },
+      { type: 'backlog_unresolved', count: 2 },
+      {
+        type: 'extractor_stale',
+        routeKey: 'interest.movie.done',
+        url: 'https://www.douban.com/x',
+        containerCount: 15,
+        missing: 'ids',
+      },
+      {
+        type: 'extractor_stale',
+        routeKey: 'interest.book.done',
+        url: 'https://www.douban.com/y',
+        containerCount: 15,
+        missing: 'times',
+      },
+    ];
+
+    for (const e of samples) {
+      const live = eventNote(e);
+      if (live === null) continue; // 这一种不翻译，那就没什么可掉的
+      const stored = eventNote(formatEntry(e, '2026-08-14T00:00:00Z'));
+      assert.doesNotMatch(live, /undefined/, `${e.type}：实时那句就已经缺字段了`);
+      assert.doesNotMatch(
+        String(stored), /undefined/,
+        `${e.type}：存进日志之后缺字段了 —— formatEntry 的白名单漏了东西`,
+      );
+      assert.equal(
+        stored, live,
+        `${e.type}：存过之后说法变了。字段掉了不会报错，只会让日志改口`,
+      );
+    }
   });
 });
 

@@ -126,6 +126,16 @@ export function formatEntry(e, at) {
     ...(e.was ? { was: e.was } : {}),
     ...(e.now ? { now: e.now } : {}),
     ...(Array.isArray(e.routes) ? { routes: e.routes.slice(0, 40) } : {}),
+    // `extractor_stale` 要的那两个。**这是白名单的固有代价**：漏一个字段不会报错，
+    // 只会让日志里那句话缺一块——而缺的那块恰好是判断「豆瓣是不是改版了」要用的
+    // 两个数（见 ui/panel/shared.js 的 eventNote）。
+    //
+    // 漏掉它们的后果不只是显示成 undefined：`missing` 一空，那边的三元判断会倒向
+    // 「时间」，于是**一次 id 抽取失败会被写成时间抽取失败**——一条印着错误结论的
+    // 诊断比没有更糟，它看起来像证据。下面 `formatEntry 之后念出来不许出现 undefined`
+    // 那条测试就是拦这个的。
+    ...(typeof e.containerCount === 'number' ? { containerCount: e.containerCount } : {}),
+    ...(e.missing ? { missing: e.missing } : {}),
   };
 }
 
