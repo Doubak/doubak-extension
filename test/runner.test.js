@@ -766,6 +766,25 @@ describe('收尾期间不许还有一批在跑', () => {
     assert.ok(err, '已经收过尾了，再收一次要报错');
     assert.equal(err.reason, 'no_run');
   });
+
+  test('**同一时刻只许有一批** —— 第二次调用等它，不是跟它并排跑', async () => {
+    // 到这里为止「不会有两批并行」全靠 offscreen 那把锁，而锁恰恰是出过问题的
+    // 地方（#3）。驱动层现在会让被顶掉的那一圈在批次边界退出，但那是协作式的：
+    // 它得先跑回边界。真在这中间又被叫一次，两批就会消费同一个 frontier。
+    const { runner, release } = heldHarness();
+    await runner.start({ username: 'example', mediums: [], includeCatalog: false });
+
+    const first = runner.runBatch();   // 卡在第一个广播页上
+    await tick();
+    const second = runner.runBatch();  // 撞进来的那一次
+    await tick();
+    release();
+
+    const [a, b] = await Promise.all([first, second]);
+    assert.ok(a.captured > 0, '先到的那一批照常干活');
+    assert.equal(b.captured, 0, '撞进来的这一次什么都不该抓');
+    assert.equal(b.done, false, '更不能报 done —— 那会让调用方去收尾');
+  });
 });
 
 describe('产出的档案内容正确', () => {

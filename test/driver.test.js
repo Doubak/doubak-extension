@@ -92,6 +92,30 @@ describe('createDrive：一段的身份认代号，不认「有没有 promise」
     assert.equal(h.runs(), 2, '判死了就该自己抢过来重开，不能等别的操作来救');
     h.settleAll();
   });
+
+  test('被顶掉的那一段，`stillMine()` 从此为假', async () => {
+    // 修好卡死**之后**才出现的形态：以前是一段都跑不起来，现在是一活一僵。
+    /** @type {(() => boolean)[]} */
+    const probes = [];
+    let now = 0;
+    const { drive } = createDrive({
+      staleAfterMs: 100,
+      now: () => now,
+      run: ({ stillMine }) => {
+        probes.push(stillMine);
+        return new Promise(() => {}); // 卡住，永不结算
+      },
+    });
+
+    void drive();
+    assert.equal(probes[0](), true, '刚开的这一段当然是当前那一段');
+
+    now = 101;
+    void drive(); // 判死 → 抢占 → 第二段
+    assert.equal(probes.length, 2);
+    assert.equal(probes[0](), false, '被顶掉的那一圈必须能认出自己已经不是当前的了');
+    assert.equal(probes[1](), true);
+  });
 });
 
 /**
@@ -173,6 +197,23 @@ describe('预算内持续推进', () => {
 
     assert.equal(batchCount(), 2);
     assert.equal(r.stoppedBy, 'blocked');
+  });
+
+  test('被顶掉之后在批次边界退出，不再开下一批', async () => {
+    const { runner, nowRef, batchCount } = fakeRunner({ totalBatches: 100, batchCostMs: 10 });
+    const events = [];
+    const r = await driveWithinBudget({
+      runner,
+      now: nowRef,
+      budgetMs: 60_000,
+      stillMine: () => false, // 这一圈已经被顶掉了
+      onEvent: (e) => events.push(e),
+    });
+
+    // 第一批照跑完——**不打断进行中的一批**，那会丢掉已抓未记账的游标。
+    assert.equal(batchCount(), 1, '认出被顶掉之后不许再开下一批');
+    assert.equal(r.stoppedBy, 'preempted');
+    assert.ok(events.some((e) => e.type === 'segment_superseded'), '悄悄退出等于没发生过');
   });
 
   test('预算耗尽会发事件', async () => {

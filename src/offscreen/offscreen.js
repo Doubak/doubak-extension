@@ -450,8 +450,11 @@ function relayEvent(e) {
  * 抓取全都在这一个 document 里跑，所以这一个锁就够——不需要跨上下文的协调。
  */
 const { drive, lock } = createDrive({
-  run: () => driveWithinBudget({
+  run: ({ stillMine }) => driveWithinBudget({
     runner: getRunner(),
+    // 被判死并抢占之后，这一圈在下一个批次边界自己退出——否则它和接管它的那一段
+    // 会同时消费一个 frontier。见 driver.js 里那段说明。
+    stillMine,
     onEvent: (e) => {
       lock.touch();
       debugLog('驱动', e.type);

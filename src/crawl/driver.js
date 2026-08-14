@@ -65,7 +65,9 @@ const SEGMENT_NAME = '抓取';
  * | 持有者已经放锁 | `null` | 开新段 |
  *
  * @param {object} opts
- * @param {() => Promise<any>} opts.run  一段工作。通常是 `driveWithinBudget`
+ * @param {(ctx: {stillMine: () => boolean}) => Promise<any>} opts.run
+ *   一段工作。通常是 `driveWithinBudget`；把 `stillMine` 传进去，它就会在被
+ *   抢占之后于批与批之间自己退出。
  * @param {(info: {name: string, silentMs: number}) => void} [opts.onPreempt]
  * @param {number} [opts.staleAfterMs]
  * @param {() => number} [opts.now]
@@ -79,10 +81,20 @@ export function createDrive({ run, onPreempt, staleAfterMs, now }) {
   async function drive() {
     if (segment && lock.gen === segment.gen && !lock.stale) return segment.promise;
 
-    // `run()` 在第一个 await 之前就同步占好了锁，所以调用返回之后读到的
-    // `lock.gen` 就是我这一段的代号。
-    const promise = lock.run(SEGMENT_NAME, run);
-    segment = { gen: lock.gen, promise };
+    // 代号在**进到锁里面**的那一刻读：`Exclusive.run` 在 `await fn()` 之前就同步
+    // 占好了锁，所以 `fn` 一被调用，`lock.gen` 已经是我的了。在这儿读，比在
+    // `lock.run(...)` 返回之后读更稳——两个用它的地方都读得到已经赋好的值，不依赖
+    // 「谁先谁后」。（拿不到锁时 `fn` 根本不会被调用，`mine` 保持 null。）
+    //
+    // 而且**必须捕获成局部变量**：`segment` 会被后来的那一段改写，闭包去读它等于
+    // 永远在问「当前那一段是不是当前那一段」，恒为真。
+    /** @type {number | null} */
+    let mine = null;
+    const promise = lock.run(SEGMENT_NAME, () => {
+      mine = lock.gen;
+      return run({ stillMine: () => lock.gen === mine });
+    });
+    segment = { gen: mine, promise };
     return promise;
   }
 
@@ -100,6 +112,7 @@ export const DEFAULT_BUDGET_MS = 22_000;
  * @param {number} [opts.budgetMs]
  * @param {() => number} [opts.now]
  * @param {(evt: object) => void} [opts.onEvent]
+ * @param {() => boolean} [opts.stillMine]  这一段是否仍是当前那一段。见 `createDrive`
  * @returns {Promise<{batches: number, captured: number, failed: number, done: boolean, stoppedBy: string | null, finishing: boolean, unresolvedFailures: number, unresolvedOrderedFailures: number, awaitingHuman: number}>}
  */
 /**
@@ -116,6 +129,7 @@ export async function driveWithinBudget({
   budgetMs = DEFAULT_BUDGET_MS,
   now = () => Date.now(),
   onEvent = () => {},
+  stillMine = () => true,
 }) {
   const startedAt = now();
   let batches = 0;
@@ -173,6 +187,23 @@ export async function driveWithinBudget({
       }
     } else {
       idleBatches = 0;
+    }
+
+    // ── 我还是当前这一段吗
+    //
+    // 被判死并抢占之后，**老的这一圈并不会自己消失**。它可能只是卡在一个迟迟不
+    // 回来的 await 上（合上电脑睡眠是实测过的诱因），醒来之后接着跑下一批——而
+    // 那时候新的一段已经在跑了。锁靠代号保证不会放错锁，但拦不住这里：两圈会
+    // 消费同一个 frontier、写同一个写入器。
+    //
+    // 这是修好卡死**之后**才出现的形态：以前那种情形下一段都跑不起来（那正是
+    // #3 报的现象），现在则是一活一僵。所以让僵的那一圈在批与批之间自己认出来
+    // 并退出。中断不了进行中的那一批——那会丢掉已抓未记账的游标，和预算是同一
+    // 条道理——但它不会再开下一批。
+    if (!stillMine()) {
+      stoppedBy = 'preempted';
+      onEvent({ type: 'segment_superseded', batches });
+      break;
     }
 
     // 预算只在批与批之间检查——不打断进行中的一批。打断意味着丢掉已抓但
