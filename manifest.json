@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "豆备 Doubak",
   "short_name": "豆备",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "在你自己的浏览器里备份豆瓣数据，存成标准 WARC 档案。所有数据留在本地。",
   "background": {
     "service_worker": "src/background.js",
