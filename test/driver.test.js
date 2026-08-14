@@ -3,8 +3,29 @@ import assert from 'node:assert/strict';
 
 import { readFile } from 'node:fs/promises';
 
-import { driveWithinBudget, DEFAULT_BUDGET_MS, MAX_IDLE_BATCHES } from '../src/crawl/driver.js';
+import {
+  createDrive, driveWithinBudget, DEFAULT_BUDGET_MS, MAX_IDLE_BATCHES,
+} from '../src/crawl/driver.js';
 import { HEARTBEAT_PERIOD_MINUTES } from '../src/crawl/supervisor.js';
+
+test('失联的驱动被接管后会启动新的一段', async () => {
+  let now = 0;
+  let runs = 0;
+  const { drive, lock } = createDrive({
+    staleAfterMs: 100,
+    now: () => now,
+    run: () => {
+      runs += 1;
+      if (runs === 1) return new Promise(() => {});
+    },
+  });
+
+  void drive();
+  now = 101;
+  await lock.run('恢复抓取', () => {});
+  void drive();
+  assert.equal(runs, 2);
+});
 
 /**
  * 假 runner：每批花 batchCostMs，跑满 totalBatches 后报 done。
