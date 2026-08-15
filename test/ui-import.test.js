@@ -111,11 +111,87 @@ async function clickImport({ picked, have = {}, confirmed = true }) {
   });
 
   await import(`../src/ui/panel.js?t=${++cacheBust}`);
-  await new Promise((r) => setTimeout(r, 5));
+  // 面板挂好处理器了没有——挂上之前 `dispatch` 会静静地什么都不做。
+  await until(() => (dom.byId.get('import').listeners.click ?? []).length > 0,
+    { what: '「导入档案…」的点击处理器' });
+
   dom.byId.get('import').dispatch('click', {});
-  await new Promise((r) => setTimeout(r, 60));
+  await settled(dom, worker, { what: '导入' });
 
   return { dom, worker, asked, result: () => dom.byId.get('import-result').textContent };
+}
+
+/**
+ * 等到**某件事真的发生**，而不是等一个时长。
+ *
+ * 原来这里写的是 `await new Promise((r) => setTimeout(r, 60))`：点完按钮睡 60 毫秒，
+ * 然后断言结果已经出来了。单独跑没问题，**整套一起跑时会偶发红一次**（实测七次里
+ * 红一次）——因为那时几十个测试文件在并行，60 毫秒不一定够。
+ *
+ * 而它红的时候最难受：看起来像导入真的坏了，实际只是机器慢了一下。这个仓库在别处
+ * 已经写过同一条（`runner.test.js`：「写成『等一小会儿』的话，机器慢一点就红，而它
+ * 红的时候没人知道是真坏了还是又慢了」），这里是漏网的那处。
+ *
+ * 判据换成**可观测的结果**：轮询到条件成立就往下走，超时才报错。这样机器再慢也只是
+ * 多轮询几圈，而真的坏了会在 5 秒后给出一句说得清的话。
+ *
+ * @param {() => boolean} cond
+ * @param {{what?: string, timeoutMs?: number}} [opts]
+ */
+async function until(cond, { what = '那件事', timeoutMs = 5000 } = {}) {
+  const started = Date.now();
+  for (;;) {
+    if (cond()) return;
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(`等了 ${timeoutMs}ms，${what}还是没发生 —— 多半是真的坏了，不是慢`);
+    }
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+/**
+ * 等到界面**不再变化**为止。
+ *
+ * ## 为什么不是「等结果出现」
+ *
+ * 因为结果出现**不是终点**。导入成功之后面板还会去刷新档案页，那一段仍然在碰
+ * `document`；一断言完就 `dom.restore()`，那些还在飞的代码就会撞上一个已经拆掉的
+ * DOM，报「document is not defined」。原来的 `setTimeout(r, 60)` 只是**碰巧**长到
+ * 让它们跑完——整套并行跑的时候就不一定了（实测七次里红一次）。
+ *
+ * ## 所以判据是「稳定下来了」而不是「过了多久」
+ *
+ * 这条路径**没有一个可观测的完成信号**（没有 promise 可 await、没有事件可听），
+ * 所以这里如实地做一件次好的事：盯着几个会变的量，连着两轮没变就算落定。
+ *
+ * 它仍然是启发式的，但与写死一个毫秒数有本质区别——**它跟着机器快慢自己伸缩**：
+ * 机器慢就多轮询几圈，而不是红一条看不出原因的用例。同一条规矩写在
+ * `runner.test.js` 里：「写成『等一小会儿』的话，机器慢一点就红，而它红的时候没人
+ * 知道是真坏了还是又慢了」。
+ *
+ * @param {{byId: Map<string, any>}} dom
+ * @param {{dirs: Map<string, any>, writes?: unknown[]}} worker
+ */
+async function settled(dom, worker, { what = '这一步', timeoutMs = 5000 } = {}) {
+  const snapshot = () => JSON.stringify([
+    dom.byId.get('import-result')?.textContent?.length ?? -1,
+    worker.dirs.size,
+    [...worker.dirs.values()].reduce((n, d) => n + (d?.size ?? 0), 0),
+  ]);
+  let last = null;
+  let stable = 0;
+  const started = Date.now();
+  for (;;) {
+    const now = snapshot();
+    stable = now === last ? stable + 1 : 0;
+    last = now;
+    // 连着两轮没变才算落定。一轮不够：两次异步之间本来就可能有一拍空档。
+    if (stable >= 2) return;
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(`等了 ${timeoutMs}ms，${what}还在动 —— 多半是真的卡住了，不是慢`);
+    }
+    await new Promise((r) => setTimeout(r, 5));
+  }
 }
 
 describe('导入（从点按钮到字节落盘）', () => {
@@ -317,9 +393,11 @@ describe('导入（从点按钮到字节落盘）', () => {
     });
     try {
       await import(`../src/ui/panel.js?t=${++cacheBust}`);
-      await new Promise((r) => setTimeout(r, 5));
+      await until(() => (dom.byId.get('import').listeners.click ?? []).length > 0,
+        { what: '「导入档案…」的点击处理器' });
+
       dom.byId.get('import').dispatch('click', {});
-      await new Promise((r) => setTimeout(r, 40));
+      await settled(dom, worker, { what: '空间预检' });
 
       assert.match(dom.byId.get('import-result').textContent, /空间不够/);
       assert.equal(worker.dirs.has(`doubak-bundle-${ID}`), false);
