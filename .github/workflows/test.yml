@@ -19,6 +19,14 @@ jobs:
           repository: Doubak/doubak-data-specs
           path: doubak-data-specs
 
+      # 解析器也要在场：`src/vendor/parser/` 是它的抽取器的**同一份**拷贝，
+      # 而「同一份」这件事只有两边都在的时候才验得了。不检出的话那组测试会
+      # 「带原因跳过」——跳过在本地合理，在 CI 里等于没测。
+      - uses: actions/checkout@v4
+        with:
+          repository: Doubak/doubak-data-parser
+          path: doubak-data-parser
+
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -61,4 +69,7 @@ jobs:
         run: |
           test -f ../doubak-data-specs/bundle/v1/validate.py || {
             echo '::error::规范仓库缺失，跨仓库测试会静默跳过'; exit 1; }
+          test -f ../doubak-data-parser/src/extract.js || {
+            echo '::error::解析器仓库缺失，vendor 新鲜度检查会静默跳过'; exit 1; }
           node tools/generate-spec-constants.mjs --check
+          node tools/sync-extractors.mjs --check
