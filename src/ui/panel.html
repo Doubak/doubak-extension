@@ -119,8 +119,6 @@
       <!-- 增量：这一份在链上的位置，以及跨链的版本历史 -->
       <div id="archive-chain"></div>
       <div id="versions"></div>
-        </div>
-      </div>
       <!-- 捕获检查器：**默认收起来**。
            这一页原来有三张各自能滚的列表（档案清单、捕获列表、原文预览），一屏
            之内三个滚动条，而其中两个属于同一件事：逐条核对字节。那件事是规范承诺
@@ -131,6 +129,12 @@
       <!-- 两个视角看同一批捕获：生的（原始字节）与熟的（解析出来的内容）。
            做成标签的样子而不是两个并排的按钮，是因为它们**互斥**——同时展开两大块
            会把这一页撑得没法看，而这一页已经装着导入、导出、校验、删除、用量。 -->
+      <!-- **在右栏里面，不在两栏下面。** 它原来是整页宽的一块，排在网格之后；
+           而左边那张档案清单会越来越长（十几份就够），两栏一样高之后，整页宽的
+           东西就被推到了清单的下沿——想看这份档案的内容，得先滚过一张与它无关的
+           清单。放进右栏，它就紧跟在这份档案的摘要与按钮后面，也就是眼睛已经在
+           的地方。代价是「翻看捕获」那两栏窄了一个清单的宽度，可以接受：右栏是
+           1fr，清单只有 260–340px。 -->
       <div id="captures-bar" class="subtabs" role="tablist" aria-label="查看这份档案">
         <button class="subtab" id="captures-toggle" role="tab" aria-selected="false"
                 aria-controls="captures-section" disabled>翻看捕获</button>
@@ -156,6 +160,8 @@
         </div>
         <div id="content-kinds" class="btn-row"></div>
         <div id="content-list" class="muted">选一个档案后显示</div>
+      </div>
+        </div>
       </div>
     </section>
 

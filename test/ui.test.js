@@ -958,6 +958,34 @@ describe('面板脚本', () => {
     assert.match(css, /max-width: 860px[\s\S]{0,600}\.with-aside \{ grid-template-columns: 1fr/);
   });
 
+  test('**「翻看捕获 / 查看内容」在右栏里面**，不在两栏下面', async () => {
+    // 它原来是整页宽的一块，排在网格之后。两栏一样高之后，左边那张档案清单
+    // （十几份就够长）决定了行高，于是整页宽的东西被推到清单的下沿——想看这份
+    // 档案的内容，得先滚过一张与它无关的清单。
+    //
+    // 判据数的是**嵌套深度**，不是字符位置：这一页的判据里已经有好几条因为钉着
+    // 「谁在谁后面 200 个字符内」而在重排时误红过。
+    const html = await readRepoFile('src/ui/panel.html');
+    const clean = html.replace(/<!--[\s\S]*?-->/g, '');
+    // **从那个 `<div` 本身开始数，不是从属性开始。** 从属性起算的话，第一个遇到
+    // 的是它的子元素，深度一开始就是 0，于是第一个子元素一闭合就以为右栏结束了。
+    const at = clean.indexOf('class="aside-main"');
+    assert.ok(at > 0, '右栏那个容器不见了，这条判据失去了意义');
+    const from = clean.lastIndexOf('<div', at);
+
+    // 从 `.aside-main` 那个 <div> 开始走，深度回到 0 就是它结束了。
+    let depth = 0;
+    let end = clean.length;
+    for (const m of clean.slice(from).matchAll(/<(\/?)div\b/g)) {
+      depth += m[1] ? -1 : 1;
+      if (depth === 0) { end = from + m.index; break; }
+    }
+    const inside = clean.slice(from, end);
+    for (const id of ['captures-bar', 'captures-section', 'content-section']) {
+      assert.ok(inside.includes(`id="${id}"`), `#${id} 跑到右栏外面去了`);
+    }
+  });
+
   test('**两列布局里侧栏不粘、不自己滚**', async () => {
     // 它原来是 `position: sticky` + `max-height: 70vh; overflow: auto`。三处不好：
     // 滚页面时它原地不动（成了跟着你跑的东西）、一页两个滚动条、以及最坏的那处

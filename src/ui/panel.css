@@ -251,7 +251,12 @@ button.act.icon { padding: var(--s2) var(--s2); line-height: 1; min-width: 2em; 
 #log div { padding: 1px 0; border-bottom: 1px solid var(--line); }
 
 .split { display: grid; grid-template-columns: minmax(240px, 1fr) 2fr; gap: var(--s4); }
-@media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
+/* **断点是 1100 不是 720，因为它现在住在右栏里。**
+   「翻看捕获」那两栏挪进了 `.aside-main`（见 panel.html 里那段），可用宽度因此是
+   视口减去档案清单的 260–340px 再减一个间距。720 是按整页宽算的，于是 900px 的
+   窗口里两栏各自只剩两百来点，列表与预览都读不了。媒体查询量的是视口，量不到
+   这一栏，所以只能把阈值往上抬到「右栏仍然够宽」的那个视口宽度。 */
+@media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
 
 #captures { max-height: 60vh; overflow: auto; font-size: 12px; border: 1px solid var(--line); border-radius: var(--r1); }
 #captures > div { padding: var(--s1) var(--s2); cursor: pointer; border-bottom: 1px solid var(--line); }
