@@ -184,6 +184,7 @@ node tools/package.mjs
 |---|---|
 | [doubak-data-parser](https://github.com/Doubak/doubak-data-parser) | bundle → canonical（结构化、带修订历史、纯离线） |
 | [doubak-site-generator](https://github.com/Doubak/doubak-site-generator) | canonical → Markdown + 图片 → 静态网站 |
+| [doubak-export-adapters](https://github.com/Doubak/doubak-export-adapters) | canonical → NeoDB / Letterboxd / Goodreads 的导入文件 |
 
 生成出来长什么样：[sample.doubak.com](https://sample.doubak.com)。
 

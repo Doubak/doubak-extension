@@ -34,11 +34,12 @@ export function renderAbout() {
       ['隐私政策', 'https://doubak.com/privacy/', '不收集、不上传、没有服务器'],
     ]],
     ['源码（Apache-2.0）', [
-      ['全部仓库', 'https://github.com/Doubak', '整条链路七个仓库'],
+      ['全部仓库', 'https://github.com/Doubak', '整条链路八个仓库'],
       ['这个扩展', 'https://github.com/Doubak/doubak-extension', '抓取，产出档案'],
       ['档案格式', 'https://github.com/Doubak/doubak-data-specs', '规范文本与 JSON Schema'],
       ['解析器', 'https://github.com/Doubak/doubak-data-parser', '档案 → 结构化数据'],
       ['站点生成器', 'https://github.com/Doubak/doubak-site-generator', '结构化数据 → 个人存档站'],
+      ['导出适配器', 'https://github.com/Doubak/doubak-export-adapters', '结构化数据 → NeoDB / Letterboxd / Goodreads'],
     ]],
   ];
   for (const [heading, links] of GROUPS) {

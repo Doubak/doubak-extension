@@ -273,10 +273,19 @@
             <td><code>npm run site &lt;上一步的产出目录&gt; &lt;导出的文件夹&gt;</code></td>
             <td><a href="https://github.com/Doubak/doubak-site-generator#readme" target="_blank" rel="noreferrer">doubak-site-generator 的 README</a></td>
           </tr>
+          <tr>
+            <td>导去别的平台</td>
+            <td><code>node bin/export.js &lt;上一步的产出目录&gt; &lt;输出目录&gt;</code></td>
+            <td><a href="https://github.com/Doubak/doubak-export-adapters#readme" target="_blank" rel="noreferrer">doubak-export-adapters 的 README</a></td>
+          </tr>
         </tbody>
       </table>
       <div class="hint">
-        需要 Node 20 或更高版本。两个仓库均为零依赖、零构建步骤，
+        「导去别的平台」产出 NeoDB / Letterboxd / Goodreads 的导入文件，同样不联网——
+        产出的是几个文件，上不上传都不影响你的档案。这一步是可选的，跳过不影响前两步。
+      </div>
+      <div class="hint">
+        需要 Node 20 或更高版本。三个仓库均为零依赖、零构建步骤，
         <code>git clone</code> 之后即可运行，无需执行 <code>npm install</code>。
       </div>
 
