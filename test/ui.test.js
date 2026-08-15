@@ -861,7 +861,13 @@ describe('面板脚本', () => {
     // 一个工具面板最该有的一句话不是「这个按钮叫什么」，而是**「现在该点哪个」**。
     const html = await readRepoFile('src/ui/panel.html');
     const help = html.slice(html.indexOf('id="tab-help"'), html.indexOf('</section>', html.indexOf('id="tab-help"')));
-    assert.match(help, /三步走/, '要有一条从零开始的路径');
+    // 判据是**那条路径在**，不是标题叫什么。原来这里钉的是字面的「三步走」，
+    // 而标题恰恰是改文风时第一个会动的东西——把措辞当判据，等于让一次纯语气的
+    // 改写去红一条与语气无关的测试。
+    assert.match(help, /<ol class="steps">/, '要有一条从零开始的、编号的路径');
+    for (const step of ['登录豆瓣', '开始抓取', '导出']) {
+      assert.ok(help.includes(step), `从零到有档案的路径里缺了「${step}」`);
+    }
     // 三步里最容易被跳过的是导出——不导出的话档案随时会连人带号一起没了。
     assert.match(help, /导出/);
     assert.match(help, /卸载扩展|清除站点数据/, '要说清不导出的后果');
@@ -1801,12 +1807,40 @@ describe('导出之后该做什么 —— 面板要说得出来', () => {
     assert.doesNotMatch(exp, /node bin\/parse\.js/, '命令不该在档案页出现第二份');
   });
 
-  test('**不许用口语**（docs/ui.md 8.5）', () => {
+  test('**整个帮助页不许用口语**（docs/ui.md 8.5）', () => {
     // 这是一个关于「档案能不能被信任」的工具，口语化的措辞会削弱它本来要传达的
-    // 确定性。「然后呢」这类标题就是被这条挡掉的。
-    const sec = html.slice(html.indexOf('id="downstream"'), html.indexOf('每个标签页是干什么的'));
-    for (const word of ['然后呢', '搞定', '咋', '啥']) {
-      assert.ok(!sec.includes(word), `出现了口语词：${word}`);
-    }
+    // 确定性。帮助页是用户读得最久的一页，所以整页都按这条来。
+    //
+    // 名单只收**改写时真的出现过**的那些，不做泛化的措辞审查：一份凭想象列出来的
+    // 禁用词表会挡住合法的写法，然后被人加白名单绕过去，最后谁也不看它。
+    const help = html.slice(html.indexOf('id="tab-help"'), html.indexOf('</section>', html.indexOf('id="tab-help"')));
+    const COLLOQUIAL = [
+      '然后呢', '搞定', '咋', '啥',
+      '就行', '就是了', '不用管', '干什么的', '说了算的地方',
+      '几分钟就完', '都行', '一遍就是',
+    ];
+    const hit = COLLOQUIAL.filter((w) => help.includes(w));
+    assert.deepEqual(hit, [], `帮助页里出现了口语词：${hit.join(' ')}`);
+  });
+
+  test('书面化不许把信息改没了', () => {
+    // docs/ui.md 8.5：「书面化改的是语气，不是内容。」这些是改写时最容易被顺手
+    // 删掉的「为什么」——每一条都是用户做决定时真正需要的那句。
+    const help = html.slice(html.indexOf('id="tab-help"'), html.indexOf('</section>', html.indexOf('id="tab-help"')));
+    const MUST_KEEP = [
+      ['不设任何后端服务器', '没有服务器这件事要说出来'],
+      ['卸载扩展或清除站点数据', '不导出的代价'],
+      ['占档案九成体积', '为什么详情页要跳过'],
+      ['发布后不可编辑', '为什么广播只抓新的'],
+      ['图片地址即内容地址', '为什么图片永远跳过'],
+      ['不会带来任何新数据', '为什么图片那一档没有「重抓」选项'],
+      ['无法判定哪一份正确', '为什么编号撞了不覆盖'],
+      ['合并之后无法再分离', '为什么别的账号默认不导'],
+      ['可能导致账号被限制', '为什么被限制之后不重试'],
+      ['缺口位于列表中段', '为什么不能看数量差'],
+      ['未抓取到即为永久丢失', '为什么广播优先'],
+    ];
+    const lost = MUST_KEEP.filter(([t]) => !help.includes(t)).map(([t, why]) => `${t}（${why}）`);
+    assert.deepEqual(lost, [], `书面化时丢了这些理由：\n${lost.join('\n')}`);
   });
 });
