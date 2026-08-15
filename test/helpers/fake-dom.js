@@ -109,6 +109,16 @@ class FakeElement {
     return this.attributes[k] ?? null;
   }
 
+  /**
+   * 真实元素有这个方法，这里原来没有——于是面板里一句 `removeAttribute` 就让
+   * **整条渲染路径**抛错，而页面上显示的是「读不出这个档案」。
+   *
+   * 这类缺口的坏处不在于少个方法，在于**报错报到了别处**：看起来像档案坏了。
+   */
+  removeAttribute(k) {
+    delete this.attributes[k];
+  }
+
   addEventListener(type, fn) {
     (this.listeners[type] ??= []).push(fn);
   }

@@ -5,6 +5,7 @@
  * 来源（见 panel.js 开头的第三条约束）。
  */
 
+import { renderContent, resetContent } from './content.js';
 import { BundleReader } from '../../bundle/bundle-reader.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
 import { bundleDirName, bundleIdTime } from '../../core/ids.js';
@@ -23,12 +24,22 @@ import {
  * 每换一份都要再点一次。模块级变量而不是每次渲染重算——它是用户的选择，不是
  * 从数据推出来的状态。
  */
-let capturesOpen = false;
+/**
+ * 这一对小标签现在开着哪个：`null`（都收着）/ `'captures'` / `'content'`。
+ *
+ * **允许都不选**，这与顶上那排主标签不同。档案页已经装着导入、导出、校验、删除、
+ * 用量，默认再摊开一大块会没法看；而且「查看内容」一展开就要解析，点一下档案就白
+ * 干一次活。
+ */
+let openPane = null;
 
 /** @type {BundleReader | null} */
 export let reader = null;
 /** @type {object[]} */
 export let entries = [];
+
+/** 这份档案属于谁（数字 uid）。广播抽取要用它滤掉转发进来的别人的内容。 */
+let accountUserId = null;
 
 /**
  * 当前在看哪份档案，以及它的摘要缓存。
@@ -233,22 +244,47 @@ async function describeBundles(scan, active, livePrevious) {
  * 就只能靠展开一次才知道，而那正是这个按钮想省掉的动作。
  */
 function syncCapturesToggle() {
-  const btn = $('captures-toggle');
-  const sec = $('captures-section');
-  btn.disabled = !entries.length;
-  btn.setAttribute('aria-expanded', String(capturesOpen));
-  sec.hidden = !capturesOpen;
   const n = entries.length ? `（${entries.length.toLocaleString('zh-CN')} 条）` : '';
-  btn.textContent = (capturesOpen ? '收起捕获' : '翻看捕获') + n;
+  for (const [key, id, sec, label] of [
+    ['captures', 'captures-toggle', 'captures-section', `翻看捕获${n}`],
+    ['content', 'content-toggle', 'content-section', '查看内容'],
+  ]) {
+    const btn = $(id);
+    const on = openPane === key;
+    btn.disabled = !entries.length;
+    btn.setAttribute('aria-selected', String(on));
+    btn.textContent = label;
+    // 标签的名字不跟着状态变（那是按钮的做法，标签靠选中态本身说话）。但「再点一下
+    // 能收起来」是标签通常没有的行为，所以用 title 说一句——不写的话没人会去试。
+    // 用 setAttribute 而不是 `btn.title =`：属性与特性只在真实 DOM 里互相反射，
+    // 而上面那行 aria-selected 本来就走 setAttribute，两行保持一致也少一处例外。
+    if (on) btn.setAttribute('title', '再点一下收起');
+    else btn.removeAttribute('title');
+    $(sec).hidden = !on;
+  }
 }
 
-/** 绑「翻看捕获」。展开时才第一次渲染，收起来不清空——再展开是免费的。 */
+/**
+ * 绑那一对小标签。
+ *
+ * **互斥**：点一个就关掉另一个。再点自己则收起来——两块都收着是合法状态，
+ * 见 `openPane` 上的说明。
+ *
+ * 展开时才第一次渲染。捕获列表收起来不清空（再展开是免费的）；内容那一块每次
+ * 展开都重新解析——它不缓存，理由见 `content.js`。
+ */
 export function initCapturesToggle() {
-  $('captures-toggle').addEventListener('click', () => {
-    capturesOpen = !capturesOpen;
-    syncCapturesToggle();
-    if (capturesOpen) renderCaptureList();
-  });
+  const panes = {
+    captures: () => renderCaptureList(),
+    content: () => renderContent({ entries, reader, userId: accountUserId }),
+  };
+  for (const [key, id] of [['captures', 'captures-toggle'], ['content', 'content-toggle']]) {
+    $(id).addEventListener('click', () => {
+      openPane = openPane === key ? null : key;
+      syncCapturesToggle();
+      if (openPane === key) void panes[key]();
+    });
+  }
 }
 
 /** @param {boolean} on */
@@ -304,6 +340,10 @@ export async function openBundle(bundleId) {
     const cur = await loadBundleSummary({ force: true });
     const s = cur?.summary ?? (await reader.summary());
     entries = await reader.index();
+    // 广播抽取要按 `data-uid` 滤掉转发进来的别人的广播（实测 149 个附图条目里有 30
+    // 个是别人的），所以「我是谁」得从 manifest 里取出来传下去。取不到就传 null——
+    // 那时抽取器会一条都不认，这比把第三方内容当成你的显示出来要好。
+    accountUserId = s?.account?.user_id ?? null;
 
     summaryEl.className = '';
     summaryEl.replaceChildren(
@@ -376,7 +416,8 @@ export async function openBundle(bundleId) {
     // 捕获列表本身收起来时不画：那是五百个 DOM 节点，每换一份档案重画一遍。
     // **收起来的东西不该继续付钱。**
     syncCapturesToggle();
-    if (capturesOpen) renderCaptureList();
+    if (openPane === 'captures') renderCaptureList();
+    else if (openPane === 'content') void renderContent({ entries, reader, userId: accountUserId });
   } catch (e) {
     summaryEl.className = 'card err';
     summaryEl.textContent = `读不出这个档案：${e.message}`;
@@ -683,5 +724,7 @@ export function resetArchive() {
   entries = [];
   currentBundleId = null;
   summaryCache = null;
-  capturesOpen = false;
+  openPane = null;
+  accountUserId = null;
+  resetContent();
 }

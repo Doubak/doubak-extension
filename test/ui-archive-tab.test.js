@@ -404,9 +404,14 @@ describe('档案页（真的跑一遍）', () => {
       bundles: { [`doubak-bundle-${ID}`]: bundleFiles(ID) },
     });
     try {
-      assert.equal(dom.byId.get('captures-section').hidden, true, '默认该是收起来的');
+      // 两块**都**默认收着。这一对小标签允许「都不选」，与顶上那排主标签不同：
+      // 这一页已经很满，而「查看内容」一展开就要解析，点一下档案就白干一次活。
+      assert.equal(dom.byId.get('captures-section').hidden, true, '捕获默认该是收起来的');
+      assert.equal(dom.byId.get('content-section').hidden, true, '内容默认也该是收起来的');
       const btn = dom.byId.get('captures-toggle');
-      assert.equal(btn.getAttribute('aria-expanded'), 'false');
+      // 做成标签之后判据是 aria-selected（互斥），不再是 aria-expanded（各开各的）。
+      assert.equal(btn.getAttribute('aria-selected'), 'false');
+      assert.equal(dom.byId.get('content-toggle').getAttribute('aria-selected'), 'false');
       // **收起来也要能被数出来**：条数不写在按钮上的话，「这份有多少条」就只能靠
       // 展开一次才知道，而那正是这个按钮想省掉的动作。
       assert.match(btn.textContent, /翻看捕获/);
@@ -428,10 +433,17 @@ describe('档案页（真的跑一遍）', () => {
       await new Promise((r) => setTimeout(r, 10));
 
       assert.equal(dom.byId.get('captures-section').hidden, false);
-      assert.equal(btn.getAttribute('aria-expanded'), 'true');
-      assert.match(btn.textContent, /收起捕获/, '按钮要说出「再按一下会发生什么」');
+      assert.equal(btn.getAttribute('aria-selected'), 'true');
+      // 标签的名字不跟着状态变（那是按钮的做法，标签靠选中态说话）。但「再点一下
+      // 能收起来」是标签通常没有的行为，所以那句话挪到了 title 上。
+      assert.match(btn.textContent, /翻看捕获/);
+      assert.equal(btn.getAttribute('title'), '再点一下收起');
       assert.equal(dom.byId.get('captures').querySelectorAll('div[data-id]').length, 1,
         '展开了却没画');
+
+      // **互斥**：开着捕获时，内容那一块必须是收着的。
+      assert.equal(dom.byId.get('content-section').hidden, true);
+      assert.equal(dom.byId.get('content-toggle').getAttribute('aria-selected'), 'false');
     } finally {
       dom.restore();
     }

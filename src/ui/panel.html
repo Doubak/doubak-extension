@@ -128,11 +128,16 @@
            看它有多少、导出去」。收起来之后这一页只剩一张列表。
            展开状态跨档案保留：正在逐条核对的人一定会连着看好几份，每换一份都收
            回去就等于每换一份都要再点一次。 -->
-      <div id="captures-bar" class="btn-row">
-        <button class="act" id="captures-toggle" aria-expanded="false"
+      <!-- 两个视角看同一批捕获：生的（原始字节）与熟的（解析出来的内容）。
+           做成标签的样子而不是两个并排的按钮，是因为它们**互斥**——同时展开两大块
+           会把这一页撑得没法看，而这一页已经装着导入、导出、校验、删除、用量。 -->
+      <div id="captures-bar" class="subtabs" role="tablist" aria-label="查看这份档案">
+        <button class="subtab" id="captures-toggle" role="tab" aria-selected="false"
                 aria-controls="captures-section" disabled>翻看捕获</button>
+        <button class="subtab" id="content-toggle" role="tab" aria-selected="false"
+                aria-controls="content-section" disabled>查看内容</button>
       </div>
-      <div id="captures-section" hidden>
+      <div id="captures-section" hidden role="tabpanel" aria-labelledby="captures-toggle">
         <div class="hint">
           逐条从段文件里取出并解压，不依赖任何声明。这正是规范承诺第三方可以走的那条路径。
         </div>
@@ -140,6 +145,16 @@
           <div id="captures" class="muted">选一个档案后显示</div>
           <div id="preview" class="muted">从左边选一条查看原始内容</div>
         </div>
+      </div>
+      <div id="content-section" hidden role="tabpanel" aria-labelledby="content-toggle">
+        <div class="hint">
+          把这份档案里的页面解析成条目，用来确认「抓到的确实是我的东西」。
+          解析在本机即时进行，不写入任何东西，也不联网。
+          <b>这里显示的是这一份档案里的全部内容，不是「本次新增」</b>——
+          增量抓取会重读最新几页，因此其中大部分你上次就已经存下来了。
+        </div>
+        <div id="content-kinds" class="btn-row"></div>
+        <div id="content-list" class="muted">选一个档案后显示</div>
       </div>
     </section>
 

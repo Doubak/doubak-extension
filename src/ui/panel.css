@@ -366,3 +366,39 @@ button.act.icon { padding: var(--s2) var(--s2); line-height: 1; min-width: 2em; 
 }
 .to-site:hover { color: var(--brand); background: var(--brand-soft); }
 @media (max-width: 560px) { .to-site { margin-left: 0; } }
+
+/* ── 档案页里那对「生 / 熟」小标签 ─────────────────────────────────────
+   长得像顶上的主标签（同样的下划线与选中色），因为它们做的是同一件事：
+   在互斥的几个视角之间切。不同的是**允许都不选**——这一页已经很满，
+   默认两块都收着，点开哪个才渲染哪个。 */
+.subtabs {
+  display: flex; gap: 2px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  margin: var(--s5) 0 var(--s3);
+}
+.subtab {
+  font: inherit; font-size: 13px; padding: var(--s2) var(--s3); cursor: pointer;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-dim); border-radius: var(--r1) var(--r1) 0 0;
+  margin-bottom: -1px;
+}
+.subtab:hover:not(:disabled) { color: var(--text); background: #8881; }
+.subtab[aria-selected="true"] {
+  color: var(--brand); border-bottom-color: var(--brand); font-weight: 600;
+}
+.subtab:disabled { opacity: .45; cursor: default; }
+
+/* 内容视图 */
+#content-kinds { margin-bottom: var(--s3); }
+.content-item {
+  padding: var(--s3) 0;
+  border-bottom: 1px solid var(--line);
+}
+.content-item .t { font-weight: 600; }
+.content-item .m { color: var(--text-dim); font-size: 12.5px; margin-top: 2px; }
+/* 用户自己写的字要显眼——它是这一页存在的理由。 */
+.content-item .own {
+  margin-top: var(--s2); padding-left: var(--s3);
+  border-left: 2px solid var(--brand); white-space: pre-wrap;
+}
+.content-item.bad .t { color: var(--text-dim); font-weight: normal; }

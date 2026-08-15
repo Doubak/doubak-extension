@@ -545,7 +545,7 @@ describe('面板脚本', () => {
     const open = js.slice(js.indexOf('async function openBundle'));
     const openBody = open.slice(0, open.indexOf('\n}\n'));
     const vanishedAt = openBody.indexOf('renderVanished()');
-    const gated = openBody.indexOf('if (capturesOpen)');
+    const gated = openBody.indexOf("if (openPane === 'captures')");
     assert.ok(vanishedAt > 0, 'openBundle 里没有画「已删除」那一块');
     assert.ok(gated > 0, '找不到收起/展开那道判断，这条判据失去了意义');
     assert.ok(vanishedAt < gated, '「已删除」被收到「翻看捕获」后面去了');
@@ -750,18 +750,30 @@ describe('面板脚本', () => {
     assert.deepEqual(bare, [], `HTML 里这些容器并排放了按钮却没挂 .btn-row：\n${bare.join('\n')}`);
   });
 
-  test('「翻看捕获」要与上下两段分开 —— 它是门，不是其中一段的一部分', async () => {
+  test('那一对小标签要与上下两段分开 —— 它是门，不是其中一段的一部分', async () => {
     // 这里原来是 `<h2>捕获列表</h2>`。标题自带上留白，把「这一份档案的详情」与
     // 「逐条核对字节」分成两段；换成按钮之后那点留白一起没了，于是它紧贴着上面的
     // 操作结果和下面的捕获区，看起来像属于其中某一段。
+    //
+    // 现在那里是两个互斥的小标签（生的 / 熟的），分界靠 `.subtabs` 自己的下边框，
+    // 不再借 `.btn-row` 的按钮间距——它已经不是一排按钮了。
     const html = await readRepoFile('src/ui/panel.html');
     const css = await readRepoFile('src/ui/panel.css');
-    assert.match(html, /id="captures-bar"[^>]*class="[^"]*\bbtn-row\b/,
-      '那一条要挂 btn-row（并排按钮的缝由它给）');
-    const rule = /#captures-bar \{([^}]*)\}/.exec(css);
-    assert.ok(rule, 'CSS 里没有 #captures-bar');
-    assert.match(rule[1], /border-top/, '要有一条分界线，光靠 margin 看不出这是两段');
-    assert.match(rule[1], /margin-top: var\(--s\d\)/);
+    assert.match(html, /id="captures-bar"[^>]*class="[^"]*\bsubtabs\b/,
+      '那一条要挂 subtabs');
+    assert.match(html, /id="captures-bar"[^>]*role="tablist"/, '互斥的一组要报成 tablist');
+    const rule = /\.subtabs \{([^}]*)\}/.exec(css);
+    assert.ok(rule, 'CSS 里没有 .subtabs');
+    assert.match(rule[1], /border-bottom/, '要有一条分界线，光靠 margin 看不出这是两段');
+    assert.match(rule[1], /margin: var\(--s\d\)/);
+  });
+
+  test('**这两块互斥** —— 同时摊开会把这一页撑得没法看', async () => {
+    // 判据不是「代码里写了 else」，而是那个状态本身只有一个值：`openPane` 是
+    // 单个变量（null / captures / content），从形状上就装不下「两个都开」。
+    const js = await readRepoFile('src/ui/panel/archive.js');
+    assert.match(js, /let openPane = null;/, '开着哪个应当是一个变量，不是两个布尔');
+    assert.doesNotMatch(js, /capturesOpen|contentOpen/, '两个独立布尔就能表示「都开着」');
   });
 
   test('**每个选项都说清它跳过什么** —— 跳过是这里唯一看不见的动作', async () => {
