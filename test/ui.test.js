@@ -772,8 +772,12 @@ describe('面板脚本', () => {
     // 判据不是「代码里写了 else」，而是那个状态本身只有一个值：`openPane` 是
     // 单个变量（null / captures / content），从形状上就装不下「两个都开」。
     const js = await readRepoFile('src/ui/panel/archive.js');
-    assert.match(js, /let openPane = null;/, '开着哪个应当是一个变量，不是两个布尔');
+    assert.match(js, /let openPane = DEFAULT_PANE;/, '开着哪个应当是一个变量，不是两个布尔');
     assert.doesNotMatch(js, /capturesOpen|contentOpen/, '两个独立布尔就能表示「都开着」');
+    // 默认值也只有一个出处：初始化与 `resetArchive()` 各写一个字面量的话，
+    // 改了一处就是「第一次打开」与「重新打开」不一样，而后者只有测试碰得到。
+    assert.equal((js.match(/DEFAULT_PANE/g) ?? []).length, 3,
+      'DEFAULT_PANE 应当定义一次、用两次（初始化与 resetArchive）');
   });
 
   test('**每个选项都说清它跳过什么** —— 跳过是这里唯一看不见的动作', async () => {

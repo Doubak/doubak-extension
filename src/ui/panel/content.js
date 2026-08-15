@@ -70,8 +70,18 @@ const KINDS = [
     match: (i) => i === 'broadcast.timeline',
     // 广播要按 uid 过滤掉转发进来的别人的内容，所以要知道自己是谁。
     extract: (html, { userId }) => extractBroadcasts(html, userId).broadcasts.map((b) => ({
-      title: b.action ?? '广播',
-      meta: [b.postedAt, b.rating ? '★'.repeat(b.rating) : null].filter(Boolean).join(' · '),
+      // **标题是作品名，不是动作。** 原来写的是 `想看` / `玩过`，于是一列
+      // 「想看 / 想看 / 想看」——除了顺序之外什么都没说，而人要认的恰恰是想看的
+      // 是哪一部。动作退到下面那行，与时间、星级并列。
+      //
+      // 没有作品的广播（纯粹的「说」）才退回动作，再退回「广播」。
+      title: b.targetTitle ?? b.action ?? '广播',
+      meta: [
+        // 有作品名时动作才进这一行，否则标题与它一模一样。
+        b.targetTitle ? b.action : null,
+        b.postedAt,
+        b.rating ? '★'.repeat(b.rating) : null,
+      ].filter(Boolean).join(' · '),
       own: b.text,
     })),
   },
@@ -141,7 +151,10 @@ const KINDS = [
           title: (d.visibility === 'public' ? '' : '🔒 ') + (d.title ?? '（无标题）'),
           meta: `${items.length} 个条目 · ${commented} 条评语`
             + (filled > 1 ? ` · 由 ${filled} 页拼成` : ''),
-          own: notes.join('\n'),
+          // 数组 = 画成真正的列表（见 `itemEl`）。一份豆列本来就是一张清单，
+          // 而拼成一段带换行的文字，行与行的界限只由换行符撑着——条目里一个换行
+          // 就会看起来像多了一条。
+          own: notes,
         };
       });
     },
@@ -179,10 +192,20 @@ function itemEl({ title, meta, own }) {
     m.textContent = meta;
     el.append(m);
   }
-  if (own) {
-    const o = document.createElement('div');
+  // `own` 给数组就画成 `<ul>`，给字符串就是一段文字。
+  //
+  // 豆列是前者：它本来就是一张清单，行与行的界限该由标记撑着，而不是由换行符——
+  // 一条评语里有个换行，读起来就多出一条。广播与短评是后者：那是一段话。
+  if (own?.length) {
+    const o = document.createElement(Array.isArray(own) ? 'ul' : 'div');
     o.className = 'own';
-    o.textContent = own;
+    if (Array.isArray(own)) {
+      for (const line of own) {
+        const li = document.createElement('li');
+        li.textContent = line;
+        o.append(li);
+      }
+    } else o.textContent = own;
     el.append(o);
   }
   return el;

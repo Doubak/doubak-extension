@@ -32,6 +32,8 @@ const MY_COMMENT = '这部片子救了我那个夏天';
 /** 只在上游那一份里出现的话。它出现在页面上就说明读串了。 */
 const OLD_COMMENT = '这句话只在上一份档案里';
 const DOULIST_TITLE = '游戏购买小账本';
+/** 广播指向的那部作品。要认的正是它，而不是「看过」。 */
+const SUBJECT_TITLE = '欢迎来龙餐馆';
 
 /**
  * 一页只有一条广播的时间线，带正文。
@@ -53,9 +55,27 @@ function broadcastPage(text = MY_COMMENT) {
     <a class="lnk-people">mewx</a> 看过
     <span class="created_at" title="2026-07-26 12:34:00">7月26日</span>
     <blockquote><p>${text}</p></blockquote>
+    ${subjectCard(SUBJECT_TITLE)}
     <div data-target-type="movie" data-object-id="36838707"></div>
   </div>
 </div></body></html>`;
+}
+
+/**
+ * 广播下面那张作品卡。
+ *
+ * **从真实档案里抄的**（`20260814T223824Z-4b82f3` 的广播页），不是照印象编的：
+ * `div.block.block-subject` → `div.content` → `div.title` → 里面那个 `<a>`。
+ * 抽取器只认链接文字——条目被豆瓣移除时这里是一段没有链接的「未知条目」，
+ * 那是占位符，占位符不是内容。
+ */
+function subjectCard(title) {
+  return '<div class="bd movie"><div class="block block-subject">'
+    + '<div class="pic"><a href="https://movie.douban.com/subject/35811064/" class="media">'
+    + '<img src="https://img3.doubanio.com/view/status/small/public/x.jpg"></a></div>'
+    + '<div class="content"><div class="title">'
+    + `<a href="https://movie.douban.com/subject/35811064/" target="_blank">${title}</a>`
+    + '</div></div></div></div>';
 }
 
 /**
@@ -257,12 +277,29 @@ describe('查看内容（真的跑一遍）', () => {
     }
   });
 
+  test('**广播这一行的标题是作品名，不是「看过」**', async () => {
+    // 报上来的现象：一列「想看 / 想看 / 想看 / 玩过」——除了顺序之外什么都没说，
+    // 而人要认的恰恰是想看的**是哪一部**。动作退到下面那行，与时间、星级并列。
+    const { dom } = await openWithContent();
+    try {
+      dom.byId.get('content-toggle').dispatch('click', {});
+      await settle(dom);
+
+      const row = dom.byId.get('content-list').querySelectorAll('.content-item')[0];
+      assert.ok(row, '一条都没画出来');
+      assert.equal(row.querySelector('.t').textContent, SUBJECT_TITLE, '标题不是作品名');
+      assert.match(row.querySelector('.m').textContent, /看过/, '动作要退到第二行，不是丢掉');
+      assert.match(row.querySelector('.m').textContent, /2026-07-26/);
+    } finally {
+      dom.restore();
+    }
+  });
+
   test('**互斥**：点内容会把捕获收起来', async () => {
     const { dom } = await openWithContent();
     try {
-      dom.byId.get('captures-toggle').dispatch('click', {});
-      await settle(dom);
-      assert.equal(dom.byId.get('captures-section').hidden, false);
+      // 捕获默认就开着，不用先点。
+      assert.equal(dom.byId.get('captures-section').hidden, false, '前提：捕获是开着的');
 
       dom.byId.get('content-toggle').dispatch('click', {});
       await settle(dom);

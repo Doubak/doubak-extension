@@ -399,52 +399,55 @@ describe('档案页（真的跑一遍）', () => {
     }
   });
 
-  test('**捕获检查器默认收起来** —— 一页里三个滚动条，两个属于同一件事', async () => {
-    // 这一页原来有三张各自能滚的列表：档案清单、捕获列表、原文预览。后两张说的是
-    // 同一件事（逐条核对字节），而那是规范承诺第三方可以走的路径——重要，但不是
-    // 每天要做的事。日常路径是「挑一份、看它有多少、导出去」。
+  test('**默认开着「翻看捕获」**，而「查看内容」默认收着', async () => {
+    // 原来两块都默认收着。但**标签这个样子本身在说「下面有内容」**，而收起来时
+    // 下面什么都没有，于是它更像两个没人按的按钮——报上来的原话是「不明显」。
+    //
+    // 挑「翻看捕获」是因为它**不花钱**：index 早就读进来了，画的是已有数据。
+    // 「查看内容」一展开就要取记录、解压、抽取，默认打开等于点一下档案就白干一次活。
     const { dom } = await openArchiveTab({
       bundles: { [`doubak-bundle-${ID}`]: bundleFiles(ID) },
     });
     try {
-      // 两块**都**默认收着。这一对小标签允许「都不选」，与顶上那排主标签不同：
-      // 这一页已经很满，而「查看内容」一展开就要解析，点一下档案就白干一次活。
-      assert.equal(dom.byId.get('captures-section').hidden, true, '捕获默认该是收起来的');
-      assert.equal(dom.byId.get('content-section').hidden, true, '内容默认也该是收起来的');
+      assert.equal(dom.byId.get('captures-section').hidden, false, '默认该开着');
+      assert.equal(dom.byId.get('content-section').hidden, true, '内容那一块要花解析的时间，不能默认开');
       const btn = dom.byId.get('captures-toggle');
       // 做成标签之后判据是 aria-selected（互斥），不再是 aria-expanded（各开各的）。
-      assert.equal(btn.getAttribute('aria-selected'), 'false');
+      assert.equal(btn.getAttribute('aria-selected'), 'true');
       assert.equal(dom.byId.get('content-toggle').getAttribute('aria-selected'), 'false');
-      // **收起来也要能被数出来**：条数不写在按钮上的话，「这份有多少条」就只能靠
-      // 展开一次才知道，而那正是这个按钮想省掉的动作。
+      // 默认开着就得默认画出来——否则「开着」只是个空壳。
+      assert.equal(dom.byId.get('captures').querySelectorAll('div[data-id]').length, 1,
+        '标签是选中的，列表却是空的');
+      // **条数写在标签上**：收起来之后「这份有多少条」还是要能被数出来。
       assert.match(btn.textContent, /翻看捕获/);
     } finally {
       dom.restore();
     }
   });
 
-  test('展开之后才画捕获列表 —— 收起来的东西不该继续付钱', async () => {
+  test('收起来之后不再继续画 —— 收起来的东西不该继续付钱', async () => {
+    // 判据从「默认收着时是空的」翻了过来：现在默认开着，所以要验的是**收起来
+    // 那一下**——两个方向说的是同一件事，而只有这一个方向现在还测得到。
     const { dom } = await openArchiveTab({
       bundles: { [`doubak-bundle-${ID}`]: bundleFiles(ID) },
     });
     try {
       const btn = dom.byId.get('captures-toggle');
-      assert.equal(dom.byId.get('captures').querySelectorAll('div[data-id]').length, 0,
-        '收起来时不该已经把行画出来了');
+      assert.equal(dom.byId.get('captures').querySelectorAll('div[data-id]').length, 1,
+        '前提：默认是开着且画好的');
+      // 标签的名字不跟着状态变（那是按钮的做法，标签靠选中态说话）。但「再点一下
+      // 能收起来」是标签通常没有的行为，所以那句话挪到了 title 上。
+      assert.equal(btn.getAttribute('title'), '再点一下收起');
 
       btn.dispatch('click', {});
       await new Promise((r) => setTimeout(r, 10));
 
-      assert.equal(dom.byId.get('captures-section').hidden, false);
-      assert.equal(btn.getAttribute('aria-selected'), 'true');
-      // 标签的名字不跟着状态变（那是按钮的做法，标签靠选中态说话）。但「再点一下
-      // 能收起来」是标签通常没有的行为，所以那句话挪到了 title 上。
+      assert.equal(dom.byId.get('captures-section').hidden, true);
+      assert.equal(btn.getAttribute('aria-selected'), 'false');
+      assert.equal(btn.getAttribute('title'), null, '收起来了还挂着「再点一下收起」');
       assert.match(btn.textContent, /翻看捕获/);
-      assert.equal(btn.getAttribute('title'), '再点一下收起');
-      assert.equal(dom.byId.get('captures').querySelectorAll('div[data-id]').length, 1,
-        '展开了却没画');
 
-      // **互斥**：开着捕获时，内容那一块必须是收着的。
+      // 「都不选」照旧是合法状态：收起捕获不会把内容那一块顶上来。
       assert.equal(dom.byId.get('content-section').hidden, true);
       assert.equal(dom.byId.get('content-toggle').getAttribute('aria-selected'), 'false');
     } finally {
@@ -470,7 +473,12 @@ describe('档案页（真的跑一遍）', () => {
     })}\n`;
     const { dom } = await openArchiveTab({ bundles: { [`doubak-bundle-${ID}`]: files } });
     try {
-      assert.equal(dom.byId.get('captures-section').hidden, true, '前提：捕获列表是收起来的');
+      // 捕获列表现在默认开着，所以这条判据要**自己去收**——不收的话它验的是
+      // 「开着的时候看得见」，而那从来不是问题所在。
+      dom.byId.get('captures-toggle').dispatch('click', {});
+      await new Promise((r) => setTimeout(r, 10));
+      assert.equal(dom.byId.get('captures-section').hidden, true, '前提：捕获列表已经收起来了');
+
       assert.match(dom.byId.get('vanished').textContent, /已经没有了/,
         '收起捕获列表把「已删除」一起藏了');
     } finally {
@@ -564,9 +572,12 @@ describe('档案页（真的跑一遍）', () => {
     }
   });
 
-  test('**换一份档案不把展开状态收回去**', async () => {
-    // 逐条核对的人一定会连着看好几份。每换一份都收回去，就等于每换一份都要再点
-    // 一次——而那是这一页上最不该有的那种摩擦：用户已经明确表达过他要看这个。
+  test('**换一份档案不把展开状态改回默认**', async () => {
+    // 这一对标签记的是**用户的选择**，不是从数据推出来的状态。每换一份档案都弹回
+    // 默认，等于每换一份都要再操作一次。
+    //
+    // 验的方向是「收起来」而不是「展开」：默认已经是展开的，那个方向即使坏了也
+    // 看不出来——**判据要落在与默认相反的那一侧**。
     const { dom } = await openArchiveTab({
       bundles: {
         [`doubak-bundle-${ID}`]: bundleFiles(ID),
@@ -576,13 +587,13 @@ describe('档案页（真的跑一遍）', () => {
     try {
       dom.byId.get('captures-toggle').dispatch('click', {});
       await new Promise((r) => setTimeout(r, 10));
-      assert.equal(dom.byId.get('captures-section').hidden, false);
+      assert.equal(dom.byId.get('captures-section').hidden, true, '前提：已经收起来了');
 
       const rows = dom.byId.get('bundle-pick').querySelectorAll('.picker-row');
       rows.find((r) => r.dataset.id === OLDER).dispatch('click', {});
       await new Promise((r) => setTimeout(r, 20));
 
-      assert.equal(dom.byId.get('captures-section').hidden, false, '换一份就收回去了');
+      assert.equal(dom.byId.get('captures-section').hidden, true, '换一份就自己弹开了');
     } finally {
       dom.restore();
     }

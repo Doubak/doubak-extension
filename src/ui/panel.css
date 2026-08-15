@@ -445,4 +445,8 @@ button.act.icon { padding: var(--s2) var(--s2); line-height: 1; min-width: 2em; 
   margin-top: var(--s2); padding-left: var(--s3);
   border-left: 2px solid var(--brand); white-space: pre-wrap;
 }
+/* 豆列画成真正的列表：项目符号要在那条绿边**里面**，所以左内边距在原来的基础上
+   再让出一个符号的宽度，而不是靠 list-style-position 把符号挤到边线上去。 */
+ul.own { margin-bottom: 0; padding-left: calc(var(--s3) + 1.1em); }
+ul.own li { margin: 2px 0; }
 .content-item.bad .t { color: var(--text-dim); font-weight: normal; }
