@@ -113,7 +113,7 @@ export async function loadArchive() {
   try {
     scan = await scanBundleDirs();
   } catch (e) {
-    $('archive-summary').className = 'card err';
+    $('archive-summary').className = 'card tone-error';
     $('archive-summary').textContent = `读不出存储：${e.message}`;
     return;
   }
@@ -376,7 +376,7 @@ export async function openBundle(bundleId) {
     incEl.replaceChildren();
     if (s.previousBundleId) {
       const c = document.createElement('div');
-      c.className = 'card idle';
+      c.className = 'card tone-idle';
       const b = document.createElement('b');
       b.textContent = '这是一次增量抓取';
       c.append(b, document.createTextNode(
@@ -391,7 +391,7 @@ export async function openBundle(bundleId) {
     // 一堆空字段会以为几小时的抓取白费了。
     if (!s.hasManifest) {
       const note = document.createElement('div');
-      note.className = 'card idle';
+      note.className = 'card tone-idle';
       const b = document.createElement('b');
       b.textContent = '这次抓取还没收尾';
       note.append(b, document.createTextNode(
@@ -420,7 +420,7 @@ export async function openBundle(bundleId) {
     if (openPane === 'captures') renderCaptureList();
     else if (openPane === 'content') void renderContent({ entries, reader, userId: accountUserId });
   } catch (e) {
-    summaryEl.className = 'card err';
+    summaryEl.className = 'card tone-error';
     summaryEl.textContent = `读不出这个档案：${e.message}`;
     // 读不出摘要不代表导不出去——字节还在，照样该让用户把它搬走。
     setArchiveButtons(true);
@@ -451,7 +451,7 @@ async function loadChainDiff() {
   const repeated = new Set(r.diff.repeated ?? []);
   if (repeated.size) {
     const c = document.createElement('div');
-    c.className = 'card idle';
+    c.className = 'card tone-idle';
     const b = document.createElement('b');
     const fresh = entries.length - repeated.size;
     b.textContent = `本次新增 ${fresh} 条，已抓取多次 ${repeated.size} 条`;
@@ -493,7 +493,7 @@ function renderVersions(count) {
   if (!count) return;
 
   const card = document.createElement('div');
-  card.className = 'card idle';
+  card.className = 'card tone-idle';
   const b = document.createElement('b');
   b.textContent = `${count} 个网址在链上有多个版本`;
   card.append(b, document.createTextNode(
@@ -555,6 +555,31 @@ function verdictTally(rows) {
   return [...by].map(([k, n]) => `${k} ${n}`).join(' · ');
 }
 
+/** 超过这么多行就默认收起来。三五行不算长，为它折一次只是让人多点一下。 */
+const FOLD_AT = 5;
+
+/**
+ * 一块可折叠的清单：标题 + 一句说明 + 若干行。
+ *
+ * **标题永远看得见**，折起来的只是清单。`<details>` 用原生的，不写一行展开逻辑
+ * ——键盘、读屏、浏览器自带的页内查找也就都照旧能用。
+ *
+ * @param {{title: string, why: string, rows: object[]}} o
+ */
+function foldSection({ title, why, rows }) {
+  const fold = document.createElement('details');
+  fold.className = 'fold';
+  fold.open = rows.length <= FOLD_AT;
+
+  const sum = document.createElement('summary');
+  sum.textContent = title;
+  const note = document.createElement('div');
+  note.className = 'muted small';
+  note.textContent = why;
+  fold.append(sum, note, badList(rows));
+  return fold;
+}
+
 /**
  * 没能正常抓到的那些捕获。
  *
@@ -567,16 +592,18 @@ function verdictTally(rows) {
  * 而它原来只以「判定分布：正常 3339 · 已不存在 8」这一个数字出现，**没有任何地方
  * 说得出是哪 8 条**。捕获列表里能看到，但要在 3347 行里翻。
  *
- * ## 为什么分成两块，只折起后面那块
+ * ## 折叠没有把这件事收回去
  *
- * 上面那段道理**只适用于 `gone`**。`blocked` / `要验证` / `判不出来` 是另一回事：
- * 它们是这次抓取的**过程**留下的痕迹，页面多半还在豆瓣上、下次能重抓，而且**数量
- * 由出错的程度决定**——选择器对不上一条路线，几十上百条一起进来，同一个网址还会
- * 因为重试出现好几遍。实测这一块能长到把下面所有东西都推出屏幕。
+ * 两块都能折，但**折起来的是清单，不是事实**：条数与分类留在折叠标题上，
+ * 「有 8 条在豆瓣上已经没有了」照旧一眼可见——上面那段反对的是「只剩一个数字、
+ * 没有任何地方说得出是哪 8 条」，而这里点一下就摊开，说得出。
  *
- * 所以：`gone` 照旧摊开（少、且不可恢复），其余折进 `<details>`，而**条数与分类
- * 写在折叠标题上**——折起来的是清单，不是事实。用原生 `<details>`，不写一行
- * 展开逻辑，键盘与读屏也就照旧能用。
+ * ## 为什么仍然分成两块
+ *
+ * 因为它们是两回事，混成一张表就分不出轻重了。`gone` 是**豆瓣上已经没有的东西**，
+ * 少、且没有别处可查；`blocked` / `要验证` / `判不出来` 是这次抓取的**过程**留下的
+ * 痕迹，页面多半还在、下次能重抓，而且**数量由出错的程度决定**——一条路线的选择器
+ * 对不上，几十上百条一起进来，同一个网址还会因为重试出现好几遍。
  */
 function renderVanished() {
   const el = $('vanished');
@@ -590,30 +617,20 @@ function renderVanished() {
   const failed = bad.filter((e) => e.verdict !== 'gone');
 
   if (gone.length) {
-    const card = document.createElement('div');
-    card.className = 'card warn';
-    const b = document.createElement('b');
-    b.textContent = `有 ${gone.length} 条在豆瓣上已经没有了`;
-    card.append(b, document.createTextNode(
-      '豆瓣已删除这些条目，公开渠道已无法查到；档案中保留了它们当时的内容。',
-    ));
-    el.append(card, badList(gone));
+    el.append(foldSection({
+      title: `有 ${gone.length} 条在豆瓣上已经没有了`,
+      why: '豆瓣已删除这些条目，公开渠道已无法查到；档案中保留了它们当时的内容。',
+      rows: gone,
+    }));
   }
 
   if (failed.length) {
-    const fold = document.createElement('details');
-    fold.className = 'fold';
-    // 短的时候直接摊开：这一块折叠是为了治「长」，而三五行并不长，
-    // 折起来只是让人多点一下。
-    fold.open = failed.length <= 5;
-    const sum = document.createElement('summary');
-    sum.textContent = `有 ${failed.length} 条没能正常抓到（${verdictTally(failed)}）`;
-    const why = document.createElement('div');
-    why.className = 'muted small';
-    why.textContent = '这些页面未能正常抓取，其原始响应已存入档案，可在「翻看捕获」中打开查看。'
-      + '判定为「判不出来」的通常是抽取规则需要校准，重抓无济于事。';
-    fold.append(sum, why, badList(failed));
-    el.append(fold);
+    el.append(foldSection({
+      title: `有 ${failed.length} 条没能正常抓到（${verdictTally(failed)}）`,
+      why: '这些页面未能正常抓取，其原始响应已存入档案，可在「翻看捕获」中打开查看。'
+        + '判定为「判不出来」的通常是抽取规则需要校准，重抓无济于事。',
+      rows: failed,
+    }));
   }
 }
 
@@ -737,7 +754,7 @@ async function showCapture(entry) {
       }
     }
   } catch (e) {
-    el.className = 'card err';
+    el.className = 'card tone-error';
     el.textContent = `读不出这条捕获：${e.message}`;
   }
 }

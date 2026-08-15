@@ -27,20 +27,20 @@ const PAUSE_COPY = {
   // 「继续」不等于自动重试：它由**人**触发，而恢复策略里这两条依旧是
   // `autoResume: false`，心跳绝不会自己来。
   account_switched: [
-    'err',
+    'error',
     '账号变了',
     '一个档案只能归属于一个账号。请切换回原账号后继续，或另行发起一次抓取。'
       + '（若你并未切换过账号，则多半是豆备判断有误：日志中该条记录会写明是在抓取哪一页时作出的判断。）',
     '我切回来了，继续',
   ],
   quota: [
-    'err',
+    'error',
     '存储空间不足',
     '需要先导出或清理再继续。已经抓到的都还在。',
     '我清出空间了，继续',
   ],
   host_permission_lost: [
-    'err',
+    'error',
     '豆备没有访问豆瓣的权限了',
     '这不是错误，抓取已安全停止，进度均已保留。请在浏览器的扩展设置中将站点访问权限改回「在所有网站上」。',
     '我改好了，继续',
@@ -52,20 +52,20 @@ const PAUSE_COPY = {
     null, // 动作在下面的失败清单里，不用这里的通用按钮
   ],
   write_failed: [
-    'err',
+    'error',
     '写入档案时出错',
     '抓取已停止，以免损坏既有数据。继续之前会先自动修复段文件尾部。',
     '我知道了，继续',
   ],
   finalize_failed: [
-    'err',
+    'error',
     '收尾失败',
     '已抓取的每一页均已落盘，档案中的数据是完整的，仅最后写入 manifest 的步骤失败。'
       + '请在「日志」标签页复制日志以便反馈；升级插件后再次点击「继续」通常即可完成收尾。',
     '再试一次收尾',
   ],
   driver_stalled: [
-    'err',
+    'error',
     '抓取空转了',
     '连续多批未取得任何进展，抓取已停止。这是插件自身的问题，并非豆瓣的限制。'
       + '已抓取的内容均在档案中且未受损坏。请在「日志」标签页复制日志以便反馈。',
@@ -78,21 +78,21 @@ const PAUSE_COPY = {
     '现在试试',
   ],
   user_paused: ['idle', '已暂停', '进度都在，随时可以继续。', '继续'],
-  crash: ['run', '正在从断点恢复', '上次被意外中断，没有数据丢失。', null],
+  crash: ['busy', '正在从断点恢复', '上次被意外中断，没有数据丢失。', null],
 };
 
 /**
  * 状态卡片。**内容没变就一个字节都不动 DOM**——它每 2 秒被调一次。
  *
- * @param {string} cls @param {string} title @param {string} [why]
+ * @param {import('../components.js').Tone} tone @param {string} title @param {string} [why]
  */
-function setState(cls, title, why = '') {
+function setState(tone, title, why = '') {
   const el = $('state');
-  const key = `${cls}\u0000${title}\u0000${why}`;
+  const key = `${tone}\u0000${title}\u0000${why}`;
   if (el.dataset.key === key) return;
   el.dataset.key = key;
 
-  el.className = `card ${cls}`;
+  el.className = `card tone-${tone}`;
   el.replaceChildren();
   const b = document.createElement('b');
   b.textContent = title;
@@ -167,7 +167,7 @@ function renderNotice() {
     return;
   }
   const card = document.createElement('div');
-  card.className = 'card err';
+  card.className = 'card tone-error';
   const b = document.createElement('b');
   b.textContent = actionError.title;
   card.append(b);
@@ -200,7 +200,7 @@ export async function refresh() {
   }
 
   if (!s?.ok) {
-    setState('err', '连不上后台', s?.error ?? '');
+    setState('error', '连不上后台', s?.error ?? '');
     setActions([['重试', refresh]]);
     return;
   }
@@ -215,7 +215,7 @@ export async function refresh() {
   const busy = s.busyWith ?? pendingCommand;
   if (busy && !s.runner?.active) {
     const [title, why] = BUSY_COPY[busy] ?? ['正在处理…', ''];
-    setState('run', title, why);
+    setState('busy', title, why);
     setActions([]);
     return;
   }
@@ -243,9 +243,9 @@ export async function refresh() {
     // active（那样才能继续），所以必须分开显示——否则暂停之后界面还写着
     // 「正在抓取」，用户会以为按钮没生效然后反复去点。
     if (r.stopped) {
-      const [cls, title, why, action] = PAUSE_COPY[r.stoppedBy] ??
+      const [tone, title, why, action] = PAUSE_COPY[r.stoppedBy] ??
         ['warn', '抓取已停下', `原因：${r.stoppedBy}`, '继续'];
-      setState(cls, title, why);
+      setState(tone, title, why);
       setActions([
         ...(action ? [[action, resumeCrawl]] : []),
         // **只要有抓不下来的条目就摆出来，不管是哪种停法。**
@@ -270,7 +270,7 @@ export async function refresh() {
     const where = r.current
       ? `\n${r.currentActive ? '正在抓' : '刚抓完'} ${r.current.replace(/^https?:\/\//, '')}`
       : '';
-    setState('run', '正在抓取', `档案 ${r.bundleId} · 当前间隔 ${(r.intervalMs / 1000).toFixed(1)} 秒` +
+    setState('busy', '正在抓取', `档案 ${r.bundleId} · 当前间隔 ${(r.intervalMs / 1000).toFixed(1)} 秒` +
       (r.backoffLevel ? `（已降速 ${r.backoffLevel} 级）` : '') + where);
     renderFailures(r.failures ?? []);
     setActions([
@@ -287,9 +287,9 @@ export async function refresh() {
   }
 
   if (s.checkpoint) {
-    const [cls, title, why, action] = PAUSE_COPY[s.checkpoint.pause_reason] ??
+    const [tone, title, why, action] = PAUSE_COPY[s.checkpoint.pause_reason] ??
       ['warn', '抓取已停下', `原因：${s.checkpoint.pause_reason}`, '继续'];
-    setState(cls, title, why);
+    setState(tone, title, why);
     setActions([
       ...(action ? [[action, resumeCrawl]] : []),
       // **没有「继续」时也必须有出路。**
@@ -325,7 +325,7 @@ export async function refresh() {
   // 开工要先确认账号（两次真实请求，过节奏闸门，好几秒）。这段时间既没有 runner
   // 也没有 checkpoint，照着状态渲染就只能说「没有进行中的抓取」——而用户刚点了开始。
   //
-  // 早先的做法是点下去先本地 `setState('run', '正在确认账号…')`，但那是**界面自己
+  // 早先的做法是点下去先本地 `setState('busy', '正在确认账号…')`，但那是**界面自己
   // 编的状态**：两秒一次的轮询读到真实状态之后立刻把它盖掉，于是画面在
   // 「正在确认账号…」→「没有进行中的抓取」→（很久之后）「正在抓取」之间跳。
   // 它也活不过面板刷新——换个标签页回来就什么都看不到了。
@@ -644,7 +644,7 @@ async function showLastRun() {
  *
  * ## 出错就停在错误上，**不要接着 refresh()**
  *
- * 原来是 `if (!r.ok) setState('err', …); refresh();`——`refresh()` 无条件跟在
+ * 原来是 `if (!r.ok) setState('error', …); refresh();`——`refresh()` 无条件跟在
  * 后面，它按后台状态重画整块，于是刚写上去的错误信息**当场被抹掉**。用户看到的
  * 是「闪了一下，又回到原样」，而真正的原因刚被自己擦掉了。
  *
@@ -946,7 +946,7 @@ async function showPreflight() {
   if (!bad) return;
 
   const warn = document.createElement('div');
-  warn.className = 'card warn';
+  warn.className = 'card tone-warn';
   const b = document.createElement('b');
   b.textContent = '现在开始可能会中途停下';
   warn.append(b, document.createTextNode(
@@ -996,7 +996,7 @@ function renderFailures(failures) {
   const leaves = failures.filter((f) => !f.ordered);
 
   const card = document.createElement('div');
-  card.className = 'card warn';
+  card.className = 'card tone-warn';
   const b = document.createElement('b');
   b.textContent = `${failures.length} 个页面抓不下来`;
   card.append(b);

@@ -68,10 +68,10 @@ const ACTION_LABEL = {
 
 const WILL_WRITE = new Set([ACTIONS.IMPORT, ACTIONS.RESUME]);
 
-/** @param {string} cls @param {string|Node} body */
-function say(cls, body) {
+/** @param {import('../components.js').Tone} tone @param {string|Node} body */
+function say(tone, body) {
   const el = $('import-result');
-  el.className = `card ${cls}`;
+  el.className = `card tone-${tone}`;
   if (typeof body === 'string') el.textContent = body;
   else el.replaceChildren(body);
 }
@@ -187,7 +187,7 @@ async function runImport(plan, byLabel) {
         resume: item.action === ACTIONS.RESUME,
         onProgress: (p) => {
           const pct = p.total ? Math.round((p.done / p.total) * 100) : 100;
-          say('run', `（${n + 1}/${todo.length}）${shortId(id)}　`
+          say('busy', `（${n + 1}/${todo.length}）${shortId(id)}　`
             + `${p.phase === 'copy' ? '正在复制' : '正在校验'} ${p.file} ${pct}%`);
         },
       });
@@ -257,13 +257,13 @@ function renderResult(done, plan) {
       box.append(line);
     }
   }
-  say(failed.length ? 'err' : 'good', box);
+  say(failed.length ? 'error' : 'ok', box);
 }
 
 export function initImport() {
   $('import').addEventListener('click', async () => {
     if (typeof window.showDirectoryPicker !== 'function') {
-      say('err', '这个浏览器不支持选择文件夹（File System Access API）。请使用 Chrome 或 Edge。');
+      say('error', '这个浏览器不支持选择文件夹（File System Access API）。请使用 Chrome 或 Edge。');
       return;
     }
 
@@ -282,11 +282,11 @@ export function initImport() {
     try {
       scan = await scanForBundles(root);
     } catch (e) {
-      say('err', `读不了这个文件夹：${e.message}`);
+      say('error', `读不了这个文件夹：${e.message}`);
       return;
     }
     if (scan.found.length === 0) {
-      say('err', `${root.name} 里（连同下面几层）没有找到档案。`
+      say('error', `${root.name} 里（连同下面几层）没有找到档案。`
         + '导出时每份档案会放进一个 doubak-bundle-… 文件夹，选中它，或者选中它的上一级。');
       return;
     }
@@ -308,7 +308,7 @@ export function initImport() {
     const others = plan.items.filter((i) => i.action === ACTIONS.OTHER_ACCOUNT);
     if (others.length) {
       $('import-result').replaceChildren(renderPlan(plan, scan));
-      $('import-result').className = 'card warn';
+      $('import-result').className = 'card tone-warn';
       const ok = confirm(
         `有 ${others.length} 份档案属于另一个豆瓣账号。\n\n`
         + '默认不导入：两个账号的档案混在一起之后，解析器会拒绝整个目录，'
@@ -322,13 +322,13 @@ export function initImport() {
       }
     }
 
-    $('import-result').className = 'card idle';
+    $('import-result').className = 'card tone-idle';
     $('import-result').replaceChildren(renderPlan(plan, scan));
 
     if (plan.count === 0) return; // 清单已经说清楚为什么了，不必再弹一个框
     const tooBig = await checkRoom(plan.bytes);
     if (tooBig) {
-      say('err', `空间不够：${tooBig}`);
+      say('error', `空间不够：${tooBig}`);
       return;
     }
     if (!confirm(confirmText(plan))) {

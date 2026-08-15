@@ -187,14 +187,34 @@ async function renderKind(kind, ctx) {
     for (const it of items) { out.append(itemEl(it)); shown += 1; }
   }
 
-  if (failed) out.append(badEl(`另有 ${failed} 页没能解析出内容（原始字节仍在档案里，可在「翻看捕获」中查看）`));
-  if (kind.rows.length > PAGE) {
-    out.append(badEl(`只显示了前 ${PAGE} 页（共 ${kind.rows.length} 页）——这一页是抽查，不是完整阅读`));
-  }
-  if (!shown && !failed) out.append(badEl('这一类里没有解析出条目'));
-
   box.className = '';
-  box.replaceChildren(out);
+  box.replaceChildren(scopeEl({ kind, shown, failed }), out);
+  if (!shown && !failed) out.append(badEl('这一类里没有解析出条目'));
+}
+
+/**
+ * 「解析了前 30 页（共 244 页），列出 812 条」——**摆在清单最上面**。
+ *
+ * 原来这句话缀在清单末尾，而这一页恰恰是给「只看前几屏」准备的：滚到底才知道
+ * 自己看的不是全部，等于没说。
+ *
+ * 条数只能在解析完之后才知道，所以这个元素是**最后造、插到最前面**的。上面那排
+ * 类别按钮写的是**页数**（`广播（173 页）`），因为那才是 index 里现成有的数——
+ * 把页数写成不带单位的 `广播（173）`，读的人会当成一百七十三条广播，而实测一份
+ * 档案里那 173 页装着好几千条。
+ */
+function scopeEl({ kind, shown, failed }) {
+  const el = document.createElement('div');
+  el.className = 'muted small content-scope';
+  const total = kind.rows.length;
+  const bits = [total > PAGE
+    ? `解析了前 ${PAGE} 页（共 ${total} 页），列出 ${shown} 条 —— 这一页是抽查，不是完整阅读`
+    : `解析了全部 ${total} 页，列出 ${shown} 条`];
+  if (failed) {
+    bits.push(`另有 ${failed} 页没能解析出内容（原始字节仍在档案里，可在「翻看捕获」中查看）`);
+  }
+  el.textContent = bits.join('；');
+  return el;
 }
 
 /**
@@ -216,7 +236,8 @@ export async function renderContent(ctx) {
   for (const k of kinds) {
     const b = document.createElement('button');
     b.className = 'act';
-    b.textContent = `${k.name}（${k.rows.length}）`;
+    // **带单位**：这个数是捕获的**页数**，不是条数。见 `scopeEl`。
+    b.textContent = `${k.name}（${k.rows.length} 页）`;
     b.setAttribute('aria-selected', String(k.key === (current ?? kinds[0].key)));
     b.addEventListener('click', () => {
       current = k.key;

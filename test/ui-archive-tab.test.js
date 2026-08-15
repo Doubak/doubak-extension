@@ -499,12 +499,12 @@ describe('档案页（真的跑一遍）', () => {
   }
 
   /** 一条豆瓣上已经删掉的。 */
-  function goneEntry(id) {
+  function goneEntry(id, n = 0) {
     return `${JSON.stringify({
-      capture_id: `${id}#000099`,
+      capture_id: `${id}#0000${String(90 + n).padStart(2, '0')}`,
       route_key: 'interest.item',
-      url: 'https://movie.douban.com/subject/1234567/',
-      url_key: 'movie.douban.com/subject/1234567',
+      url: `https://movie.douban.com/subject/123456${n}/`,
+      url_key: `movie.douban.com/subject/123456${n}`,
       observed_at: '2026-08-01T01:00:01Z',
       verdict: 'gone',
       length: 4,
@@ -512,35 +512,38 @@ describe('档案页（真的跑一遍）', () => {
     })}\n`;
   }
 
-  test('**没抓成的那一堆折起来，「已经没有了」的不折**', async () => {
+  test('**两类分开折，条数与分类留在折叠标题上**', async () => {
     // 报上来的现象：一条路线的抽取规则对不上，几十条「判不出来」一次涌进来，
-    // 同一个网址还因为重试出现好几遍，把下面的东西全推出屏幕。
+    // 同一个网址还因为重试出现好几遍，把下面的东西全推出屏幕；八条 gone 也一样。
     //
-    // 但这两类不是一回事，所以不能一起折：`gone` 是**豆瓣上已经没有的东西**，
-    // 少、且没有任何别的地方能查到；「判不出来」是这次抓取的过程留下的痕迹，
-    // 页面还在，改了抽取器重抓就有。
+    // 折可以，但**折起来的必须只是清单**：反对的从来是「只剩一个数字、没有任何
+    // 地方说得出是哪 8 条」，而标题写着条数、点一下就摊开，说得出。
+    //
+    // 两块仍然分开，因为它们是两回事：`gone` 是豆瓣上已经没有的东西，别处查不到；
+    // 「判不出来」是这次抓取的过程留下的痕迹，页面还在，改了抽取器重抓就有。
     const files = bundleFiles(ID);
-    files[`index-${ID}.ndjson`] += goneEntry(ID);
+    for (let i = 0; i < 8; i += 1) files[`index-${ID}.ndjson`] += goneEntry(ID, i);
     for (let i = 0; i < 12; i += 1) files[`index-${ID}.ndjson`] += failedEntry(ID, i);
 
     const { dom } = await openArchiveTab({ bundles: { [`doubak-bundle-${ID}`]: files } });
     try {
       const vanished = dom.byId.get('vanished');
-      const fold = vanished.querySelector('details');
-      assert.ok(fold, '十几条「判不出来」还是直接摊在页面上');
-      assert.equal(fold.open, false, '这么长的清单该默认收起来');
+      const folds = vanished.querySelectorAll('details');
+      assert.equal(folds.length, 2, '两类该是两块，混成一张表就分不出轻重了');
 
-      // **折起来的是清单，不是事实**：条数与分类要留在能看见的那一行上。
-      const sum = fold.querySelector('summary');
-      assert.match(sum.textContent, /12 条没能正常抓到/);
-      assert.match(sum.textContent, /判不出来 12/, '折叠标题上要说清是哪一类');
+      const [goneFold, failFold] = folds;
+      assert.match(goneFold.querySelector('summary').textContent, /有 8 条在豆瓣上已经没有了/);
+      assert.equal(goneFold.open, false, '八条已经算长了');
+      assert.equal(goneFold.querySelectorAll('.cap').length, 8, '点开要看得见是哪 8 条');
 
-      // 而 gone 那条在折叠外面。
+      assert.match(failFold.querySelector('summary').textContent, /12 条没能正常抓到/);
+      assert.match(failFold.querySelector('summary').textContent, /判不出来 12/,
+        '折叠标题上要说清是哪一类');
+      assert.equal(failFold.open, false);
+      assert.equal(failFold.querySelectorAll('.cap').length, 12);
+
+      // 两句话都在，而且都在折叠**标题**上——收起来时也看得见。
       assert.match(vanished.textContent, /已经没有了/);
-      assert.equal(/已经没有了/.test(fold.textContent), false,
-        '「豆瓣上已经没有了」被折进去了 —— 那是整份档案里最不可替代的东西');
-      assert.equal(vanished.querySelectorAll('.cap').length, 13, '前提：两类都画了');
-      assert.equal(fold.querySelectorAll('.cap').length, 12, 'gone 那一条被折进去了');
     } finally {
       dom.restore();
     }

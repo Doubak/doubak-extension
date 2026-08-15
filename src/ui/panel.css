@@ -418,6 +418,9 @@ button.act.icon { padding: var(--s2) var(--s2); line-height: 1; min-width: 2em; 
 
 /* 内容视图 */
 #content-kinds { margin-bottom: var(--s3); }
+/* 「解析了前 30 页（共 244 页）」——在清单**上面**。缀在末尾的话，滚到底才知道
+   自己看的不是全部，而这一页恰恰是给只看前几屏的人准备的。 */
+.content-scope { padding-bottom: var(--s2); border-bottom: 1px solid var(--line); }
 .content-item {
   padding: var(--s3) 0;
   border-bottom: 1px solid var(--line);

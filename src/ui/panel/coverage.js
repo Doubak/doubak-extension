@@ -55,7 +55,7 @@ export async function loadCoverage() {
     }
     renderCoverage(cur.summary.coverage, cur.summary.crawlState, cur.id);
   } catch (e) {
-    el.className = 'card err';
+    el.className = 'card tone-error';
     el.textContent = `读不出来：${e.message}`;
   }
 }
@@ -92,7 +92,7 @@ async function renderChain() {
 
   const r = await send({ type: 'chain' });
   if (!r?.ok) {
-    el.className = 'card err';
+    el.className = 'card tone-error';
     el.textContent = `读不出来：${r?.error ?? ''}`;
     return;
   }
@@ -107,7 +107,7 @@ async function renderChain() {
   }
 
   const head = document.createElement('div');
-  head.className = 'card idle';
+  head.className = 'card tone-idle';
   const hb = document.createElement('b');
   hb.textContent = chainHeadline(bundles);
   // 箭头指向**更早的那一份**，也就是 `previous_bundle_id` 真正的指向：每一份档案
@@ -132,7 +132,7 @@ async function renderChain() {
   // 最新那一条链——不提的话看起来像档案丢了。
   if (others?.length) {
     const c = document.createElement('div');
-    c.className = 'card idle';
+    c.className = 'card tone-idle';
     const b = document.createElement('b');
     b.textContent = `另有 ${others.length} 组档案不属于此链`;
     c.append(b, document.createTextNode(
@@ -145,7 +145,7 @@ async function renderChain() {
   // 链断了要**明说**，而且不能因此把在场的那几份说成无效。
   for (const h of holes) {
     const c = document.createElement('div');
-    c.className = 'card warn';
+    c.className = 'card tone-warn';
     const b = document.createElement('b');
     b.textContent = holeText(h);
     c.append(b, document.createTextNode(h.detail));
@@ -209,7 +209,7 @@ function renderCoverage(coverage, crawlState, bundleId) {
   for (const cs of crawlState ?? []) {
     if (!cs.gaps?.length) continue;
     const g = document.createElement('div');
-    g.className = 'card warn';
+    g.className = 'card tone-warn';
     const b = document.createElement('b');
     // 与进度表用同一套说法：说结论（有几处缺口），不说「未验证」——后者听起来像
     // 我们的代码没查，而其实查了。见 `contiguityLabel`。

@@ -68,7 +68,7 @@ export async function loadDebug() {
 
   // 绕过门控这件事必须说出来，而不是藏在按钮说明里
   const gateNote = document.createElement('div');
-  gateNote.className = 'card idle';
+  gateNote.className = 'card tone-idle';
   const gb = document.createElement('b');
   gb.textContent = '作品详情页那一项会绕过抓取顺序';
   gateNote.append(gb, document.createTextNode(
@@ -97,18 +97,18 @@ export async function loadDebug() {
 /** @param {string} key */
 async function runDryRun(key) {
   const el = $('dryrun-result');
-  el.className = 'card idle';
+  el.className = 'card tone-idle';
   el.textContent = `正在演练「${SCENARIOS[key].title}」…（不发出任何网络请求）`;
 
   const r = await send({ type: 'dryRun', scenario: key });
   if (!r?.ok) {
-    el.className = 'card err';
+    el.className = 'card tone-error';
     el.textContent = `演练失败：${r?.error ?? ''}`;
     return;
   }
 
   const d = r.result;
-  el.className = 'card good';
+  el.className = 'card tone-ok';
   el.replaceChildren();
   const b = document.createElement('b');
   b.textContent = `演练完成：${SCENARIOS[key].title}`;

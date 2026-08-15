@@ -149,9 +149,10 @@
       <div id="content-section" hidden role="tabpanel" aria-labelledby="content-toggle">
         <div class="hint">
           把这份档案里的页面解析成条目，用来确认「抓到的确实是我的东西」。
-          解析在本机即时进行，不写入任何东西，也不联网。
-          <b>这里显示的是这一份档案里的全部内容，不是「本次新增」</b>——
-          增量抓取会重读最新几页，因此其中大部分你上次就已经存下来了。
+          解析在本机即时进行，不写入任何内容，也不联网。
+          <b>范围仅限当前选中的这一份档案</b>，不含同一条链上的其他档案：
+          一次增量抓取只包含这次取回的那些页面，而其中大部分（增量会重读最新几页）
+          上一次就已经存下来了。若要通读全部收藏，请使用站点生成器。
         </div>
         <div id="content-kinds" class="btn-row"></div>
         <div id="content-list" class="muted">选一个档案后显示</div>

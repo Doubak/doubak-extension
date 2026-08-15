@@ -24,9 +24,13 @@ import { buildWarcRecord, buildHttpResponseBlock, gzipMember } from '../src/core
 import { bundleIdTime } from '../src/core/ids.js';
 
 const ID = '20260801T005010Z-3eef52';
+/** 链上更早的那一份。用来验「只看选中的这一份」。 */
+const OLDER = '20260731T043423Z-d40c1d';
 const UID = '1000001';
 /** 用户自己写的那句话。整组测试真正盯着的就是它。 */
 const MY_COMMENT = '这部片子救了我那个夏天';
+/** 只在上游那一份里出现的话。它出现在页面上就说明读串了。 */
+const OLD_COMMENT = '这句话只在上一份档案里';
 
 /**
  * 一页只有一条广播的时间线，带正文。
@@ -39,7 +43,7 @@ const MY_COMMENT = '这部片子救了我那个夏天';
  * 抽取器一条都认不出来——而这正是这个仓库反复栽的那个跟头：凭想象写选择器。
  * 用例这一侧也一样，编出来的夹具只会验证当初的想象。
  */
-function broadcastPage() {
+function broadcastPage(text = MY_COMMENT) {
   return `<html><head><title>我的动态</title></head><body>
 <div id="db-global-nav"><a href="https://www.douban.com/people/mewx/">mewx</a></div>
 <div id="db-usr-profile"><div class="info"><h1>mewx</h1></div></div>
@@ -47,63 +51,92 @@ function broadcastPage() {
   <div class="new-status status-wrapper" data-sid="900001" data-uid="${UID}">
     <a class="lnk-people">mewx</a> 看过
     <span class="created_at" title="2026-07-26 12:34:00">7月26日</span>
-    <blockquote><p>${MY_COMMENT}</p></blockquote>
+    <blockquote><p>${text}</p></blockquote>
     <div data-target-type="movie" data-object-id="36838707"></div>
   </div>
 </div></body></html>`;
 }
 
-/** 造一份**真的**能被 readEntry 读开的档案。 */
-async function realBundle() {
-  const body = new TextEncoder().encode(broadcastPage());
-  const block = buildHttpResponseBlock({
-    statusLine: 'HTTP/1.1 200 OK',
-    headers: [['Content-Type', 'text/html; charset=utf-8']],
-    body,
-  });
-  const record = buildWarcRecord({
-    type: 'response',
-    recordId: 'urn:uuid:11111111-1111-4111-8111-111111111111',
-    date: new Date('2026-08-01T01:00:00Z'),
-    targetUri: 'https://www.douban.com/people/mewx/statuses',
-    block,
-  });
-  const member = await gzipMember(record);
-  const segment = `pages-${ID}-00001.warc.gz`;
+/**
+ * 造一份**真的**能被 readEntry 读开的档案。
+ *
+ * `pages` 张一模一样的广播页，一页一条 gzip member 首尾相接——这正是段文件的真实
+ * 形状，index 里的 `offset`/`length` 也就必须一页页累加。
+ *
+ * @param {number} [pages]
+ * @param {{id?: string, text?: string, previous?: string|null}} [opts]
+ */
+async function realBundle(pages = 1, { id = ID, text = MY_COMMENT, previous = null } = {}) {
+  const segment = `pages-${id}-00001.warc.gz`;
+  const members = [];
+  const lines = [];
+  let offset = 0;
+
+  for (let i = 0; i < pages; i += 1) {
+    const block = buildHttpResponseBlock({
+      statusLine: 'HTTP/1.1 200 OK',
+      headers: [['Content-Type', 'text/html; charset=utf-8']],
+      body: new TextEncoder().encode(broadcastPage(text)),
+    });
+    const member = await gzipMember(buildWarcRecord({
+      type: 'response',
+      recordId: `urn:uuid:11111111-1111-4111-8111-${String(i).padStart(12, '0')}`,
+      date: new Date('2026-08-01T01:00:00Z'),
+      targetUri: `https://www.douban.com/people/mewx/statuses?p=${i + 1}`,
+      block,
+    }));
+    lines.push(JSON.stringify({
+      capture_id: `${id}#${String(i + 1).padStart(6, '0')}`,
+      route_key: 'broadcast.timeline',
+      intent: 'broadcast.timeline',
+      url: `https://www.douban.com/people/mewx/statuses?p=${i + 1}`,
+      url_key: `douban.com/people/mewx/statuses?p=${i + 1}`,
+      observed_at: '2026-08-01T01:00:00Z',
+      verdict: 'ok',
+      offset,
+      length: member.length,
+      segment,
+    }));
+    members.push(member);
+    offset += member.length;
+  }
+
+  const bytes = new Uint8Array(offset);
+  let at = 0;
+  for (const m of members) { bytes.set(m, at); at += m.length; }
 
   return {
     'manifest.json': JSON.stringify({
-      bundle_id: ID,
+      bundle_id: id,
       status: 'complete',
-      created_at: bundleIdTime(ID).toISOString(),
+      created_at: bundleIdTime(id).toISOString(),
       completed_at: '2026-08-01T02:00:00Z',
-      previous_bundle_id: null,
+      previous_bundle_id: previous,
       // 广播抽取要靠它滤掉转发进来的别人的广播。
       account: { user_id: UID, username: 'mewx' },
-      segments: [{ filename: segment, bytes: member.length }],
-      index: { filename: `index-${ID}.ndjson`, line_count: 1 },
+      segments: [{ filename: segment, bytes: bytes.length }],
+      index: { filename: `index-${id}.ndjson`, line_count: pages },
       crawl_state: [],
       coverage: [],
     }),
-    [`index-${ID}.ndjson`]: `${JSON.stringify({
-      capture_id: `${ID}#000001`,
-      route_key: 'broadcast.timeline',
-      intent: 'broadcast.timeline',
-      url: 'https://www.douban.com/people/mewx/statuses',
-      url_key: 'douban.com/people/mewx/statuses',
-      observed_at: '2026-08-01T01:00:00Z',
-      verdict: 'ok',
-      offset: 0,
-      length: member.length,
-      segment,
-    })}\n`,
-    [segment]: member,
+    [`index-${id}.ndjson`]: `${lines.join('\n')}\n`,
+    [segment]: bytes,
   };
 }
 
-async function openWithContent() {
+/**
+ * @param {object} [o]
+ * @param {number} [o.pages]
+ * @param {boolean} [o.withOlder]  再放一份上游档案（用来验「只看这一份，不看整条链」）
+ */
+async function openWithContent({ pages = 1, withOlder = false } = {}) {
   const worker = fakeOpfsWorker();
-  const store = await seedBundle(worker, `doubak-bundle-${ID}`, await realBundle());
+  if (withOlder) {
+    await seedBundle(worker, `doubak-bundle-${OLDER}`,
+      await realBundle(1, { id: OLDER, text: OLD_COMMENT }));
+  }
+  const store = await seedBundle(worker, `doubak-bundle-${ID}`,
+    await realBundle(pages, { previous: withOlder ? OLDER : null }));
 
   // 数一数段文件被读了几次。**「有没有解析」要看有没有真去读字节**，
   // 而不是看界面上有没有字——假 DOM 不从 HTML 里带初始文本，那条判据是假的。
@@ -140,7 +173,15 @@ async function openWithContent() {
   return { dom, worker, segRead };
 }
 
-/** 等到界面不再变化。理由与 ui-import 那组相同：这条路径没有可观测的完成信号。 */
+/**
+ * 等到界面不再变化。理由与 ui-import 那组相同：这条路径没有可观测的完成信号。
+ *
+ * **「不再变化」不等于「做完了」**，而这里有一处真实的例外：解析期间界面上一直写着
+ * 「正在解析 广播…」，一个字都不变。31 页那条用例因此拿到了占位文字就返回，
+ * 报的却是「children[0] 是 undefined」——离真正的原因很远。
+ *
+ * 那句占位文字**就是**完成信号的反面，所以直接认它：还写着就继续等。
+ */
 async function settle(dom, { timeoutMs = 5000 } = {}) {
   const snap = () => [
     dom.byId.get('content-list')?.textContent ?? '',
@@ -151,7 +192,8 @@ async function settle(dom, { timeoutMs = 5000 } = {}) {
   const t0 = Date.now();
   for (;;) {
     const now = snap();
-    stable = now === last ? stable + 1 : 0;
+    const working = now.startsWith('正在解析');
+    stable = (now === last && !working) ? stable + 1 : 0;
     last = now;
     if (stable >= 2) return;
     if (Date.now() - t0 > timeoutMs) throw new Error('等太久，界面还在动');
@@ -208,6 +250,72 @@ describe('查看内容（真的跑一遍）', () => {
       assert.equal(dom.byId.get('content-section').hidden, true);
       assert.equal(btn.getAttribute('aria-selected'), 'false');
       assert.equal(btn.getAttribute('title'), null, '收起来之后不该还挂着「再点一下收起」');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('**页数写明单位，条数在解析完之后才报**', async () => {
+    // 报上来的现象：类别按钮写着「广播（173）标记（244）」，读起来像是 173 条广播
+    // ——而那 173 是**页数**，一份真档案里那些页装着好几千条。index 里现成有的就是
+    // 页数，条数非解析不可知，所以两个数各归各位、各带各的说法。
+    const { dom } = await openWithContent({ pages: 2 });
+    try {
+      dom.byId.get('content-toggle').dispatch('click', {});
+      await settle(dom);
+
+      assert.match(dom.byId.get('content-kinds').textContent, /广播（2 页）/,
+        '这个数是页数，不带单位会被读成条数');
+
+      const list = dom.byId.get('content-list');
+      // 抽查的范围要在**清单最上面**：缀在末尾的话，滚到底才知道自己看的不是全部。
+      assert.match(list.children[0].className, /content-scope/, '范围那句话不在第一行');
+      assert.match(list.children[0].textContent, /解析了全部 2 页，列出 2 条/);
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('**超过上限时说清楚只解析了前几页**', async () => {
+    // 31 页真的造出来跑一遍，而不是断言一句文案：上限那条分支要真的走到，
+    // 才谈得上验证它说的数对不对。
+    const { dom, segRead } = await openWithContent({ pages: 31 });
+    try {
+      dom.byId.get('content-toggle').dispatch('click', {});
+      await settle(dom);
+
+      const scope = dom.byId.get('content-list').children[0];
+      assert.match(scope.textContent, /解析了前 30 页（共 31 页），列出 30 条/);
+      assert.match(scope.textContent, /抽查/, '要说清这不是完整阅读');
+      // 而且**真的只解析了 30 页**：多出来的那一页一个字节都没取。
+      // 数的是段文件的取值次数（`readEntry` 按 offset/length 取一段，不是整段文件）。
+      assert.equal(segRead.n, 30, '上限只写在文案里，实际还是把 31 页都解析了');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('**只看选中的这一份，不看整条链**', async () => {
+    // 页面上那句说明写着「范围仅限当前选中的这一份档案」。它现在成立是因为
+    // `BundleReader.index()` 读的就是一个目录里的一个 index 文件——**成立得有点
+    // 顺手**，而顺手成立的事没有任何东西拦着它以后不成立。
+    //
+    // 所以放一份上游进去：它只有一句别的话，一旦出现在页面上就是读串了链。
+    const { dom } = await openWithContent({ withOlder: true });
+    try {
+      // 前提：那一份**真的在存储里**。不验的话，夹具没造出来也会让下面全绿。
+      assert.equal(dom.byId.get('bundle-pick').querySelectorAll('.picker-row').length, 2,
+        '上游那一份没被放进去，这条判据就什么都没验');
+
+      dom.byId.get('content-toggle').dispatch('click', {});
+      await settle(dom);
+
+      const list = dom.byId.get('content-list').textContent;
+      assert.match(list, new RegExp(MY_COMMENT), '前提：选中的这一份要读得出来');
+      assert.equal(list.includes(OLD_COMMENT), false,
+        '上一份档案的内容混进来了 —— 那句「范围仅限当前选中的这一份」就成了假话');
+      assert.match(dom.byId.get('content-kinds').textContent, /广播（1 页）/,
+        '页数把整条链算进去了');
     } finally {
       dom.restore();
     }

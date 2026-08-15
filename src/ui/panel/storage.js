@@ -51,7 +51,7 @@ export async function loadStorage() {
 
     renderStorage();
   } catch (e) {
-    el.className = 'card err';
+    el.className = 'card tone-error';
     el.textContent = `统计不出来：${e.message}`;
   }
 }
@@ -90,7 +90,7 @@ function renderStorage() {
  *
  * @param {string} bundleId
  * @param {object} [opts]
- * @param {(cls: string, text: string) => void} [opts.report]
+ * @param {(tone: import('../components.js').Tone, text: string) => void} [opts.report]
  * @returns {Promise<boolean>} 是否真的删掉了
  */
 export async function deleteBundle(bundleId, { report = setStorageResult } = {}) {
@@ -101,7 +101,7 @@ export async function deleteBundle(bundleId, { report = setStorageResult } = {})
   // 用户可能点得很快。
   const check = checkDeletable(getStorageUsage(), bundleId);
   if (!check.ok) {
-    report('err', check.error);
+    report('error', check.error);
     return false;
   }
   const u = check.target;
@@ -123,10 +123,10 @@ export async function deleteBundle(bundleId, { report = setStorageResult } = {})
   report('idle', `正在删除 ${u.bundleId}…`);
   const r = await send({ type: 'deleteBundle', bundleId: u.bundleId, dir: u.dir });
   if (!r?.ok) {
-    report('err', `删不掉：${r?.error ?? ''}`);
+    report('error', `删不掉：${r?.error ?? ''}`);
     return false;
   }
-  report('good', `已删除 ${u.bundleId}（释放 ${bytes(u.bytes)}）`);
+  report('ok', `已删除 ${u.bundleId}（释放 ${bytes(u.bytes)}）`);
   // 存储变了：两处缓存都作废，并且如果当前选中的那份就是被删的那个，取消选中。
   // 不取消的话，下一次读取会去开一个不存在的目录然后报「读不出来」，
   // 而真实情况只是它被删了。
@@ -141,7 +141,7 @@ async function deleteAll() {
   const deletable = getStorageUsage().filter((u) => u.deletable);
   const blocked = getStorageUsage().filter((u) => !u.deletable);
   if (deletable.length === 0) {
-    setStorageResult('err', '没有可删的档案' + (blocked.length ? '（正在抓的那份不能删）' : ''));
+    setStorageResult('error', '没有可删的档案' + (blocked.length ? '（正在抓的那份不能删）' : ''));
     return;
   }
 
@@ -169,17 +169,17 @@ async function deleteAll() {
 
   invalidateBundleScan();
   invalidateBundles(blocked.map((x) => x.bundleId));
-  if (failed.length) setStorageResult('err', `有 ${failed.length} 份删不掉：${failed.join('；')}`);
-  else setStorageResult('good', `已清空 ${deletable.length} 份档案`);
+  if (failed.length) setStorageResult('error', `有 ${failed.length} 份删不掉：${failed.join('；')}`);
+  else setStorageResult('ok', `已清空 ${deletable.length} 份档案`);
   await loadStorage();
   await loadArchive();
   await refreshOpenTab();
 }
 
-/** @param {string} cls @param {string} text */
-function setStorageResult(cls, text) {
+/** @param {import('../components.js').Tone} tone @param {string} text */
+function setStorageResult(tone, text) {
   const el = $('storage-result');
-  el.className = `card ${cls}`;
+  el.className = `card tone-${tone}`;
   el.textContent = text;
 }
 
@@ -207,9 +207,9 @@ export function initStorage() {
   $('delete-this').addEventListener('click', async () => {
     if (!currentBundleId) return;
     const gone = await deleteBundle(currentBundleId, {
-      report: (cls, text) => {
+      report: (tone, text) => {
         const el = $('export-result');
-        el.className = `card ${cls}`;
+        el.className = `card tone-${tone}`;
         el.textContent = text;
       },
     });

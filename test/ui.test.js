@@ -978,6 +978,29 @@ describe('面板脚本', () => {
       'align-items: start 会让侧栏只有自己那点高度，右边长它不长');
   });
 
+  test('**卡片的语气只有一套词**，而且每一个都在 CSS 里有规则', async () => {
+    // 面板里曾经并存两套：`card err` / `good` / `run` 与 `card tone-error` /
+    // `tone-ok` / `tone-busy`。CSS 里只有后一套有规则，于是**前一套那 35 处卡片
+    // 一点颜色都没有**——「有 8 条在豆瓣上已经没有了」与一句普通说明长得一模一样。
+    //
+    // 这种毛病靠看是发现不了的：每一处单独看都像写对了，只有把类名与 CSS 放在
+    // 一起数才看得出来。所以这条判据做的正是那件事——**两头对齐**，而不是
+    // 「别再写 `card err`」那样只挡住一个方向。
+    const js = readPanelSourceSync();
+    const css = await readRepoFile('src/ui/panel.css');
+
+    const used = [...js.matchAll(/['"`]card ([a-z-]+|\$\{[^}]*\})/g)].map((m) => m[1]);
+    assert.ok(used.length > 20, `只找到 ${used.length} 处卡片类名，这条判据多半没在数它想数的东西`);
+
+    const bad = used.filter((c) => !c.startsWith('tone-') && !c.startsWith('${'));
+    assert.deepEqual(bad, [], `这些卡片用的是旧词，CSS 里没有对应规则：${[...new Set(bad)].join('、')}`);
+
+    // 模板拼出来的那几处（`card tone-${tone}`）验的是词表本身：五种语气都要有规则。
+    for (const tone of ['idle', 'busy', 'ok', 'warn', 'error']) {
+      assert.match(css, new RegExp(`\\.tone-${tone}\\s*\\{`), `CSS 里没有 .tone-${tone}`);
+    }
+  });
+
   test('折叠块用原生 <details>，不自己写展开逻辑', async () => {
     // 键盘、读屏、Ctrl-F 找页内文字——原生的这些都照旧能用，自己写一套就要各自
     // 重来一遍，而这个面板里没有任何理由需要那样。

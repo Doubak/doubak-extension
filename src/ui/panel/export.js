@@ -34,7 +34,7 @@ import { reader, currentBundleId } from './archive.js';
 /** 整条链导出的结果：逐份说清楚，别汇总成一句「成功」。 */
 function renderChainExportResult(el, done) {
   const failed = done.filter((d) => d.error || d.result?.problems.length);
-  el.className = `card ${failed.length ? 'err' : 'good'}`;
+  el.className = `card tone-${failed.length ? 'error' : 'ok'}`;
   el.replaceChildren();
 
   const b = document.createElement('b');
@@ -65,7 +65,7 @@ function showExportResult(r, folder) {
   const b = document.createElement('b');
 
   if (r.problems.length) {
-    el.className = 'card err';
+    el.className = 'card tone-error';
     b.textContent = `导出有问题：${r.problems.length} 个文件没对上`;
     el.append(b, document.createTextNode(
       r.problems.map((p) => `${p.name}（${p.reason}）`).join('；')
@@ -74,7 +74,7 @@ function showExportResult(r, folder) {
     return;
   }
 
-  el.className = 'card good';
+  el.className = 'card tone-ok';
   // **报的是目的地现在一共有多少**，不是这一趟搬了多少。续导时后者可能是 0，
   // 而「已导出并校验：4 个文件，0 B」会让人以为什么都没发生。
   const totalBytes = r.bytes + (r.skippedBytes ?? 0);
@@ -130,7 +130,7 @@ export function initExport() {
     if (!currentBundleId) return;
 
     if (typeof window.showDirectoryPicker !== 'function') {
-      el.className = 'card err';
+      el.className = 'card tone-error';
       el.textContent = '这个浏览器不支持选择文件夹（File System Access API）。请使用 Chrome 或 Edge。';
       return;
     }
@@ -138,7 +138,7 @@ export function initExport() {
     const r = await send({ type: 'chain', bundleId: currentBundleId });
     const chain = r?.ok ? (r.chain?.bundles ?? []) : [];
     if (chain.length === 0) {
-      el.className = 'card err';
+      el.className = 'card tone-error';
       el.textContent = '读不出这条链。';
       return;
     }
@@ -166,7 +166,7 @@ export function initExport() {
         const res = await exportBundle({
           store, sink, overwrite: true,
           onProgress: (p) => {
-            el.className = 'card run';
+            el.className = 'card tone-busy';
             const pct = p.total ? Math.round((p.done / p.total) * 100) : 100;
             el.textContent =
               `（${i + 1}/${ids.length}）${id}　`
@@ -195,7 +195,7 @@ export function initExport() {
     if (!bundleId) return;
 
     if (typeof window.showDirectoryPicker !== 'function') {
-      el.className = 'card err';
+      el.className = 'card tone-error';
       el.textContent = '这个浏览器不支持选择文件夹（File System Access API）。请用 Chrome 或 Edge。';
       return;
     }
@@ -225,7 +225,7 @@ export function initExport() {
     const run = (opts) => exportBundle({
       store, sink, ...opts,
       onProgress: (p) => {
-        el.className = 'card run';
+        el.className = 'card tone-busy';
         const pct = p.total ? Math.round((p.done / p.total) * 100) : 100;
         // 这里的百分比是**字节数**，不是「抓了多少」——分母是本地文件的真实
         // 大小，可信；豆瓣的计数不可信，两者不是一回事。
@@ -248,7 +248,7 @@ export function initExport() {
         // 不再只问「要不要覆盖」——先去看清楚已经导好了几个，然后把**将要发生
         // 什么**原原本本说出来。「已经有 12 个文件，覆盖吗」和「12 个已经导好、
         // 还差 8 个，续导只补这 8 个」是完全不同的两句话，而后者才是实情。
-        el.className = 'card run';
+        el.className = 'card tone-busy';
         el.textContent = '正在检查上次导到哪儿了…';
         const done = await countAlreadyExported({ store, sink });
 
@@ -258,7 +258,7 @@ export function initExport() {
           : `上次导出到一半：${done.ok} 个文件已经完整（${bytes(done.okBytes)}），还差 ${done.missing} 个。\n\n`
             + '继续只会补齐缺的那些，已经完整的不动。确定吗？';
         if (!confirm(msg)) {
-          el.className = 'card idle';
+          el.className = 'card tone-idle';
           el.textContent = '已取消，什么都没写。';
           return;
         }
@@ -277,7 +277,7 @@ export function initExport() {
         await refreshOpenTab();
       }
     } catch (e) {
-      el.className = 'card err';
+      el.className = 'card tone-error';
       el.textContent = `导出失败：${e.message}`;
     }
   });
@@ -285,13 +285,13 @@ export function initExport() {
   $('verify').addEventListener('click', async () => {
     if (!reader) return;
     const el = $('verify-result');
-    el.className = 'card idle';
+    el.className = 'card tone-idle';
     el.textContent = '正在逐条取出并解压…';
 
     try {
       const v = await reader.verify();
       if (v.problems.length === 0) {
-        el.className = 'card good';
+        el.className = 'card tone-ok';
         el.replaceChildren();
         const b = document.createElement('b');
         b.textContent = `${v.checked} 条全部读得通`;
@@ -299,13 +299,13 @@ export function initExport() {
           '索引里的每一条都能按偏移量从段文件里取出来并解压。这份档案是自洽的。',
         ));
       } else {
-        el.className = 'card err';
+        el.className = 'card tone-error';
         el.textContent =
           `${v.problems.length} / ${v.checked} 条读不出来：` +
           v.problems.slice(0, 5).map((p) => `${p.captureId}（${p.error}）`).join('；');
       }
     } catch (e) {
-      el.className = 'card err';
+      el.className = 'card tone-error';
       el.textContent = `验证失败：${e.message}`;
     }
   });
