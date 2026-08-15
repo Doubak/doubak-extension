@@ -51,6 +51,17 @@ const PAGE = 30;
  *
  * **按 intent 分流，不按 URL 猜**。intent 是抓取时写下的「我们为什么取这一页」，
  * 是规范里三个不可恢复字段之一；URL 形状会变，intent 不会。
+ *
+ * ## `extract` 一页一页地出，`merge` 是给「一条记录横跨几页」准备的
+ *
+ * 多数路线是一页多条：一页标记列表十五个标记，一页广播二三十条广播，各页之间没有
+ * 关系，抽出来直接就能画。**豆列不是**——一份豆列每页 25 个条目，五十个条目就是
+ * 三页，而那三页说的是**同一份豆列**。不合并的话，一份豆列在页面上出现三次，
+ * 条数还各不相同（25 / 25 / 8），读起来像是重复，或者像是三份同名的豆列。
+ *
+ * 所以豆列这一类的 `extract` 交出的是**零件**，由 `merge` 合成能画的行。合并规则
+ * 与解析器一致（`parse.js` 的 `doulistPages`）：按 `start` 升序拼接条目——
+ * **次序是内容的一部分**，用户排过的清单，把第二页排到第一页前面就是改了内容。
  */
 const KINDS = [
   {
@@ -92,20 +103,39 @@ const KINDS = [
     key: 'doulist',
     name: '豆列',
     match: (i) => i === 'doulist.item',
+    // 零件：这一页属于哪份豆列、是第几页起。见上面 KINDS 的说明。
     extract: (html, { url }) => {
       const d = extractDoulist(html, url);
-      if (!d) return [];
-      // 一份豆列一条，条目里自己写的评语拼在下面——那才是这条路线的价值所在。
-      const notes = d.items.filter((i) => i.comment)
-        .map((i) => `${i.title ?? '（未命名）'}：${i.comment}`);
-      return [{
-        title: (d.visibility === 'public' ? '' : '🔒 ') + (d.title ?? '（无标题）'),
-        meta: `${d.items.length} 个条目 · ${notes.length} 条评语`,
-        own: notes.join('\n'),
-      }];
+      return d ? [{ id: d.id, start: startOf(url), d }] : [];
+    },
+    merge: (parts) => {
+      /** @type {Map<string, object[]>} */
+      const by = new Map();
+      for (const p of parts) by.set(p.id, [...(by.get(p.id) ?? []), p]);
+
+      return [...by.values()].map((pages) => {
+        // 次序是内容的一部分，所以按 start 升序拼，不按抓取顺序。
+        pages.sort((a, b) => a.start - b.start);
+        const { d } = pages[0];
+        const items = pages.flatMap((p) => p.d.items);
+        // 条目上自己写的评语——那才是这条路线的价值所在。
+        const notes = items.filter((i) => i.comment)
+          .map((i) => `${i.title ?? '（未命名）'}：${i.comment}`);
+        return {
+          title: (d.visibility === 'public' ? '' : '🔒 ') + (d.title ?? '（无标题）'),
+          meta: `${items.length} 个条目 · ${notes.length} 条评语`
+            + (pages.length > 1 ? ` · 由 ${pages.length} 页拼成` : ''),
+          own: notes.join('\n'),
+        };
+      });
     },
   },
 ];
+
+/** 豆列翻页写在 `?start=25` 里（routes.js：步长 25，实测出来的）。 */
+function startOf(url) {
+  return Number(/[?&]start=(\d+)/.exec(String(url ?? ''))?.[1] ?? 0);
+}
 
 let current = null;
 
@@ -169,27 +199,30 @@ async function renderKind(kind, ctx) {
   box.textContent = `正在解析 ${kind.name}…`;
 
   const rows = kind.rows.slice(0, PAGE);
-  const out = document.createElement('div');
-  let shown = 0;
+  const collected = [];
   let failed = 0;
 
   for (const row of rows) {
-    let items = [];
     try {
       const r = await ctx.reader.readEntry(row);
-      items = kind.extract(r.bodyText, { intent: String(row.intent), url: row.url, userId: ctx.userId });
+      collected.push(...kind.extract(
+        r.bodyText, { intent: String(row.intent), url: row.url, userId: ctx.userId },
+      ));
     } catch {
       // 抽取器抛了：**报出来，不吞掉**。这一页是用来建立信任的，
       // 一个静静少掉的条目比一句「这条读不出来」糟得多。
       failed += 1;
-      continue;
     }
-    for (const it of items) { out.append(itemEl(it)); shown += 1; }
   }
 
+  // 横跨几页的记录在这里合成一条（目前只有豆列）。见 KINDS 的说明。
+  const items = kind.merge ? kind.merge(collected) : collected;
+  const out = document.createElement('div');
+  for (const it of items) out.append(itemEl(it));
+
   box.className = '';
-  box.replaceChildren(scopeEl({ kind, shown, failed }), out);
-  if (!shown && !failed) out.append(badEl('这一类里没有解析出条目'));
+  box.replaceChildren(scopeEl({ kind, shown: items.length, failed }), out);
+  if (!items.length && !failed) out.append(badEl('这一类里没有解析出条目'));
 }
 
 /**

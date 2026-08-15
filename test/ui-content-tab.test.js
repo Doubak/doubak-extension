@@ -31,6 +31,7 @@ const UID = '1000001';
 const MY_COMMENT = '这部片子救了我那个夏天';
 /** 只在上游那一份里出现的话。它出现在页面上就说明读串了。 */
 const OLD_COMMENT = '这句话只在上一份档案里';
+const DOULIST_TITLE = '游戏购买小账本';
 
 /**
  * 一页只有一条广播的时间线，带正文。
@@ -58,39 +59,60 @@ function broadcastPage(text = MY_COMMENT) {
 }
 
 /**
+ * 一份豆列的一页。
+ *
+ * **结构照 `test/vendor-extractors.test.js` 里那份写**——容器上 `id` 在 `class`
+ * 前面，真实页面就是这样，而抽取器的切片正是从 `<div` 开始的。那一份已经跑通过
+ * 抽取器，所以不是凭想象编的。
+ *
+ * @param {{title: string, comment?: string}[]} items
+ * @param {number} start  这一页从第几条起（豆列翻页写在 `?start=` 里）
+ */
+function doulistPage(items, start = 0) {
+  const rows = items.map((it, i) => `<div id="77034${start + i}" class="doulist-item" >`
+    + `<a data-id="3023${start + i}" data-cate="3114"`
+    + ` data-url="https://www.douban.com/subject/3023${start + i}/"`
+    + ` data-title="${it.title}" class="lnk-doulist-add"></a>`
+    + (it.comment ? `<blockquote class="comment"><span>评语：</span>${it.comment}</blockquote>` : '')
+    + '</div>').join('');
+  return `<html><body><div id="doulist-info"><h1>${DOULIST_TITLE}</h1>`
+    + `<div class="doulist-about">我的信仰值有多少</div></div>${rows}</body></html>`;
+}
+
+/**
  * 造一份**真的**能被 readEntry 读开的档案。
  *
- * `pages` 张一模一样的广播页，一页一条 gzip member 首尾相接——这正是段文件的真实
- * 形状，index 里的 `offset`/`length` 也就必须一页页累加。
+ * 一页一条 gzip member 首尾相接——这正是段文件的真实形状，index 里的
+ * `offset`/`length` 也就必须一页页累加。
  *
- * @param {number} [pages]
- * @param {{id?: string, text?: string, previous?: string|null}} [opts]
+ * @param {{intent: string, url: string, html: string}[]} pages
+ * @param {{id?: string, previous?: string|null}} [opts]
  */
-async function realBundle(pages = 1, { id = ID, text = MY_COMMENT, previous = null } = {}) {
+async function bundleFrom(pages, { id = ID, previous = null } = {}) {
   const segment = `pages-${id}-00001.warc.gz`;
   const members = [];
   const lines = [];
   let offset = 0;
 
-  for (let i = 0; i < pages; i += 1) {
+  for (const [i, page] of pages.entries()) {
     const block = buildHttpResponseBlock({
       statusLine: 'HTTP/1.1 200 OK',
       headers: [['Content-Type', 'text/html; charset=utf-8']],
-      body: new TextEncoder().encode(broadcastPage(text)),
+      body: new TextEncoder().encode(page.html),
     });
     const member = await gzipMember(buildWarcRecord({
       type: 'response',
       recordId: `urn:uuid:11111111-1111-4111-8111-${String(i).padStart(12, '0')}`,
       date: new Date('2026-08-01T01:00:00Z'),
-      targetUri: `https://www.douban.com/people/mewx/statuses?p=${i + 1}`,
+      targetUri: page.url,
       block,
     }));
     lines.push(JSON.stringify({
       capture_id: `${id}#${String(i + 1).padStart(6, '0')}`,
-      route_key: 'broadcast.timeline',
-      intent: 'broadcast.timeline',
-      url: `https://www.douban.com/people/mewx/statuses?p=${i + 1}`,
-      url_key: `douban.com/people/mewx/statuses?p=${i + 1}`,
+      route_key: page.intent,
+      intent: page.intent,
+      url: page.url,
+      url_key: page.url.replace(/^https:\/\//, ''),
       observed_at: '2026-08-01T01:00:00Z',
       verdict: 'ok',
       offset,
@@ -115,7 +137,7 @@ async function realBundle(pages = 1, { id = ID, text = MY_COMMENT, previous = nu
       // 广播抽取要靠它滤掉转发进来的别人的广播。
       account: { user_id: UID, username: 'mewx' },
       segments: [{ filename: segment, bytes: bytes.length }],
-      index: { filename: `index-${id}.ndjson`, line_count: pages },
+      index: { filename: `index-${id}.ndjson`, line_count: pages.length },
       crawl_state: [],
       coverage: [],
     }),
@@ -124,19 +146,32 @@ async function realBundle(pages = 1, { id = ID, text = MY_COMMENT, previous = nu
   };
 }
 
+/** n 张一模一样的广播页。 */
+function realBundle(pages = 1, { id = ID, text = MY_COMMENT, previous = null } = {}) {
+  return bundleFrom(
+    Array.from({ length: pages }, (_, i) => ({
+      intent: 'broadcast.timeline',
+      url: `https://www.douban.com/people/mewx/statuses?p=${i + 1}`,
+      html: broadcastPage(text),
+    })),
+    { id, previous },
+  );
+}
+
 /**
  * @param {object} [o]
  * @param {number} [o.pages]
  * @param {boolean} [o.withOlder]  再放一份上游档案（用来验「只看这一份，不看整条链」）
+ * @param {object[]} [o.files]  直接给一份档案的文件表，用来测广播以外的路线
  */
-async function openWithContent({ pages = 1, withOlder = false } = {}) {
+async function openWithContent({ pages = 1, withOlder = false, files = null } = {}) {
   const worker = fakeOpfsWorker();
   if (withOlder) {
     await seedBundle(worker, `doubak-bundle-${OLDER}`,
       await realBundle(1, { id: OLDER, text: OLD_COMMENT }));
   }
   const store = await seedBundle(worker, `doubak-bundle-${ID}`,
-    await realBundle(pages, { previous: withOlder ? OLDER : null }));
+    files ?? await realBundle(pages, { previous: withOlder ? OLDER : null }));
 
   // 数一数段文件被读了几次。**「有没有解析」要看有没有真去读字节**，
   // 而不是看界面上有没有字——假 DOM 不从 HTML 里带初始文本，那条判据是假的。
@@ -290,6 +325,44 @@ describe('查看内容（真的跑一遍）', () => {
       // 而且**真的只解析了 30 页**：多出来的那一页一个字节都没取。
       // 数的是段文件的取值次数（`readEntry` 按 offset/length 取一段，不是整段文件）。
       assert.equal(segRead.n, 30, '上限只写在文案里，实际还是把 31 页都解析了');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('**一份豆列的三页拼成一条，不是三条**', async () => {
+    // 报上来的现象：豆列那一栏「内容重复了」。其实不是重复——一份豆列每页 25 条，
+    // 而这里**一页画一行**，于是同一份豆列出现好几次，条数还各不相同（25 / 25 / 8），
+    // 末尾那几页甚至是 0 条。读起来像重复，也像三份同名的豆列，两种读法都不对。
+    //
+    // 别的路线没有这个问题：一页标记列表里的十五个标记本来就是十五条记录，页与页
+    // 之间没有关系。**豆列是唯一一个「一条记录横跨几页」的**。
+    const base = 'https://www.douban.com/doulist/45473911/';
+    const files = await bundleFrom([
+      { intent: 'doulist.item', url: base, html: doulistPage([{ title: '巫师3', comment: 'A$23.99' }], 0) },
+      {
+        intent: 'doulist.item',
+        url: `${base}?start=25`,
+        html: doulistPage([{ title: '塞伯利亚' }, { title: '围攻', comment: '夏促 ¥18' }], 25),
+      },
+      // 末页空的：翻页的正常终点，它不该在界面上变成一份「0 个条目」的豆列。
+      { intent: 'doulist.item', url: `${base}?start=50`, html: doulistPage([], 50) },
+    ]);
+
+    const { dom } = await openWithContent({ files });
+    try {
+      dom.byId.get('content-toggle').dispatch('click', {});
+      await settle(dom);
+
+      const items = dom.byId.get('content-list').querySelectorAll('.content-item');
+      assert.equal(items.length, 1, `一份豆列画成了 ${items.length} 行`);
+      assert.match(items[0].textContent, new RegExp(`${DOULIST_TITLE}`));
+      assert.match(items[0].textContent, /3 个条目 · 2 条评语 · 由 3 页拼成/);
+      // 顺序是内容的一部分：按 start 升序拼，不按抓取顺序。
+      assert.ok(items[0].textContent.indexOf('巫师3') < items[0].textContent.indexOf('围攻'),
+        '页序错了 —— 用户排过的清单，换了次序就是改了内容');
+
+      assert.match(dom.byId.get('content-list').children[0].textContent, /解析了全部 3 页，列出 1 条/);
     } finally {
       dom.restore();
     }
