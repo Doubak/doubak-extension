@@ -1,6 +1,6 @@
 {
   "name": "doubak-extension",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "豆备 (Doubak) 的浏览器插件——在用户自己的浏览器里把豆瓣页面原样存成 WARC 档案",
   "private": true,
   "type": "module",
