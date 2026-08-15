@@ -213,8 +213,9 @@ async function describeBundles(scan, active, livePrevious) {
     // **manifest 是收尾时才写的，所以正在抓的那一份没有时间。**
     //
     // 少了它，下面那句排序会把它当成空字符串——比任何真实时间都小，于是**新的
-    // 那一份沉到最底下**。十七份档案、侧栏还是 70vh 带滚动条，它就落在看不见的
-    // 地方；而右边偏偏默认打开的就是它（`loadArchive()` 优先选 active）。
+    // 那一份沉到最底下**。当时侧栏还是 70vh 带滚动条（现在不是了，见 panel.css
+    // 里那段），十七份档案排下来它就落在看不见的地方；而右边偏偏默认打开的就是
+    // 它（`loadArchive()` 优先选 active）。
     // 用户看到的是「右边显示着一份抓取中的档案，左边整张列表里找不到它」，
     // 于是合理地判断成「列表没刷新」——而列表其实是新的，只是顺序把它藏了。
     //
@@ -502,20 +503,80 @@ function renderVersions(count) {
   el.append(card);
 }
 
+/** 折起来之后最多还是只画这么多行。展开一次画上千行会把这一页卡住。 */
+const BAD_ROWS = 100;
+
+/** 非正常捕获的一行：路线 · 判定 / 网址 + 抓取时刻。 */
+function badRow(e) {
+  const row = document.createElement('div');
+  row.className = 'cap';
+  const left = document.createElement('span');
+  left.textContent = captureTitle(e, routeName);
+  const right = document.createElement('span');
+  right.className = 'v warn-text';
+  right.textContent = verdictName(e);
+  row.append(left, right);
+
+  const url = document.createElement('div');
+  url.className = 'muted cap-sub breakable';
+  // URL 与时间之间要有明显的分隔——挤在一起时 URL 的结尾会被读成时间的一部分。
+  url.textContent = `${e.url}\n抓于 ${String(e.observed_at ?? '').slice(0, 19).replace('T', ' ')}`;
+  row.append(url);
+  return row;
+}
+
+/** @param {object[]} rows */
+function badList(rows) {
+  const list = document.createElement('div');
+  list.className = 'caps';
+  for (const e of rows.slice(0, BAD_ROWS)) list.append(badRow(e));
+  if (rows.length > BAD_ROWS) {
+    const more = document.createElement('div');
+    more.className = 'muted cap-sub';
+    more.textContent = `另有 ${rows.length - BAD_ROWS} 条同类，可在「翻看捕获」中逐条查看。`;
+    list.append(more);
+  }
+  return list;
+}
+
 /**
- * 「豆瓣上已经没有了」的那几条，单独列出来。
+ * 「已不存在 8 · 判不出来 43」——按判定归类数一遍。
+ *
+ * 用 `verdictName` 的**前半段**：它会把原因缀在后面（「判不出来 · 选择器该校准了」），
+ * 那对单独一行有用，对一句概括只会把三五个类别摊成十几个。
+ */
+function verdictTally(rows) {
+  /** @type {Map<string, number>} */
+  const by = new Map();
+  for (const e of rows) {
+    const k = verdictName(e).split(' · ')[0];
+    by.set(k, (by.get(k) ?? 0) + 1);
+  }
+  return [...by].map(([k, n]) => `${k} ${n}`).join(' · ');
+}
+
+/**
+ * 没能正常抓到的那些捕获。
  *
  * ## 为什么值得占一块地方
  *
- * 这是**整份档案里最不可替代的信息**。一份 3347 条的真实档案里有 8 条 `gone`——
+ * `gone` 是**整份档案里最不可替代的信息**。一份 3347 条的真实档案里有 8 条——
  * 那 8 部电影豆瓣已经删了，网上再也查不到，而你的档案里存着它们当时的样子。
  * 这正是这个项目存在的理由本身。
  *
  * 而它原来只以「判定分布：正常 3339 · 已不存在 8」这一个数字出现，**没有任何地方
  * 说得出是哪 8 条**。捕获列表里能看到，但要在 3347 行里翻。
  *
- * 顺带也列 `blocked` / `challenge` / 判不出来的：它们是风控留下的痕迹，同样稀少
- * 同样要紧。
+ * ## 为什么分成两块，只折起后面那块
+ *
+ * 上面那段道理**只适用于 `gone`**。`blocked` / `要验证` / `判不出来` 是另一回事：
+ * 它们是这次抓取的**过程**留下的痕迹，页面多半还在豆瓣上、下次能重抓，而且**数量
+ * 由出错的程度决定**——选择器对不上一条路线，几十上百条一起进来，同一个网址还会
+ * 因为重试出现好几遍。实测这一块能长到把下面所有东西都推出屏幕。
+ *
+ * 所以：`gone` 照旧摊开（少、且不可恢复），其余折进 `<details>`，而**条数与分类
+ * 写在折叠标题上**——折起来的是清单，不是事实。用原生 `<details>`，不写一行
+ * 展开逻辑，键盘与读屏也就照旧能用。
  */
 function renderVanished() {
   const el = $('vanished');
@@ -525,42 +586,35 @@ function renderVanished() {
   const bad = entries.filter((e) => e.verdict !== 'ok');
   if (bad.length === 0) return;
 
-  const card = document.createElement('div');
-  card.className = 'card warn';
-  const b = document.createElement('b');
-  const goneCount = bad.filter((e) => e.verdict === 'gone').length;
-  b.textContent = goneCount
-    ? `有 ${goneCount} 条在豆瓣上已经没有了`
-    : `有 ${bad.length} 条不是正常抓到的`;
-  card.append(b, document.createTextNode(
-    goneCount
-      ? '豆瓣已删除这些条目，公开渠道已无法查到；档案中保留了它们当时的内容。'
-      : '这些页面未能正常抓取，其原始响应已存入档案，可打开查看具体内容。',
-  ));
-  el.append(card);
+  const gone = bad.filter((e) => e.verdict === 'gone');
+  const failed = bad.filter((e) => e.verdict !== 'gone');
 
-  const list = document.createElement('div');
-  list.className = 'caps';
-  for (const e of bad) {
-    const row = document.createElement('div');
-    row.className = 'cap';
-    const left = document.createElement('span');
-    left.textContent = captureTitle(e, routeName);
-    const right = document.createElement('span');
-    right.className = 'v warn-text';
-    right.textContent = verdictName(e);
-    row.append(left, right);
-
-    const url = document.createElement('div');
-    url.className = 'muted cap-sub';
-    url.className = url.className ? `${url.className} breakable` : 'breakable';
-    // URL 与时间之间要有明显的分隔——挤在一起时 URL 的结尾会被读成时间的一部分。
-    url.textContent = `${e.url}\n抓于 ${String(e.observed_at ?? '').slice(0, 19).replace('T', ' ')}`;
-
-    row.append(url);
-    list.append(row);
+  if (gone.length) {
+    const card = document.createElement('div');
+    card.className = 'card warn';
+    const b = document.createElement('b');
+    b.textContent = `有 ${gone.length} 条在豆瓣上已经没有了`;
+    card.append(b, document.createTextNode(
+      '豆瓣已删除这些条目，公开渠道已无法查到；档案中保留了它们当时的内容。',
+    ));
+    el.append(card, badList(gone));
   }
-  el.append(list);
+
+  if (failed.length) {
+    const fold = document.createElement('details');
+    fold.className = 'fold';
+    // 短的时候直接摊开：这一块折叠是为了治「长」，而三五行并不长，
+    // 折起来只是让人多点一下。
+    fold.open = failed.length <= 5;
+    const sum = document.createElement('summary');
+    sum.textContent = `有 ${failed.length} 条没能正常抓到（${verdictTally(failed)}）`;
+    const why = document.createElement('div');
+    why.className = 'muted small';
+    why.textContent = '这些页面未能正常抓取，其原始响应已存入档案，可在「翻看捕获」中打开查看。'
+      + '判定为「判不出来」的通常是抽取规则需要校准，重抓无济于事。';
+    fold.append(sum, why, badList(failed));
+    el.append(fold);
+  }
 }
 
 /**

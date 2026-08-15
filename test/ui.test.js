@@ -955,7 +955,36 @@ describe('面板脚本', () => {
     const css = await readRepoFile('src/ui/panel.css');
     assert.match(css, /\.with-aside \{[^}]*grid-template-columns/);
     // 窄窗口要退回上下排，否则两列各自挤成一条。
-    assert.match(css, /max-width: 860px[\s\S]{0,200}\.with-aside \{ grid-template-columns: 1fr/);
+    assert.match(css, /max-width: 860px[\s\S]{0,600}\.with-aside \{ grid-template-columns: 1fr/);
+  });
+
+  test('**两列布局里侧栏不粘、不自己滚**', async () => {
+    // 它原来是 `position: sticky` + `max-height: 70vh; overflow: auto`。三处不好：
+    // 滚页面时它原地不动（成了跟着你跑的东西）、一页两个滚动条、以及最坏的那处
+    // ——70vh 之外的行看不见，而它们没有任何迹象说自己存在。正在抓的那一份沉到
+    // 十七行底下那次，「清单看起来没刷新」的直接原因就是它。
+    //
+    // 判据钉在**宽窗口那一段**上：窄窗口里清单在详情上面，那里的 max-height 是
+    // 有道理的，两者不是同一件事。
+    const css = await readRepoFile('src/ui/panel.css');
+    const wide = css.slice(0, css.indexOf('@media (max-width: 860px)'));
+    const rule = wide.slice(wide.indexOf('.with-aside > aside {'));
+    const body = rule.slice(0, rule.indexOf('}'));
+    assert.equal(/position: sticky/.test(body), false, '侧栏又粘住了');
+    assert.equal(/max-height|overflow/.test(body), false,
+      '侧栏又自己滚了 —— 超出的那些行没有任何迹象说自己存在');
+    // 而且两列一样高：网格默认 stretch，所以不能写 align-items: start。
+    assert.equal(/\.with-aside \{[^}]*align-items: start/.test(css), false,
+      'align-items: start 会让侧栏只有自己那点高度，右边长它不长');
+  });
+
+  test('折叠块用原生 <details>，不自己写展开逻辑', async () => {
+    // 键盘、读屏、Ctrl-F 找页内文字——原生的这些都照旧能用，自己写一套就要各自
+    // 重来一遍，而这个面板里没有任何理由需要那样。
+    const js = readPanelSourceSync();
+    assert.match(js, /createElement\('details'\)/);
+    const css = await readRepoFile('src/ui/panel.css');
+    assert.match(css, /\.fold > summary/, '折叠块没有样式');
   });
 
   test('**JS 里不许出现行内样式**', async () => {

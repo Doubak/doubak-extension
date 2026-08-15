@@ -194,8 +194,11 @@ describe('档案页（真的跑一遍）', () => {
     // 找不到正在抓的那一份。看起来像清单没刷新——**清单其实是新的**。
     //
     // manifest 是收尾时才写的，所以进行中的那一份读不出 `created_at`，排序键成了
-    // 空字符串，比任何真实时间都小，于是它沉到十七行的最底下；侧栏是 70vh 带滚动
-    // 的，它就落在看不见的地方。而右边默认打开的偏偏就是它。
+    // 空字符串，比任何真实时间都小，于是它沉到十七行的最底下；当时侧栏还是 70vh
+    // 带滚动的，它就落在看不见的地方。而右边默认打开的偏偏就是它。
+    //
+    // 侧栏后来不滚了（见 panel.css），但**这条判据照旧要留**：顺序本身就是错的，
+    // 「看得见」只是把它从「找不到」降成「要多滚一会儿」。
     const { dom } = await openArchiveTab({
       bundles: {
         // 新的那一份还在抓：只有段文件与索引，没有 manifest
@@ -470,6 +473,89 @@ describe('档案页（真的跑一遍）', () => {
       assert.equal(dom.byId.get('captures-section').hidden, true, '前提：捕获列表是收起来的');
       assert.match(dom.byId.get('vanished').textContent, /已经没有了/,
         '收起捕获列表把「已删除」一起藏了');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  /**
+   * 一条没抓成的捕获。**用 `blocked` + `note` 写「判不出来」**，因为规范里的
+   * `verdict` 是封闭词表、没有这个取值，写入时用的正是 `cls.verdict ?? 'blocked'`
+   * （见 loop.js），真相退在 `note` 里。照 verdict 编一个词表外的值，测的就是一种
+   * 档案里不会出现的形状。
+   */
+  function failedEntry(id, n) {
+    return `${JSON.stringify({
+      capture_id: `${id}#0001${String(n).padStart(2, '0')}`,
+      route_key: 'note.item',
+      url: `https://www.douban.com/topic/4962842${n}/`,
+      url_key: `douban.com/topic/4962842${n}`,
+      observed_at: '2026-08-07T18:35:50Z',
+      verdict: 'blocked',
+      note: '判不出来：一个内容区块都没有',
+      length: 4,
+      segment: `pages-${id}-00001.warc.gz`,
+    })}\n`;
+  }
+
+  /** 一条豆瓣上已经删掉的。 */
+  function goneEntry(id) {
+    return `${JSON.stringify({
+      capture_id: `${id}#000099`,
+      route_key: 'interest.item',
+      url: 'https://movie.douban.com/subject/1234567/',
+      url_key: 'movie.douban.com/subject/1234567',
+      observed_at: '2026-08-01T01:00:01Z',
+      verdict: 'gone',
+      length: 4,
+      segment: `pages-${id}-00001.warc.gz`,
+    })}\n`;
+  }
+
+  test('**没抓成的那一堆折起来，「已经没有了」的不折**', async () => {
+    // 报上来的现象：一条路线的抽取规则对不上，几十条「判不出来」一次涌进来，
+    // 同一个网址还因为重试出现好几遍，把下面的东西全推出屏幕。
+    //
+    // 但这两类不是一回事，所以不能一起折：`gone` 是**豆瓣上已经没有的东西**，
+    // 少、且没有任何别的地方能查到；「判不出来」是这次抓取的过程留下的痕迹，
+    // 页面还在，改了抽取器重抓就有。
+    const files = bundleFiles(ID);
+    files[`index-${ID}.ndjson`] += goneEntry(ID);
+    for (let i = 0; i < 12; i += 1) files[`index-${ID}.ndjson`] += failedEntry(ID, i);
+
+    const { dom } = await openArchiveTab({ bundles: { [`doubak-bundle-${ID}`]: files } });
+    try {
+      const vanished = dom.byId.get('vanished');
+      const fold = vanished.querySelector('details');
+      assert.ok(fold, '十几条「判不出来」还是直接摊在页面上');
+      assert.equal(fold.open, false, '这么长的清单该默认收起来');
+
+      // **折起来的是清单，不是事实**：条数与分类要留在能看见的那一行上。
+      const sum = fold.querySelector('summary');
+      assert.match(sum.textContent, /12 条没能正常抓到/);
+      assert.match(sum.textContent, /判不出来 12/, '折叠标题上要说清是哪一类');
+
+      // 而 gone 那条在折叠外面。
+      assert.match(vanished.textContent, /已经没有了/);
+      assert.equal(/已经没有了/.test(fold.textContent), false,
+        '「豆瓣上已经没有了」被折进去了 —— 那是整份档案里最不可替代的东西');
+      assert.equal(vanished.querySelectorAll('.cap').length, 13, '前提：两类都画了');
+      assert.equal(fold.querySelectorAll('.cap').length, 12, 'gone 那一条被折进去了');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('只有两三条时直接摊开 —— 折叠是为了治「长」', async () => {
+    // 三行并不长。为它折一次只是让人多点一下鼠标，而多点一下正是这一块想省掉的。
+    const files = bundleFiles(ID);
+    for (let i = 0; i < 3; i += 1) files[`index-${ID}.ndjson`] += failedEntry(ID, i);
+
+    const { dom } = await openArchiveTab({ bundles: { [`doubak-bundle-${ID}`]: files } });
+    try {
+      const fold = dom.byId.get('vanished').querySelector('details');
+      assert.ok(fold, '连折叠块都没画出来');
+      assert.equal(fold.open, true);
     } finally {
       dom.restore();
     }

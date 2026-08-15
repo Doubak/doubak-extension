@@ -36,8 +36,15 @@ import { extractBroadcasts } from '../../vendor/parser/extract-broadcast.js';
 import { extractLongform } from '../../vendor/parser/extract-longform.js';
 import { extractDoulist } from '../../vendor/parser/extract-doulist.js';
 
-/** 一次渲染多少条。够看清「是不是我的东西」，又不至于把几千条一次铺满。 */
-const PAGE = 60;
+/**
+ * 一次解析多少**页**捕获。
+ *
+ * 单位是页不是条：一页标记列表有十五条，一页广播二三十条，所以 30 页已经是好几百
+ * 条摊在屏幕上了。真实档案里标记列表有 244 页——把上限定得高一点看似大方，实际
+ * 只是让人多滚一会儿，而这一页要回答的问题（「抓到的确实是我的东西吗」）在头几屏
+ * 就已经答完了。要通读请用站点生成器，那才是为阅读做的东西。
+ */
+const PAGE = 30;
 
 /**
  * intent → 这一类叫什么、怎么抽。

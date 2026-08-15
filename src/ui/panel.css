@@ -268,6 +268,18 @@ button.act.icon { padding: var(--s2) var(--s2); line-height: 1; min-width: 2em; 
 .cap > div { flex-basis: 100%; }
 .warn-text { color: var(--tone-error); }
 
+/* 折叠块（原生 `<details>`，不写一行 JS）。
+   **标题那一行始终看得见**，收起来的只是清单——「有 43 条没能正常抓到（判不出来
+   43）」这句话是事实，不该跟着一起藏。 */
+.fold {
+  border: 1px solid var(--line); border-radius: var(--r2);
+  padding: var(--s2) var(--s3); margin-bottom: var(--s4);
+}
+.fold > summary { cursor: pointer; font-size: 13.5px; }
+.fold > summary:hover { color: var(--brand); }
+.fold[open] > summary { margin-bottom: var(--s2); }
+.fold > .muted { margin-bottom: var(--s2); }
+
 #preview { border: 1px solid var(--line); border-radius: var(--r1); padding: var(--s3); max-height: 60vh; overflow: auto; }
 #preview pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; margin: 0; }
 #preview img { max-width: 100%; }
@@ -294,20 +306,36 @@ button.act.icon { padding: var(--s2) var(--s2); line-height: 1; min-width: 2em; 
    档案会越攒越多（实测已经十几份）。竖着排的话，选一份要先滚过整张列表，
    回头再看详情又要滚回去——而这两件事本来就是一起做的。 */
 
-.with-aside { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: var(--s5); align-items: start; }
-.with-aside > aside {
-  /* 列表自己滚，右边的详情不跟着动。 */
-  max-height: 70vh; overflow: auto;
-  position: sticky; top: var(--s3);
-}
-.with-aside > aside .picker { margin-bottom: 0; }
+/* **侧栏不粘、不自己滚，跟着右边一起长。**
+
+   原来它是 `position: sticky` + `max-height: 70vh; overflow: auto`——列表钉在
+   视口上自己滚。听起来方便，实际有三处不好：
+
+   - 页面滚动时它在原地不动，而眼睛跟着右边的内容走，那一列就成了跟着你跑的东西；
+   - 一页之内出现两个滚动条，滚轮落在哪一个上取决于指针在哪；
+   - **最坏的一处**：70vh 之外的行看不见，而它们并没有任何迹象说自己存在。正在
+     抓的那一份沉到十七行底下那次，「清单看起来没刷新」的直接原因就是这个
+     （见 test/ui-archive-tab.test.js 里那条排序判据）。
+
+   两列一样高：网格默认 stretch（所以这里**不写** `align-items: start`），
+   侧栏再用 flex 把那只边框盒子撑满，于是两边的框底对齐，而不是左边早早收口、
+   右边还剩半屏。 */
+.with-aside { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: var(--s5); }
+.with-aside > aside { display: flex; flex-direction: column; }
+/* `1 0 auto`：撑满可以，**压缩不行**。窄窗口那边给了 `max-height`，而默认的
+   `flex-shrink: 1` 会把这只盒子压到那个高度里——它自己是 `overflow: hidden`，
+   于是压出去的行既滚不到也没有任何痕迹。 */
+.with-aside > aside .picker { margin-bottom: 0; flex: 1 0 auto; }
 .aside-main { min-width: 0; }
 /* 那一排按钮下面紧跟着导出/校验的结果卡，而卡片只有下外边距。 */
 .aside-main > .btn-row { margin-bottom: var(--s3); }
-/* 窄窗口下退回上下排，且列表不再吃掉一屏。 */
+/* 窄窗口下退回上下排。
+   **这里保留内滚，与宽窗口不同**，而两者的道理是同一条：一列的时候清单在详情
+   **上面**，十几份就把详情整个推出屏幕；两列的时候它在**旁边**，长一点不挡任何
+   东西。约束不同是因为版面不同，不是因为想法变了。 */
 @media (max-width: 860px) {
   .with-aside { grid-template-columns: 1fr; }
-  .with-aside > aside { position: static; max-height: 40vh; }
+  .with-aside > aside { max-height: 40vh; overflow: auto; }
 }
 
 /* 「翻看捕获」那一条。
