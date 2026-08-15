@@ -13,7 +13,7 @@ import { captureTitle, captureSubtitle, subjectLabel } from '../capture-label.js
 import { bundlePicker } from '../components.js';
 import { routeName } from '../route-names.js';
 import {
-  $, send, bytes, table, verdictName, STATUS_NAMES, VERDICT_NAMES,
+  $, send, bytes, table, fieldList, verdictName, STATUS_NAMES, VERDICT_NAMES,
   getOpfsWorker, getLastStatus, scanBundleDirs,
 } from './shared.js';
 
@@ -715,20 +715,16 @@ async function showCapture(entry) {
     const r = await reader.readEntry(entry);
     el.replaceChildren();
 
-    el.append(
-      table(
-        ['项', '值'],
-        [
-          ['URL', entry.url],
-          ...(entry.final_url ? [['跟随跳转后', entry.final_url]] : []),
-          ['判定', verdictName(entry)],
-          ['抓取原因', entry.intent],
-          ['保真度', entry.capture_fidelity],
-          ['抓取时间', entry.observed_at],
-          ['所在段', `${entry.segment} @${entry.offset}+${entry.length}`],
-        ],
-      ),
-    );
+    // 一栏，不是两列表格——这一块只有四百来点宽，理由见 `fieldList`。
+    el.append(fieldList([
+      ['URL', entry.url],
+      ...(entry.final_url ? [['跟随跳转后', entry.final_url]] : []),
+      ['判定', verdictName(entry)],
+      ['抓取原因', entry.intent],
+      ['保真度', entry.capture_fidelity],
+      ['抓取时间', entry.observed_at],
+      ['所在段', `${entry.segment} @${entry.offset}+${entry.length}`],
+    ]));
 
     const ct = (entry.content_type ?? '').toLowerCase();
     if (ct.startsWith('image/')) {

@@ -237,6 +237,36 @@ export function bytes(n) {
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
+/**
+ * 「项 / 值」的**一栏**排法：名字一行，值另起一行。
+ *
+ * ## 为什么不是两列表格
+ *
+ * 两列在窄的地方会塌掉，而且是**两头一起塌**：名字那一列被挤成一字一行
+ * （「抓取原因」竖着排成四行），值那一列还是不够宽，URL 与段文件名直接被切掉。
+ * 实测正是这样——「翻看捕获」的原文预览挪进右栏之后只剩四百来点宽。
+ *
+ * 一栏就没有这个问题：名字占一整行（多长都放得下），值也占一整行。
+ * 表格的好处是同一列能对齐着扫，而这里每份只有七行、各说各的，本来就没有可扫的列。
+ *
+ * 值一律 `word-break: break-all`：这里的值有一半是 URL 和文件名，不给断点就会
+ * 撑破容器——**而撑破的表现是「被切掉」，不是「出现滚动条」**，也就是静静地少了字。
+ *
+ * @param {Array<[string, string|null|undefined]>} rows
+ */
+export function fieldList(rows) {
+  const dl = document.createElement('dl');
+  dl.className = 'fields';
+  for (const [name, value] of rows) {
+    const dt = document.createElement('dt');
+    dt.textContent = name;
+    const dd = document.createElement('dd');
+    dd.textContent = value ?? '';
+    dl.append(dt, dd);
+  }
+  return dl;
+}
+
 /** 建一个表格。 */
 export function table(headers, rows) {
   const t = document.createElement('table');

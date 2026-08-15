@@ -221,6 +221,7 @@ async function settle(dom, { timeoutMs = 5000 } = {}) {
   const snap = () => [
     dom.byId.get('content-list')?.textContent ?? '',
     dom.byId.get('captures')?.textContent ?? '',
+    dom.byId.get('preview')?.textContent ?? '',
     dom.byId.get('archive-summary')?.textContent ?? '',
   ].join('|');
   let last = null; let stable = 0;
@@ -357,6 +358,11 @@ describe('查看内容（真的跑一遍）', () => {
       const items = dom.byId.get('content-list').querySelectorAll('.content-item');
       assert.equal(items.length, 1, `一份豆列画成了 ${items.length} 行`);
       assert.match(items[0].textContent, new RegExp(`${DOULIST_TITLE}`));
+      // **没写评语的条目也要列出来。** 只列有评语的那些，会让一份从没写过评语的
+      // 豆列（实测 6 份里有 3 份）在这一页上只剩标题和两个数字，看着像没解析出来
+      // ——而站点那边把条目都渲染了。选了哪些本身就是用户编的。
+      assert.match(items[0].textContent, /塞伯利亚/, '没有评语的条目被丢掉了');
+      assert.match(items[0].textContent, /围攻：夏促 ¥18/, '有评语的要跟在标题后面');
       // 「由 2 页拼成」不是 3：末尾那页是空的，它属于抓取过程，不属于这份豆列。
       // 实测一份只有 1 个条目的豆列后面跟着两页空的（没有翻页器，只能靠要一页
       // 拿回空的才知道到头），写成「由 3 页拼成」会让人以为那是一份三页的豆列。
@@ -366,6 +372,33 @@ describe('查看内容（真的跑一遍）', () => {
         '页序错了 —— 用户排过的清单，换了次序就是改了内容');
 
       assert.match(dom.byId.get('content-list').children[0].textContent, /解析了全部 3 页，列出 1 条/);
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('**原文预览的元信息是一栏，不是两列表格**', async () => {
+    // 两列在四百来点宽的地方两头一起塌：名字被挤成一字一行（「抓取原因」竖排成
+    // 四行），值那一列还是不够宽，URL 与段文件名直接被切掉——切掉不是出现滚动条，
+    // 是静静地少了字。「翻看捕获」挪进右栏之后正是这个宽度。
+    const { dom } = await openWithContent();
+    try {
+      dom.byId.get('captures-toggle').dispatch('click', {});
+      await settle(dom);
+      const row = dom.byId.get('captures').querySelectorAll('div[data-id]')[0];
+      assert.ok(row, '前提：捕获列表里要有一行可点');
+      // 那一行挂的是 `onclick`（一行一个处理器），不是委托到列表上的监听器，
+      // 所以这里直接调它——`dispatch('click')` 走的是 addEventListener 那一路。
+      assert.equal(typeof row.onclick, 'function', '这一行根本没绑点击');
+      row.onclick();
+      await settle(dom);
+
+      const preview = dom.byId.get('preview');
+      assert.equal(preview.querySelectorAll('table').length, 0, '又变回两列表格了');
+      const dl = preview.querySelector('dl');
+      assert.ok(dl, '元信息没画出来');
+      assert.match(dl.textContent, /所在段/);
+      assert.match(dl.textContent, /douban\.com/, 'URL 要完整地在里面');
     } finally {
       dom.restore();
     }

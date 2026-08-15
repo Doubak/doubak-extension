@@ -285,6 +285,14 @@ button.act.icon { padding: var(--s2) var(--s2); line-height: 1; min-width: 2em; 
 .fold[open] > summary { margin-bottom: var(--s2); }
 .fold > .muted { margin-bottom: var(--s2); }
 
+/* 一栏的「项 / 值」。**不是表格**，理由在 shared.js 的 `fieldList` 上：两列在
+   四百来点宽的地方两头一起塌——名字竖着排成一字一行，值还是被切掉。 */
+.fields { margin: 0 0 var(--s3); }
+.fields dt { font-size: 11px; color: var(--text-dim); margin-top: var(--s2); }
+.fields dt:first-child { margin-top: 0; }
+/* 值里一半是 URL 与文件名。不给断点，撑破的表现是**被切掉**而不是出现滚动条。 */
+.fields dd { margin: 0; font-size: 12.5px; word-break: break-all; }
+
 #preview { border: 1px solid var(--line); border-radius: var(--r1); padding: var(--s3); max-height: 60vh; overflow: auto; }
 #preview pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; margin: 0; }
 #preview img { max-width: 100%; }
