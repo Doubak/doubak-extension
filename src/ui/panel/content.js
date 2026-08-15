@@ -34,7 +34,7 @@ import { $ } from './shared.js';
 import { extractMarks } from '../../vendor/parser/extract.js';
 import { extractBroadcasts } from '../../vendor/parser/extract-broadcast.js';
 import { extractLongform } from '../../vendor/parser/extract-longform.js';
-import { extractDoulist } from '../../vendor/parser/extract-doulist.js';
+import { extractDoulist, mergeDoulistPages } from '../../vendor/parser/extract-doulist.js';
 
 /**
  * 一次解析多少**页**捕获。
@@ -116,18 +116,22 @@ const KINDS = [
     // 零件：这一页属于哪份豆列、是第几页起。见上面 KINDS 的说明。
     extract: (html, { url }) => {
       const d = extractDoulist(html, url);
-      return d ? [{ id: d.id, start: startOf(url), d }] : [];
+      // 字段名照 `mergeDoulistPages` 的入参写（`start` / `doulist`），
+      // `id` 是这一边分组用的。
+      return d ? [{ id: d.id, start: startOf(url), doulist: d }] : [];
     },
     merge: (parts) => {
+      // **分组在这里，拼接不在这里。** 拼接（按 start 升序接条目）是一条规则，
+      // 而规则只能有一份实现——`mergeDoulistPages` 是解析器那一份，原样搬过来的。
+      // 分组键两边不一样（解析器按「哪份档案里的哪份豆列」，这里按豆列），
+      // 而会悄悄出错的是次序不是分组：次序错了看起来完全正常。
       /** @type {Map<string, object[]>} */
       const by = new Map();
       for (const p of parts) by.set(p.id, [...(by.get(p.id) ?? []), p]);
 
-      return [...by.values()].map((pages) => {
-        // 次序是内容的一部分，所以按 start 升序拼，不按抓取顺序。
-        pages.sort((a, b) => a.start - b.start);
-        const { d } = pages[0];
-        const items = pages.flatMap((p) => p.d.items);
+      return [...by.values()].map((group) => {
+        const { doulist: d, pages } = mergeDoulistPages(group);
+        const items = d.items;
         /**
          * **每个条目都列出来，不只是写了评语的那些。**
          *
@@ -146,7 +150,7 @@ const KINDS = [
         // 豆列（实测 6 份里有 4 份）只能靠「再要一页、拿回来是空的」才知道到头了，
         // 那一页照样进档案。把它算进来，一份只有 1 个条目的豆列会写着「由 3 页拼成」
         // ——说的是抓取过程，而这一行说的是这份豆列。整份档案抓了多少页在最上面那行。
-        const filled = pages.filter((p) => p.d.items.length > 0).length;
+        const filled = pages.filter((p) => p.doulist.items.length > 0).length;
         return {
           title: (d.visibility === 'public' ? '' : '🔒 ') + (d.title ?? '（无标题）'),
           meta: `${items.length} 个条目 · ${commented} 条评语`

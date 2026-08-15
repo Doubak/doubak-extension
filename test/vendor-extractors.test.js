@@ -26,7 +26,7 @@ import { join } from 'node:path';
 import { FILES, findParserDir, renderAll } from '../tools/sync-extractors.mjs';
 import { decodeEntities } from '../src/vendor/parser/html-entities.js';
 import { extractBroadcasts } from '../src/vendor/parser/extract-broadcast.js';
-import { extractDoulistItems } from '../src/vendor/parser/extract-doulist.js';
+import { extractDoulistItems, mergeDoulistPages } from '../src/vendor/parser/extract-doulist.js';
 
 const DEST = new URL('../src/vendor/parser/', import.meta.url).pathname;
 
@@ -82,5 +82,20 @@ describe('vendor 的抽取器', () => {
     // 广播那边只验它接得住调用、不抛：真实结构在解析器仓库里有整套测试，
     // 这里要证明的是「搬过来之后还能跑」，不是重测一遍解析器。
     assert.doesNotThrow(() => extractBroadcasts('<div class="stream-items"></div>', '1'));
+  });
+
+  test('**拼页的规则也是搬过来的，不是这边另写的**', () => {
+    // 一份豆列每页 25 条，「一份豆列」因此跨着好几次捕获。**谁来拼、按什么次序拼
+    // 是一条规则**，而这条规则一度有两份实现：解析器 `parse.js` 里一份，面板的
+    // 内容预览里一份。两份对同一份豆列可以给出不同的条目次序，而次序错了看起来
+    // 完全正常——还是那些作品，还是那些评语。
+    //
+    // 所以这里验的不是「能跑」，是**这一份确实带着那条规则**：解析器那边把它删了
+    // 或改了名，这条会红，而不是让面板悄悄退回自己那份。
+    const page = (start, title) => ({ start, doulist: { id: '1', items: [{ title }] } });
+    const m = mergeDoulistPages([page(50, '三'), page(0, '一'), page(25, '二')]);
+    assert.deepEqual(m.doulist.items.map((i) => i.title), ['一', '二', '三'],
+      '按 start 升序 —— 次序是内容的一部分');
+    assert.equal(mergeDoulistPages([]), null, '一页都没有要返回 null，不是一份空豆列');
   });
 });

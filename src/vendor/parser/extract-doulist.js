@@ -202,3 +202,46 @@ export function extractDoulistItems(html) {
     };
   });
 }
+
+/**
+ * 把**同一份豆列**的几页拼成一份。
+ *
+ * ## 为什么这条规则住在抽取器旁边
+ *
+ * 一份豆列每页 25 条（实测有 4 页的），所以「一份豆列」跨着好几次捕获。谁来拼、
+ * 按什么次序拼，是一条规则；而这条规则原来有**两份实现**——解析器 `parse.js` 里
+ * 一份，扩展面板的内容预览里一份。两份实现对同一份豆列可以给出不同的条目次序，
+ * 而**次序错了看起来完全正常**：还是那些作品，还是那些评语。
+ *
+ * 这个仓库为「同一件事有好几份实现」付过一次明码标价的钱：`&#34;` 印在
+ * sample.doubak.com 上，根因是四份各自演化的 HTML 实体解码表。所以这条规则收在
+ * 产生这些页面的抽取器旁边，扩展那边按 `tools/sync-extractors.mjs` 原样拿过去。
+ *
+ * ## 按 `start` 升序，不按抓取顺序
+ *
+ * **次序是内容的一部分**：用户排过的清单，把第 2 页排到第 1 页前面就是改了内容。
+ * 抓取顺序不可靠——广度优先的 frontier 会把几份豆列的页面交错排开，重试还会让某
+ * 一页迟到。
+ *
+ * **分组不在这里做。** 两个调用方的分组键不一样（解析器按「哪份档案里的哪份豆列」，
+ * 面板按豆列），而会悄悄出错的是拼接次序，不是分组。
+ *
+ * 传进来的对象原样回传（在 `pages` 里），所以调用方可以在上面挂自己的东西
+ * ——解析器就靠这一点把每一页的 observation 带回去。
+ *
+ * @param {Array<{start: number, doulist: object}>} pages 同一份豆列的几页，次序随意
+ * @returns {{doulist: object, pages: Array<{start: number, doulist: object}>} | null}
+ *   `null` = 一页都没有
+ */
+export function mergeDoulistPages(pages) {
+  const ordered = [...pages].sort((a, b) => a.start - b.start);
+  if (!ordered.length) return null;
+  return {
+    // 标题、简介、可见性取第一页的：它们在每一页上都一样，而第一页是必然存在的那页。
+    doulist: {
+      ...ordered[0].doulist,
+      items: ordered.flatMap((p) => p.doulist?.items ?? []),
+    },
+    pages: ordered,
+  };
+}
