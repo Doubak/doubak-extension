@@ -121,10 +121,15 @@ const KINDS = [
         // 条目上自己写的评语——那才是这条路线的价值所在。
         const notes = items.filter((i) => i.comment)
           .map((i) => `${i.title ?? '（未命名）'}：${i.comment}`);
+        // **只数出过条目的那些页。** 一份豆列的末尾常常跟着一两页空的：没有翻页器的
+        // 豆列（实测 6 份里有 4 份）只能靠「再要一页、拿回来是空的」才知道到头了，
+        // 那一页照样进档案。把它算进来，一份只有 1 个条目的豆列会写着「由 3 页拼成」
+        // ——说的是抓取过程，而这一行说的是这份豆列。整份档案抓了多少页在最上面那行。
+        const filled = pages.filter((p) => p.d.items.length > 0).length;
         return {
           title: (d.visibility === 'public' ? '' : '🔒 ') + (d.title ?? '（无标题）'),
           meta: `${items.length} 个条目 · ${notes.length} 条评语`
-            + (pages.length > 1 ? ` · 由 ${pages.length} 页拼成` : ''),
+            + (filled > 1 ? ` · 由 ${filled} 页拼成` : ''),
           own: notes.join('\n'),
         };
       });

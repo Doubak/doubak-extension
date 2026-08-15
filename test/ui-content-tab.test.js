@@ -357,7 +357,10 @@ describe('查看内容（真的跑一遍）', () => {
       const items = dom.byId.get('content-list').querySelectorAll('.content-item');
       assert.equal(items.length, 1, `一份豆列画成了 ${items.length} 行`);
       assert.match(items[0].textContent, new RegExp(`${DOULIST_TITLE}`));
-      assert.match(items[0].textContent, /3 个条目 · 2 条评语 · 由 3 页拼成/);
+      // 「由 2 页拼成」不是 3：末尾那页是空的，它属于抓取过程，不属于这份豆列。
+      // 实测一份只有 1 个条目的豆列后面跟着两页空的（没有翻页器，只能靠要一页
+      // 拿回空的才知道到头），写成「由 3 页拼成」会让人以为那是一份三页的豆列。
+      assert.match(items[0].textContent, /3 个条目 · 2 条评语 · 由 2 页拼成/);
       // 顺序是内容的一部分：按 start 升序拼，不按抓取顺序。
       assert.ok(items[0].textContent.indexOf('巫师3') < items[0].textContent.indexOf('围攻'),
         '页序错了 —— 用户排过的清单，换了次序就是改了内容');
