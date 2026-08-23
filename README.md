@@ -1,5 +1,7 @@
 # doubak-extension
 
+[![test](https://github.com/Doubak/doubak-extension/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/Doubak/doubak-extension/actions/workflows/test.yml?query=branch%3Amain)
+
 > **这是源码仓库。** 想了解这个工具是什么、能做什么，去 **<https://doubak.com>**；
 > 想看它生成出来长什么样，去 **<https://sample.doubak.com>**。
 
