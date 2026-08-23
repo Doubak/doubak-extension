@@ -73,3 +73,29 @@ jobs:
             echo '::error::解析器仓库缺失，vendor 新鲜度检查会静默跳过'; exit 1; }
           node tools/generate-spec-constants.mjs --check
           node tools/sync-extractors.mjs --check
+
+      # 覆盖率用 Node 自带的，不装任何东西；上传是 curl 打 Coveralls 的
+      # /jobs 端点，用 repo token 认证。**不引 coverallsapp/github-action**：
+      # 它只认 github-token，还要把 @coveralls 以 Role: Write 请进仓库。
+      #
+      # 只在 push 上跑：fork 来的 PR 拿不到 secrets，脚本会硬失败（故意不静默
+      # 跳过），在 PR 上就成了一个和代码无关的红叉。
+      #
+      # **排除项只有 test/** 一条**：排除项会烂掉，越少越好。测试文件按定义就是
+      # ~100%，算进去只会把总数拖向 100% 并盖住 src 里的窟窿；而且完全不排除时
+      # 这一步跑不完（实测 120 秒未结束，排除后 1 秒）。
+      #
+      # 真正该担心的是**没写出来的遗漏**：从没被任何测试 import 的文件根本不进
+      # 分母，不是 0% 而是压根不存在。显式的排除项至少还看得见。
+      - name: 覆盖率 → Coveralls
+        if: github.event_name == 'push'
+        working-directory: doubak-extension
+        env:
+          COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+        run: |
+          node --test --experimental-test-coverage \
+            --test-coverage-exclude='test/**' \
+            --test-reporter=lcov --test-reporter-destination=lcov.info \
+            --test-reporter=dot --test-reporter-destination=stdout \
+            "test/**/*.test.js"
+          node tools/coveralls.mjs lcov.info
