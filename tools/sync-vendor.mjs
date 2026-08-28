@@ -138,7 +138,21 @@ export function stamp(src, name, repo) {
 export function renderOne(source, dir) {
   const out = new Map();
   for (const name of source.files) {
-    out.set(name, stamp(readFileSync(join(dir, 'src', name), 'utf-8'), name, source.repo));
+    const path = join(dir, 'src', name);
+    if (!existsSync(path)) {
+      // **这不是「文件丢了」，多半是上游的改动还没合并。** CI 把兄弟仓库检出在
+      // 各自的默认分支上，所以名单里新加的文件在上游合并之前一定不存在。
+      // 原样让 readFileSync 抛的话，报出来的是一串 ENOENT 栈，而真正该说的那句
+      // （「先合上游」）一个字都没有。
+      throw new Error([
+        `${source.repo} 里没有 src/${name}。`,
+        '这一般不是文件丢了，而是【上游的改动还没合并】：CI 与本地默认都按各自的',
+        '默认分支检出兄弟仓库，所以这份名单里新加的文件要等上游合并之后才存在。',
+        `先合 ${source.repo} 那个 PR 再跑这里；本地开发时把那个仓库切到对应分支，`,
+        `或者用 ${source.env} 指到别处。`,
+      ].join('\n  '));
+    }
+    out.set(name, stamp(readFileSync(path, 'utf-8'), name, source.repo));
   }
   return out;
 }
