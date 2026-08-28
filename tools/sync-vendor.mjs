@@ -105,6 +105,8 @@ export const SOURCES = [
       'projection.js',
       'markdown.js',
       'search.js',
+      'pages.js',
+      'image-index.js',
     ],
   },
 ];
