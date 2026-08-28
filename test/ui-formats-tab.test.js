@@ -126,6 +126,8 @@ describe('导出页的行为约束', () => {
     const js = await read('src/ui/panel/formats.js');
     assert.match(js, /混着 \\d\+ 个账号/, '没有识别那条错误');
     assert.match(js, /到「档案」页/, '没有给出这一侧能做的事');
+    // 正常路径已经被账号选择器接管了，这条只剩兜底。
+    assert.match(js, /上面已经按账号分开了/);
     assert.ok(!js.includes('ignoreWarnings: true'), '面板上不该有「照样合并」这条路');
   });
 
@@ -151,7 +153,9 @@ describe('依赖方向', () => {
   test('panel.js 显式调用 initFormats / resetFormats', async () => {
     // 「模块加载 == 面板打开」在拆分之后不再成立，所以每一页都要显式清、显式绑。
     const js = await read('src/ui/panel.js');
-    assert.match(js, /import \{ initFormats, resetFormats \}/);
+    assert.match(js, /import \{ initFormats, resetFormats, loadFormats \}/);
+    // 切到这一页时要现扫一遍：库里混了几个账号只有扫过才知道。
+    assert.match(js, /'formats'\) loadFormats\(\)/);
     assert.match(js, /^resetFormats\(\);$/m);
     assert.match(js, /^initFormats\(\);$/m);
   });
@@ -220,5 +224,57 @@ describe('告警怎么显示', () => {
       const [line] = warningLines([w]);
       assert.ok(!line.startsWith('{'), `${w.type} 漏了，印成了 JSON：${line}`);
     }
+  });
+});
+
+describe('库里混了两个账号', () => {
+  const mk = (id, name, n) => Array.from({ length: n }, (_, i) => ({
+    bundleId: `${id}-${i}`, dir: `d${id}${i}`,
+    manifest: { account: { user_id: id, username: name } },
+  }));
+
+  test('按数字 id 分组，改过名不算另一个人', async () => {
+    // 与导入那边的 `isOtherAccount` 同一条判据 —— 两处不一致的话，
+    // 导得进来的档案导不出去，而两边都不报错。
+    const { groupByAccount } = await import('../src/ui/panel/formats.js');
+    const entries = [
+      ...mk('82160871', 'mewcatcher', 3),
+      // 同一个 id、不同用户名：改名，不是别人
+      { bundleId: 'x', dir: 'x', manifest: { account: { user_id: '82160871', username: '改了名' } } },
+      ...mk('999', 'someone', 1),
+    ];
+    const { groups, unattributed } = groupByAccount(entries);
+    assert.equal(groups.length, 2, `改名被当成了另一个账号：${groups.length} 组`);
+    assert.equal(groups[0].entries.length, 4, '按档案数从多到少排');
+    assert.equal(groups[0].userId, '82160871');
+    assert.equal(unattributed.length, 0);
+  });
+
+  test('**认不出账号的不丢掉**，单独列出来', async () => {
+    // 没有 manifest 多半是抓到一半被打断的。扔掉它等于因为它残缺而惩罚它，
+    // 而残缺恰恰是它最需要被带走的理由（INGESTION.md §2.3）。
+    const { groupByAccount } = await import('../src/ui/panel/formats.js');
+    const { groups, unattributed } = groupByAccount([
+      ...mk('1', 'a', 2),
+      { bundleId: 'broken', dir: 'b', manifest: null },
+      { bundleId: 'noacct', dir: 'c', manifest: {} },
+    ]);
+    assert.equal(groups.length, 1);
+    assert.equal(unattributed.length, 2, '认不出账号的必须被数出来，不能静静并进某一组');
+  });
+
+  test('只有一个账号时不画选择器', async () => {
+    const { groupByAccount } = await import('../src/ui/panel/formats.js');
+    const { groups } = groupByAccount(mk('1', 'a', 5));
+    assert.equal(groups.length, 1, '一个只有一个选项的选择器只是噪音');
+  });
+
+  test('**面板上没有「照样合并」这条路**，因为合出来的东西会说谎', async () => {
+    // 实测（两个账号一起解析）：产出的 `account` 只有其中一个，而 marks 里两个
+    // 账号的记录都在 —— NeoDB 的包会在文件头写着 A 的用户名，装着 B 的记录。
+    // 命令行的 --ignore-warnings 还在，给「确实是同一个人的两个号」用。
+    const js = await read('src/ui/panel/formats.js');
+    assert.ok(!js.includes('ignoreWarnings: true'), '面板上不该有「照样合并」这条路');
+    assert.match(js, /entriesFor\(all\)/, '导出必须走按账号筛过的那批');
   });
 });

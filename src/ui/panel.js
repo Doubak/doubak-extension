@@ -45,7 +45,7 @@ import { loadLog, initLog, resetLog } from './panel/log.js';
 import { loadDebug, resetDebug } from './panel/debug.js';
 import { loadStorage, initStorage, resetStorage } from './panel/storage.js';
 import { initExport } from './panel/export.js';
-import { initFormats, resetFormats } from './panel/formats.js';
+import { initFormats, resetFormats, loadFormats } from './panel/formats.js';
 import { initImport, resetImport } from './panel/import.js';
 import { initDebugToggle } from './panel/debug-toggle.js';
 
@@ -67,6 +67,9 @@ $('tabs').addEventListener('click', (e) => {
   // 覆盖率原来**没有自己的加载**——它只是 `openBundle()` 的副作用，所以第一次直接点
   // 进来是空白的（要先去过档案页才有东西）。空白看起来像「正在加载」，而它其实什么
   // 都不会发生。
+  // 导出页要现扫一遍档案：库里混了几个账号只有扫过才知道，而这一页的
+  // 账号选择器就是靠它画的。
+  if (btn.dataset.tab === 'formats') loadFormats();
   if (btn.dataset.tab === 'coverage') loadCoverage();
   if (btn.dataset.tab === 'log') loadLog();
   // 帮助页是静态的，只有「关于」那一块要填（版本号从 manifest 读）。

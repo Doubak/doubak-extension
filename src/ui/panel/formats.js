@@ -20,6 +20,25 @@
  * 而不是「半个文件」。中转一趟只会让派生数据在 OPFS 里再占一份，而那正是 ① 要
  * 躲开的事。
  *
+ * ## 库里混了两个账号：让你选一个，而不是让你删东西
+ *
+ * 解析器拒绝把两个账号合进同一份 canonical，理由是合过之后拆不开。命令行那边的出路
+ * 是 `--ignore-warnings`，但**这一侧不该照搬那个出路**，有两个原因：
+ *
+ * **① 合并出来的东西会说谎。** 实测：两个账号一起解析时，产出的 `account` 只有其中
+ * 一个（第一条标记那个），而 marks 里两个账号的记录都在。NeoDB 的包会因此在文件头
+ * 写着 A 的用户名，里面装着 B 的记录。
+ *
+ * **② 这一侧有命令行没有的东西：每份档案的 manifest 就在手上。** 所以不必在「合并」
+ * 与「删掉一批」之间二选一——直接按账号分开导就行，两个账号各导一次，一条都不丢，
+ * 而且每份产出的 `account` 都是对的。
+ *
+ * 导入那边早就让用户回答过「这确实是我另一个账号」（`allowOtherAccounts`），
+ * 而导出这边原来只会说「去把它们删了」。两条路互相矛盾，这一版把它抹平。
+ *
+ * 认不出账号的档案（没有 manifest，多半是抓到一半被打断的）**跟着一起导，并且说出来**
+ * ——INGESTION.md §2.3：该受限的是「凭它能下什么结论」，不是数据本身。
+ *
  * ## 进度条有百分比，而抓取那边没有
  *
  * 看起来跟面板的第②条约束（「进度不用百分比」）冲突，其实不是：那一条说的是
@@ -37,6 +56,51 @@ import { buildCanonical, buildNeodb, buildMarkdown } from '../../pipeline/target
 
 /** 正在跑的那一个。非 null 时其余按钮禁用。 */
 let running = null;
+
+/** 选中要导哪个账号（`user_id`）。库里只有一个账号时是 null。 */
+let account = null;
+
+/**
+ * 按账号把档案分组。
+ *
+ * @param {Array<{bundleId: string, manifest: object|null}>} entries
+ * @returns {{groups: Array<{userId: string, username: string|null, entries: object[]}>,
+ *            unattributed: object[]}}
+ *   `groups` 按档案数从多到少排；`unattributed` 是认不出账号的那些。
+ */
+export function groupByAccount(entries) {
+  /** @type {Map<string, {userId: string, username: string|null, entries: object[]}>} */
+  const by = new Map();
+  const unattributed = [];
+  for (const e of entries) {
+    // **只按数字 id 分。** 改过名（id 相同、用户名不同）不是另一个人——
+    // 导入那边是同一条判据（`isOtherAccount`），两处必须一致。
+    const id = e.manifest?.account?.user_id;
+    if (!id) { unattributed.push(e); continue; }
+    const key = String(id);
+    if (!by.has(key)) {
+      by.set(key, { userId: key, username: e.manifest?.account?.username ?? null, entries: [] });
+    }
+    by.get(key).entries.push(e);
+  }
+  return {
+    groups: [...by.values()].sort((a, b) => b.entries.length - a.entries.length),
+    unattributed,
+  };
+}
+
+/**
+ * 这次要导哪些档案。
+ *
+ * 认不出账号的**总是跟着一起导**：一份没有 manifest 的档案多半是抓到一半被打断的，
+ * 把它扔掉等于因为它残缺而惩罚它，而残缺恰恰是它最需要被带走的理由。
+ */
+function entriesFor(all) {
+  const { groups, unattributed } = groupByAccount(all);
+  if (groups.length <= 1) return all;
+  const pick = groups.find((g) => g.userId === account) ?? groups[0];
+  return [...pick.entries, ...unattributed];
+}
 
 /**
  * 三种产出。**顺序按「多数人要哪个」排**，与 HTML 里的卡片一致。
@@ -170,12 +234,14 @@ async function runExport(kind) {
     return;
   }
 
-  const entries = await scanBundleDirs();
-  if (!entries.length) {
+  const all = await scanBundleDirs();
+  if (!all.length) {
     el.className = 'card tone-error';
     el.textContent = '扩展里一份档案都没有。先抓一次，或者到「档案」页导入一份。';
     return;
   }
+  // 混了账号时只导选中的那个。见文件头「库里混了两个账号」。
+  const entries = entriesFor(all);
 
   /** @type {FileSystemDirectoryHandle} */
   let picked;
@@ -230,9 +296,12 @@ async function runExport(kind) {
     // canonical 事后拆不开，而一个就在旁边的按钮会把「停下来」变成一次点击。
     // 真的是同一个人的两个账号时，命令行那条路还在。
     if (/混着 \d+ 个账号/.test(e.message)) {
+      // 正常路径下走不到这里——上面已经按账号筛过了。走到这里意味着筛完之后
+      // **还是**有两个账号，也就是那几份认不出账号的档案里其实带着别人的记录。
       const how = document.createElement('p');
       how.className = 'small';
-      how.textContent = '到「档案」页把不属于这个账号的那几份删掉（或者先导出来另存），再回来导一次。';
+      how.textContent = '上面已经按账号分开了，所以走到这一步说明有档案的 manifest 认不出账号、'
+        + '而它里面又是别人的记录。到「档案」页把那几份挑出来删掉（或先导出来另存），再试一次。';
       el.append(how);
     }
   } finally {
@@ -254,7 +323,9 @@ function showResult(format, built, data, bundles) {
 
   const where = document.createElement('div');
   where.className = 'cap-sub';
-  where.textContent = `写进了 ${format.dir}/，读的是扩展里全部 ${bundles} 份档案。`;
+  where.textContent = account
+    ? `写进了 ${format.dir}/，读的是账号 ${account} 的 ${bundles} 份档案。`
+    : `写进了 ${format.dir}/，读的是扩展里全部 ${bundles} 份档案。`;
   el.append(where);
 
   for (const line of format.summary(built.report)) {
@@ -348,6 +419,63 @@ export function warningLines(warnings) {
   return lines;
 }
 
+/**
+ * 库里不止一个账号时，画一排账号让人选。只有一个账号时**什么都不画**——
+ * 一个只有一个选项的选择器只是噪音。
+ */
+export async function loadFormats() {
+  const box = $('formats-accounts');
+  box.replaceChildren();
+  box.hidden = true;
+
+  let entries;
+  try {
+    entries = await scanBundleDirs();
+  } catch {
+    return; // 存储读不出来时，导出按钮自己会报
+  }
+  const { groups, unattributed } = groupByAccount(entries);
+  if (groups.length <= 1) { account = null; return; }
+
+  // 默认选档案最多的那个。**不记住上次选的**：库变了（导入、删除）之后，
+  // 一个记着的选择会让人以为导的是全部。
+  if (!groups.some((g) => g.userId === account)) account = groups[0].userId;
+
+  box.hidden = false;
+  const hint = document.createElement('div');
+  hint.className = 'small';
+  hint.textContent = `扩展里有 ${groups.length} 个账号的档案。一次导一个——`
+    + '两个账号合进同一份数据之后就拆不开了，而分开导一条也不会少。';
+  box.append(hint);
+
+  const row = document.createElement('div');
+  row.className = 'btn-row';
+  for (const g of groups) {
+    const b = document.createElement('button');
+    b.className = 'act';
+    b.textContent = `${g.username ?? g.userId}（${g.entries.length} 份）`;
+    b.setAttribute('aria-selected', String(g.userId === account));
+    b.addEventListener('click', () => {
+      if (running) return;
+      account = g.userId;
+      for (const other of row.querySelectorAll('button')) {
+        other.setAttribute('aria-selected', String(other === b));
+      }
+    });
+    row.append(b);
+  }
+  box.append(row);
+
+  if (unattributed.length) {
+    // **说出来。** 这几份跟着一起导，而「跟着谁」是没法知道的。
+    const note = document.createElement('div');
+    note.className = 'small muted';
+    note.textContent = `另有 ${unattributed.length} 份档案认不出属于哪个账号`
+      + '（多半是抓到一半被打断、没写 manifest 的），它们会跟着一起导。';
+    box.append(note);
+  }
+}
+
 /** 绑事件。**由 panel.js 显式调用**，不靠 import 的副作用。 */
 export function initFormats() {
   for (const [kind, f] of Object.entries(FORMATS)) {
@@ -368,6 +496,7 @@ export function initFormats() {
 /** 视图状态清回「刚打开面板」的样子。见 panel.js 里那段说明。 */
 export function resetFormats() {
   running = null;
+  account = null;
   hideProgress();
   $('formats-result').className = '';
   $('formats-result').replaceChildren();
