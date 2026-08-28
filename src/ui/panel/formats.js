@@ -265,10 +265,10 @@ function showResult(format, built, data, bundles) {
   }
 
   // 解析过程中的告警要露面。**静静吞掉会让这一页看起来比实际可靠。**
-  for (const w of data.warnings ?? []) {
+  for (const line of warningLines(data.warnings ?? [])) {
     const d = document.createElement('div');
     d.className = 'cap-sub warn';
-    d.textContent = `⚠ ${warningText(w)}`;
+    d.textContent = `⚠ ${line}`;
     el.append(d);
   }
 
@@ -278,15 +278,74 @@ function showResult(format, built, data, bundles) {
   el.append(next);
 }
 
-/** 把解析告警说成人话。认不出来的**原样印出去**，不要吞掉。 */
-function warningText(w) {
-  if (w.type === 'multiple_accounts') {
-    return `档案里混了 ${w.accounts?.length ?? 2} 个账号（${(w.accounts ?? []).join('、')}），`
-      + '合并之后拆不开';
+/**
+ * 把解析告警说成人话，并且**按类别合并**。
+ *
+ * ## 为什么必须合并，不能一条一行
+ *
+ * 实测：一次真实导出出了 **41 条 `implausible_full`**，每条一行原始 JSON。
+ * 而这 41 条是**永久性的**——那几份档案在生产者的两个 bug 修好之前就写下了
+ * 假的 `enumeration: full`，而 bundle 是冻结的，永远修不掉。也就是说以后
+ * **每一次导出**都会看到这 41 行。
+ *
+ * 这正是这个项目已经踩过两次的那条：**一个永远有内容的失败清单，就是一个没人看的
+ * 失败清单。** 之前是「那条没有链接的记录」挪进了 zip 外的旁注，以及 8 条没有日期
+ * 的标记收成了一行。41 行足够盖住第 42 行真的问题。
+ *
+ * 所以按类别数出来，每类一行。
+ *
+ * ## 认不出来的仍然一条一行、原样印出去
+ *
+ * 上游加一个新类型时，这里**不能**把它折叠进「其它」——那等于把一条我们还不理解的
+ * 告警藏起来。原样印出 JSON 很难看，但难看的东西会被人看见，然后被处理掉。
+ *
+ * @param {object[]} warnings
+ * @returns {string[]}
+ */
+export function warningLines(warnings) {
+  /** @type {Map<string, object[]>} */
+  const by = new Map();
+  for (const w of warnings) {
+    const k = String(w.type ?? '(无类型)');
+    by.set(k, [...(by.get(k) ?? []), w]);
   }
-  if (w.type === 'unreadable') return `有一条捕获读不出来：${w.capture}`;
-  if (w.type === 'dangling_floor') return `有一份档案引用了不在这里的上一份（${w.bundle ?? '?'}）`;
-  return JSON.stringify(w);
+
+  const lines = [];
+  for (const [type, list] of by) {
+    const n = list.length;
+    const bundles = new Set(list.map((w) => w.bundle).filter(Boolean)).size;
+
+    if (type === 'multiple_accounts') {
+      const w = list[0];
+      lines.push(`档案里混了 ${w.accounts?.length ?? 2} 个账号（${(w.accounts ?? []).join('、')}），`
+        + '合并之后拆不开');
+    } else if (type === 'implausible_full') {
+      // **说清楚它不代表这次导出少了东西。** 它说的是某一份档案自己那句
+      // 「这条路线我走全了」不成立——而完整性是整条链的属性，不是单份档案的。
+      lines.push(`${n} 处「抓全了」的声明说不通（涉及 ${bundles} 份档案），已经不采信。`
+        + '这是早期几份档案里的一个生产者 bug 留下的，而档案是冻结的，改不了；'
+        + '它不代表这次导出少了东西——完整性看的是整条链。');
+    } else if (type === 'missing_floor_bundle') {
+      // 这一条相反：它是**真的覆盖空洞**，而且看起来一切正常。
+      lines.push(`${n} 处增量的起点档案不在库里（涉及 ${bundles} 份档案）——`
+        + '那一段谁也没看过，是真的缺了一块。到「档案」页把缺的那几份导入进来再导一次。');
+    } else if (type === 'unreadable') {
+      lines.push(`${n} 条捕获读不出来（索引与段文件可能对不上），这些页面没有进入产出`);
+    } else if (type === 'extractor_stale') {
+      const kinds = [...new Set(list.map((w) => w.kind ?? w.medium).filter(Boolean))];
+      lines.push(`${n} 个页面抽不出条目${kinds.length ? `（${kinds.join('、')}）` : ''}——`
+        + '多半是豆瓣改了页面结构，原始字节仍然在档案里');
+    } else if (type === 'unknown_verdict') {
+      const vs = [...new Set(list.map((w) => w.verdict))];
+      lines.push(`${n} 条捕获带着这个版本不认识的判定（${vs.join('、')}），已跳过`);
+    } else if (type === 'no_owner') {
+      lines.push(`${n} 条广播分不出是谁发的，已跳过（转发进来的别人的内容就是这样）`);
+    } else {
+      // **认不出来的一条一行、原样印。** 折叠进「其它」等于把还不理解的东西藏起来。
+      for (const w of list) lines.push(JSON.stringify(w));
+    }
+  }
+  return lines;
 }
 
 /** 绑事件。**由 panel.js 显式调用**，不靠 import 的副作用。 */

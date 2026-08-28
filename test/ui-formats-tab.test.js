@@ -136,7 +136,7 @@ describe('导出页的行为约束', () => {
     assert.match(js, /data\.warnings/);
     assert.match(js, /multiple_accounts/);
     // 认不出来的告警要原样印出去，不能被 `return null` 吃掉。
-    assert.match(js, /return JSON\.stringify\(w\)/);
+    assert.match(js, /lines\.push\(JSON\.stringify\(w\)\)/);
   });
 });
 
@@ -154,5 +154,71 @@ describe('依赖方向', () => {
     assert.match(js, /import \{ initFormats, resetFormats \}/);
     assert.match(js, /^resetFormats\(\);$/m);
     assert.match(js, /^initFormats\(\);$/m);
+  });
+});
+
+describe('告警怎么显示', () => {
+  test('**同一类合成一行**——一个永远有内容的清单没人看', async () => {
+    // 实测：一次真实导出出了 41 条 implausible_full，每条一行原始 JSON。
+    // 而它们是**永久性的**：那几份档案在生产者 bug 修好之前就写下了假的
+    // enumeration: full，而 bundle 是冻结的。也就是说每一次导出都会看到这 41 行，
+    // 足够盖住第 42 行真的问题。
+    const { warningLines } = await import('../src/ui/panel/formats.js');
+    const many = Array.from({ length: 41 }, (_, i) => ({
+      type: 'implausible_full', bundle: `b${i % 6}`, route_key: 'interest.movie.collect',
+      claimed: 1336, captured: 15,
+    }));
+    const lines = warningLines(many);
+    assert.equal(lines.length, 1, `41 条应该合成 1 行，实际 ${lines.length} 行`);
+    assert.match(lines[0], /41 处/);
+    assert.match(lines[0], /6 份档案/);
+    // **必须说清它不代表这次少了东西**，否则用户会以为导出坏了。
+    assert.match(lines[0], /不代表这次导出少了东西/);
+  });
+
+  test('**真的覆盖空洞与那个说不通的声明，措辞必须相反**', async () => {
+    // implausible_full 是「别信那句声明」，missing_floor_bundle 是「真的缺了一块」。
+    // 两者都只是一行 ⚠，措辞是唯一能区分它们的东西。
+    const { warningLines } = await import('../src/ui/panel/formats.js');
+    const [gap] = warningLines([
+      { type: 'missing_floor_bundle', bundle: 'b1', route_key: 'r', missing: 'b0' },
+    ]);
+    assert.match(gap, /真的缺了一块/);
+    assert.match(gap, /导入/, '要给出下一步');
+    const [claim] = warningLines([
+      { type: 'implausible_full', bundle: 'b1', route_key: 'r', claimed: 1336, captured: 15 },
+    ]);
+    assert.ok(!/真的缺了一块/.test(claim), '两条的措辞不能混起来');
+  });
+
+  test('**认不出来的类型一条一行、原样印出去**，不许折叠进「其它」', async () => {
+    // 上游加一个新类型时，折叠等于把一条我们还不理解的告警藏起来。
+    // 难看的东西会被人看见，然后被处理掉。
+    const { warningLines } = await import('../src/ui/panel/formats.js');
+    const lines = warningLines([
+      { type: 'brand_new_thing', a: 1 },
+      { type: 'brand_new_thing', a: 2 },
+    ]);
+    assert.equal(lines.length, 2, '认不出来的不许合并');
+    assert.match(lines[0], /brand_new_thing/);
+    assert.match(lines[0], /"a":1/);
+  });
+
+  test('每一种已知类型都说人话，没有一个漏成 JSON', async () => {
+    // 漏掉一种的表现是页面上突然出现一行原始 JSON —— 那正是这次要修的毛病。
+    const { warningLines } = await import('../src/ui/panel/formats.js');
+    const known = [
+      { type: 'multiple_accounts', accounts: ['1', '2'] },
+      { type: 'implausible_full', bundle: 'b', route_key: 'r', claimed: 9, captured: 1 },
+      { type: 'missing_floor_bundle', bundle: 'b', route_key: 'r', missing: 'a' },
+      { type: 'unreadable', capture: 'c1', error: 'x' },
+      { type: 'extractor_stale', capture: 'c1', kind: 'broadcast' },
+      { type: 'unknown_verdict', verdict: 'weird', capture: 'c1' },
+      { type: 'no_owner', capture: 'c1' },
+    ];
+    for (const w of known) {
+      const [line] = warningLines([w]);
+      assert.ok(!line.startsWith('{'), `${w.type} 漏了，印成了 JSON：${line}`);
+    }
   });
 });
