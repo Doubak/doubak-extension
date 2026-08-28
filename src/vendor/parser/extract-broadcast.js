@@ -1,6 +1,6 @@
 /* 【自动同步，请勿手改】来自 doubak-data-parser 的 src/extract-broadcast.js
- * 改动请在解析器仓库里做，然后运行 node tools/sync-extractors.mjs。
- * 理由见 tools/sync-extractors.mjs：两份实现对同一段 HTML 得出不同结论，只是早晚的事。
+ * 改动请在那个仓库里做，然后运行 node tools/sync-vendor.mjs。
+ * 理由见 tools/sync-vendor.mjs：两份实现对同一段输入得出不同结论，只是早晚的事。
  */
 /**
  * 从广播时间线抽出一条条广播。

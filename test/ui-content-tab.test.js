@@ -81,7 +81,7 @@ function subjectCard(title) {
 /**
  * 一份豆列的一页。
  *
- * **结构照 `test/vendor-extractors.test.js` 里那份写**——容器上 `id` 在 `class`
+ * **结构照 `test/vendor.test.js` 里那份写**——容器上 `id` 在 `class`
  * 前面，真实页面就是这样，而抽取器的切片正是从 `<div` 开始的。那一份已经跑通过
  * 抽取器，所以不是凭想象编的。
  *

@@ -1,6 +1,6 @@
 /* 【自动同步，请勿手改】来自 doubak-data-parser 的 src/extract-doulist.js
- * 改动请在解析器仓库里做，然后运行 node tools/sync-extractors.mjs。
- * 理由见 tools/sync-extractors.mjs：两份实现对同一段 HTML 得出不同结论，只是早晚的事。
+ * 改动请在那个仓库里做，然后运行 node tools/sync-vendor.mjs。
+ * 理由见 tools/sync-vendor.mjs：两份实现对同一段输入得出不同结论，只是早晚的事。
  */
 /**
  * 从豆列页抽出清单本身与它的条目。
@@ -215,7 +215,7 @@ export function extractDoulistItems(html) {
  *
  * 这个仓库为「同一件事有好几份实现」付过一次明码标价的钱：`&#34;` 印在
  * sample.doubak.com 上，根因是四份各自演化的 HTML 实体解码表。所以这条规则收在
- * 产生这些页面的抽取器旁边，扩展那边按 `tools/sync-extractors.mjs` 原样拿过去。
+ * 产生这些页面的抽取器旁边，扩展那边按 `tools/sync-vendor.mjs` 原样拿过去。
  *
  * ## 按 `start` 升序，不按抓取顺序
  *
