@@ -298,3 +298,46 @@ describe('库里混了两个账号', () => {
     assert.match(js, /entriesFor\(all\)/, '导出必须走按账号筛过的那批');
   });
 });
+
+describe('帮助页不许落下这一页', () => {
+  test('**「各标签页的用途」那张表要盖住每一个标签**', async () => {
+    // 这条是被真事逼出来的：加完「导出」页之后，帮助页的三处（使用步骤、标签页
+    // 用途表、按钮表）全都还停在原来那五页上，而三处都不会报错——用户点开帮助，
+    // 看到的是一份**说这个扩展没有这个功能**的说明书。
+    const html = await read('src/ui/panel.html');
+    const tabs = [...html.matchAll(/<button data-tab="(\w+)"/g)].map((m) => m[1]);
+    assert.ok(tabs.length >= 6, `只找到 ${tabs.length} 个标签，正则大概坏了`);
+
+    const table = html.slice(html.indexOf('<h2>各标签页的用途</h2>'));
+    const rows = table.slice(0, table.indexOf('</table>'));
+    const NAMES = {
+      overview: '概览', coverage: '覆盖率', archive: '档案',
+      formats: '导出', log: '日志', debug: '调试', help: '帮助',
+    };
+    const missing = tabs.filter((t) => !rows.includes(`<b>${NAMES[t] ?? t}</b>`));
+    assert.deepEqual(missing, [],
+      `帮助页的标签页表漏了：${missing.map((t) => NAMES[t] ?? t).join('、')}`);
+  });
+
+  test('**按钮表要提到三种产出各自写进哪个目录**', async () => {
+    const html = await read('src/ui/panel.html');
+    const js = await read('src/ui/panel/formats.js');
+    const dirs = [...js.matchAll(/dir: '([^']+)'/g)].map((m) => m[1]);
+    const table = html.slice(html.indexOf('<h2>主要按钮说明</h2>'));
+    const rows = table.slice(0, table.indexOf('</table>'));
+    for (const d of dirs) {
+      assert.ok(rows.includes(d), `按钮表里没提到 ${d}/`);
+    }
+  });
+
+  test('**使用步骤要走到「导出」页**，并说清它可以省略而上一步不能', async () => {
+    // 「档案没导出就可能永远没了」与「派生数据随时能重算」是这套界面最重要的
+    // 一组对比。步骤里把两者摆在一起，读的人才知道哪一步是不能跳的。
+    const html = await read('src/ui/panel.html');
+    const steps = html.slice(html.indexOf('<h2>使用步骤</h2>'));
+    const list = steps.slice(0, steps.indexOf('</ol>'));
+    assert.match(list, /「导出」页/, '使用步骤没提到导出页');
+    assert.match(list, /此步骤不可省略/, '没说档案那一步不能跳');
+    assert.match(list, /此步骤可以省略/, '没说派生数据那一步可以跳');
+  });
+});
