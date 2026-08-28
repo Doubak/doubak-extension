@@ -35,8 +35,10 @@
 > 存下来的是标准 **WARC** 档案加一份 JSON 索引：用 `jq`、pywb、
 > ReplayWeb.page 都能直接打开，不依赖本工具。十年后仍然读得懂。
 >
-> 还可以把档案解析成结构化数据，生成一个属于你自己的静态豆瓣站点
-> （示例：sample.doubak.com）。
+> 「导出」页当场把档案算成三种能直接用的东西，不用装任何别的软件：
+> 结构化数据（NDJSON，`jq` 直接查）、NeoDB 的导入包、
+> 以及一棵带图片的 Markdown 站点（示例：sample.doubak.com）。
+> 这几步同样在本机完成，不联网。
 >
 > 开源，Apache-2.0。源码与逐条权限审计：github.com/Doubak
 >

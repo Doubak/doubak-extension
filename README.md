@@ -61,7 +61,7 @@ node tools/package.mjs --stage dist/unpacked   # 摊成一个可直接加载的�
 
 **试 main 上还没发版的改动**：GitHub 的
 [Actions → package](https://github.com/Doubak/doubak-extension/actions/workflows/package.yml)
-里挑一次运行，下载 `doubak-<版本>-unpacked`，解压即可加载。它只有那 89 个运行时真正
+里挑一次运行，下载 `doubak-<版本>-unpacked`，解压即可加载。它只有那 119 个运行时真正
 需要的文件。**下载构建产物需要登录 GitHub**（匿名取是 401），所以面向用户的地方一律
 指向 Releases。
 

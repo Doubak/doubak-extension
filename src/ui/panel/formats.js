@@ -221,6 +221,20 @@ async function runExport(kind) {
     const b = document.createElement('b');
     b.textContent = '导出失败';
     el.append(b, document.createTextNode(e.message));
+
+    // **解析器那条消息的结尾是给命令行写的**（「加 --ignore-warnings」），
+    // 而这里没有命令行。原样印出来等于让人去找一个不存在的开关，
+    // 所以补一句这一侧真的能做的事。
+    //
+    // 不在界面上做一个「照样合并」的按钮：那道拦截存在的理由是合并过的
+    // canonical 事后拆不开，而一个就在旁边的按钮会把「停下来」变成一次点击。
+    // 真的是同一个人的两个账号时，命令行那条路还在。
+    if (/混着 \d+ 个账号/.test(e.message)) {
+      const how = document.createElement('p');
+      how.className = 'small';
+      how.textContent = '到「档案」页把不属于这个账号的那几份删掉（或者先导出来另存），再回来导一次。';
+      el.append(how);
+    }
   } finally {
     running = null;
     setBusy(false);

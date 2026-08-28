@@ -118,6 +118,17 @@ describe('导出页的行为约束', () => {
     assert.match(js, /getOpfsWorker/);
   });
 
+  test('**混了账号时给的是这一侧能做的事**，不是命令行的开关', async () => {
+    // 解析器那条消息的结尾是「加 --ignore-warnings」——给命令行写的。原样印在
+    // 面板上等于让人去找一个不存在的开关。同时**不做**一个「照样合并」的按钮：
+    // 那道拦截存在的理由是合并过的 canonical 事后拆不开，而一个就在旁边的按钮
+    // 会把「停下来」变成一次点击。
+    const js = await read('src/ui/panel/formats.js');
+    assert.match(js, /混着 \\d\+ 个账号/, '没有识别那条错误');
+    assert.match(js, /到「档案」页/, '没有给出这一侧能做的事');
+    assert.ok(!js.includes('ignoreWarnings: true'), '面板上不该有「照样合并」这条路');
+  });
+
   test('**解析告警要露面**，不许静静吞掉', async () => {
     // 静静吞掉会让这一页看起来比实际可靠。混了两个账号尤其要说 ——
     // 合并过的 canonical 事后拆不开。
