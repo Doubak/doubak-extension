@@ -257,10 +257,10 @@ async function runExport(kind) {
   el.textContent = `正在解析 ${entries.length} 份档案…`;
 
   try {
-    const root = await picked.getDirectoryHandle(format.dir, { create: true });
-    const write = writerFor(root);
-
     // ── 解析。**每次都重来**，不留中间产物（见文件头①）。
+    //
+    // **先解析，再建目录。** 反过来的话，一次半路失败会在用户的文件夹里留下一个空的
+    // `doubak-xxx/`，而一个空目录看起来像「导出过了，只是东西不见了」。
     const { data, sources } = await parseLibrary({
       entries,
       openStore: (entry) => new WorkerFileStore({ worker: getOpfsWorker(), dir: entry.dir }),
@@ -269,6 +269,9 @@ async function runExport(kind) {
         else progress('正在解析页面', p.done, p.total);
       },
     });
+
+    const root = await picked.getDirectoryHandle(format.dir, { create: true });
+    const write = writerFor(root);
 
     progress('正在生成文件');
     const built = await format.build(data, { sources, write });
@@ -280,6 +283,7 @@ async function runExport(kind) {
 
     hideProgress();
     showResult(format, built, data, entries.length);
+
   } catch (e) {
     hideProgress();
     el.className = 'card tone-error';
@@ -313,13 +317,40 @@ async function runExport(kind) {
 /** @param {object} format @param {object} built @param {object} data @param {number} bundles */
 function showResult(format, built, data, bundles) {
   const el = $('formats-result');
-  el.className = 'card tone-ok';
   el.replaceChildren();
+
+  // 一条记录都没有的时候**照样写**——用户点了导出，那就给他文件。但卡片不能是
+  // 绿的：一张写着「已导出：6 个文件」的绿卡片，与一份真有内容的导出长得一模一样，
+  // 而空在哪儿要等他传到 NeoDB、看到「导入 0 条」才知道——**失败发生在别人的
+  // 服务器上，离原因最远的地方**。
+  //
+  // 判据是「五类全空」，不是「标记为 0」：只抓了广播、或者只有几篇日记的档案，
+  // 都是完全正当的导出。
+  const records = data.marks.length + data.subjects.length + data.broadcasts.length
+    + data.longform.length + data.doulists.length;
+  const empty = records === 0;
+
+  el.className = `card tone-${empty ? 'warn' : 'ok'}`;
 
   const b = document.createElement('b');
   const total = built.files.reduce((n, f) => n + f.bytes.length, 0);
-  b.textContent = `${format.name} 已导出：${built.files.length} 个文件，${fmtBytes(total)}`;
+  b.textContent = empty
+    ? `导出的是一份空档案：${built.files.length} 个文件，里面一条记录都没有`
+    : `${format.name} 已导出：${built.files.length} 个文件，${fmtBytes(total)}`;
   el.append(b);
+
+  if (empty) {
+    const why = document.createElement('div');
+    why.className = 'cap-sub';
+    why.textContent = `读了 ${bundles} 份档案，但一条记录都没解析出来。`
+      + '多半是这几份只有 manifest（抓了一下就被打断），或者只装着图片。';
+    const how = document.createElement('p');
+    how.className = 'small';
+    how.textContent = '文件已经写出去了，只是内容是空的。到「概览」页跑一次抓取，'
+      + '或者在「档案」页用「查看内容」确认这几份里到底有没有东西。';
+    el.append(why, how);
+    return;
+  }
 
   const where = document.createElement('div');
   where.className = 'cap-sub';

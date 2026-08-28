@@ -341,3 +341,46 @@ describe('帮助页不许落下这一页', () => {
     assert.match(list, /此步骤可以省略/, '没说派生数据那一步可以跳');
   });
 });
+
+describe('空档案', () => {
+  test('**照样导，但卡片不能是绿的**', async () => {
+    // 空的导出是正当的——用户点了按钮就该拿到文件。危险的是那张卡片：
+    // 一张写着「已导出：6 个文件」的绿卡片，跟一份真有内容的导出长得一模一样，
+    // 而空在哪儿要等他传到 NeoDB、看到「导入 0 条」才知道 —— 失败发生在别人的
+    // 服务器上，离原因最远的地方。
+    const js = await read('src/ui/panel/formats.js');
+    assert.match(js, /const empty = records === 0/, '没有判空');
+    assert.match(js, /tone-\$\{empty \? 'warn' : 'ok'\}/, '空的时候卡片还是绿的');
+    assert.match(js, /导出的是一份空档案/, '标题没说清是空的');
+    assert.match(js, /文件已经写出去了，只是内容是空的/, '没说清文件确实写了');
+  });
+
+  test('**判据是「五类全空」，不是「标记为 0」**', async () => {
+    // 只抓了广播、或者只有几篇日记的档案，都是完全正当的导出。
+    // 拿 marks.length === 0 当判据会把它们一起误报成空。
+    const js = await read('src/ui/panel/formats.js');
+    const m = /const records = ([^;]+);/.exec(js);
+    assert.ok(m, '找不到那个合计');
+    for (const kind of ['marks', 'subjects', 'broadcasts', 'longform', 'doulists']) {
+      assert.match(m[1], new RegExp(`data\\.${kind}\\.length`), `合计里漏了 ${kind}`);
+    }
+  });
+
+  test('**一份档案都没有时，不弹选文件夹**', async () => {
+    // 让人选一个文件夹、再告诉他没东西可导，是白白浪费一次点击。
+    const js = await read('src/ui/panel/formats.js');
+    const emptyAt = js.indexOf('扩展里一份档案都没有');
+    const pickerAt = js.indexOf('showDirectoryPicker({');
+    assert.ok(emptyAt > 0 && pickerAt > 0);
+    assert.ok(emptyAt < pickerAt, '「没有档案」的拦截必须在选文件夹之前');
+  });
+
+  test('**先解析再建目录**，半路失败不留一个空文件夹', async () => {
+    // 一个空的 doubak-xxx/ 看起来像「导出过了，只是东西不见了」。
+    const js = await read('src/ui/panel/formats.js');
+    const parseAt = js.indexOf('await parseLibrary({');
+    const mkdirAt = js.indexOf("getDirectoryHandle(format.dir");
+    assert.ok(parseAt > 0 && mkdirAt > 0);
+    assert.ok(parseAt < mkdirAt, '目录在解析之前就建了');
+  });
+});
