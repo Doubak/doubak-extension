@@ -23,6 +23,9 @@
  *
  *     shared ← archive ← coverage ← overview ← { export, storage, log, debug, debug-toggle } ← import
  *
+ * 「导出」页（`formats.js`）只 import `shared`，与 `archive` 平级——它读的是整个
+ * 档案库，不依赖「当前选中哪一份」。
+ *
  * `shared.js` 谁也不 import；`archive.js` 只 import 它。**这条方向一破，拆分就白做**
  * ——那时它只是摊成十个文件的 panel.js。`test/ui-modules.test.js` 守着这条，也守着
  * 「用到的名字必须真的 import 进来」：那类错只在浏览器里炸，`node --check` 看不出来。
@@ -42,6 +45,7 @@ import { loadLog, initLog, resetLog } from './panel/log.js';
 import { loadDebug, resetDebug } from './panel/debug.js';
 import { loadStorage, initStorage, resetStorage } from './panel/storage.js';
 import { initExport } from './panel/export.js';
+import { initFormats, resetFormats } from './panel/formats.js';
 import { initImport, resetImport } from './panel/import.js';
 import { initDebugToggle } from './panel/debug-toggle.js';
 
@@ -82,8 +86,10 @@ resetLog();
 resetDebug();
 resetStorage();
 resetImport();
+resetFormats();
 
 initExport();
+initFormats();
 initImport();
 initStorage();
 initCapturesToggle();

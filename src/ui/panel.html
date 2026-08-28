@@ -18,6 +18,10 @@
       <button data-tab="overview" aria-selected="true">概览</button>
       <button data-tab="coverage" aria-selected="false">覆盖率</button>
       <button data-tab="archive" aria-selected="false">档案</button>
+      <!-- 「导出」与「档案」是两件事，所以是两页。档案那一页搬的是 WARC 本身
+           （不可替代的那份），这一页出的是从它算出来的东西（随时可以重算）。
+           摆在档案后面：抓完 → 看档案 → 导出，与真实顺序一致。 -->
+      <button data-tab="formats" aria-selected="false">导出</button>
       <button data-tab="log" aria-selected="false">日志</button>
       <button data-tab="debug" aria-selected="false">调试</button>
       <button data-tab="help" aria-selected="false">帮助</button>
@@ -164,6 +168,75 @@
         </div>
       </div>
     </section>
+
+    <section id="tab-formats" hidden>
+      <div class="hint">
+        这一页出的是<b>从档案算出来的东西</b>：结构化数据、NeoDB 的导入包、Markdown 站点。
+        它们随时可以重新生成，所以<b>不占扩展的存储</b>——每次都是现场解析，直接写进你选的文件夹。
+        <br>
+        要搬走档案本身（那份不可替代的 WARC），去<a href="#" id="go-archive">「档案」页</a>。
+      </div>
+
+      <!-- 一次只跑一个。三种产出共用同一次解析，同时跑两个等于把最慢的那一步做两遍，
+           而且两个都会变慢；进度条也只有一条，两个一起跑就没法说清是谁的进度。 -->
+      <!-- 用原生 <progress>，不自己拿 div 拼一个：它带无障碍语义（读屏会念出
+           进度），而且**不写 value 就是「不确定」状态**——正好对应那几段算不出
+           分母的阶段（正在生成文件、正在打包）。自己拼的话那几段只能显示 0%，
+           而 0% 看起来像卡住了。样式也就不必在 JS 里写宽度，那是被禁的。 -->
+      <div id="formats-progress" class="progress" hidden>
+        <progress id="formats-bar" max="100"></progress>
+        <div id="formats-progress-text" class="muted small">正在准备…</div>
+      </div>
+      <div id="formats-result"></div>
+
+      <div class="formats">
+        <!-- 顺序按「多数人要哪个」排：NeoDB 是维护者与用户都在等的那条路。 -->
+        <div class="format-card">
+          <h3>导到 NeoDB</h3>
+          <p class="muted small">
+            一个 zip，直接传到 NeoDB 的「设置 → 数据 → 导入 NeoDB 备份」。
+            标记、评分、短评、标签、书评影评、日记、豆列，以及豆瓣自己已经不显示的
+            <b>状态变化史</b>（从广播还原）都在里面。
+          </p>
+          <div class="btn-row">
+            <button class="act" id="export-neodb">导出…</button>
+            <a href="https://neodb.social/users/data/" target="_blank" rel="noreferrer noopener">上传页面 ↗</a>
+            <a href="https://github.com/Doubak/doubak-export-adapters#neodb" target="_blank" rel="noreferrer noopener">怎么用 ↗</a>
+          </div>
+        </div>
+
+        <div class="format-card">
+          <h3>结构化数据（canonical）</h3>
+          <p class="muted small">
+            五个 NDJSON 文件，每行一条 JSON，<code>jq</code> 直接能读。
+            这是所有下游工具的输入，也是十年后拿着这个文件夹的人最容易读懂的那一份。
+          </p>
+          <div class="btn-row">
+            <button class="act" id="export-canonical">导出…</button>
+            <a href="https://github.com/Doubak/doubak-data-specs/tree/main/canonical/v1" target="_blank" rel="noreferrer noopener">格式说明 ↗</a>
+          </div>
+        </div>
+
+        <div class="format-card">
+          <h3>Markdown 站点</h3>
+          <p class="muted small">
+            一棵带 YAML 头的 Markdown 树，外加图片与搜索索引，交给 Hugo / Astro /
+            Eleventy / Jekyll 都能出站点。<b>图片一并导出</b>，所以离线也看得见。
+          </p>
+          <div class="btn-row">
+            <button class="act" id="export-markdown">导出…</button>
+            <a href="https://sample.doubak.com" target="_blank" rel="noreferrer noopener">样张 ↗</a>
+            <a href="https://github.com/Doubak/doubak-site-generator" target="_blank" rel="noreferrer noopener">怎么建站 ↗</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="hint small">
+        三种产出都从<b>同一次解析</b>来，所以它们说的是同一件事。
+        解析在本机进行，<b>不联网</b>，也不往扩展里写任何东西。
+      </div>
+    </section>
+
 
     <section id="tab-debug" hidden>
       <div class="hint">
