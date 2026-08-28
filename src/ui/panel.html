@@ -177,6 +177,16 @@
         要搬走档案本身（那份不可替代的 WARC），去<a href="#" id="go-archive">「档案」页</a>。
       </div>
 
+      <!-- **「文件夹要怎么准备」是一定会冒出来的问题**，而答案是「不用准备」。
+           不说的话，人会先自己建一个空目录、再担心导第二种会不会盖掉第一种。
+           三种产出各建各的子目录（见 formats.js 的 FORMATS[].dir）。 -->
+      <div class="hint">
+        <b>不用先建文件夹。</b> 点「导出…」时选一个现成的目录就行（比如「下载」），
+        三种产出会各自在里面建一个子目录，<b>不会互相覆盖</b>：
+        <code>doubak-neodb/</code>、<code>doubak-canonical/</code>、<code>doubak-markdown/</code>。
+        同一个目录可以反复导，同名文件会被新的覆盖。
+      </div>
+
       <!-- 库里混了两个账号时，让人选一个，而不是让人去删东西。只有一个账号时
            整块是 hidden 的——一个只有一个选项的选择器只是噪音。 -->
       <div id="formats-accounts" hidden></div>
@@ -202,6 +212,11 @@
             标记、评分、短评、标签、书评影评、日记、豆列，以及豆瓣自己已经不显示的
             <b>状态变化史</b>（从广播还原）都在里面。
           </p>
+          <pre class="tree">doubak-neodb/
+├─ neodb-ndjson-import.zip   ← 传这个
+├─ neodb-needs-check.csv     ← 没能带走的那几条，及原因
+├─ neodb-doulist-needs-check.csv
+└─ 怎么导入.md</pre>
           <div class="btn-row">
             <button class="act" id="export-neodb">导出…</button>
             <a href="https://neodb.social/users/data/" target="_blank" rel="noreferrer noopener">上传页面 ↗</a>
@@ -215,6 +230,13 @@
             五个 NDJSON 文件，每行一条 JSON，<code>jq</code> 直接能读。
             这是所有下游工具的输入，也是十年后拿着这个文件夹的人最容易读懂的那一份。
           </p>
+          <pre class="tree">doubak-canonical/
+├─ marks.ndjson       标记（看过/在看/想看，含评分短评标签）
+├─ subjects.ndjson    作品
+├─ broadcasts.ndjson  广播
+├─ longform.ndjson    日记与影评书评
+├─ doulists.ndjson    豆列
+└─ README.txt</pre>
           <div class="btn-row">
             <button class="act" id="export-canonical">导出…</button>
             <a href="https://github.com/Doubak/doubak-data-specs/tree/main/canonical/v1" target="_blank" rel="noreferrer noopener">格式说明 ↗</a>
@@ -227,6 +249,9 @@
             一棵带 YAML 头的 Markdown 树，外加图片与搜索索引，交给 Hugo / Astro /
             Eleventy / Jekyll 都能出站点。<b>图片一并导出</b>，所以离线也看得见。
           </p>
+          <pre class="tree">doubak-markdown/
+├─ content/   每个作品、每月广播、每篇长文各一个 .md
+└─ static/    图片（covers/ 与 uploads/）与搜索索引</pre>
           <div class="btn-row">
             <button class="act" id="export-markdown">导出…</button>
             <a href="https://sample.doubak.com" target="_blank" rel="noreferrer noopener">样张 ↗</a>

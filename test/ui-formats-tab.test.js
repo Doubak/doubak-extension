@@ -41,6 +41,26 @@ describe('导出页的骨架', () => {
     }
   });
 
+  test('**每张卡片都画出产出的目录结构**', async () => {
+    // 「文件夹要怎么准备」是一定会冒出来的问题，而答案是「不用准备」。不说的话，
+    // 人会先自己建一个空目录，再担心导第二种会不会盖掉第一种。
+    const html = await read('src/ui/panel.html');
+    const section = html.slice(html.indexOf('<section id="tab-formats"'), html.indexOf('<section id="tab-debug"'));
+    const trees = [...section.matchAll(/<pre class="tree">([\s\S]*?)<\/pre>/g)].map((m) => m[1]);
+    assert.equal(trees.length, 3, `三张卡片各要一棵树，实际 ${trees.length}`);
+    // 每棵树的第一行必须是那个子目录名，而且要与 formats.js 里的 dir 对得上 ——
+    // 两处写的不一样的话，界面说的路径和真写出去的路径就不是一回事。
+    const js = await read('src/ui/panel/formats.js');
+    const dirs = [...js.matchAll(/dir: '([^']+)'/g)].map((m) => m[1]);
+    assert.deepEqual(trees.map((t) => t.split('\n')[0].replace('/', '')), dirs);
+  });
+
+  test('**说清楚不用先建文件夹**，也说清楚三种不会互相覆盖', async () => {
+    const html = await read('src/ui/panel.html');
+    assert.match(html, /不用先建文件夹/);
+    assert.match(html, /不会互相覆盖/);
+  });
+
   test('外链一律带 rel="noreferrer noopener"', async () => {
     const html = await read('src/ui/panel.html');
     const section = html.slice(html.indexOf('<section id="tab-formats"'), html.indexOf('<section id="tab-debug"'));

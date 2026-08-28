@@ -511,3 +511,13 @@ ul.own li { margin: 2px 0; }
 /* 告警行。用 warn 而不是 error：解析出了告警不等于导出失败，而这几行恰恰
    出现在一张 tone-ok 的卡片里——那正是它们必须显眼的原因。 */
 .cap-sub.warn { color: var(--tone-warn); }
+
+/* 产出的目录结构。**用 <pre> 而不是列表**：这几行是一棵树，而树是靠对齐读的，
+   `├─` 与 `└─` 只有在等宽字体里才连得起来。 */
+.format-card .tree {
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.55;
+  color: var(--text-dim); background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--r1); padding: var(--s2); margin: 0 0 var(--s3);
+  /* 窄面板下让它自己横向滚，而不是把整张卡片撑宽。 */
+  overflow-x: auto; white-space: pre;
+}
