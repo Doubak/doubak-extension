@@ -9,6 +9,10 @@
 
 它在**你自己的浏览器、用你自己的 IP 和节奏**抓取豆瓣，把页面原样存成标准 WARC 档案。登录凭据和会话 cookie 不离开你的设备。验收标准是：**把服务器关掉，插件依然能产出一份完整可用的本地档案。**
 
+抓完之后不用再装任何东西：「导出」页当场把档案算成**结构化数据**、**NeoDB 导入包**、
+或者一棵 **Markdown 站点**（图片一并导出）。用的就是下游那三个仓库的同一份代码
+（`src/vendor/`，逐字节拷贝 + CI 查新鲜度），所以扩展出的东西和命令行出的东西是同一个东西。
+
 > **v1.0。** 全量与增量抓取都对着真实豆瓣跑通了，图片（自己上传的、作品封面）、
 > 长文正文、豆列、导出与导入都在里面。还没做的只剩相册；移动应用（app）**明确不支持**，
 > 上游已废弃——见下方「现状」。
@@ -114,6 +118,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 | 导出（File System Access）+ 回读校验 | ✅ |
 | **导入**（把导出过的档案搬回来） | ✅ 认 `bundle_id` 而不是目录名；先列出「将要发生什么」再写；残缺 / 撞编号 / 别的账号一律不导 |
 | 存储管理（列表 / 删除 / 配额） | ✅ 并进档案页 —— 原来两页列的是同一批档案，只换了几列 |
+| **「导出」页**（canonical / NeoDB / Markdown） | ✅ 三种产出共用一次解析，中间产物不落盘，直接写进用户选的文件夹 |
 | 通知与角标 | ✅ |
 
 ### 路线覆盖
@@ -180,7 +185,18 @@ node tools/package.mjs
 
 ## 抓完之后
 
-这个扩展只负责第一步。产出的 bundle 交给下游：
+**「导出」页当场就能出三种东西**，不用装 Node、不用 clone 任何仓库：
+
+| 产出 | 是什么 | 拿它干什么 |
+|---|---|---|
+| 结构化数据（canonical） | 五个 NDJSON，每行一条 JSON | `jq` 直接查；也是下面两个的输入 |
+| NeoDB 导入包 | 一个 zip | 传到 NeoDB「设置 → 数据 → 导入 NeoDB 备份」 |
+| Markdown 站点 | 带 YAML 头的 Markdown 树 + 图片 + 搜索索引 | 交给 Hugo / Astro / Eleventy / Jekyll |
+
+三种都是**现场从档案算出来**的：解析结果不落盘（派生数据落盘就是第二个真相来源），
+直接写进你选的文件夹，一次只跑一个。样张：[sample.doubak.com](https://sample.doubak.com)。
+
+命令行工具做的是同一件事，适合要改参数、接进脚本、或者只想拿一部分数据的人：
 
 | | |
 |---|---|
@@ -188,7 +204,19 @@ node tools/package.mjs
 | [doubak-site-generator](https://github.com/Doubak/doubak-site-generator) | canonical → Markdown + 图片 → 静态网站 |
 | [doubak-export-adapters](https://github.com/Doubak/doubak-export-adapters) | canonical → NeoDB / Letterboxd / Goodreads 的导入文件 |
 
-生成出来长什么样：[sample.doubak.com](https://sample.doubak.com)。
+### 为什么是抄一份，不是 submodule
+
+`src/vendor/` 是那三个仓库里 23 个纯函数文件的**逐字节拷贝**，
+`tools/sync-vendor.mjs --check` 由测试与 CI 守着新鲜度。
+
+不用 submodule 有个具体的理由：`git clone` 不加 `--recursive` 会留下一个**存在但是空的**
+目录，而 `tools/package.mjs` 的 `collect()` 只在路径**不存在**时才抛——空目录它照收不误。
+于是打包成功，装出来的扩展里没有解析器，而且一声不响。白名单当初就是为了避开这种
+「静静少了东西」的失败。
+
+界线是「字节从哪儿来各写各的，字节怎么解释只有一份」：读文件系统的那几个
+（`bundle-source.js`、`canonical.js`、`generate.js`、`images.js`）不搬，
+扩展这边在 `src/pipeline/` 里有对应的 OPFS 版本。
 
 ## 导出被打断了怎么办
 
