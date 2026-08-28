@@ -399,6 +399,18 @@ button.act.icon { padding: var(--s2) var(--s2); line-height: 1; min-width: 2em; 
 #tab-help td:first-child { white-space: nowrap; padding-right: var(--s4); }
 #tab-help a { color: var(--brand); }
 
+/* 页首那条身份带。
+ *
+ * 它借 `.hint` 的外壳，但装的东西比别处的 `.hint` 多——那些地方是一行字，
+ * 这里是四段加一个列表。段落与列表的**浏览器默认外边距**（`1em`、
+ * `padding-left: 40px`）在一个只有几百像素宽的侧边栏里会把这一块撑成大半屏，
+ * 而它是压在「使用步骤」上面的，撑高多少就把正事挤下去多少。
+ */
+#about p { margin: 0 0 var(--s2); }
+#about p:last-child { margin-bottom: 0; }
+#about ul { margin: 0 0 var(--s2); padding-left: calc(var(--s3) + 1.1em); }
+#about ul li { margin: 2px 0; }
+
 /* 导航行最右边那个去官网的链接。与标签页拉开距离，它不是第七个页面。 */
 .to-site {
   margin-left: auto; align-self: center;

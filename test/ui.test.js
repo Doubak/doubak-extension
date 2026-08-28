@@ -906,36 +906,83 @@ describe('面板脚本', () => {
     assert.equal(/<b>存储<\/b>/.test(help), false, '帮助里还在说有个「存储」标签页');
   });
 
-  test('**关于**里给出去处，且外链带 noopener', async () => {
-    const js = readPanelSourceSync();
-    const fn = js.slice(js.indexOf('function renderAbout'));
-    const body = fn.slice(0, fn.indexOf('\n}\n'));
-    for (const u of ['doubak.com', 'sample.doubak.com', 'github.com/Doubak']) {
-      assert.ok(body.includes(u), `关于里没有 ${u}`);
-    }
-    // 新标签页打开外链时不带 noopener 的话，对方页面能通过 window.opener 操作这一页。
-    assert.match(body, /rel = 'noreferrer noopener'/);
-    // 版本号从 manifest 读——写死的那个迟早与真实版本对不上。
-    assert.match(body, /getManifest/);
-    assert.ok(!/v0\.\d+\.\d+/.test(body), '版本号不许写死在界面里');
+  test('**身份带排在使用步骤前面**，去处排在最后', async () => {
+    // 这两块原来是同一个「关于」，压在九节说明底下。而翻到帮助页的人多半是有话
+    // 要说，「我装的是哪一版」正是他要说的第一句 —— 让他为此滚到页尾，等于把最
+    // 有动力的那个人挡在外面。
+    //
+    // **比的是位置，不是「存在」。** 只断言 id 在不在，把它移回页尾照样绿。
+    const html = await readRepoFile('src/ui/panel.html');
+    const about = html.indexOf('<div id="about">');
+    const steps = html.indexOf('<h2>使用步骤</h2>');
+    const links = html.indexOf('<div id="links">');
+    assert.ok(about > 0 && steps > 0 && links > 0, '帮助页少了 #about / 使用步骤 / #links');
+    assert.ok(about < steps, '身份带（版本号在里面）跑到「使用步骤」后面去了');
+    assert.ok(steps < links, '去处与致谢该在页尾');
+    // 两个容器各只有一个 —— 同一个 id 出现两次时 `$()` 只会拿到第一个，
+    // 另一处永远是空的，而空着看起来跟「这块没内容」一模一样。
+    assert.equal(html.split('id="about"').length - 1, 1);
+    assert.equal(html.split('id="links"').length - 1, 1);
   });
 
-  test('**帮助页要告诉用户怎么反馈**，并说清会带出去什么', async () => {
-    const js = readPanelSourceSync();
-    const fn = js.slice(js.indexOf('function renderAbout'));
-    const body = fn.slice(0, fn.indexOf('\n}\n'));
-    assert.match(body, /doubak-extension\/issues/, '要给提 issue 的去处');
-    assert.match(body, /mailto:/, '要给邮箱');
-    // **报错前先说清楚会带出去什么。** 不说的话，一个在意隐私的人不敢提 issue，
-    // 而他恰恰是最该被听见的那类用户。
-    assert.match(body, /日志.*用户名|用户名.*日志/s, '要提醒日志里有什么');
-    // 反馈要排在致谢与许可之前——有话要说的人不该被要求先滚屏。
-    // **比的是渲染顺序，不是文字先后**：注释里也会出现「致谢」两个字，
-    // 拿它当锚点会把注释也算进去（第一版就是这么错的）。
-    assert.ok(body.indexOf('const FEEDBACK = [') < body.indexOf('credits.textContent'),
-      '反馈该排在致谢前面');
-    // mailto 不该开新标签页。
-    assert.match(body, /startsWith\('mailto:'\)/);
+  test('**关于**：版本号真的来自 manifest，外链带 noopener', async () => {
+    // 这一条原来是拿正则在源码里找 `getManifest`。那只证明字符串在文件里 ——
+    // 谁也没验过它渲染出来的是什么。这里真的跑一遍，断言页面上的数字**跟着
+    // manifest 变**：写死的版本号在那种测法下是绿的。
+    const dom = await installFakeDom({ html: await readRepoFile('src/ui/panel.html') });
+    try {
+      dom.chrome.runtime.getManifest = () => ({ version: '7.8.9' });
+      const help = await import(`../src/ui/panel/help.js?t=${Date.now()}${Math.random()}`);
+      help.renderAbout();
+      help.renderLinks();
+
+      const about = dom.byId.get('about').textContent;
+      assert.match(about, /v7\.8\.9/, '版本号没有跟着 manifest 走');
+      assert.match(about, /第三方工具/, '要说清这不是豆瓣官方的东西');
+      assert.match(about, /没有服务器/, '要说清数据不会离开这台机器');
+      // **报错前先说清楚会带出去什么。** 不说的话，一个在意隐私的人不敢提 issue，
+      // 而他恰恰是最该被听见的那类用户。
+      assert.match(about, /日志[\s\S]*用户名/, '要提醒日志里有什么');
+
+      const links = dom.byId.get('links').textContent;
+      for (const u of ['doubak.com', 'sample.doubak.com', 'github.com/Doubak']) {
+        assert.ok(links.includes(u), `去处里没有 ${u}`);
+      }
+
+      // 两块加起来要给出提 issue 与发邮件的去处，缺一不可。
+      const anchors = [...dom.byId.get('about').querySelectorAll('a'),
+        ...dom.byId.get('links').querySelectorAll('a')];
+      const hrefs = anchors.map((a) => a.href);
+      assert.ok(hrefs.some((h) => h.includes('doubak-extension/issues')), '要给提 issue 的去处');
+      assert.ok(hrefs.some((h) => h.startsWith('mailto:')), '要给邮箱');
+
+      for (const a of anchors) {
+        if (a.href.startsWith('mailto:')) {
+          // mailto 开新标签页会留下一个空白页。
+          assert.equal(a.target, undefined, `${a.href} 不该开新标签页`);
+        } else {
+          // 不带 noopener 的话，对方页面能通过 window.opener 操作这一页。
+          assert.equal(a.target, '_blank');
+          assert.equal(a.rel, 'noreferrer noopener', `${a.href} 少了 rel`);
+        }
+      }
+    } finally {
+      dom.restore();
+    }
+  });
+
+  test('拿不到版本号时明说「版本未知」，不是悄悄不显示', async () => {
+    // 少一个数字，与从来没打算显示它，在页面上长得一模一样 —— 而这一页存在的
+    // 理由就是让人有话可说，第一句话就是版本号。
+    const dom = await installFakeDom({ html: await readRepoFile('src/ui/panel.html') });
+    try {
+      dom.chrome.runtime.getManifest = () => ({});
+      const help = await import(`../src/ui/panel/help.js?t=${Date.now()}${Math.random()}`);
+      help.renderAbout();
+      assert.match(dom.byId.get('about').textContent, /版本未知/);
+    } finally {
+      dom.restore();
+    }
   });
 
   test('页眉给一个去官网的口子，且与标签页分开', async () => {

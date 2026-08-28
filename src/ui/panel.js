@@ -37,7 +37,7 @@
  */
 
 import { $, resetShared } from './panel/shared.js';
-import { renderAbout } from './panel/help.js';
+import { renderAbout, renderLinks } from './panel/help.js';
 import { refresh, resetOverview } from './panel/overview.js';
 import { loadArchive, resetArchive, initCapturesToggle } from './panel/archive.js';
 import { loadCoverage } from './panel/coverage.js';
@@ -72,8 +72,8 @@ $('tabs').addEventListener('click', (e) => {
   if (btn.dataset.tab === 'formats') loadFormats();
   if (btn.dataset.tab === 'coverage') loadCoverage();
   if (btn.dataset.tab === 'log') loadLog();
-  // 帮助页是静态的，只有「关于」那一块要填（版本号从 manifest 读）。
-  if (btn.dataset.tab === 'help') renderAbout();
+  // 帮助页的说明是静态的，只有页首的身份带与页尾的去处要填（版本号从 manifest 读）。
+  if (btn.dataset.tab === 'help') { renderAbout(); renderLinks(); }
 });
 
 // ── 启动 ────────────────────────────────────────────────────
