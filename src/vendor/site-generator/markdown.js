@@ -78,7 +78,26 @@ export function markPage(m, { coverPath = null } = {}) {
     // 实测电影 2090 条里出现过 43 种段数，按位置拆多数行都是错的；按内容猜属于
     // enricher，它的产出带 source 与置信度、可以重跑。
     douban_meta: m.rawMeta,
-    douban_cover: coverPath ?? m.coverUrl,
+    /**
+     * **只写本地路径。接不回来就不写，绝不回退到豆瓣的 URL。**
+     *
+     * 原来这里是 `coverPath ?? m.coverUrl`，而那一句与同一个文件里说了三遍的
+     * 规矩正好相反（广播的作品链接、被截断的全文、广播卡片上的名字，全都写着
+     * 「不回退到豆瓣」），也与 `projection.js` 的 `realCover()` 二十行注释直接
+     * 冲突——那里说的正是「原样带过去的话，页面上会留一个指向 doubanio 的 URL，
+     * 那让一份号称离线可看的备份，为了一张本来就不存在的图去联网」。
+     *
+     * 它一直没出事，只是因为扩展抓的档案里封面的字节总是在。**接进 2022–2024
+     * 那批老档案之后就出事了**：老工具只存 HTML，一张图都没有，于是 5 个只在
+     * 老档案里的作品把 doubanio 的地址印到了页面上——15 个文件，而上一版是 0 个。
+     * 那些页面的页脚同时还写着「这个页面也不发一个外部请求」。
+     *
+     * 代价是这几页没有封面。**那是对的**：主题本来就用 `{{ with }}` 兜着，
+     * 页面上还有标题、评分、短评。「没有封面就只剩文字，不放占位图」——
+     * 而一个指向源站的 img 比占位图更糟：它既毁掉离线可看，又把访客的 IP
+     * 送给豆瓣。
+     */
+    douban_cover: coverPath,
     // 留一条通往 canonical 的线索：投影是有损的，这两个数说明「还有更多」。
     douban_revisions: m.revisionCount,
     douban_last_seen: m.lastSeenAt,
@@ -487,11 +506,16 @@ export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../'
 export function broadcastMonthPage(month, list, { images = {}, covers = {} } = {}) {
   const sorted = [...list].sort((a, b) => (a.postedAt < b.postedAt ? 1 : -1));
   const [y, m] = month.split('-');
+  const dated = month !== UNDATED;
 
   const fm = {
-    title: `${y}年${Number(m)}月`,
+    title: dated ? `${y}年${Number(m)}月` : '时间未知',
     // 月首，不是月内某条的时间——这一页代表的是整个月。
-    date: `${month}-01`,
+    //
+    // **没有时间的那一页不写这个字段，而不是编一个。** `undefined` 会被
+    // `frontMatter()` 整个跳过（`null` 才会写成 null），于是 Hugo 给这一页
+    // 零值日期，`.Pages.ByDate.Reverse` 把它排在最后——正是「时间未知」该在的位置。
+    date: dated ? `${month}-01` : undefined,
     douban_kind: 'broadcast_month',
     douban_month: month,
     douban_count: sorted.length,
@@ -513,6 +537,27 @@ export function broadcastMonthPath(month) {
 }
 
 /**
+ * 没有时间的那些广播归到哪个「月」。
+ *
+ * ## 这不是假想的情形
+ *
+ * 3411 条 2026 年抓到的广播全都带 `created_at`，所以这条路一直没人走过。而前代
+ * 工具 2014 年抓下来的档案里有一条 **「MewX 开始收听自己的豆瓣FM」**——豆瓣自己
+ * 用 `signature.html` 模板生成的动态，整个条目里**没有 `created_at`**，也没有
+ * 正文、没有评分。解析器如实记成 `posted_at: null`，那是对的。
+ *
+ * 而这里原来只有一个哨兵值、没有对应的处理：`'未知'.split('-')` 得到
+ * `['未知']`，于是 `Number(undefined)` 是 `NaN`，标题成了「未知年NaN月」，
+ * front matter 里写出 `date: "未知-01"`——**Hugo 直接整站构建失败**：
+ *
+ *     ERROR the "date" front matter field is not a parsable date
+ *
+ * 一条 2014 年的系统广播，让整个站点生成不出来。所以哨兵值必须是个常量，
+ * 而且每一个消费它的地方都要认得它。
+ */
+export const UNDATED = '未知';
+
+/**
  * 一条广播属于哪个月。
  *
  * 按**本地时间**切，不按 UTC。canonical 里的时间戳带 `+08:00`，用 UTC 切的话
@@ -521,7 +566,7 @@ export function broadcastMonthPath(month) {
  * @param {object} b
  */
 export function monthOf(b) {
-  return (b.postedAtRaw ?? b.postedAt ?? '').slice(0, 7) || '未知';
+  return (b.postedAtRaw ?? b.postedAt ?? '').slice(0, 7) || UNDATED;
 }
 
 /**

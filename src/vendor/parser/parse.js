@@ -41,7 +41,12 @@ import {
 //        而广播冻结，所以这是豆瓣自己都不保存的评分变化史。
 // 0.8.0：广播多存一个 target_title —— 卡片上那个作品名。实测 162 条广播指向一个本地
 //        没有的条目（被豆瓣删了、或豆列这类不产生标记的东西），此前页面上只剩一个动作词。
-export const PARSER_VERSION = 'doubak-data-parser/0.8.0';
+// 0.9.0：**标记的身份跨层归并**。data-cid 是 2023-12 才有的（IDENTITY.md §2.2），
+//        而两层用的是两个不相交的键空间，于是一个目录里同时有那之前和之后的档案时，
+//        每一条跨越那条线的标记都会一分为二。实测把前代工具 2022-12 → 2024-08 的
+//        档案导进来：2526 个作品出了 4050 条标记，修订史被劈成两半。
+//        这里不改任何抽取逻辑，摘要一个都没动——变的是「哪些观测算同一条记录」。
+export const PARSER_VERSION = 'doubak-data-parser/0.9.0';
 export const CANONICAL_VERSION = 'canonical/1.0';
 
 /** 路线状态词 → canonical 的封闭词表。 */
@@ -82,6 +87,16 @@ export async function parse(sources, opts = {}) {
 
   /** @type {Map<string, object>} 身份键 → 记录 */
   const marks = new Map();
+  /**
+   * 退化键 → 这个作品的标记最终落在哪个身份键上。
+   *
+   * 存在的理由见 `identityOf()`：`data-cid` 是 2023-12 才出现的，一个目录里同时
+   * 有那之前和之后的档案时，同一条标记的观测会分属两个键空间。这张表就是把它们
+   * 认回同一条记录的那一环。
+   *
+   * @type {Map<string, string>}
+   */
+  const markKeys = new Map();
   /** @type {Map<string, object>} `${medium}:${id}` → 作品 */
   const subjects = new Map();
   /** @type {Map<string, object>} data-sid → 广播 */
@@ -378,7 +393,7 @@ export async function parse(sources, opts = {}) {
 
       const observation = { ...observationBase };
 
-      upsertMark(marks, { m, medium, status, account: src.manifest?.account, observation, parserVersion, tz });
+      upsertMark(marks, markKeys, { m, medium, status, account: src.manifest?.account, observation, parserVersion, tz });
       upsertSubject(subjects, {
         m, medium, observation, parserVersion,
         detail: details.get(`${medium}:${m.subjectId}`),
@@ -434,16 +449,84 @@ export async function parse(sources, opts = {}) {
   };
 }
 
-/** 身份分层。见 canonical/IDENTITY.md §2.3。 */
-function identityOf(m, medium, accountId) {
-  if (m.upstreamId) return { key: `u:${medium}:${m.upstreamId}`, layer: 'upstream_id' };
-  // 退化键把状态迁移正确识别为同一条记录——那正是它存在的理由。
-  return { key: `d:${accountId}:${medium}:${m.subjectId}`, layer: 'degraded_key' };
+/**
+ * 身份分层，**并且跨层归并**。见 canonical/IDENTITY.md §2.3。
+ *
+ * ## 为什么不能只按每次观测各自定层
+ *
+ * 第一版就是那样：有 `data-cid` 就用 `u:`，没有就用 `d:`。两个键空间不相交，
+ * 于是**同一条标记在不同年代的观测会变成两条记录**。
+ *
+ * 而这不是假想的情况，IDENTITY.md §2.2 那张表自己就写着：
+ *
+ * | 情形 | 有 data-cid 吗 |
+ * |---|---|
+ * | 电影/书/音乐/舞台剧，**2023-12 之后**抓的 | 有 |
+ * | 任何媒介，**2023-12 之前**抓的 | 没有 |
+ *
+ * 也就是说，只要一个目录里同时有 2023-12 前后的档案，每一条跨越那条线的标记都会
+ * 一分为二。实测把前代工具 2022-12 → 2024-08 的档案导进来跑一遍：**2526 个作品
+ * 出了 4050 条标记**，而且修订史被劈成两半——恰恰是这批数据唯一的价值所在。
+ *
+ * 失败的形状是最坏的那一种：不报错，而且**看起来像数据变多了**。
+ *
+ * ## 归并规则
+ *
+ * `(账号, 媒介, 作品 id)` 这个退化键在一个账号内是稳定的，所以拿它当「这是哪个
+ * 作品」的锚点，记住这个作品最终落在哪个 key 上：
+ *
+ * - 先在没有 `data-cid` 的年代见过、后来拿到了 —— **把那条记录搬到上游键上**，
+ *   不另起一条。
+ * - 先有上游 id、后来的观测没有 —— 跟着已经确定的那个 key 走。
+ * - 同一个作品先后出现**两个不同的**上游 id —— 那是「标了、删了、又重新标」，
+ *   **不合并**，那真的是两条记录。这一层信息只有 `data-cid` 给得出，正是它比
+ *   退化键强的地方，不能在归并时丢掉。
+ *
+ * ## 搬过去之后 `identity_layer` 仍然写 `degraded_key`
+ *
+ * 因为它回答的是「这条记录的身份最弱靠到了哪一层」。早年那几次观测确确实实是
+ * 靠退化键攒起来的，改写成 `upstream_id` 会把那件事掩盖掉——而读者判断「这些
+ * 修订真的是同一条记录吗」时，要看的正是最弱的那一环。
+ *
+ * @param {Map<string, object>} store    key → 记录
+ * @param {Map<string, string>} resolved 退化键 → 这个作品最终用的 key
+ */
+function identityOf(store, resolved, m, medium, accountId) {
+  const degraded = `d:${accountId}:${medium}:${m.subjectId}`;
+  const upstream = m.upstreamId ? `u:${medium}:${m.upstreamId}` : null;
+  const prior = resolved.get(degraded);
+
+  if (!upstream) {
+    if (prior) return { key: prior, layer: store.get(prior)?.identity_layer ?? 'degraded_key' };
+    resolved.set(degraded, degraded);
+    return { key: degraded, layer: 'degraded_key' };
+  }
+
+  if (!prior || prior === upstream) {
+    resolved.set(degraded, upstream);
+    return { key: upstream, layer: store.get(upstream)?.identity_layer ?? 'upstream_id' };
+  }
+
+  if (prior === degraded) {
+    const rec = store.get(degraded);
+    if (rec) {
+      store.delete(degraded);
+      rec.upstream_id = m.upstreamId;
+      store.set(upstream, rec);
+    }
+    resolved.set(degraded, upstream);
+    // 搬过去了，层级不变：这条记录的身份最弱靠到过退化键。
+    return { key: upstream, layer: rec?.identity_layer ?? 'degraded_key' };
+  }
+
+  // prior 是另一个上游 id：同一个作品的第二条上游记录。不合并。
+  resolved.set(degraded, upstream);
+  return { key: upstream, layer: store.get(upstream)?.identity_layer ?? 'upstream_id' };
 }
 
-function upsertMark(store, { m, medium, status, account, observation, parserVersion, tz }) {
+function upsertMark(store, resolved, { m, medium, status, account, observation, parserVersion, tz }) {
   const accountId = account?.user_id ?? 'unknown';
-  const { key, layer } = identityOf(m, medium, accountId);
+  const { key, layer } = identityOf(store, resolved, m, medium, accountId);
 
   const fields = {
     status,
@@ -480,6 +563,7 @@ function upsertMark(store, { m, medium, status, account, observation, parserVers
   }
   // 上游 id 后来才出现（2023-12 起才有 data-cid）——补上，但不改身份层，
   // 因为这条记录此前是靠退化键攒起来的，说成 upstream_id 会掩盖那件事。
+  // （记录本身的搬家在 identityOf 里做，这里只管字段。）
   if (!rec.upstream_id && m.upstreamId) rec.upstream_id = m.upstreamId;
   if (m.upstreamDeleted) rec.subject.upstream_deleted = true;
 

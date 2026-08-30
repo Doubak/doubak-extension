@@ -4,7 +4,7 @@
  * **拆成两块，是按用途拆的，不是把一块「关于」抄成两份。**
  *
  *   `#about`（页首）—— 身份：这是什么、哪一版、谁做的、会不会把数据传走。
- *   `#links`（页尾）—— 去处：官网、八个仓库、致谢。
+ *   `#links`（页尾）—— 去处：官网、各个仓库、致谢。
  *
  * 分界线是「答的是哪个问题」：页首答「我手上这个东西是什么」，页尾答
  * 「接下来去哪儿」。两边没有一句重复的话——真重复了就会漂，而漂了的那份
@@ -98,12 +98,17 @@ export function renderLinks() {
       ['隐私政策', 'https://doubak.com/privacy/', '不收集、不上传、没有服务器'],
     ]],
     ['源码（Apache-2.0）', [
-      ['全部仓库', 'https://github.com/Doubak', '整条链路八个仓库'],
+      // **不写「N 个仓库」。** 这里原来是「整条链路八个仓库」，而第九个
+      // （导入适配器）落地时没人想起来改它——一句没有任何东西守着的计数，
+      // 迟早会变成一句错话，而它错得毫无声响。链接指向组织页，那儿的列表
+      // 永远是准的。
+      ['全部仓库', 'https://github.com/Doubak', '整条链路的每一个仓库'],
       ['这个扩展', 'https://github.com/Doubak/doubak-extension', '抓取，产出档案'],
       ['档案格式', 'https://github.com/Doubak/doubak-data-specs', '规范文本与 JSON Schema'],
       ['解析器', 'https://github.com/Doubak/doubak-data-parser', '档案 → 结构化数据'],
       ['站点生成器', 'https://github.com/Doubak/doubak-site-generator', '结构化数据 → 个人存档站'],
       ['导出适配器', 'https://github.com/Doubak/doubak-export-adapters', '结构化数据 → NeoDB / Letterboxd / Goodreads'],
+      ['导入适配器', 'https://github.com/Doubak/doubak-import-adapters', '别的工具存下来的页面 → 档案'],
     ]],
   ];
   for (const [heading, links] of GROUPS) {
@@ -133,8 +138,8 @@ export function renderLinks() {
   const credits = document.createElement('p');
   credits.className = 'muted small';
   credits.textContent = '致谢：前代命令行工具 its-my-data/doubak 抓下的那批档案，'
-    + '是这个项目几乎所有实测结论的来源。WARC 格式与 pywb / ReplayWeb.page 生态，'
-    + '让这些档案不依赖本工具也能打开。';
+    + '是这个项目几乎所有实测结论的来源；现在「导入适配器」还能把它们直接转成档案接进来。'
+    + 'WARC 格式与 pywb / ReplayWeb.page 生态，让这些档案不依赖本工具也能打开。';
   box.append(credits);
 
   el.replaceChildren(box);
