@@ -78,7 +78,18 @@ export function buildPages(p, { images = {}, coverBySubject = {} } = {}) {
   for (const m of p.marks) {
     // 按作品 id 找到的优先——那是档案里真的有的那一张。按 URL 找到的作为退路。
     const cover = coverBySubject[m.subjectId] ?? paths[m.coverUrl] ?? null;
-    if (!cover) stillRemote(m.coverUrl);
+    // **封面不算进 `remote`。**
+    //
+    // 这里原来有一句 `if (!cover) stillRemote(m.coverUrl)`，而它自从封面那个
+    // 回归被修好之后就一直在说假话：`markPage()` 现在写的是 `douban_cover: coverPath`，
+    // 取不到就**什么都不写**（「没有封面就只剩文字，不放占位图」）。所以这些 URL
+    // 一个都没有留在页面上，而 CLI 却照着这个数字说「页面上留的是 doubanio 的地址」。
+    //
+    // 实测一份单份档案：`remote` 数出 153 张封面，产出里 `douban_cover` 带
+    // doubanio 的**一条都没有**。
+    //
+    // 没有本地封面这件事本身照样会被报——它走的是 `missing`，那才是它的性质。
+    // 一个数字同时被两条不同结论的告警引用，其中必有一条是错的。
     files.push([content(markPath(m)), markPage(m, { coverPath: cover })]);
   }
   for (const r of p.longform) {

@@ -71,19 +71,62 @@ const STATUS = { collect: 'done', do: 'doing', wish: 'wish' };
  *   契约只有这八项。`BundleSource`（Node）与 `OpfsBundleSource`（扩展）各实现一份，
  *   因为「字节从哪儿来」本来就该各写各的。
  * @param {{parserVersion?: string, timezone?: string, ignoreWarnings?: boolean,
+ *   skipCaptures?: Set<string>,
  *   onProgress?: (p: {done: number, total: number, phase: string}) => void}} [opts]
  *   `ignoreWarnings` 只放行「混了多个账号」那一条，且照样把它写进 `warnings`。
+ *   `skipCaptures` 是一组 capture_id，摄取时跳过——`bin/verify.js` 查出字节对不上的
+ *   那几条走这里。**它是一个普通的 Set，不是一项新的宿主契约**，所以扩展那边
+ *   照样能用，八项契约一个字没动。
  *   `onProgress` 给界面用：分母是本地 index 的行数，**是可信的**——那跟豆瓣的
  *   计数不是一回事（后者有时统计于审查之前、有时之后）。
  */
 export async function parse(sources, opts = {}) {
   const parserVersion = opts.parserVersion ?? PARSER_VERSION;
   const tz = opts.timezone ?? 'Asia/Shanghai';
+  /** 完整性检查查出问题的那几条捕获。默认空集——不查就等于全都信。 */
+  const skipCaptures = opts.skipCaptures ?? new Set();
 
   // 先体检，再解析。**分叉不拦**——两条分支只是同一个账号的两批观测，合并起来是
   // 信息更多而不是信息打架（理由与实测见 topology.js）。真该拦的是另外两件事。
   const topo = topology(sources);
   const accountWarning = assertSingleAccount(topo, { ignoreWarnings: opts.ignoreWarnings });
+
+  /**
+   * 没有 manifest 的档案归到哪个账号名下。
+   *
+   * **`'unknown'` 不是一个账号 id，是「没有 id」。** 把它当成键的一部分用，等于
+   * 凭空造出第二个人：退化键是 `d:<账号>:<媒介>:<作品 id>`，于是同一个作品在
+   * 有 manifest 的档案里落到 `d:82160871:drama:34912679`，在没有 manifest 的档案里
+   * 落到 `d:unknown:drama:34912679`——**两个不相交的键空间**，与 0.9.0 修掉的
+   * `data-cid` 那个 bug 是同一个形状，只是换了个字段来劈。
+   *
+   * 实测：把 9 份没有 manifest 的档案并进来，2955 个作品出了 2960 条标记，
+   * 5 部舞台剧一分为二（两半的 status / rating / marked_at 完全相同，只有
+   * first_observed_at 不一样）。只有舞台剧中招，因为它的列表页没有 `data-cid`
+   * ——带上游 id 的走 `u:` 键，与账号无关，照常合并。
+   *
+   * 修法是**认领，不是猜**：目录里恰好只有一个账号时，缺 manifest 的档案就归它。
+   * 这与扩展「导出」页对无归属档案的处理是同一条（INGESTION.md §2.3——限制的是
+   * 结论，不是数据），而且这里的前提更硬：多账号本来就是错误，走不到这一步。
+   *
+   * 目录里一个已知账号都没有时，大家一起用 `'unknown'`——那时它是**唯一**的
+   * 键空间，不会劈开任何东西。
+   */
+  const soleAccount = topo.accounts.length === 1
+    ? (sources.find((s) => s.manifest?.account?.user_id)?.manifest.account ?? null)
+    : null;
+  /**
+   * 哪些档案是被认领进来的。**认领了就要说出来**，否则这是一次静默的归属判断。
+   *
+   * 这里**先算好，不边用边记**。第一版是在 `accountOf()` 里边调边往数组里塞，
+   * 而那个告警是在工作循环之前 push 的——于是数组永远是空的，告警永远不出现。
+   * 一条永远不触发的告警比没有告警更糟：它让人以为这件事有人盯着。
+   */
+  const adopted = soleAccount
+    ? sources.filter((s) => !s.manifest?.account).map((s) => s.bundleId).sort()
+    : [];
+  /** @param {{manifest: object|null}} src */
+  const accountOf = (src) => src.manifest?.account ?? soleAccount ?? undefined;
 
   /** @type {Map<string, object>} 身份键 → 记录 */
   const marks = new Map();
@@ -174,6 +217,19 @@ export async function parse(sources, opts = {}) {
       }
     }
     for (const row of src.index) {
+      // **字节对不上的那几条，在这里就排除掉。**
+      //
+      // 排除而不是拒绝整份档案：一张图坏了不该让另外两万条观测也进不来
+      // （canonical/INGESTION.md §2.3——丢弃的是凭它能下的结论，不是数据）。
+      //
+      // 落进 `skipped` 而不是 `warnings`，是因为它与 `verdict:login` 是同一类
+      // 事情：这一条没被摄取，而这里说的是为什么。真正要人看的那句话由
+      // `bin/verify.js` 自己讲，它才知道是哪一种对不上。
+      if (skipCaptures.has(row.capture_id)) {
+        bump(stats.skipped, 'verify:字节与索引对不上');
+        continue;
+      }
+
       const isBroadcast = row.intent === 'broadcast.timeline';
       const lfKind = row.intent === 'note.item' ? 'note' : row.intent === 'review.item' ? 'review' : null;
       const isDetail = row.intent === 'interest.item';
@@ -251,6 +307,17 @@ export async function parse(sources, opts = {}) {
 
       work.push({ src, row, kind: 'mark', medium, status, auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
     }
+  }
+  // **认领了就要说出来。** 归属是一次判断，不是一个事实；不说的话，一份
+  // 没有 manifest 的档案会以档案主人的名义静悄悄进来。
+  if (adopted.length) {
+    warnings.push({
+      type: 'account_adopted',
+      account: soleAccount.user_id,
+      bundles: adopted.slice().sort(),
+      message: `${adopted.length} 份档案没有 manifest，按目录里唯一的账号 `
+        + `${soleAccount.user_id} 归并。它们的广播仍然不抽（分不清哪条是转发的别人的）。`,
+    });
   }
   for (const d of topo.danglingFloors) {
     // 增量只看了地板以上，而地板底下那段**谁也没看过**——那份档案不在目录里。
@@ -340,15 +407,21 @@ export async function parse(sources, opts = {}) {
         continue;
       }
       stats.observations += 1;
-      upsertLongform(longform, { lf, account: src.manifest?.account, observation: { ...observationBase }, parserVersion });
+      upsertLongform(longform, { lf, account: accountOf(src), observation: { ...observationBase }, parserVersion });
       continue;
     }
 
     if (kind === 'broadcast') {
+      // **这里刻意不走 `accountOf(src)`。**
+      //
+      // 认领一个账号来当身份键的一部分，与拿它来判断「这一页上哪几条广播是我的」，
+      // 是两件事：前者只影响两条记录合不合并，后者是在**授权**——`extractBroadcasts`
+      // 拿 owner 去比对每条广播的 `data-uid`，认错了就会把转发进来的第三方内容
+      // 写进档案主人的 canonical。
+      //
+      // 严格授予、宽松否定：认领用来归并可以，用来筛别人的内容不行。
       const owner = src.manifest?.account?.user_id;
       if (!owner) {
-        // 不知道主人是谁就不抽——转发进来的是别人的广播，分不清就会把第三方内容
-        // 写进档案主人的 canonical。
         warnings.push({ type: 'no_owner', capture: row.capture_id });
         continue;
       }
@@ -367,7 +440,7 @@ export async function parse(sources, opts = {}) {
       }
       for (const b of bs) {
         stats.observations += 1;
-        upsertBroadcast(broadcasts, { b, account: src.manifest?.account, observation: { ...observationBase }, parserVersion });
+        upsertBroadcast(broadcasts, { b, account: accountOf(src), observation: { ...observationBase }, parserVersion });
       }
       continue;
     }
@@ -393,7 +466,7 @@ export async function parse(sources, opts = {}) {
 
       const observation = { ...observationBase };
 
-      upsertMark(marks, markKeys, { m, medium, status, account: src.manifest?.account, observation, parserVersion, tz });
+      upsertMark(marks, markKeys, { m, medium, status, account: accountOf(src), observation, parserVersion, tz });
       upsertSubject(subjects, {
         m, medium, observation, parserVersion,
         detail: details.get(`${medium}:${m.subjectId}`),
@@ -429,7 +502,7 @@ export async function parse(sources, opts = {}) {
     if (!merged) continue;
     upsertDoulist(doulists, {
       d: merged.doulist,
-      account: src.manifest?.account,
+      account: accountOf(src),
       observation: merged.pages[0].observation,
       // 每一页都是这条记录的来源，全都要能指回去。
       captureIds: merged.pages.flatMap((p) => p.observation.capture_ids ?? []),
