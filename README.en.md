@@ -26,10 +26,11 @@ extension still produces a complete, usable local archive.**
 
 Two things an English-speaking reader should know before installing:
 
-- **The user interface is in Simplified Chinese only.** There is no `_locales/`
-  directory and no `default_locale`; the panel strings are hard-coded Chinese. The
-  archive format, the exported data and the generated site are language-neutral, but
-  operating the extension currently requires reading Chinese.
+- **The user interface is in Simplified Chinese only.** There is a `_locales/`
+  directory, but it holds the store listing text and nothing else — the panel's own
+  strings are hard-coded Chinese, about 700 of them. The archive format, the exported
+  data and the generated site are language-neutral, but operating the extension
+  currently requires reading Chinese.
 - **Chromium-only.** It needs the [File System Access
   API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API)
   (`showDirectoryPicker`) to write archives, and the extension `offscreen` API to run
