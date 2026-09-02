@@ -64,6 +64,62 @@ directories included in the extension”）。所以这件事的开关在代码�
 
 **那句免责声明别删。** 它既是事实，也是把「第三方工具」与「官方产品」分开的那道线。
 
+### 詳細說明（繁體，草稿）
+
+繁體這一份不是簡轉繁：**第一段就要說清介面只有簡體中文**，否則換來的是一次白裝。
+
+> 豆備把你的豆瓣內容備份到你自己手裡：標記（想看／在看／看過）、短評、評分、
+> 標籤、廣播、日記與影評、自己編的豆列（連同你寫在每個條目上的評語），
+> 以及你自己上傳的圖片。
+>
+> ⚠️ **擴充功能的介面目前只有簡體中文。** 存下來的檔案、匯出的資料、產生的網站
+> 都與語言無關，但操作它本身現在需要看得懂簡體字。
+>
+> **它在你自己的瀏覽器裡跑，用你已有的登入狀態。** 沒有伺服器，沒有帳號，
+> 不上傳任何東西——你的密碼和 Cookie 一步都不經過第三方。
+>
+> 存下來的是標準 **WARC** 檔案加一份 JSON 索引：用 `jq`、pywb、
+> ReplayWeb.page 都能直接打開，不依賴本工具。十年後仍然讀得懂。
+>
+> 「匯出」頁當場把檔案算成三種能直接用的東西，不用裝任何別的軟體：
+> 結構化資料（NDJSON）、NeoDB 的匯入包，以及一棵帶圖片的 Markdown 網站
+> （範例：sample.doubak.com）。這幾步同樣在本機完成，不連網。
+>
+> 開源，Apache-2.0。原始碼與逐條權限稽核：github.com/Doubak
+>
+> ⚠️ 豆備是獨立的第三方開源工具，與豆瓣網及其營運方沒有任何關係，
+> 也未獲其授權或認可。
+
+### Detailed description (English, draft)
+
+Same rule: **the language caveat goes near the top**, not in a footnote.
+
+> Doubak backs up your Douban account into your own hands: marks (want to / doing /
+> done), short reviews, ratings, tags, broadcasts (广播), journals and long-form
+> reviews, your own doulists including the notes you wrote on each entry, and the
+> images you uploaded.
+>
+> ⚠️ **The extension's interface is in Simplified Chinese only.** The archive format,
+> the exported data and the generated site are language-neutral, but operating the
+> extension itself currently requires reading Chinese.
+>
+> **It runs in your own browser, using the session you are already logged into.**
+> No server, no account, nothing uploaded — your password and cookies never pass
+> through a third party.
+>
+> What it writes is a standard **WARC** archive plus a JSON index: openable with
+> `jq`, pywb or ReplayWeb.page, with or without this tool. Still readable in ten years.
+>
+> The export page turns that archive into three usable things, offline, with nothing
+> else to install: structured data (NDJSON), a NeoDB import package, and a Markdown
+> site with images (sample: sample.doubak.com).
+>
+> Open source, Apache-2.0. Source and a permission-by-permission audit:
+> github.com/Doubak
+>
+> ⚠️ Doubak is an independent, third-party open-source tool. It is not affiliated
+> with, authorised by, or endorsed by Douban or its operators.
+
 ---
 
 ## 权限理由
