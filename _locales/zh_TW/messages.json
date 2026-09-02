@@ -1,0 +1,18 @@
+{
+  "extName": {
+    "message": "豆備 Doubak：豆瓣備份與原樣歸檔",
+    "description": "繁體的商店標題。「備份」和「备份」是兩個完全不同的字串，搜尋不會互通——這一份存在的全部理由就是這個。品牌的中文寫法跟著轉成繁體，拉丁字母那半邊 Doubak 三地一致。"
+  },
+  "extShortName": {
+    "message": "豆備",
+    "description": "地方不夠時用的短名。"
+  },
+  "extDescription": {
+    "message": "原樣存檔，不只是匯出：廣播、標記、短評、日記、豆列與自己上傳的圖，全部存成標準 WARC。可離線瀏覽，可匯入 NeoDB。介面目前只有簡體中文。",
+    "description": "最後一句是刻意寫的：介面現在只有簡體中文，而這份清單會把繁體使用者帶進來。不先說，換來的是一次白裝。"
+  },
+  "extActionTitle": {
+    "message": "豆備 Doubak",
+    "description": "工具列圖示的提示文字。"
+  }
+}

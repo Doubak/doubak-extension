@@ -133,3 +133,9 @@ Release 上那份 zip 就是提交用的，不需要另外打。**上架之后�
 
 表单里每个权限都要写「为什么需要」，可直接粘贴的答案在 [`store-listing.md`](store-listing.md)——改权限的时候，那份、
 [`permissions.md`](permissions.md) 和 `manifest.json` 是一起改的。
+
+**商店的标题和简短说明改不了后台**，它们取自 `manifest.json`，而那两格指向
+[`_locales/<语言>/messages.json`](../_locales)。所以「改一下商店文案」和「发一个版本」
+是同一件事：改字 → 重新打包 → 重新提交审核。改完跑一遍 `npm test`
+（[`test/locales.test.js`](../test/locales.test.js) 会核长度上限、各语言的键集，
+以及 `_locales` 还在不在打包白名单里——漏了它 Chrome 会整个拒绝加载）。

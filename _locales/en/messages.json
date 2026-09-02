@@ -1,0 +1,18 @@
+{
+  "extName": {
+    "message": "Doubak: Douban account backup and page archive",
+    "description": "English store title. 'Douban backup' and 'export Douban to NeoDB' return almost nothing today, so this listing competes with nobody."
+  },
+  "extShortName": {
+    "message": "Doubak",
+    "description": "Short name. No Chinese here — a Latin-script listing that leads with Chinese characters reads as the wrong language, not as a brand."
+  },
+  "extDescription": {
+    "message": "Archives the pages as standard WARC, not just an export: marks, reviews, broadcasts, journals, images. Chinese-only UI.",
+    "description": "Max 132 characters. The last clause is deliberate: the panel is Simplified Chinese only, and this listing is what will bring in readers who cannot use it. Saying so costs an install; not saying so costs their time. Left ~15 characters of headroom — a description that only just fits gets truncated by the next edit."
+  },
+  "extActionTitle": {
+    "message": "Doubak",
+    "description": "Toolbar tooltip."
+  }
+}

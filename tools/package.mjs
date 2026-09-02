@@ -41,6 +41,10 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const INCLUDE = [
   'manifest.json',
   'LICENSE',
+  // manifest 里 `default_locale` 指着它。漏掉的后果不是「名字变回英文」——
+  // Chrome 会**整个拒绝加载**这个扩展，而 collect() 只在名单里的路径不存在时才抛，
+  // 所以本地一切正常，问题要到上传审核时才出现，那时名字已经改了。
+  '_locales',
   'icons',
   'src',
   'selftest',
