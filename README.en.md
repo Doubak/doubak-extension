@@ -49,7 +49,22 @@ Most backup tools export a CSV or scrape the text. Once Douban's markup changes,
 is deleted, or an image 404s, what you kept can no longer reconstruct what you actually saw.
 Archiving the page itself is what makes that reconstruction possible years later — and
 deleted entries are not hypothetical: the sample archive contains **eight works Douban has
-since removed**, still readable, still carrying the reviews and ratings written about them.
+since removed** — seven games and one film. Their pages are gone; what was written about
+them is not. Short reviews survive for seven of the eight, tags for six, and for three, the
+star rating — frozen into a broadcast on the day it was posted, because a broadcast cannot
+be edited afterwards.
+
+That last point is the sharpest thing this archive can demonstrate, so it is worth being
+exact about: **not one of the eight still carries a rating on the mark itself.** Douban
+keeps only current state, and current state left with the entry. The stars that survive
+survive because they were posted, not because they were stored.
+
+What is *not* recoverable is what the works were called. Douban re-renders the work card
+under a broadcast at the moment you open the page, so even a 2017 broadcast captured in
+2026 already reads 「未知作品」. Three of the eight got their names back only because an
+older 2022–2024 archive had seen them while they still existed. **A name survives only if
+something captured it while the entry was still up** — which is the entire difference
+between backing up now and getting to it later.
 
 ## Install
 
@@ -101,7 +116,11 @@ it up like any other folder. From it, the extension's export page produces:
 - **A static site** — searchable, with stable permalinks, **fully readable offline**
 
 Adapters for **Letterboxd** and **Goodreads** live in
-[doubak-export-adapters](https://github.com/Doubak/doubak-export-adapters).
+[doubak-export-adapters](https://github.com/Doubak/doubak-export-adapters), as command-line
+tools. Neither has been round-tripped against the real service yet, so the honest claim for
+those two is "matches the format read out of the importer's source", not "works" — which is
+also why the export page in the extension offers only NeoDB. A button is a claim that the
+path works.
 
 Because parsing is a pure function over already-captured pages, downstream formats can be
 added years later without re-crawling anything. Capture is the only irreversible step.
