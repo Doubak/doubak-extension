@@ -6,19 +6,36 @@
 
 改动权限时，这份和 `permissions.md` 要一起改。
 
+## 分语言的商店页
+
+后台能分语言填详细说明和截图，**但只对扩展带了 `_locales/<语言>` 目录的那些语言开放**
+（Chrome 的原话：“Each locale corresponds to one of the `_locales/LOCALE_CODE`
+directories included in the extension”）。所以这件事的开关在代码里，不在后台。
+
+现在有三种：`zh_CN`、`zh_TW`、`en`。繁体那份不是简体的变体——**「備份」和「备份」是两个
+完全不同的字串，搜索不互通**，港台用户搜「豆瓣備份」现在什么也搜不到，而这一格是空的。
+
+英文和繁体的简短说明里都写明了**界面目前只有简体中文**。这两页会把读不了简体的人带进来，
+不先说，换来的是一次白装。界面本身没有翻译，`_locales` 这里只放商店那几行字。
+
 ---
 
 ## 基本信息
 
-| 字段 | 填什么 |
-|---|---|
-| 名称 | 豆备 Doubak |
-| 简短说明（132 字以内） | 在你自己的浏览器里备份豆瓣数据，存成标准 WARC 档案。所有数据留在本地。 |
-| 类别 | 生产力工具（Productivity） |
-| 语言 | 中文（简体） |
-| 隐私政策 URL | `https://doubak.com/privacy/` |
-| 官网 | `https://doubak.com` |
-| 支持 / 反馈 | `https://github.com/Doubak/doubak-extension/issues` |
+**名称和简短说明不在这个表单里填。** 它们取自 `manifest.json`，后台是只读的——
+要改就得改代码、重新打包、重新提交审核。而 `manifest.json` 里那两格现在写的是
+`__MSG_extName__` / `__MSG_extDescription__`，真正的字在
+[`_locales/<语言>/messages.json`](../_locales) 里。
+
+| 字段 | 填什么 | 在哪儿改 |
+|---|---|---|
+| 名称（75 字符以内） | 豆备 Doubak：豆瓣备份与原样归档 | `_locales/zh_CN/messages.json` |
+| 简短说明（132 字符以内） | 见 `extDescription` | `_locales/zh_CN/messages.json` |
+| 类别 | 生产力工具（Productivity） | 后台表单 |
+| 语言 | 简体中文 · 繁體中文 · English | 有几个 `_locales/<语言>` 目录就有几种 |
+| 隐私政策 URL | `https://doubak.com/privacy/` | 后台表单 |
+| 官网 | `https://doubak.com` | 后台表单 |
+| 支持 / 反馈 | `https://github.com/Doubak/doubak-extension/issues` | 后台表单 |
 
 ### 详细说明（草稿）
 

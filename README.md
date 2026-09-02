@@ -178,12 +178,15 @@ node tools/package.mjs
 
 - **打包用白名单，不是黑名单。** 名单在 `tools/package.mjs` 的 `INCLUDE` 里。黑名单漏一条会**多打进去一个不该有的东西且没人发现**；白名单漏一条则是扩展装上就报错 —— 后者一眼就能看见。有测试守着 `test/` `tools/` `docs/` 不许进包。
 - **`selftest/` 必须打包进去。** 它没有被 `manifest.json` 引用，只被调试页那个按钮 `getURL` 打开 —— 漏了它，那个按钮就是个死链。
+- **`_locales/` 同理，而且更狠。** `manifest.json` 的 `default_locale` 指着它，漏了它 Chrome **整个拒绝加载**这个扩展；而 `collect()` 只在名单里的路径不存在时才抛，名单里压根没有的目录它不看 —— 本地全绿，问题要到上传审核时才出现。`test/locales.test.js` 守着这一条。
 - **zip 是自己写的，不调系统 `zip`。** 与整个工具链一致（不依赖外部程序），而且时间戳一律写 0，所以**同样的源码打出逐字节相同的包** —— 才能核对「上传的到底是不是我构建的那个」。
 - **版本号只能升不能降。** 改 `manifest.json`，`package.json` 跟着改（有测试钉住两者一致）。
 
 ### 提交表单要填的东西
 
 逐条权限理由见 [`docs/store-listing.md`](docs/store-listing.md) —— 那份是直接可粘贴的。隐私政策 URL 用 <https://doubak.com/privacy/>。
+
+**商店的标题和简短说明不在表单里**，它们取自 `manifest.json`，后台只读。那两格写的是 `__MSG_extName__` / `__MSG_extDescription__`，真正的字在 [`_locales/<语言>/messages.json`](_locales) 里 —— 现在有 `zh_CN` / `zh_TW` / `en` 三份。**分语言的商店页只对带了对应 `_locales/<语言>` 目录的语言开放**，所以这件事的开关在代码里。界面本身没有翻译（仍然只有简体中文），`_locales` 只放商店那几行字，繁体和英文的说明里都写明了这一点。
 
 ## 抓完之后
 
