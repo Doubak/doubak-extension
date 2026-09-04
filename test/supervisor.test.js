@@ -1,5 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { Supervisor, ALARM_NAME, HEARTBEAT_PERIOD_MINUTES } from '../src/crawl/supervisor.js';
 
@@ -122,29 +123,46 @@ describe('心跳', () => {
 });
 
 describe('tick 必须幂等', () => {
-  test('**并发**唤醒只开工一次', async () => {
-    // 要防的是两段推进同时跑：那会让同一个 frontier 被两个循环消费。
+  test('一段推进永远不返回时，后面的心跳照样要来 —— 那才是自救的入口', async () => {
+    // 报上来的那次：两次「推进结果 …captured:25…」之后，**282 次**「心跳 → 未恢复」，
+    // 整整 8494 秒，直到用户重新加载扩展。
+    //
+    // 原因是 `tick()` 里一个 `_running` 内存标志：`onResume()` 里那个 await 永远没
+    // 回来（offscreen 里的一段推进卡死了），于是标志永久为真，此后每一次心跳都在
+    // 那儿掉头。
+    //
+    // 关键不在于「少推进了几段」，而在于**它挡住了自救**：卡死本来有救——锁会在
+    // 持有者 5 分钟不吭声后判它死、允许抢占，而抢占的唯一入口就是心跳这条路上的
+    // `op: 'resume'`。标志一挡，那 282 次唤醒一次都没走到锁跟前。
     const store = memStore({
       bundle_id: 'b1', pause_reason: 'crash', paused_at: '2026-07-29T11:00:00Z',
     });
-    let inFlight = 0;
-    let maxInFlight = 0;
     let calls = 0;
     const { sup } = harness({
       store,
-      onResume: async () => {
-        calls += 1;
-        inFlight += 1;
-        maxInFlight = Math.max(maxInFlight, inFlight);
-        await new Promise((r) => setTimeout(r, 20));
-        inFlight -= 1;
-      },
+      // 永不结算：这就是一段卡死的推进在 service worker 这一侧的样子。
+      onResume: () => new Promise(() => { calls += 1; }),
     });
 
-    await Promise.all([sup.tick(), sup.tick(), sup.tick()]);
+    void sup.tick();
+    void sup.tick();
+    void sup.tick();
+    await new Promise((r) => setTimeout(r, 5));
 
-    assert.equal(maxInFlight, 1, '两段推进同时在飞');
-    assert.equal(calls, 1, '并发的那几次应当被挡掉');
+    assert.equal(calls, 3, '上一段卡住之后，心跳就再也不去敲门了');
+  });
+
+  test('并发防护在锁那一层，不在这里 —— 这里没有可以卡住的内存标志', async () => {
+    // 「同一时刻只跑一段」是真的要保证，但**保证不了的地方不该假装保证**：推进跑在
+    // offscreen 里，而这是一个每 30 秒就被杀一次的 service worker。它的内存标志只在
+    // 同一个 worker 的生命周期内有效，跨一次被杀就形同虚设——production 从来没有、
+    // 也不能靠它。真正管用的是 `Exclusive`（busy 就拒、判死就抢占）和 offscreen 里
+    // 那个按代号缓存的推进段，两者都在知道答案的那一侧。见 exclusive/driver 的测试。
+    const src = readFileSync(new URL('../src/crawl/supervisor.js', import.meta.url), 'utf-8');
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    assert.ok(code.length > 500, '注释剥完就没剩多少了，这条判据已经失去意义');
+    assert.equal(/_running/.test(code), false,
+      '又出现了一个「正在推进」的内存标志 —— 它已经连着出过三次事');
   });
 
   test('**先后**唤醒每次都要推进一段 —— 否则抓取就停住了', async () => {
@@ -198,7 +216,6 @@ describe('tick 必须幂等', () => {
     // 直接调用的 `drive()`——它不走 tick，也就没人来清这个标志。
     const { sup, resumed, store } = harness();
     await sup.startRun({ bundle_id: 'b1' });
-    assert.equal(sup.running, false, 'startRun 不该占住「正在推进」这个标志');
 
     // 第一段推进由 background 直接跑（不经过 tick），这里只模拟它写下的状态
     await store.saveCheckpoint({

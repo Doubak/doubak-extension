@@ -211,3 +211,105 @@ describe('「被占用」是状况，不是错误', () => {
     assert.match(bg, /上一段还在跑，跳过/);
   });
 });
+
+describe('判死之后，别人替它吭一声不算数', () => {
+  /**
+   * 报上来的那次：8494 秒。
+   *
+   * 一段推进卡死，早就该被判死了；用户按下「暂停」，而 `runner.pause()` 发出的
+   * 那条 `paused` 事件和抓取自己的事件走同一条通道（offscreen 的 `relayEvent`），
+   * 于是**替那具尸体刷新了心跳**。紧接着的「继续」被拒，理由是
+   * 「已经有『抓取』在进行中（8494 秒前开始）」——一个刚刚才被别人证明还活着的
+   * 死持有者。**用户按下的那个按钮，正是让他按不动下一个按钮的原因。**
+   */
+  test('已经判死的持有者，touch 不能把它救回来', async () => {
+    let t = 0;
+    const lock = new Exclusive({ staleAfterMs: 100, now: () => t });
+
+    let release = () => {};
+    const wedged = lock.run('抓取', () => new Promise((r) => { release = r; }));
+
+    t = 500; // 卡死，早已过阈值
+    assert.equal(lock.stale, true, '阈值都过了还没判死');
+
+    lock.touch(); // ← 不持锁的那些 op 发事件时会走到这儿
+    assert.equal(lock.stale, true, '一条迟来的消息把死持有者救活了');
+
+    let took = false;
+    await lock.run('恢复抓取', async () => { took = true; });
+    assert.equal(took, true, '「继续」应当能抢占一段已经判死的推进');
+
+    release();
+    await wedged;
+  });
+
+  test('还没判死的时候，touch 照常续命 —— 一段跑得久的抓取不许被误杀', async () => {
+    let t = 0;
+    const lock = new Exclusive({ staleAfterMs: 100, now: () => t });
+    let release = () => {};
+    const held = lock.run('抓取', () => new Promise((r) => { release = r; }));
+
+    for (let i = 0; i < 10; i += 1) {
+      t += 80; // 每次都在阈值内吭一声
+      lock.touch();
+      assert.equal(lock.stale, false, `第 ${i + 1} 次续命之后被判死了`);
+    }
+    // 持有了 800 毫秒，是阈值的 8 倍，但一直在吭声——判据是「多久没吭声」，
+    // 不是「持有了多久」。
+    await assert.rejects(() => lock.run('恢复抓取', async () => {}), (e) => e.reason === 'busy');
+
+    release();
+    await held;
+  });
+});
+
+describe('活着的证据必须由持有者自己出具', () => {
+  test('不持锁的那四个 op 发的事件，不算「还活着」', async () => {
+    const { EVENTS_WITHOUT_LOCK, provesLiveness } = await import('../src/crawl/driver.js');
+    for (const t of ['paused', 'aborted', 'finished', 'retry_requested']) {
+      assert.equal(provesLiveness(t), false, `${t} 不该被当成「抓取还在动」`);
+      assert.ok(EVENTS_WITHOUT_LOCK.has(t));
+    }
+  });
+
+  test('用排除法：没见过的事件一律**算**活着 —— 漏判一种会误杀活着的抓取', async () => {
+    const { provesLiveness } = await import('../src/crawl/driver.js');
+    // 「又抓到一页」的形态不止一种，而且还会加。白名单漏一种 = 把一段活着的抓取
+    // 判死并抢占；黑名单漏一种 = 一具尸体多活 5 分钟。后者便宜得多。
+    for (const t of ['capture', 'batch', 'retry', 'gate', 'error', 'preflight', '将来才有的']) {
+      assert.equal(provesLiveness(t), true, `${t} 被误判成「不算活着」`);
+    }
+    assert.equal(provesLiveness(undefined), true, '没有 type 的事件不该被当成不活着');
+  });
+
+  test('offscreen 的事件通道真的按这个来分', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../src/offscreen/offscreen.js', import.meta.url), 'utf-8');
+    // 钉的是**判据本身**（有没有那一层门），不是文案。无条件 touch 会让这条红。
+    assert.match(src, /if \(provesLiveness\([^)]*\)\) lock\.touch\(\);/,
+      'relayEvent 又在无条件地替持有者作证了');
+    assert.equal(/^\s*lock\.touch\(\);\s*$/m.test(src.replace(/onEvent[\s\S]*/, '')), false,
+      '事件通道里还留着一处无条件的 lock.touch()');
+  });
+});
+
+describe('「继续」被锁挡住时，调度镜像照样要改回哨兵', () => {
+  test('busy 不算「继续失败」', async () => {
+    const { readFileSync } = await import('node:fs');
+    // **先剥注释。** 这一段的注释里就写着 `resumeRun()` 三个字（在讲它当初为什么
+    // 没跑到），带着注释找位置只会找到那一处，于是判据恒假。
+    const bg = readFileSync(new URL('../src/background.js', import.meta.url), 'utf-8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const at = bg.indexOf("case 'resume': {");
+    assert.ok(at > 0, "找不到 case 'resume'，这条判据已经失去意义");
+    const body = bg.slice(at, bg.indexOf("case 'abort'", at));
+
+    const caught = body.indexOf("reason !== 'busy'");
+    const mirror = body.indexOf('resumeRun()');
+    assert.ok(caught > 0, "「继续」没有认出 busy —— 它会一路抛给面板，弹一句「无法继续」");
+    assert.ok(mirror > caught,
+      'busy 必须在改镜像**之前**被接住：抛在那儿的话 checkpoint 会一直写着 '
+      + 'user_paused，心跳从此每 30 秒判一次「未恢复：你手动暂停了抓取」—— '
+      + '用户点的那一下「继续」，唯一的效果是让抓取再也不会自己回来');
+  });
+});

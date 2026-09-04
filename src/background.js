@@ -400,13 +400,14 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
     try {
       switch (msg?.type) {
         case 'status': {
-          const sup = getSupervisor();
           const cp = await getRunStore().loadCheckpoint();
           // offscreen 不在就**不去建**——只是看一眼状态，没必要为此把它拉起来。
           const st = await withOffscreen({ op: 'status' }).catch(() => null);
           sendResponse({
             ok: true,
-            running: sup.running,
+            // 「现在在不在跑」只有 offscreen 答得出（`busyWith` / `runner`）。这里
+            // 原来还报一个 service worker 自己的 `running` 布尔量，那是它猜的——
+            // 它每 30 秒就被杀一次，而推进在另一个上下文里。已随那个标志一起删掉。
             checkpoint: cp,
             runner: st?.status ?? { active: false },
             // **正在做什么**（全局互斥锁的持有者）。
@@ -491,7 +492,22 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           const cp = await getRunStore().loadCheckpoint();
           if (!cp) throw new Error('没有可恢复的抓取');
           // 全本 checkpoint 在档案里，offscreen 自己读（见上面 onResume 的说明）。
-          await withOffscreen({ op: 'resume' });
+          try {
+            await withOffscreen({ op: 'resume' });
+          } catch (err) {
+            // **「已经有一段在跑」不是「继续失败」。**
+            //
+            // 锁被推进段占着时 `op: 'resume'` 会被拒。要么它真的在跑（那用户要的
+            // 事情已经成立），要么它卡死了（那 5 分钟后会被判死并抢占）——两种都
+            // 不该让下面那几行不执行。
+            //
+            // 而下面那几行里最要紧的是把调度镜像改回哨兵。实测的后果（8494 秒的
+            // 那次）：抛在这儿 → `resumeRun()` 没跑 → checkpoint 一直写着
+            // `user_paused` → 心跳从此每 30 秒判一次「未恢复：你手动暂停了抓取」。
+            // **用户点的那一下「继续」，唯一的效果是让抓取再也不会自己回来。**
+            if (/** @type {any} */ (err)?.reason !== 'busy') throw err;
+            debugLog('继续', '上一段还占着锁，镜像照改；卡死的话会被判死后抢占');
+          }
           // **调度镜像也要改回哨兵。** 它还写着 user_paused 的话，心跳每 30 秒就会
           // 再弹一条「需要你处理：你手动暂停了抓取」——而用户刚点的正是继续。
           await getSupervisor().resumeRun();

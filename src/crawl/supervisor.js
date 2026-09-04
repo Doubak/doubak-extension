@@ -69,7 +69,6 @@ export class Supervisor {
     this._hooks = hooks;
     this._alarms = alarms ?? null;
     this._now = now;
-    this._running = false;
   }
 
   /**
@@ -88,19 +87,9 @@ export class Supervisor {
       paused_at: new Date(this._now()).toISOString(),
     });
     await this._ensureHeartbeat();
-    // **这里不能置 `_running`。**
-    //
-    // 那个标志的含义是「有一段推进正在飞」，而 `startRun()` 不推进——真正推进的是
-    // 紧随其后由 background 直接调用的 `drive()`，它走的不是这条路，也就没人会来清。
-    // 于是标志一直是 true，此后每一次心跳都在这里掉头返回「已经在跑了」，抓取
-    // **在第一段之后就停住**。
-    //
-    // 真实日志：一次「推进结果 …captured:25…」，然后十几次「心跳 → 未恢复」，
-    // 直到用户重新加载扩展把内存清零。
-    //
-    // 上一次修的是 `tick()` 里忘了在 finally 清；这是同一个标志的另一个写入点，
-    // 而它压根就不该写。并发防护本来就有三层，都不依赖它：`Exclusive` 全局互斥、
-    // offscreen 的 `driving` 复用同一个 promise、以及 tick 自己的这个检查。
+    // 这里**什么内存标志都不置**。「现在有没有一段推进在飞」不是这个进程知道的事
+    // ——推进跑在 offscreen 里，而 service worker 每 30 秒就被杀一次。曾经有过一个
+    // `_running` 标志，它连着出过三次事，最后被删掉了；理由见 `tick()`。
   }
 
   /**
@@ -120,7 +109,6 @@ export class Supervisor {
       pause_reason: reason,
       paused_at: new Date(this._now()).toISOString(),
     });
-    this._running = false;
   }
 
   /**
@@ -156,7 +144,6 @@ export class Supervisor {
   async finishRun() {
     await this._store.clearCheckpoint();
     await this._clearHeartbeat();
-    this._running = false;
   }
 
   /**
@@ -188,31 +175,31 @@ export class Supervisor {
       return { acted: false, decision };
     }
 
-    if (this._running) {
-      // **有一段推进正在飞**，不要再开一段。worker 会被反复唤醒（心跳、启动检查、
-      // 界面命令），两段并行推进会让同一个 frontier 被两个循环消费。
-      return { acted: false, decision };
-    }
-
-    this._running = true;
-    try {
-      await this._hooks.onResume();
-    } finally {
-      // **必须在 finally 里清。**
-      //
-      // 早先只有 `pauseRun()` / `finishRun()` 会把它清掉——而一段推进的**正常**结局
-      // 是「预算用完了，还没抓完」，那两个都不会被调用。于是 `_running` 永远是 true，
-      // 此后每一次心跳都直接返回「已经在跑了」，**抓取就此停住**。
-      //
-      // 真实日志里的样子：一次「推进结果 …captured:25…」，然后连续十几次
-      // 「心跳 → 未恢复」。抓取只在 service worker 被杀、内存清零之后才会再走一段。
-      this._running = false;
-    }
+    // **这里没有「已经在跑了吗」的内存标志。**
+    //
+    // 曾经有过一个 `_running`，它连着出了三次事，一次比一次贵：`startRun()` 置了
+    // 它却没人清；`tick()` 忘了在 finally 里清；最后是这一次——`onResume()` 里那个
+    // `await` **永远没有回来**（offscreen 里的一段推进卡死了），于是标志永久为真。
+    //
+    // 真实日志：两次「推进结果 …captured:25…」，然后 **282 次**「心跳 → 未恢复」，
+    // 整整 8494 秒。
+    //
+    // 前两次都被当成「忘了清」修掉了，但根子不在清没清干净，而在**这个进程根本
+    // 无权回答这个问题**：推进跑在 offscreen 里，而这里是一个每 30 秒就被杀一次、
+    // 内存随时清零的 service worker。它手上那个布尔量描述的是别人的状态。
+    //
+    // 更糟的是这个标志挡住了什么。卡死本来有救：`Exclusive` 会在持有者 5 分钟
+    // 不吭声后判它死、允许抢占，而抢占的入口正是 `onResume()` 里那句
+    // `withOffscreen({ op: 'resume' })`。标志一挡，**心跳连问都没问过锁**——
+    // 那 282 次唤醒一次都没走到自救机制跟前。
+    //
+    // 一道防线，只有在它保护的那件事没发生时才够得着，就等于没有。
+    //
+    // 所以判断交给知道答案的那一层。锁被一段活着的推进占着时抛 `busy`，闹钟那边
+    // 认这个码、记一句「上一段还在跑，跳过」；持有者已判死时它会抢占并接着抓。
+    // 两种情形都比一个猜出来的布尔量准。
+    await this._hooks.onResume();
     return { acted: true, decision };
-  }
-
-  get running() {
-    return this._running;
   }
 
   async _ensureHeartbeat() {

@@ -70,7 +70,7 @@
 
 import { CrawlRunner } from '../crawl/runner.js';
 import { RunStore } from '../crawl/run-store.js';
-import { createDrive, driveWithinBudget } from '../crawl/driver.js';
+import { createDrive, driveWithinBudget, provesLiveness } from '../crawl/driver.js';
 import { MemoryKvStore } from '../storage/kv-store.js';
 import { IdbKvStore } from '../storage/idb-kv-store.js';
 import { appendEvent } from '../crawl/event-log.js';
@@ -427,7 +427,12 @@ function relayEvent(e) {
   // **「我还活着」。** 互斥锁靠这个区分「跑得久」和「卡死了」——不吭声超过阈值
   // 就会被抢占。抓取每抓一页都会走到这儿，所以正常情况下永远不会被判死；而真的
   // 卡在某个永不返回的 await 上时，事件也就随之停了。见 crawl/exclusive.js。
-  lock.touch();
+  //
+  // **但不是每条事件都由持有者发出。** `pause` / `abort` / `finish` / `retryFailed`
+  // 四个 op 刻意不持锁（各自的理由见下面的 switch），它们发的事件也走这条通道。
+  // 无条件 `touch()` 等于让**旁人**替持有者作证——实测让一段早该判死的推进又活了
+  // 5 分钟，紧接着的「继续」被它挡了回去。见 crawl/driver.js 的 `provesLiveness`。
+  if (provesLiveness(e?.type)) lock.touch();
 
   debugLog('事件', e.type, e.routeKey ?? e.reason ?? '');
   // 没有界面打开时 sendMessage 会 reject，那是正常的，不是错误。

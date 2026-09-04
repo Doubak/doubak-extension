@@ -101,6 +101,43 @@ export function createDrive({ run, onPreempt, staleAfterMs, now }) {
   return { drive, lock };
 }
 
+/**
+ * 这些事件**不算**「这一段还活着」。
+ *
+ * 锁靠 `touch()` 分辨「跑得久」和「卡死了」，而 offscreen 里所有抓取事件走的是
+ * 同一条通道（`relayEvent`）。问题在于**不是每条事件都由持有者发出**：`pause`、
+ * `abort`、`finish`、`retryFailed` 四个 op 刻意不持锁（见 offscreen.js 里各自的
+ * 说明），它们各自发的那一条事件却和抓取自己的事件长得一模一样。
+ *
+ * 实测的后果（8494 秒的那次）：一段推进卡死，早就该被判死，用户按「暂停」时
+ * `runner.pause()` 发出的 `paused` 事件替它刷新了心跳；紧接着的「继续」于是被拒，
+ * 理由是「已经有『抓取』在进行中」。**用户按下的那个按钮，正是让他按不动下一个
+ * 按钮的原因。**
+ *
+ * 所以证明必须由持有者自己出具。这张表按 op 对齐，一个 op 一条：
+ *
+ * | 不持锁的 op | 它发的事件 |
+ * |---|---|
+ * | `pause`       | `paused` |
+ * | `abort`       | `aborted` |
+ * | `finish`      | `finished` |
+ * | `retryFailed` | `retry_requested` |
+ *
+ * 用排除法而不是白名单：**「又抓到一页」的形态不止一种**（capture、batch、retry、
+ * gate、error……），漏掉一种就会把一段活着的抓取判死并抢占。而不持锁的 op 只有
+ * 四个，且都在同一个 switch 里——数得清的那一侧才适合列举。
+ */
+export const EVENTS_WITHOUT_LOCK = new Set(['paused', 'aborted', 'finished', 'retry_requested']);
+
+/**
+ * 这条事件能不能算作「持有者还活着」。
+ *
+ * @param {string | undefined} type
+ */
+export function provesLiveness(type) {
+  return !EVENTS_WITHOUT_LOCK.has(String(type));
+}
+
 /** 一次唤醒最多干多久。比心跳周期（30 秒）略小。 */
 export const DEFAULT_BUDGET_MS = 22_000;
 
