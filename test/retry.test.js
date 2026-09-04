@@ -18,7 +18,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { Frontier, MAX_NETWORK_RETRIES } from '../src/crawl/frontier.js';
-import { CrawlLoop } from '../src/crawl/loop.js';
+import { CrawlLoop, RETRY_BACKOFF_MS } from '../src/crawl/loop.js';
 import { SessionGuard } from '../src/crawl/session.js';
 import { Pacer, RequestGate } from '../src/crawl/pacing.js';
 import { Transport } from '../src/crawl/transport.js';
@@ -38,8 +38,9 @@ const SUBJECT_OK = `<html><body>
  * @param {object} opts
  * @param {boolean} opts.ordered  条目之间有没有先后关系
  * @param {(url: string) => boolean} opts.failIf
+ * @param {number} [opts.retryBackoffMs]  不传就用真实默认值（等待被注入，不会真睡）
  */
-async function harness({ ordered, failIf }) {
+async function harness({ ordered, failIf, retryBackoffMs }) {
   const store = new MemoryFileStore();
   const writer = new BundleWriter({ producer: TEST_PRODUCER, store, account: { user_id: '82160871', username: 'example' } });
 
@@ -68,14 +69,20 @@ async function harness({ ordered, failIf }) {
   session.preflight(fixtures.broadcastPage);
   /** @type {object[]} */
   const events = [];
+  // **退避的等待要注入，不能真睡。** 重试预算是 10 次 × 10 秒，跑真的计时器的话
+  // 光这一个文件就要十几分钟。记下每一段等了多久，退避本身也就顺便可测了。
+  /** @type {number[]} */
+  const slept = [];
   const loop = new CrawlLoop({
     frontier, transport, writer, session,
     pacer: new Pacer({ intervalMs: 1, jitterRatio: 0 }),
     routes: new Map([['interest.item', { intent: 'interest.item', kind: 'catalog' }]]),
     onEvent: (e) => events.push(e),
+    sleep: async (ms) => { slept.push(ms); },
+    ...(retryBackoffMs === undefined ? {} : { retryBackoffMs }),
   });
 
-  return { loop, frontier, writer, store, events, urls, calls: () => calls };
+  return { loop, frontier, writer, store, events, urls, slept, calls: () => calls };
 }
 
 describe('重试预算', () => {
@@ -104,6 +111,76 @@ describe('重试预算', () => {
     assert.equal(cs.gaps[0].reason, 'fetch_failed');
     assert.match(cs.gaps[0].detail, /subject\/2\//, '要说清是哪一页');
     assert.equal(cs.advanced, false, '有缺口就不许推进水位线');
+  });
+});
+
+describe('重试之间的固定退避', () => {
+  test('每次重试之前都等满 RETRY_BACKOFF_MS', async () => {
+    // 原来两次重试之间只隔一个正常的 1 秒节拍，三次全撞在同一个坏窗口里。
+    const h = await harness({ ordered: false, failIf: (u) => u.includes('/2/') });
+    await h.loop.run({ maxItems: 50 });
+
+    const total = h.slept.reduce((a, b) => a + b, 0);
+    assert.equal(
+      total, RETRY_BACKOFF_MS * MAX_NETWORK_RETRIES,
+      `等了 ${total} 毫秒，应当是 ${MAX_NETWORK_RETRIES} 次 × ${RETRY_BACKOFF_MS} 毫秒`,
+    );
+    // 切成小段是为了让「暂停」不必等满一整段，所以段数必须真的多于一段。
+    assert.ok(h.slept.length > MAX_NETWORK_RETRIES, `退避没有切段：只睡了 ${h.slept.length} 次`);
+    assert.ok(h.slept.every((ms) => ms > 0), '不许出现 0 毫秒的空等');
+  });
+
+  test('**用尽之后不再等**——那一笔等待是为下一次请求付的', async () => {
+    // 最后一次失败之后不会再发请求了，还等 10 秒就是白白拖慢收尾。
+    const h = await harness({ ordered: false, failIf: (u) => u.includes('/2/') });
+    await h.loop.run({ maxItems: 50 });
+
+    const last = h.events.filter((e) => e.type === 'retry').at(-1);
+    assert.equal(last.willRetry, false);
+    assert.equal(last.waitMs, undefined, '不再重试的那一条不该报等待时间');
+    assert.equal(h.slept.reduce((a, b) => a + b, 0), RETRY_BACKOFF_MS * MAX_NETWORK_RETRIES);
+  });
+
+  test('退避期间被叫停，剩下的不补——而且立刻停', async () => {
+    // 「暂停」是纯内存操作，打断不了一个正在跑的 await。一口气睡满的话，用户按下
+    // 暂停最坏要等满一整段才见效——而按暂停往往正是因为他看到了不对的东西。
+    const h = await harness({ ordered: false, failIf: () => true });
+    const realSleep = h.loop._sleep;
+    let slices = 0;
+    h.loop._sleep = async (ms) => {
+      slices += 1;
+      // 第一小段之后就当作用户按了暂停
+      if (slices === 1) h.frontier.stop('user_paused');
+      return realSleep(ms);
+    };
+
+    await h.loop.run({ maxItems: 50 });
+    assert.equal(slices, 1, `叫停之后还睡了 ${slices} 段`);
+  });
+
+  test('每条重试事件都报得出第几次 / 一共几次', async () => {
+    // 预算从 3 次涨到 11 次之后，界面上就是同一行 URL 反复出现；不报这两个数的话，
+    // 「在退避等待」和「卡住了」长得一模一样，而两者的处置完全相反。
+    const h = await harness({ ordered: false, failIf: (u) => u.includes('/2/') });
+    await h.loop.run({ maxItems: 50 });
+
+    const retries = h.events.filter((e) => e.type === 'retry');
+    assert.deepEqual(
+      retries.map((e) => e.attempt),
+      Array.from({ length: MAX_NETWORK_RETRIES + 1 }, (_, i) => i + 1),
+      '次数要从 1 连到 1 + MAX_NETWORK_RETRIES',
+    );
+    assert.ok(retries.every((e) => e.maxAttempts === 1 + MAX_NETWORK_RETRIES));
+  });
+
+  test('退避时长可注入 —— 0 就是不等', async () => {
+    const h = await harness({ ordered: false, failIf: (u) => u.includes('/2/'), retryBackoffMs: 0 });
+    await h.loop.run({ maxItems: 50 });
+    assert.deepEqual(h.slept, [], '退避设成 0 还在等');
+    assert.equal(
+      h.events.filter((e) => e.type === 'retry').length, MAX_NETWORK_RETRIES + 1,
+      '不等待不该影响重试次数',
+    );
   });
 });
 

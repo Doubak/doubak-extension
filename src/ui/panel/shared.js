@@ -53,6 +53,18 @@ export function eventNote(e) {
     // 而覆盖率页要等这一轮跑完才会变。
     return `先前抓不下来的那一页这次抓到了，覆盖率里那处缺口已经收回：${e.url}`;
   }
+  if (e.type === 'retry' && typeof e.attempt === 'number') {
+    // **同一个 URL 会连出十一行。** 重试预算是 11 次、每两次之间固定等 10 秒，
+    // 不写清「第几次 / 一共几次 / 在等多久」的话，这十一行看起来像循环卡住了
+    // ——而「卡住」和「正在按计划退避」的处置完全相反：前者要去查，后者只要等。
+    if (e.attempt >= e.maxAttempts) {
+      return `这一页连着 ${e.maxAttempts} 次都没能连上，不再试了，已经记成一处缺口。`
+        + '抓完之后可以在进度里点「重试抓不下来的页面」，成功了那处缺口会自己收回。';
+    }
+    const secs = Math.round((e.waitMs ?? 0) / 1000);
+    return `没能连上（第 ${e.attempt} 次，最多 ${e.maxAttempts} 次），`
+      + `等 ${secs} 秒再试。这是网络层的失败，不是豆瓣拒绝了我们。`;
+  }
   if (e.type === 'incremental_rebased' && e.reason === 'renamed') {
     return `豆瓣用户名从「${e.was}」改成了「${e.now}」，所以这次要重新抓一份完整的基准。`
       + '不是出错——每条路线的网址里都嵌着用户名，改名之后新旧档案的网址对不上，'

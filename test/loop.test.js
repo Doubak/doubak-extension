@@ -95,12 +95,17 @@ async function harness(script, { maxSegmentBytes } = {}) {
     cursor: { kind: 'page', value: 1 },
   });
 
+  /** @type {number[]} */
+  const slept = [];
   const loop = new CrawlLoop({
     frontier, transport, writer, session, pacer, routes,
     onEvent: (e) => events.push(e),
+    // 重试之间的固定退避走注入的计时器。默认 10 秒 × 最多 10 次，真睡的话
+    // 一个网络错误的用例就要两分钟。
+    sleep: async (ms) => { slept.push(ms); },
   });
 
-  return { loop, frontier, store, writer, events, calls, pacer, session };
+  return { loop, frontier, store, writer, events, calls, pacer, session, slept };
 }
 
 async function readIndex(store, bundleId) {
@@ -602,12 +607,20 @@ describe('网络断了要早早停手，不要一条条熬超时', () => {
   });
 
   test('省下的时间是数量级的', async () => {
-    // 25 条 × 31 秒 ≈ 775 秒 vs 阈值 × 31 秒。这条测试守的是「早停」这件事本身
-    // 有没有意义——阈值要是被调到接近批大小，这个修法就白做了。
+    // 守的是「早停」这件事本身有没有意义——阈值要是接近「一整批熬到底」，这个修法
+    // 就白做了。
+    //
+    // **原来这里拿阈值跟 `DEFAULT_BATCH_SIZE` 比，那是个代理。** 它只在单条的重试
+    // 预算是 3 的时候成立：一整批要熬的是 `批大小 × 单条预算` 次请求，不是「批大小」
+    // 次。预算从 2 调到 10 的那天，代理与本体分家——`22 * 3 < 25` 变成假，而早停
+    // 其实**更划算**了（22 次 vs 一整批 275 次）。
+    //
+    // 所以这里比的是本体：早停要熬的次数，必须是一整批的一个零头。
     const { DEFAULT_BATCH_SIZE } = await import('../src/crawl/runner.js');
+    const wholeBatch = DEFAULT_BATCH_SIZE * (1 + MAX_NETWORK_RETRIES);
     assert.ok(
-      MAX_CONSECUTIVE_NETWORK_ERRORS * 3 < DEFAULT_BATCH_SIZE,
-      '阈值太接近批大小，早停省不下多少时间',
+      MAX_CONSECUTIVE_NETWORK_ERRORS * 3 < wholeBatch,
+      `阈值 ${MAX_CONSECUTIVE_NETWORK_ERRORS} 次太接近一整批的 ${wholeBatch} 次，早停省不下多少时间`,
     );
   });
 

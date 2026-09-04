@@ -165,6 +165,21 @@ describe('一条日志留什么', () => {
       { type: 'longform_refresh', count: 3 },
       { type: 'assets_skipped', count: 7 },
       { type: 'backlog_queued', count: 121 },
+      // 重试的两端：还要再试 / 已经用尽。`waitMs` 只在前者上有，而念出来那句
+      // **不许**靠它分辨——靠 attempt 与 maxAttempts，两个都在白名单里。
+      {
+        type: 'retry',
+        url: 'https://img3.doubanio.com/view/photo/l/public/p1.jpg',
+        attempt: 1,
+        maxAttempts: 11,
+        waitMs: 10_000,
+      },
+      {
+        type: 'retry',
+        url: 'https://img3.doubanio.com/view/photo/l/public/p1.jpg',
+        attempt: 11,
+        maxAttempts: 11,
+      },
       { type: 'backlog_unresolved', count: 2 },
       {
         type: 'extractor_stale',

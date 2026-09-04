@@ -47,16 +47,48 @@ import { urlKey } from '../core/urlkey.js';
 import { nowRfc3339, parseDoubanTimestamp } from '../core/time.js';
 
 /**
+ * 两次重试之间等多久。**固定值，不指数增长。**
+ *
+ * 指数退避是给「对方在限流我」准备的，而这条路上永远不会出现限流：风控是一个
+ * **成功的 HTTP 响应**，由分类器判成 `blocked` / `challenge` 然后转
+ * `awaiting_human`，压根不走重试。走到这里的只有「请求没能完成」——连接失败、
+ * DNS、超时。那类故障的持续时间与我们试了几次无关，所以每次等一样久就够了，
+ * 而且能算得清：一个条目最坏耗时是
+ *
+ *     (1 + MAX_NETWORK_RETRIES) × 30 秒超时 + MAX_NETWORK_RETRIES × 10 秒 ≈ 6.5 分钟
+ *
+ * 10 秒也是**给对方的喘息**：网络抖动、CDN 某个分片抽风，往往几秒就过去了，
+ * 而原来两次重试之间只隔一个正常的 1 秒节拍，等于三次都撞在同一个坏窗口里。
+ *
+ * 这段等待走 `_sleep`（可注入），并且**切成小段、每段之间看一眼有没有被叫停**
+ * ——否则用户按下「暂停」之后最多要等满 10 秒才见效，而按暂停往往正是因为他
+ * 看到了不对的东西。
+ */
+export const RETRY_BACKOFF_MS = 10_000;
+
+/**
  * 连续多少次网络层错误就判定「网络没了」。
  *
  * ## 这个数不能随手取
  *
- * 它**必须大于单个条目的重试预算**（`1 + MAX_NETWORK_RETRIES` = 3）。否则一个
+ * 它**必须大于单个条目的重试预算**（`1 + MAX_NETWORK_RETRIES` = 11）。否则一个
  * 坏 URL 自己就能把整场抓取判成「网络断了」——那是把「这一页有问题」误读成
  * 「全世界都没了」，而两者的处置完全相反。
  *
- * 取两个条目的预算（6）：这是「不止一个 URL 出问题」所需的最小值。再大就是在
- * 白白多熬超时——网络真断了的时候，每多试一次就是 30 秒。
+ * 取两个条目的预算（22）：这是「不止一个 URL 出问题」所需的最小值。
+ *
+ * ## 重试预算调到 10 之后，这个数的代价变了，如实写在这里
+ *
+ * 网络真断了的时候，每一次尝试是 30 秒超时 + 10 秒退避，22 次就是 **约 15 分钟**
+ * 才判定「网络没了」。原来（预算 2、无退避）是 6 次 × 30 秒 ≈ 3 分钟。
+ *
+ * 这个变长是**推导出来的，不是选出来的**：只要「一个坏 URL 不许把全场判成断网」
+ * 这条还成立，阈值就必须跟着重试预算走。把它单独调小会让下界失效——那才是真的
+ * 错误（把一页的问题说成全世界的问题），而多等十几分钟只是慢。
+ *
+ * 期间并不是没有动静：每一次重试都发 `retry` 事件，界面上看得见，锁那边也据此
+ * 认定持有者还活着（见 driver.js 的 `provesLiveness`）。真正要防的是**一声不吭**
+ * 地卡住，那是另一个 bug，已经修在 `errors.js` 的 `readBody` 里。
  */
 export const MAX_CONSECUTIVE_NETWORK_ERRORS = (1 + MAX_NETWORK_RETRIES) * 2;
 
@@ -86,6 +118,7 @@ export class CrawlLoop {
   constructor({
     frontier, transport, writer, session, pacer, routes, onEvent, floors,
     bypassGates = false, priorCounts = null, savedStates = null, floorSources = null,
+    sleep, retryBackoffMs = RETRY_BACKOFF_MS,
   }) {
     this._frontier = frontier;
     this._transport = transport;
@@ -94,6 +127,8 @@ export class CrawlLoop {
     this._pacer = pacer;
     this._routes = routes;
     this._emit = onEvent ?? (() => {});
+    this._sleep = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this._retryBackoffMs = retryBackoffMs;
 
     /**
      * 连续多少次网络层错误。用来判定「网络没了」——见 `_handleTransportError`。
@@ -397,7 +432,7 @@ export class CrawlLoop {
         withCk: route.surface === 'api',
       });
     } catch (err) {
-      return this._handleTransportError(item, err);
+      return await this._handleTransportError(item, err);
     }
 
     // ── 2. 判定
@@ -702,12 +737,35 @@ export class CrawlLoop {
   }
 
   /**
+   * 重试之前的固定退避。
+   *
+   * ## 为什么要切成小段
+   *
+   * 「暂停」是纯内存操作（`frontier.stop()`），它不会打断一个正在跑的 `await`。
+   * 一口气睡满 10 秒的话，用户按下暂停之后最坏要等 10 秒才见效——而按暂停往往
+   * 正是因为他看到了不对的东西。切成小段、每段之间看一眼是否已被叫停，把这个
+   * 延迟压到一段之内。
+   *
+   * 被叫停就**直接返回**，不补足剩下的时间：那笔等待是欠豆瓣的，而我们已经不打算
+   * 再发请求了。
+   */
+  async _backoff() {
+    const total = this._retryBackoffMs;
+    if (!(total > 0)) return;
+    const step = 500;
+    for (let waited = 0; waited < total; waited += step) {
+      if (this._frontier.stopped) return;
+      await this._sleep(Math.min(step, total - waited));
+    }
+  }
+
+  /**
    * 取页失败的分流。
    *
    * 网络错误与超时可以重试；用户中止、以及**分不清的错误**一律不重试——
    * 把风控当网络错误去重试，代价是账号。
    */
-  _handleTransportError(item, err) {
+  async _handleTransportError(item, err) {
     const te = err instanceof TransportError ? err : null;
 
     // **连着几次都是网络层错误 = 网络没了，别再一条条熬超时。**
@@ -731,7 +789,7 @@ export class CrawlLoop {
           url: item.url,
           message:
             `连续 ${this._consecutiveNetworkErrors} 次请求都没能连上豆瓣，判定为网络中断。` +
-            '已停下——不这么做的话，剩下的条目会一条条熬满超时，白耗十几分钟。',
+            '已停下——不这么做的话，剩下的条目会一条条熬满超时加退避，白耗几个小时。',
         });
         return 'stop';
       }
@@ -739,7 +797,18 @@ export class CrawlLoop {
 
     if (te?.retryable) {
       const { willRetry } = this._frontier.settleNetworkError(item, te.message);
-      this._emit({ type: 'retry', url: item.url, kind: te.kind, willRetry });
+      this._emit({
+        type: 'retry',
+        url: item.url,
+        kind: te.kind,
+        willRetry,
+        // **次数和等待要说出来。** 重试预算从 3 次涨到 11 次之后，一个坏 URL 能占住
+        // 六分多钟；不报这两个数的话，界面上就是同一行 URL 反复出现，看不出是
+        // 「在退避等待」还是「卡住了」——而那两件事的处置完全相反。
+        attempt: item.attempts,
+        maxAttempts: 1 + MAX_NETWORK_RETRIES,
+        ...(willRetry ? { waitMs: this._retryBackoffMs } : {}),
+      });
       if (!willRetry) {
         // **重试用尽也要留下痕迹。** 早先这条分支只是返回 'failed' 就完了：不记缺口，
         // 而叶子路线又从没走过 observePage，于是 `crawl_state` 与 `coverage` 双双为空
@@ -751,8 +820,10 @@ export class CrawlLoop {
           `${item.url}：重试 ${item.attempts} 次仍失败（${te.message}）`,
           item.url,
         );
+        return 'failed';
       }
-      return willRetry ? 'retry' : 'failed';
+      await this._backoff();
+      return 'retry';
     }
 
     if (te?.kind === 'aborted') {

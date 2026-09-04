@@ -136,6 +136,13 @@ export function formatEntry(e, at) {
     // 那条测试就是拦这个的。
     ...(typeof e.containerCount === 'number' ? { containerCount: e.containerCount } : {}),
     ...(e.missing ? { missing: e.missing } : {}),
+    // `retry` 要的三个。重试预算是 11 次，所以一个连不上的 URL 会在日志里**连出
+    // 十一行一模一样的字**——不带次数的话，那看起来像循环卡住了，而它其实正在
+    // 按计划退避。`waitMs` 在不再重试的那一条上是缺席的，那正是「这次是最后一次」
+    // 的意思（`eventNote` 不靠它分辨，靠 attempt/maxAttempts，两个都在白名单里）。
+    ...(typeof e.attempt === 'number' ? { attempt: e.attempt } : {}),
+    ...(typeof e.maxAttempts === 'number' ? { maxAttempts: e.maxAttempts } : {}),
+    ...(typeof e.waitMs === 'number' ? { waitMs: e.waitMs } : {}),
   };
 }
 
