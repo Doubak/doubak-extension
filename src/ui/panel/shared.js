@@ -48,6 +48,11 @@ export const STATUS_NAMES = {
  * @returns {string | null}
  */
 export function eventNote(e) {
+  if (e.type === 'gap_resolved') {
+    // 好消息也要说出来。用户点「重试」之后最想知道的就是「那处缺口没了吗」，
+    // 而覆盖率页要等这一轮跑完才会变。
+    return `先前抓不下来的那一页这次抓到了，覆盖率里那处缺口已经收回：${e.url}`;
+  }
   if (e.type === 'incremental_rebased' && e.reason === 'renamed') {
     return `豆瓣用户名从「${e.was}」改成了「${e.now}」，所以这次要重新抓一份完整的基准。`
       + '不是出错——每条路线的网址里都嵌着用户名，改名之后新旧档案的网址对不上，'

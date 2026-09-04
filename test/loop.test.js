@@ -826,3 +826,72 @@ describe('判不出来写进档案的是 unknown，不是 blocked', () => {
     assert.equal(idx[0].verdict_reason, undefined);
   });
 });
+
+describe('重试成功之后，那处缺口必须收回', () => {
+  /**
+   * 真实档案 `20260903T232811Z-b3c2b6`：一张广播配图三次都超时，记下
+   *
+   *     {"reason":"fetch_failed","detail":"…f042d8249db3650.jpg：重试 3 次仍失败（请求超时…）"}
+   *
+   * 用户点了「重试」，这一次**成功了**——索引里躺着那条 `verdict: ok`、542163 字节、
+   * content_sha256 齐全的捕获。而 manifest 里那处缺口原样留着，于是
+   * `contiguous: false` 被封进了档案，永远改不了。**档案是全的，声明是错的。**
+   */
+  test('同一个 URL 抓成功了，先前那处缺口就地抹掉', async () => {
+    let fail = true;
+    const h = await harness([{ body: broadcastPage(0) }]);
+    h.loop._transport = {
+      fidelity: 'decoded_body+filtered_headers',
+      fetch: async (url) => {
+        if (fail) throw new TransportError('timeout', '请求超时');
+        return {
+          requestedUrl: url, finalUrl: url, redirectChain: [], status: 200,
+          headers: [['content-type', 'text/html']],
+          body: enc.encode(broadcastPage(0)),
+          bodyText: broadcastPage(0),
+          fidelity: 'decoded_body+filtered_headers', elapsedMs: 1,
+        };
+      },
+    };
+
+    // ① 重试预算用尽 → 记缺口
+    await h.loop.run({ maxItems: 10 });
+    const st = h.loop.stateFor('broadcast.timeline');
+    assert.equal(st.gaps.length, 1, '重试用尽必须留下痕迹');
+    assert.equal(st.gaps[0].reason, 'fetch_failed');
+    assert.ok(st.gaps[0].url, '缺口要带上结构化的 URL —— detail 是给人看的，不能拿去做匹配');
+
+    // ② 用户点「重试」，这一次成功
+    fail = false;
+    assert.equal(h.frontier.retryFailed({}), 1);
+    await h.loop.run({ maxItems: 10 });
+
+    assert.equal(st.gaps.length, 0, '重试成功了，缺口却还留着 —— 档案是全的，声明是错的');
+    h.loop.flushRouteEvidence();
+    const manifest = await h.writer.finalize();
+    const cs = manifest.crawl_state.find((c) => c.route_key === 'broadcast.timeline');
+    assert.equal(cs.gaps.length, 0, 'manifest 里那处缺口是冻住的 —— 封进去就再也改不了');
+    assert.ok(h.events.some((e) => e.type === 'gap_resolved'), '收回缺口这件事要说出来');
+  });
+
+  test('只认完全相同的 URL —— 抹掉缺口是在放宽完整性声明', () => {
+    const st = new RouteState({ routeKey: 'broadcast.timeline', enumeration: 'bounded' });
+    st.recordGap('fetch_failed', 'x', 'https://douban.com/a');
+    assert.equal(st.resolveGap('https://douban.com/a?x=1'), 0, '前缀不算');
+    assert.equal(st.resolveGap('https://douban.com/'), 0, '被包含也不算');
+    assert.equal(st.resolveGap(undefined), 0);
+    assert.equal(st.gaps.length, 1);
+    assert.equal(st.resolveGap('https://douban.com/a'), 1);
+    assert.equal(st.gaps.length, 0);
+  });
+
+  test('没有 URL 的那些缺口，永远不会被后来的成功冲掉', () => {
+    // 「中途停下」「抽取器坏了」说的都不是某一个 URL，后来抓成一页并不能推翻它们。
+    // 缺口只增不减在别处都对，唯独「这一页抓不下来」是一句可以被自己证伪的断言。
+    const st = new RouteState({ routeKey: 'broadcast.timeline', enumeration: 'bounded' });
+    st.markStopped('blocked');
+    st.recordGap('no_items_observed', '一个 ID 都没抽到');
+    assert.equal(st.resolveGap('https://douban.com/a'), 0);
+    assert.equal(st.gaps.length, 2, '与 URL 无关的缺口被抹掉了');
+  });
+});

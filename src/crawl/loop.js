@@ -644,12 +644,25 @@ export class CrawlLoop {
     }
     if (t.state === 'failed') {
       // 失败页阻塞该路线，且构成一处缺口——有缺口就不许推进水位线。
-      this.stateFor(item.routeKey).recordGap(t.reason ?? 'failed', item.url);
+      this.stateFor(item.routeKey).recordGap(t.reason ?? 'failed', item.url, item.url);
       return 'failed';
     }
 
     // ── 6. 只有 ok 才继续翻页 / 派生新条目
     if (cls.verdict === 'ok') {
+      // **这一页先前记下的缺口，被这次捕获本身推翻了。**
+      //
+      // 「重试 3 次仍失败」是一句关于这个 URL 的断言，而现在同一个 URL 就在档案里。
+      // 不抹掉的话，用户点「重试」、重试**成功了**，manifest 里那处缺口照样留着，
+      // 这条路线的 `contiguous` 于是永久为 false——档案是全的，声明是错的，而且
+      // 档案一旦封好就再也改不了。实测撞到过（2026-09-03，一张广播配图）。
+      //
+      // 只认完全相同的 URL：抹掉缺口是在**放宽**完整性声明，判据必须严。
+      const healed = this.stateFor(item.routeKey).resolveGap(item.url);
+      if (healed) {
+        this._emit({ type: 'gap_resolved', url: item.url, routeKey: item.routeKey, count: healed });
+      }
+
       // 叶子路线（没有分页的，比如作品详情页）不走 `observePage`，得在这里记一笔，
       // 否则它抓了几千页仍然显示「已抓 0」——而且只在出错时才出现在进度表上。
       if (!route.pagination) this.stateFor(item.routeKey).recordLeafCapture();
@@ -736,6 +749,7 @@ export class CrawlLoop {
         this.stateFor(item.routeKey).recordGap(
           'fetch_failed',
           `${item.url}：重试 ${item.attempts} 次仍失败（${te.message}）`,
+          item.url,
         );
       }
       return willRetry ? 'retry' : 'failed';
@@ -762,6 +776,7 @@ export class CrawlLoop {
     this.stateFor(item.routeKey).recordGap(
       'fetch_failed',
       `${item.url}：${String(err?.message ?? err)}`,
+      item.url,
     );
     this._emit({ type: 'error', url: item.url, message: String(err?.message ?? err) });
     return 'failed';

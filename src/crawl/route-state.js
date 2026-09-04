@@ -260,9 +260,43 @@ export class RouteState {
     return this._timeExtractionFailedAt ?? null;
   }
 
-  /** 记一处缺口。有缺口就不许推进水位线。 */
-  recordGap(reason, detail) {
-    this.gaps.push({ reason, ...(detail ? { detail } : {}) });
+  /**
+   * 记一处缺口。有缺口就不许推进水位线。
+   *
+   * `url` 是**结构化的那一份**。`detail` 是给人看的一句话（里面往往也含着 URL），
+   * 而 `url` 供 `resolveGap()` 精确比对。不能拿 detail 做子串匹配：两条 URL 可以
+   * 互为前缀，而这里判错的方向是**悄悄抹掉一处真缺口**——最不能出的那种错。
+   * 不是所有缺口都有 URL（`aborted`、`no_items_observed` 就没有），没有的那些
+   * 也就永远不会被下面那个方法碰到，这正是想要的。
+   */
+  recordGap(reason, detail, url) {
+    this.gaps.push({ reason, ...(detail ? { detail } : {}), ...(url ? { url } : {}) });
+  }
+
+  /**
+   * 这处缺口被**我们自己后来的证据**推翻了：同一个 URL 真的抓下来了。
+   *
+   * 实测的漏洞（2026-09-03 的一次全量抓取）：一张广播配图三次都超时，于是记下
+   * 「重试 3 次仍失败」；用户点了「重试」，这一次**成功了**，索引里躺着那条
+   * `verdict: ok`、542163 字节的捕获——而 manifest 里那处缺口原样留着，
+   * 于是这条路线的 `contiguous` 永久是 false。**档案是全的，声明是错的。**
+   *
+   * 缺口是只增不减的，这在别处都对（中途停下、抽取器坏了，都不该被后来的成功
+   * 冲掉），唯独「这一页抓不下来」不是：它是一句关于**某一个 URL** 的断言，
+   * 而同一个 URL 的一次成功捕获正好把它证伪。
+   *
+   * 方向也值得说清楚：抹掉缺口等于**放宽**完整性声明，所以判据必须严——只认
+   * 完全相同的 URL，且只在本次抓取内。上一份档案里的缺口是冻住的，不去动它，
+   * 那份档案当时确实没抓到。
+   *
+   * @param {string} url
+   * @returns {number}  抹掉了几处
+   */
+  resolveGap(url) {
+    if (!url) return 0;
+    const before = this.gaps.length;
+    this.gaps = this.gaps.filter((g) => g.url !== url);
+    return before - this.gaps.length;
   }
 
   /**
