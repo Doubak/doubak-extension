@@ -1987,3 +1987,66 @@ describe('导出之后该做什么 —— 面板要说得出来', () => {
     assert.deepEqual(lost, [], `书面化时丢了这些理由：\n${lost.join('\n')}`);
   });
 });
+
+describe('抓取停下来不是「失败」—— 面板必须在删除之前说出来', () => {
+  /**
+   * ## 为什么这几条要被守着
+   *
+   * 「没收尾的档案照样能解析、导出之后照样能导回来」这两件事**代码里本来就是对的**，
+   * 而且措辞也早就写好了——`pipeline/opfs-bundle-source.js` 的 `status` 注释里一句，
+   * `bundle/importer.js` 的 `no_manifest` 告警里一句。问题是那两句都出现在用户
+   * **已经决定之后**才会看到的地方：前者根本不上屏，后者要等他开始导入才弹。
+   *
+   * 而真正做决定的两个对话框，一个只印「未收尾」三个字（周围全是量词，于是它读起来
+   * 像个缺陷标签），另一个末行直接写着「中止后，该档案即可删除」。
+   *
+   * 这类回退是**静默**的：删掉一句话不会让任何东西变红，页面照常打开。所以这里
+   * 反着钉——钉那句不该再出现的话。
+   */
+
+  test('中止确认框不再以「即可删除」收尾', () => {
+    const js = readPanelSourceSync();
+    assert.equal(
+      js.includes('中止后，该档案即可删除。'), false,
+      '这句话出现在确认框最末一行，读起来是建议而不是事实，且与三行之上的「将全部保留」自相矛盾',
+    );
+    // 能力照说，但不能是最后一句。
+    assert.match(js, /中止后该档案将解除占用/);
+    assert.match(js, /半途中止的档案照样能解析、能导出，导出之后也能再导入回来/);
+  });
+
+  test('删除确认框在档案没收尾时，说得出它还能做什么', () => {
+    const js = readPanelSourceSync();
+    // 判据是 hasManifest，不是别的：这一句只对没收尾的那些成立。
+    assert.match(js, /if \(!u\.hasManifest\) \{[\s\S]{0,400}未收尾」不等于「没用」/);
+    assert.match(js, /解析器照常读得出来，导出之后也可以再导入回来/);
+    // 「清空全部」是同一个判断，而且那条路上的人更可能是觉得前几次白抓了。
+    assert.match(js, /const unfinalized = deletable\.filter\(\(u\) => !u\.hasManifest\)/);
+  });
+
+  test('帮助页那张表有总纲，也有「没抓完」这两种收场', async () => {
+    const html = await readRepoFile('src/ui/panel.html');
+    assert.match(html, /抓取不会「失败」，只会停下来/, '五行全是「继续」的表需要一句总纲');
+    // 总纲必须同时给出那条例外，否则它就是一句撑不住的话。
+    assert.match(html, /未曾抓取/, '真正会永久丢失的只有这一种，不说就是过度承诺');
+    for (const row of ['你中止了这次抓取', '这份档案还没收尾']) {
+      assert.ok(html.includes(`<b>${row}</b>`), `表里少了「${row}」这一行`);
+    }
+  });
+
+  test('档案页那张「还没收尾」的卡片，不止说「不是坏的」', () => {
+    const js = readPanelSourceSync();
+    assert.match(js, /这并不表示档案损坏/);
+    // 只否定一件事，看到一屏空字段的人接着要问的仍然没人答。
+    assert.match(js, /即便这次抓取就此中止，这一份也不会作废/);
+  });
+
+  test('这几句都进得了面板 —— 界面文字不是 Markdown', () => {
+    const js = readPanelSourceSync();
+    for (const s of ['未收尾」不等于「没用」', '半途中止的档案照样能解析']) {
+      const i = js.indexOf(s);
+      assert.notEqual(i, -1, `找不到「${s}」`);
+      assert.equal(js.slice(i - 60, i + 120).includes('**'), false, '界面文字里不许有 Markdown 星号');
+    }
+  });
+});

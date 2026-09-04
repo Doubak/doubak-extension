@@ -107,6 +107,15 @@ The first run is a **full crawl** — a complete pass, resumable. Later runs are
 work pages and images. The test is "can the upstream thing still change", not "have we
 fetched it before", which is why incremental runs are fast enough to run often.
 
+**A crawl that stops is not a crawl that failed, and a half-finished archive is not a
+worthless one.** Every page is written to disk as it is captured, so wherever a run stops —
+a CAPTCHA, an expired session, a closed browser — everything up to that point is already in
+the archive. An unfinalized bundle has no `manifest.json`, because that file is written
+once, at the end: it therefore carries no coverage evidence and cannot be the basis for the
+next incremental run. It does, however, parse normally, export normally, and import back
+into the extension later. **So don't delete it.** The one thing that causes permanent loss
+is not having crawled at all — broadcasts leave no trace when they are deleted.
+
 ## What you get out
 
 The archive is a plain folder of WARC segment files, an index, and a `manifest.json` — back

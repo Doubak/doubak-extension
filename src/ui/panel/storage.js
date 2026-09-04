@@ -111,13 +111,31 @@ export async function deleteBundle(bundleId, { report = setStorageResult } = {})
   const lines = [
     `删除档案 ${u.bundleId}？`,
     `${bytes(u.bytes)} · ${u.files} 个文件 · ${u.hasManifest ? '已完成' : '未收尾'}`,
+  ];
+  // **「未收尾」在这里会被读成「这份是坏的」。** 那一行上其余每个词都是量
+  // （多大、几个文件），于是夹在中间的这个状态词看起来也像一个缺陷标签——而这
+  // 是唯一一个不可逆的对话框，误判的代价是永久的。
+  //
+  // 实际情况相反：manifest 只在收尾时写一次，没有它照样解析（见
+  // `pipeline/opfs-bundle-source.js` 的 `status`），导出的目录也照样导得回来
+  // （见 `bundle/importer.js` 的 `no_manifest` 告警）。这两件事本来都写在代码里，
+  // 只是都写在用户已经决定之后才会看到的地方。
+  //
+  // 下面那条「没有导出记录」答的是另一个问题（还有没有副本），替代不了这条。
+  if (!u.hasManifest) {
+    lines.push(
+      '「未收尾」不等于「没用」：已抓取的每一页均已落盘，',
+      '解析器照常读得出来，导出之后也可以再导入回来。',
+    );
+  }
+  lines.push(
     '',
     u.exportState === 'exported'
       ? `你在 ${u.exportedAt.slice(0, 16).replace('T', ' ')} 导出过它。`
       : '⚠ 没有导出记录 —— 浏览器里这一份可能是唯一的副本。',
     '',
     '删除不可逆，没有回收站。',
-  ];
+  );
   if (!confirm(lines.join('\n'))) return false;
 
   report('idle', `正在删除 ${u.bundleId}…`);
@@ -154,6 +172,16 @@ async function deleteAll() {
   ];
   if (unexported.length) {
     lines.push(`⚠ 其中 ${unexported.length} 份没有导出记录，可能是唯一的副本。`, '');
+  }
+  // 与单份删除同一条理由：「未收尾」不是「没用」。这条路径尤其要说——会点
+  // 「清空全部」的人，往往正是因为觉得前几次都白抓了。
+  const unfinalized = deletable.filter((u) => !u.hasManifest);
+  if (unfinalized.length) {
+    lines.push(
+      `其中 ${unfinalized.length} 份未收尾。那不等于没用：里面每一页都已落盘，`,
+      '解析器照常读得出来，导出之后也可以再导入回来。',
+      '',
+    );
   }
   if (blocked.length) lines.push(`（${blocked.length} 份正在抓，会保留）`, '');
   lines.push('删除不可逆，没有回收站。');
