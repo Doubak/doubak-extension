@@ -89,6 +89,16 @@
              或者我们哪天又漏了一种时机。所以是个小图标，不是一个按钮。 -->
         <button class="act icon" id="rescan" title="重新扫描存储" aria-label="重新扫描存储">↻</button>
       </div>
+      <!-- **系统的文件夹对话框一次只能选一个文件夹。**
+           File System Access 的 `showDirectoryPicker()` 没有多选（`<input webkitdirectory>`
+           也一样），所以「一次导入好几份」只能靠选中它们共同的上一级——而这件事
+           扫描器本来就做得到（`scanForBundles` 往下找三层）。
+           原来这句话只在**扫不到档案之后**才说得出口，也就是决定已经做完了才到。
+           判据不是「这句话对不对」，而是「做这个决定的人，在按下去之前会不会读到它」。 -->
+      <div class="muted small" id="import-hint">
+        系统的对话框一次只能选一个文件夹。要一次导入多份，请选中它们<b>共同的上一级</b>——
+        这里会往下找三层，所以按月归档、或者解压之后多套一层，都认得出来。
+      </div>
       <div id="import-result"></div>
       <div id="storage-result"></div>
 

@@ -2050,3 +2050,43 @@ describe('抓取停下来不是「失败」—— 面板必须在删除之前说
     }
   });
 });
+
+describe('一次只能选一个文件夹 —— 这话要在点开对话框之前说', () => {
+  /**
+   * 用户问的是「导入档案的对话框能不能多选文件夹」。答案是不能：
+   * `showDirectoryPicker()` 没有多选，`<input webkitdirectory>` 也一样，
+   * 这是浏览器那一侧的事，不是我们挑的。
+   *
+   * 但要做的事本来就做得到——`scanForBundles` 往下找三层，选中共同的上一级
+   * 就是一次导入好几份。问题只在于这句话原来**只在扫不到档案之后**才出现，
+   * 也就是决定已经做完之后才到。判据不是「这句话对不对」。
+   */
+  test('按钮旁边就得说清楚，而不是等扫空了才说', async () => {
+    // **先把 HTML 注释剥掉。** 这一段的注释里就写着「共同的上一级」（在讲这句话
+    // 为什么必须提前说），带着注释去搜，删掉屏幕上那一行判据照样是绿的——变异测试
+    // 当场抓到了这一点。注释不是界面。
+    const html = (await readRepoFile('src/ui/panel.html')).replace(/<!--[\s\S]*?-->/g, '');
+    const bar = html.indexOf('id="library-bar"');
+    const list = html.indexOf('id="import-result"');
+    assert.ok(bar > 0 && list > bar, '找不到导入那一行，这条判据已经失去意义');
+    const between = html.slice(bar, list);
+    assert.ok(between.length > 40, '剥完注释就没剩什么了，这条判据已经失去意义');
+    assert.match(between, /一次只能选一个文件夹/, '没有在按钮旁边说「一次只能选一个」');
+    assert.match(between, /共同的上一级/, '没说该怎么办 —— 只说限制等于没说');
+  });
+
+  test('文案里那个「三层」必须就是扫描器真的走的层数', async () => {
+    // 一个写死在句子里的数字，改了代码不会有任何东西提醒你。而它错了的后果是
+    // 用户照着做、然后得到一句「这里没有档案」。
+    const { scanForBundles } = await import('../src/bundle/importer.js');
+    const depth = /maxDepth = (\d+)/.exec(
+      await readRepoFile('src/bundle/importer.js'),
+    );
+    assert.ok(scanForBundles && depth, '找不到 maxDepth 的默认值');
+    const 汉字 = ['零', '一', '两', '三', '四', '五', '六'][Number(depth[1])];
+    for (const f of ['src/ui/panel.html', 'README.md']) {
+      const t = await readRepoFile(f);
+      assert.match(t, new RegExp(`往下找${汉字}层`), `${f} 里那个层数和 maxDepth 对不上`);
+    }
+  });
+});
