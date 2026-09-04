@@ -15,7 +15,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  readBundleMeta, planImport, compareContents, importBundle, ACTIONS,
+  readBundleMeta, planImport, compareContents, importBundle, ACTIONS, scanForBundles,
 } from '../src/bundle/importer.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { sha256Hex } from '../src/core/digest.js';
@@ -369,5 +369,125 @@ describe('真的搬一次', () => {
 
     await importBundle({ source: src, dest, resume: true });
     assert.deepEqual(await dest.read(seg), await src.read(seg));
+  });
+});
+
+describe('选中上一级：一次导入好几份', () => {
+  /**
+   * 这一段回答的是一个很具体的问题：「选中装着好几份档案的父目录，是不是全都会导？」
+   *
+   * 系统的文件夹对话框一次只能选一个文件夹（`showDirectoryPicker()` 没有多选），
+   * 所以「选上一级」就是这个扩展里的多选。而 `scanForBundles` 此前**一个测试都没有**
+   * ——往下找几层、找到就不再往下、超上限要说出来，全靠读代码相信。
+   */
+
+  /**
+   * 一个只实现了 `entries()` 的假目录句柄。`scanForBundles` 只用得到它。
+   * @param {string} name
+   * @param {Record<string, any>} children  文件名 → null，子目录名 → 另一个句柄
+   */
+  const dir = (name, children) => ({
+    kind: 'directory',
+    name,
+    async *entries() {
+      for (const [k, v] of Object.entries(children)) {
+        yield [k, v === null ? { kind: 'file', name: k } : v];
+      }
+    },
+  });
+
+  /** 一份长得像档案的目录。 */
+  const bundle = (id, extra = {}) => dir(`doubak-bundle-${id}`, {
+    'manifest.json': null,
+    [`index-${id}.ndjson`]: null,
+    [`data-${id}-00001.warc.gz`]: null,
+    ...extra,
+  });
+
+  test('父目录里并排三份 —— 三份都找得到', async () => {
+    const root = dir('exports', {
+      'doubak-bundle-20260801T005010Z-3eef52': bundle('20260801T005010Z-3eef52'),
+      'doubak-bundle-20260903T232811Z-b3c2b6': bundle('20260903T232811Z-b3c2b6'),
+      'doubak-bundle-20240811T121600Z-4983ef': bundle('20240811T121600Z-4983ef'),
+      '截图.png': null,
+    });
+    const r = await scanForBundles(root);
+    assert.equal(r.found.length, 3, '并排的三份没有全部找到');
+    assert.equal(r.truncated, false);
+  });
+
+  test('再套一层也认得 —— 真实的下载目录就是这个形状', async () => {
+    // ~/downloads/exports 实测就是混着的：一份在第一层，另外几份在 `20260806/` 里。
+    const root = dir('exports', {
+      'doubak-bundle-20260903T232811Z-b3c2b6': bundle('20260903T232811Z-b3c2b6'),
+      20260806: dir('20260806', {
+        'doubak-bundle-20221225T181500Z-98e6c6': bundle('20221225T181500Z-98e6c6'),
+        'doubak-bundle-20240811T121600Z-4983ef': bundle('20240811T121600Z-4983ef'),
+      }),
+    });
+    const r = await scanForBundles(root);
+    assert.equal(r.found.length, 3, '深浅不一的三份没有全部找到');
+    assert.deepEqual(
+      r.found.map((f) => f.label).sort(),
+      [
+        'exports/20260806/doubak-bundle-20221225T181500Z-98e6c6',
+        'exports/20260806/doubak-bundle-20240811T121600Z-4983ef',
+        'exports/doubak-bundle-20260903T232811Z-b3c2b6',
+      ],
+      'label 要说清每一份是从哪儿来的 —— 用户要靠它对上号',
+    );
+  });
+
+  test('只有 index 没有 manifest 也算一份 —— 没收尾的档案照样导得进来', async () => {
+    const root = dir('x', {
+      a: dir('a', { 'index-20260903T232811Z-b3c2b6.ndjson': null }),
+    });
+    assert.equal((await scanForBundles(root)).found.length, 1);
+  });
+
+  test('认出是档案就不再往里走', async () => {
+    // 档案目录里不该有子目录。进去只是浪费时间，还可能把同名的东西也当成候选。
+    const inner = bundle('20260903T232811Z-b3c2b6', {
+      备份: bundle('20240811T121600Z-4983ef'),
+    });
+    const r = await scanForBundles(dir('x', { b: inner }));
+    assert.equal(r.found.length, 1, '钻进档案目录里面去了');
+  });
+
+  test('太深就不找了，而且**说出来**', async () => {
+    // 用户完全可能手滑选中整个主目录。默认 maxDepth=3：这里把档案埋到第 4 层。
+    const deep = dir('1', { 2: dir('2', { 3: dir('3', { 4: bundle('20260903T232811Z-b3c2b6') }) }) });
+    const r = await scanForBundles(dir('root', { 1: deep }));
+    assert.equal(r.found.length, 0, '超过 maxDepth 还在往下找');
+
+    // 加一层预算就该找得到 —— 证明上面那条是深度挡的，不是别的东西挡的。
+    const r2 = await scanForBundles(dir('root', { 1: deep }), { maxDepth: 4 });
+    assert.equal(r2.found.length, 1);
+  });
+
+  test('扫得太多就停下，并且 truncated 为真 —— 报一个不完整的结果而不声张是最糟的', async () => {
+    const many = {};
+    for (let i = 0; i < 30; i += 1) many[`d${i}`] = dir(`d${i}`, {});
+    const r = await scanForBundles(dir('root', many), { maxDirs: 5 });
+    assert.equal(r.truncated, true, '到了上限却没说');
+    assert.ok(r.scanned <= 6, `扫了 ${r.scanned} 个，超过了上限`);
+  });
+
+  test('找到之后，计划里每一份都是「导入」', async () => {
+    // scanForBundles 只负责找；真正决定导不导的是 planImport。这条把两头接上：
+    // 三份互不相同、扩展里一份都没有 —— 三份都该导，count 就是 3。
+    const candidates = ['a1b2c3', 'd4e5f6', '778899'].map((id) => ({
+      label: `exports/doubak-bundle-${id}`,
+      bundleId: id,
+      accountUserId: '82160871',
+      accountUsername: 'mewx',
+      hasManifest: true,
+      files: [{ name: 'manifest.json', size: 10 }],
+      bytes: 10,
+      fatal: [],
+    }));
+    const plan = planImport({ candidates, existing: [] });
+    assert.equal(plan.count, 3, '找到了三份，计划里却不是三份都导');
+    assert.deepEqual(plan.items.map((i) => i.action), ['import', 'import', 'import']);
   });
 });
