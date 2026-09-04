@@ -81,8 +81,63 @@ describe('超时：没有它，一个挂住的连接会永远卡住队列', () =
 
   test('正常响应不受影响', async () => {
     const ok = async () => ({ status: 200 });
-    const res = await fetchWithTimeout(ok, 'https://x/', {}, { timeoutMs: 1000 });
-    assert.equal(res.status, 200);
+    const { response, body } = await fetchWithTimeout(ok, 'https://x/', {}, { timeoutMs: 1000 });
+    assert.equal(response.status, 200);
+    assert.equal(body, null, '没给 readBody 时不该凭空读出正文');
+  });
+
+  test('**正文也在期限里** —— 响应头到了不算这次请求完成了', async () => {
+    // 这是 2026-09-04 那次卡死的成因。浏览器的 fetch 在**响应头到达时**就 resolve，
+    // 正文还在路上；而 `fetchWithTimeout` 的 finally 里定时器已经清掉、外部 abort
+    // 的监听也摘掉了。于是调用方那句 `await response.arrayBuffer()` 是一个
+    // **完全没有上限**的等待——不报错、不重试、不发事件，抓取循环就此不再返回。
+    // 实测卡了 8494 秒（抓封面图抓到 2414/2943 时）。
+    const headersThenStall = async () => ({
+      status: 200,
+      arrayBuffer: () => new Promise(() => {}), // 头给了，正文永远不来
+    });
+    await assert.rejects(
+      () => fetchWithTimeout(headersThenStall, 'https://x/', {}, {
+        timeoutMs: 20,
+        readBody: (r) => r.arrayBuffer(),
+      }),
+      (err) => {
+        assert.equal(err.kind, 'timeout', '正文挂住必须和响应头挂住一样归类');
+        assert.equal(err.retryable, true);
+        return true;
+      },
+    );
+  });
+
+  test('正文挂住时，用户的暂停也要能掐断它', async () => {
+    // 光会超时还不够：`externalSignal` 的监听原来在读正文之前就被摘了，于是
+    // 用户按下暂停，那一条正在挂着的连接**收不到任何信号**——「点了暂停没反应」。
+    const controller = new AbortController();
+    const headersThenStall = async () => ({
+      status: 200,
+      arrayBuffer: () => new Promise(() => {}),
+    });
+    const p = fetchWithTimeout(headersThenStall, 'https://x/', {}, {
+      timeoutMs: 60_000,
+      externalSignal: controller.signal,
+      readBody: (r) => r.arrayBuffer(),
+    });
+    controller.abort();
+    await assert.rejects(p, (err) => {
+      assert.equal(err.kind, 'aborted', '用户中止不是超时');
+      return true;
+    });
+  });
+
+  test('正文读出来了就带回来', async () => {
+    const bytes = new Uint8Array([1, 2, 3]).buffer;
+    const ok = async () => ({ status: 200, arrayBuffer: async () => bytes });
+    const { response, body } = await fetchWithTimeout(ok, 'https://x/', {}, {
+      timeoutMs: 1000,
+      readBody: (r) => r.arrayBuffer(),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(body, bytes);
   });
 
   test('请求完成后清掉定时器 —— 否则 worker 会被无谓地续命', async () => {

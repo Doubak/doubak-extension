@@ -89,10 +89,30 @@ export function classifyTransportError(err, { timedOut = false, url } = {}) {
 }
 
 /**
- * 带超时的 fetch。
+ * 带超时的一次完整往返：**响应头加正文**。
  *
  * 没有超时的话，一个挂住的连接会**永远**卡住队列——而监管层只会看到「还在
  * 跑」，永远不来干预。那是一种静默的失败，比响亮地报错糟糕得多。
+ *
+ * ## 正文必须在同一个期限里，否则这个保证是假的
+ *
+ * 浏览器的 `fetch()` 在**响应头到达时**就 resolve，正文还在路上。所以原来这里
+ * 只盖住了半次往返：`finally` 里 `clearTimeout` 一执行，定时器没了、外部 abort
+ * 的监听也摘了，紧接着调用方那句 `await response.arrayBuffer()` 就是**一个完全
+ * 没有上限的等待**——连用户按下的暂停都中止不了它，因为信号已经不再挂在这上面。
+ *
+ * 实测的后果（2026-09-04，抓封面图抓到 2414/2943 时）：一条连接给了响应头之后
+ * 停住，`arrayBuffer()` 再也没回来。它卡在两条事件之间，于是**没有任何东西发生**
+ * ——不报错、不重试、不发事件，抓取循环就此不再返回。上层看到的是「还在跑」，
+ * 一路顶到心跳每 30 秒说一次「未恢复」，共 282 次。
+ *
+ * 这个文件开头那句话本来就把这件事说对了；漏的是**「一次请求」到哪儿为止**。
+ * 头到了不算到，字节收完才算。
+ *
+ * 所以正文由 `readBody` 交进来、在同一个 `race` 里读：超时定时器盖住它，
+ * `controller.abort()` 也会把正文流一并掐断（只 reject 不 abort 的话，连接还
+ * 挂在那儿）。**读正文也就自然被算进了闸门持有的时间**，那正是「并发恒为 1」
+ * 本来的意思——此前下一个请求可以在上一个正文还在下载时就发出去。
  *
  * @param {typeof fetch} fetchImpl
  * @param {string} url
@@ -100,9 +120,10 @@ export function classifyTransportError(err, { timedOut = false, url } = {}) {
  * @param {object} opts
  * @param {number} opts.timeoutMs
  * @param {AbortSignal} [opts.externalSignal]  用户暂停/关闭时用的
- * @returns {Promise<Response>}
+ * @param {(res: Response) => Promise<any>} [opts.readBody]  怎么把正文读出来
+ * @returns {Promise<{response: Response, body: any}>}  没给 `readBody` 时 `body` 是 null
  */
-export async function fetchWithTimeout(fetchImpl, url, init, { timeoutMs, externalSignal }) {
+export async function fetchWithTimeout(fetchImpl, url, init, { timeoutMs, externalSignal, readBody }) {
   const controller = new AbortController();
   let timedOut = false;
   /** @type {any} */
@@ -133,14 +154,18 @@ export async function fetchWithTimeout(fetchImpl, url, init, { timeoutMs, extern
     else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
   });
 
+  // 一次往返是「头 + 正文」。**两段都要在 race 里面**，否则期限只盖住前半段。
+  const exchange = (async () => {
+    const response = await fetchImpl(url, { ...init, signal: controller.signal });
+    return { response, body: readBody ? await readBody(response) : null };
+  })().catch((err) => {
+    // 正文读到一半被掐断时抛的也是 AbortError，与头阶段超时同一种分类——
+    // 对调用方来说它们本来就是同一件事：这一次请求没在期限内完成。
+    throw classifyTransportError(err, { timedOut, url });
+  });
+
   try {
-    return await Promise.race([
-      fetchImpl(url, { ...init, signal: controller.signal }).catch((err) => {
-        throw classifyTransportError(err, { timedOut, url });
-      }),
-      timeoutPromise,
-      abortPromise,
-    ]);
+    return await Promise.race([exchange, timeoutPromise, abortPromise]);
   } finally {
     clearTimeout(timer);
     externalSignal?.removeEventListener?.('abort', onExternalAbort);

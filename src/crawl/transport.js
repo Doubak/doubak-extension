@@ -179,6 +179,8 @@ export class Transport {
     const redirectChain = [];
     let currentUrl = requestedUrl;
     let response;
+    /** 最后一跳的正文。跳转途中那几跳的正文读了就丢，反正 3xx 基本是空的。 */
+    let buf = new ArrayBuffer(0);
 
     for (let hop = 0; ; hop++) {
       if (hop > MAX_REDIRECTS) {
@@ -191,7 +193,7 @@ export class Transport {
       // 必须有超时：挂住的连接会永远卡住队列，而监管层只会看到「还在跑」，
       // 永远不来干预——那是一种静默的失败，比响亮地报错糟糕得多。
       const hopUrl = currentUrl;
-      /** @type {{result: Response}} */
+      /** @type {{result: {response: Response, body: ArrayBuffer}}} */
       let hopResult;
       try {
         hopResult = await this._gate.run(() =>
@@ -207,7 +209,14 @@ export class Transport {
               // 见文件开头。
               redirect: 'follow',
             },
-            { timeoutMs: this._timeoutMs, externalSignal: this._signal },
+            {
+              timeoutMs: this._timeoutMs,
+              externalSignal: this._signal,
+              // **正文也交给它读。** 在这儿 `await response.arrayBuffer()` 的话，
+              // 那句等待没有任何上限——期限与 abort 监听在 `fetchWithTimeout`
+              // 的 finally 里就已经撤了。实测卡死过 8494 秒，见 errors.js。
+              readBody: (res) => res.arrayBuffer(),
+            },
           ),
         );
       } catch (err) {
@@ -220,7 +229,8 @@ export class Transport {
         const permErr = await permissionErrorIfLost({ permissions: this._permissions });
         throw permErr ?? err;
       }
-      response = hopResult.result;
+      response = hopResult.result.response;
+      buf = hopResult.result.body;
 
       // opaqueredirect：万一哪天又有人把 redirect 改回 manual，要响亮地报错，
       // 而不是像上次那样静默地把跳转前的 URL 当成最终 URL 用。
@@ -240,7 +250,6 @@ export class Transport {
       currentUrl = next;
     }
 
-    const buf = await response.arrayBuffer();
     const body = new Uint8Array(buf);
 
     return {
