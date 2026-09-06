@@ -42,6 +42,7 @@ import {
 } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { routeName } from '../src/ui/route-names.js';
+import { realBundle, readCapture } from './real-archive.js';
 
 const fixture = (n) => readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf-8');
 const NOTES = () => fixture('notes-list.html');
@@ -394,7 +395,7 @@ describe('成对抽取 —— id 与时间必须结构上对齐', () => {
 });
 
 describe('对着真实档案：每种媒介都要与声称数量吻合', () => {
-  const DL = '/home/mewx/downloads/20260806/doubak-bundle-20260801T005010Z-3eef52';
+  const DL = realBundle('doubak-bundle-20260801T005010Z-3eef52');
 
   test('五种媒介，抽出的条目数 = 豆瓣声称的条数', async (t) => {
     const { existsSync, readdirSync, readFileSync } = await import('node:fs');
@@ -475,21 +476,31 @@ describe('正文里内嵌的图', () => {
 });
 
 describe('对着那张真实的 /topic/ 日记', () => {
-  const PAGE = '/home/mewx/downloads/496284296.html';
+  /**
+   * **从档案里读，不从手工另存的散页读。**
+   *
+   * 原来指的是 `~/downloads/496284296.html`，那个文件早没了，于是下面两条
+   * 「对着真实页面」的测试**永远跳过**——而 npm test 照样全绿。档案是冻结的，
+   * 这一页在里面跑不掉。
+   *
+   * 这一份是同一个网址在同一次抓取里的**第三次**捕获：前两次判不出来（当时的
+   * 判定还不认 topic 这套模板），第三次成了。也就是说这条测试守的正是那次
+   * 校准——退回去的话它会红。
+   */
+  const CAPTURE = ['doubak-bundle-20260807T083529Z-0fb09c', '20260807T083529Z-0fb09c#001564'];
 
-  test('判定通过 —— 两种日记的框架标志都要有', async (t) => {
-    const { existsSync, readFileSync } = await import('node:fs');
-    if (!existsSync(PAGE)) return t.skip('样本不在这台机器上');
-    const cls = classify('note.item', readFileSync(PAGE, 'utf-8'),
-      'https://www.douban.com/topic/496284296/');
+  test('判定通过 —— 两种日记的框架标志都要有', (t) => {
+    const page = readCapture(...CAPTURE);
+    if (!page) return t.skip('真实档案不在这台机器上');
+    const cls = classify('note.item', page, 'https://www.douban.com/topic/496284296/');
     assert.equal(cls.verdict, 'ok');
   });
 
   test('抽出正文里那两张图', async (t) => {
-    const { existsSync, readFileSync } = await import('node:fs');
-    if (!existsSync(PAGE)) return t.skip('样本不在这台机器上');
+    const page = readCapture(...CAPTURE);
+    if (!page) return t.skip('真实档案不在这台机器上');
     const { extractEmbeddedImages } = await import('../src/crawl/classifier.js');
-    const r = extractEmbeddedImages(readFileSync(PAGE, 'utf-8'));
+    const r = extractEmbeddedImages(page);
     assert.equal(r.urls.length, 2);
     for (const u of r.urls) assert.match(u, /\/view\/group_topic\/l\/public\//);
     assert.equal(r.captions[r.urls[0]], '长这样咯就是');

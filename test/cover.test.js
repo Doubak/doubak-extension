@@ -35,6 +35,7 @@ import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { indexFilename } from '../src/core/ids.js';
 import { TEST_PRODUCER } from './helpers/producer.js';
+import { realBundle } from './real-archive.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -467,7 +468,7 @@ describe('整条链路：详情页 → 抽封面 → 取图 → 进 catalog 段'
 
 describe('真实档案（有就跑，没有就跳过）', () => {
   test('2900+ 个作品详情页都抽得到封面，且形状对得上', () => {
-    const dir = `${homedir()}/downloads/doubak-bundle-20260731T051333Z-786e5c`;
+    const dir = realBundle('doubak-bundle-20260731T051333Z-786e5c');
     let idxName;
     try {
       idxName = readdirSync(dir).find((f) => f.startsWith('index-'));

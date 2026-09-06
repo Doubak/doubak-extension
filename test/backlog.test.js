@@ -25,6 +25,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 import { backlogFromIndex, capturedAssets } from '../src/crawl/backlog.js';
+import { openReal, payloadOf } from './real-archive.js';
 
 const OWNER = '82160871';
 
@@ -196,17 +197,6 @@ describe('对着真实档案跑', () => {
    * 这一组要证明的是**这一步真的能把那 121 张找出来**——合成夹具证明不了这个，
    * 因为它证明的是我自己写的假设。
    */
-  const DL = '/home/mewx/downloads/20260806';
-
-  /** 读一份真实档案的索引与载荷。旧档案不在这台机器上就返回 null。 */
-  function openReal(dir) {
-    if (!existsSync(`${DL}/${dir}`)) return null;
-    const idxName = readdirSync(`${DL}/${dir}`).find((f) => f.startsWith('index-'));
-    if (!idxName) return null;
-    const rows = readFileSync(`${DL}/${dir}/${idxName}`, 'utf-8')
-      .trimEnd().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-    return { rows, dir };
-  }
 
   test('把真实档案里欠的图全找出来，一张别人的都不带', async (t) => {
     const bundles = ['doubak-bundle-20260801T005010Z-3eef52',
@@ -215,16 +205,7 @@ describe('对着真实档案跑', () => {
       'doubak-bundle-20260806T131620Z-354a1d'].map(openReal).filter(Boolean);
     if (bundles.length === 0) return t.skip('真实档案不在这台机器上');
 
-    const { gunzipSync } = await import('node:zlib');
-    /** 按 offset 解压一条 WARC 记录，取出 HTTP 正文。 */
-    const payloadOf = (dir) => async (row) => {
-      const fd = readFileSync(`${DL}/${dir}/${row.segment}`);
-      const raw = gunzipSync(fd.subarray(row.offset, row.offset + row.length));
-      const head = raw.indexOf('\r\n\r\n');
-      const len = Number(/^Content-Length: (\d+)$/m.exec(raw.subarray(0, head).toString())[1]);
-      const block = raw.subarray(head + 4, head + 4 + len);
-      return block.subarray(block.indexOf('\r\n\r\n') + 4).toString('utf-8');
-    };
+    const readPayloadOf = (dir) => async (row) => payloadOf(dir, row);
 
     /** @type {any[]} */
     const all = [];
@@ -233,7 +214,7 @@ describe('对着真实档案跑', () => {
     for (const b of bundles) {
       const { items, pagesRead } = await backlogFromIndex({
         indexRows: b.rows,
-        readPayload: payloadOf(b.dir),
+        readPayload: readPayloadOf(b.dir),
         ownerUserId: OWNER,
         alreadyHave: new Set(all.map((x) => x.url)),
         onWarn: (e) => warns.push(e),

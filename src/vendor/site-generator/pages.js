@@ -204,8 +204,20 @@ const STATUS_ORDER = ['wish', 'doing', 'done'];
 /** 首页每一行摆几张封面。摆不下的由主题裁掉——一行就是一行。 */
 const STRIP = 12;
 
-/** 广播、日记、评论各给几条预览。 */
+/** 日记、评论各给几条预览。 */
 const PREVIEW = 2;
+
+/**
+ * 广播给几条预览。**比长文多**，而且是刻意的。
+ *
+ * 广播是这份档案里最不可替代的一条（发布即冻结、可被静默删除、豆瓣自己不留历史），
+ * 而它在首页上又是**唯一一处能看见原话**的地方——媒介小节给的是封面墙，长文给的
+ * 是标题加 80 字摘要。两条广播撑不起「这份存档里有话」这件事；五条能。
+ *
+ * 它不跟着 `PREVIEW` 走，因为那两者的取舍不一样：长文一条就占掉一屏，多给几条
+ * 等于把下面的小节全推下去。
+ */
+const BROADCAST_PREVIEW = 5;
 
 /** 长文预览截多少字。 */
 const EXCERPT = 80;
@@ -218,7 +230,7 @@ const EXCERPT = 80;
  * 原来这里只有一列数字（「读过 45」），点进去才看得到东西。而这份存档的价值恰恰在
  * 那些封面、那些话——首页一张图都没有的话，它看起来像个后台管理界面。
  *
- * 所以每个状态给一行封面加一个「看全部」的出口；广播与长文各给两条真实的预览。
+ * 所以每个状态给一行封面加一个「看全部」的出口；广播给五条真实的预览，长文各给两条。
  *
  * ## 还是纯 Markdown
  *
@@ -276,11 +288,11 @@ function homePage(p, { covers = {}, previewImages = {} } = {}) {
     return out;
   };
 
-  /** 广播：两条真实的预览。只写「共 3401 条」等于把这份档案最值钱的东西藏起来。 */
+  /** 广播：五条真实的预览。只写「共 3401 条」等于把这份档案最值钱的东西藏起来。 */
   const broadcastSection = () => {
     const recent = [...p.broadcasts]
       .sort((a, b) => ((a.postedAt ?? '') < (b.postedAt ?? '') ? 1 : -1))
-      .slice(0, PREVIEW);
+      .slice(0, BROADCAST_PREVIEW);
     const withText = p.broadcasts.filter((b) => b.text).length;
     return [
       `## ${MEDIUM_NAMES.broadcast} ${p.broadcasts.length}`, '',

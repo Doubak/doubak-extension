@@ -189,7 +189,35 @@ export async function parse(sources, opts = {}) {
      * @type {Record<string, number>}
      */
     recalibratable: {},
+
+    /**
+     * 判不出来、但**同一个网址在这份档案里另有成功捕获**的那些。
+     *
+     * 它们不进 `recalibratable`，因为改好抽取器重跑一遍**救不回任何内容**
+     * ——那一页的内容已经从另一条捕获进了 canonical。留在名单上只会让人去做
+     * 一件没有收益的事，而这个项目已经数过五次「一个永远有条目的失败列表，
+     * 是没人看的失败列表」。
+     *
+     * 判据与 `resolveGap`（bundle/1.4）是同一条，方向也一样：**一句关于某一个
+     * 网址的断言，被同一个网址的一次成功捕获证伪。** 只认完全相同的网址。
+     *
+     * 但它们**不被抹掉，而是折成一行说出来**：那一页的观测确实少了一次，
+     * 极端情况下少的是一条修订（不是一条记录）。说「有这么些，但内容不缺」
+     * 与不说，是两回事。
+     * @type {number}
+     */
+    recalibratableCovered: 0,
   };
+
+  /**
+   * 判不出来、可以靠改抽取器离线救回的那些捕获，先收着。
+   *
+   * **不能边扫边判**：能不能救回取决于「同一个网址有没有别的成功捕获」，
+   * 而那条捕获可能排在后面，甚至在另一份档案里。实测那两条 `note.item` 就是
+   * 这样——同一次抓取里同一个网址抓了三遍，前两遍判不出来，第三遍成了。
+   * @type {Array<{route_key: string, url: string}>}
+   */
+  const recalibratable = [];
 
   // 观测必须按时间升序处理，否则「第一次看到」和「最后一次看到」会记反。
   // 顺序无关那条说的是**结果**与输入顺序无关，不是可以随便乱序处理。
@@ -246,7 +274,7 @@ export async function parse(sources, opts = {}) {
         }
         if (!isContent(row)) {
           bump(stats.skipped, `verdict:${row.verdict}`);
-          if (isRecalibratable(row)) bump(stats.recalibratable, row.route_key);
+          if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
         work.push({ src, row, kind: 'doulist', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
@@ -260,7 +288,7 @@ export async function parse(sources, opts = {}) {
         }
         if (!isContent(row)) {
           bump(stats.skipped, `verdict:${row.verdict}`);
-          if (isRecalibratable(row)) bump(stats.recalibratable, row.route_key);
+          if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
         work.push({ src, row, kind: 'longform', lfKind, auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
@@ -274,7 +302,7 @@ export async function parse(sources, opts = {}) {
         }
         if (!isContent(row)) {
           bump(stats.skipped, `verdict:${row.verdict}`);
-          if (isRecalibratable(row)) bump(stats.recalibratable, row.route_key);
+          if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
         work.push({ src, row, kind: 'broadcast', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
@@ -301,13 +329,24 @@ export async function parse(sources, opts = {}) {
       }
       if (!isContent(row)) {
         bump(stats.skipped, `verdict:${row.verdict}`);
-        if (isRecalibratable(row)) bump(stats.recalibratable, row.route_key);
+        if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
         continue;
       }
 
       work.push({ src, row, kind: 'mark', medium, status, auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
     }
   }
+  // ── 哪些「判不出来」是真的还缺内容
+  //
+  // `work` 里装的正是每一条读出了内容的捕获，所以它的网址集合就是「这份档案
+  // 到底把哪些页面读出来了」。判不出来的那一条，若它的网址也在里面，改抽取器
+  // 重跑救不回任何东西。
+  const gotContent = new Set(work.map((w) => w.row.url).filter((u) => typeof u === 'string' && u));
+  for (const r of recalibratable) {
+    if (typeof r.url === 'string' && r.url && gotContent.has(r.url)) stats.recalibratableCovered += 1;
+    else bump(stats.recalibratable, r.route_key);
+  }
+
   // **认领了就要说出来。** 归属是一次判断，不是一个事实；不说的话，一份
   // 没有 manifest 的档案会以档案主人的名义静悄悄进来。
   if (adopted.length) {

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 import { classifyResponse, RollingSize, ROUTE_PROFILES, profileForRoute, extractItemIds, extractItemTimes, extractClaimedCount } from '../src/crawl/classifier.js';
 import { fixtures, stripLoginMarkers, anonymizeWithLoginPrompt } from './helpers/fixtures.js';
+import { readCapture } from './real-archive.js';
 
 const BROADCAST_URL = 'https://www.douban.com/people/82160871/statuses?p=1';
 
@@ -518,18 +519,19 @@ describe('标记列表页：ID 与时间必须覆盖全部媒介', () => {
     assert.deepEqual(extractItemTimes(html, p), ['2025-05-05', '2023-11-29']);
   });
 
-  test('对着真实的舞台剧列表页：3 个 ID、3 个日期、一一对上', async () => {
-    // 这是那次报告的原始数据。
-    const { gunzipSync, constants } = await import('node:zlib');
-    const { readFileSync } = await import('node:fs');
-    let body;
-    try {
-      const raw = readFileSync('/home/mewx/downloads/data-20260730T130118Z-a60b6a-00001.warc.gz');
-      const rec = gunzipSync(raw, { finishFlush: constants.Z_SYNC_FLUSH }).toString('utf8');
-      body = rec.split('\r\n\r\n').slice(2).join('\r\n\r\n');
-    } catch {
-      return; // 那份 dump 不在这台机器上
-    }
+  test('对着真实的舞台剧列表页：3 个 ID、3 个日期、一一对上', (t) => {
+    // 这是那次报告的原始数据 —— **同一张页面，换了个来源**。
+    //
+    // 原来读的是 `~/downloads/data-20260730T130118Z-a60b6a-00001.warc.gz`，
+    // 一份手工留下来的段文件；那份 dump 早就没了，于是这条测试永远走 catch、
+    // 静默 return，而它守的恰恰是这个项目最贵的一次教训：舞台剧的 id 选择器
+    // 抽不到东西，停滞检测因此失效，而覆盖率报告说「claimed 3 / captured 0 /
+    // 契合性 ✔ 已验证」。
+    //
+    // 同一张列表页在留下来的档案里有十几份拷贝，三个 id 一字不差。
+    const body = readCapture('doubak-bundle-20260731T051333Z-786e5c',
+      '20260731T051333Z-786e5c#000200');
+    if (!body) return t.skip('真实档案不在这台机器上');
     const ids = extractItemIds(body, p);
     const times = extractItemTimes(body, p);
     assert.equal(ids.length, 3);

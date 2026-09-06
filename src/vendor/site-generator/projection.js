@@ -32,8 +32,13 @@ export function project({ marks = [], subjects = [], longform = [], broadcasts =
   for (const s of subjects) bySubject.set(`${s.medium}:${s.id}`, s);
 
   const byTarget = broadcastsBySubject(broadcasts, marks);
-  const projectedMarks = marks.map(
-    (m) => projectMark(m, bySubject.get(`${m.medium}:${m.subject.id}`), byTarget.get(m.subject.id) ?? []),
+  const projectedMarks = mergeReMarks(marks).map(
+    ({ current, superseded }) => projectMark(
+      current,
+      bySubject.get(`${current.medium}:${current.subject.id}`),
+      byTarget.get(current.subject.id) ?? [],
+      superseded,
+    ),
   );
 
   return {
@@ -42,6 +47,55 @@ export function project({ marks = [], subjects = [], longform = [], broadcasts =
     doulists: doulists.map(projectDoulist),
     broadcasts: broadcasts.map((b) => projectBroadcast(b, targetIndex(projectedMarks))),
   };
+}
+
+/**
+ * 一个作品**一页**，哪怕它在豆瓣上被标记过两次。
+ *
+ * ## 为什么会有两条
+ *
+ * 用户在豆瓣上**删掉再重标**：豆瓣发一个新的条目 id，解析器据此如实分成两条记录
+ * ——那是对的，两个不同的上游 id 就是两次不同的标记（`IDENTITY.md` §2.2：这正是
+ * `data-cid` 唯一能看见、而降级键看不见的东西）。canonical 是事件日志，它必须
+ * 留着两条。
+ *
+ * ## 但投影是「当前状态优先」的一张缓存，一个作品只有一个网址
+ *
+ * 原来这里不做处理，于是两条标记生成**同一个文件名**，后写的把先写的整个盖掉
+ * ——先来后到决定谁活下来，而不是任何一条判据。实测《盗梦空间》：2018 年那条
+ * 标记的短评与标签就这么从站点上消失了，git 里连一行新增都看不到（页数没变），
+ * 只在那一页的 diff 里。**盖掉是静默的，这是最坏的一种。**
+ *
+ * 现在明确地选一条当页头，其余的**并进时间线**——旧那条的短评、评分、日期因此
+ * 一样在页面上，位置也对（2018 年那一行），而不是假装从没发生过。
+ *
+ * 判据是**最后一次看到它是什么时候**：豆瓣现在还留着的那条，才是最近一次抓取里
+ * 出现过的那条。按 `marked_at` 挑是不对的——重标的日期理论上可以更早（补标一部
+ * 老片），而那条在豆瓣上仍然是现存的那一条。日期只用来打平手。
+ *
+ * @param {object[]} marks canonical 的标记
+ * @returns {{current: object, superseded: object[]}[]}
+ */
+function mergeReMarks(marks) {
+  /** @type {Map<string, object[]>} */
+  const groups = new Map();
+  for (const m of marks) {
+    const key = `${m.medium}:${m.subject.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m);
+  }
+
+  const seenAt = (m) => latest(m).last_observed_at ?? '';
+  const markedAt = (m) => latest(m).fields?.marked_at?.iso ?? '';
+
+  return [...groups.values()].map((g) => {
+    if (g.length === 1) return { current: g[0], superseded: [] };
+    const sorted = [...g].sort((a, b) => {
+      if (seenAt(a) !== seenAt(b)) return seenAt(a) < seenAt(b) ? 1 : -1;
+      return markedAt(a) < markedAt(b) ? 1 : -1;
+    });
+    return { current: sorted[0], superseded: sorted.slice(1) };
+  });
 }
 
 /**
@@ -74,11 +128,19 @@ export function project({ marks = [], subjects = [], longform = [], broadcasts =
  * @param {object[]} marks
  */
 function broadcastsBySubject(broadcasts, marks) {
-  // 撞车的一律不接。广播上只有 data-object-id，没有媒介；接错了是档案在说假话，
-  // 而且看不出来。（实测这份档案 0 个撞车，但这条不能靠运气。）
+  // 跨媒介撞车的一律不接。广播上只有 data-object-id，没有媒介；接错了是档案在说
+  // 假话，而且看不出来。（实测这份档案 0 个跨媒介撞车，但这条不能靠运气。）
+  //
+  // **同一媒介下的两条标记不算撞车**——那是「删掉再重标」，两条说的是同一部作品。
+  // 判据与 `targetIndex` 必须一模一样：一边接得回、另一边接不回的话，广播卡片上
+  // 有链接而作品页上没有时间线，两边都看不出是谁错了。
   const seen = new Map();
   for (const m of marks) {
-    seen.set(m.subject.id, seen.has(m.subject.id) ? null : m);
+    const id = m.subject.id;
+    if (!seen.has(id)) { seen.set(id, m); continue; }
+    const prev = seen.get(id);
+    if (prev === null) continue;
+    if (prev.medium !== m.medium) seen.set(id, null);
   }
 
   /** @type {Map<string, object[]>} */
@@ -119,13 +181,13 @@ function broadcastsBySubject(broadcasts, marks) {
  * **同样的话只留一次。** 实测有 10 条是用户转发自己的旧广播，正文一字不差——
  * 列两遍会让人以为他说了两次。
  *
- * @param {object} m canonical 的标记
+ * @param {object[]} marks 这个作品的全部标记：当前那条，加上被顶掉的（删掉再重标）
  * @param {object[]} fromBroadcasts
  */
-function buildTimeline(m, fromBroadcasts) {
+function buildTimeline(marks, fromBroadcasts) {
   const rows = [...fromBroadcasts];
 
-  for (const r of m.revisions) {
+  for (const r of marks.flatMap((m) => m.revisions)) {
     const f = r.fields;
     // 短评是空的也收——状态本身就是「什么时候」的答案。实测那三条有多个修订的
     // 标记里，有两条正是「空短评 → 写了短评」，只看短评的话这段经过整个消失。
@@ -217,12 +279,26 @@ function buildTimeline(m, fromBroadcasts) {
 /**
  * 作品 id → 标记，用来把广播接回本地的作品页。
  *
- * **id 撞车的一律不接。** 广播上只有 `data-object-id`，没有媒介；而不同媒介的 id
- * 是各自编号的，理论上会撞。撞了还硬接的话，页面上会出现一条指向另一部作品的链接
- * ——**那比不接严重得多**：不接只是少个链接，接错了是档案在说假话，而且看不出来。
+ * **跨媒介撞车的一律不接。** 广播上只有 `data-object-id`，没有媒介；而不同媒介的
+ * id 是各自编号的，理论上会撞。撞了还硬接的话，页面上会出现一条指向另一部作品的
+ * 链接——**那比不接严重得多**：不接只是少个链接，接错了是档案在说假话，而且看不
+ * 出来。
+ *
+ * ## 这里的「撞车」只可能是跨媒介的，而那是上游保证的
+ *
+ * 入参是**投影过的**标记，而 `mergeReMarks` 已经按 `媒介:作品id` 归过组——所以
+ * 到这一步，两条记录共用一个 `subjectId` 就只可能是媒介不同。判据因此仍然只看
+ * id，不必再比一次媒介：那个比较永远为真，而一个永远为真的判断读起来像是在防
+ * 什么，实际什么都没防。
+ *
+ * **这条依赖必须写下来**，因为它一度不成立：`mergeReMarks` 之前，用户在豆瓣上
+ * 删掉再重标（豆瓣发一个新条目 id，解析器如实分成两条记录）会让同一部电影出现
+ * 两条标记，于是这里判撞车、拒绝接链。实测《盗梦空间》：2018 年那条广播的链接与
+ * 封面**一起消失**，作品页上整个「说过什么」栏目也没了——而那正是这份档案最不可
+ * 替代的部分（豆瓣自己已经不显示 2018 年那条了）。
  */
 function targetIndex(projectedMarks) {
-  /** @type {Map<string, object|null>} null = 撞车了，不许接 */
+  /** @type {Map<string, object|null>} null = 跨媒介撞车了，不许接 */
   const out = new Map();
   for (const m of projectedMarks) {
     if (out.has(m.subjectId)) out.set(m.subjectId, null);
@@ -290,7 +366,7 @@ function localLongform(url) {
 /** 最后一条修订。**不是**「最新的上游状态」，是「我们最后一次看到的样子」。 */
 const latest = (rec) => rec.revisions[rec.revisions.length - 1];
 
-function projectMark(m, subject, fromBroadcasts = []) {
+function projectMark(m, subject, fromBroadcasts = [], superseded = []) {
   const r = latest(m);
   const s = subject ? latest(subject) : null;
 
@@ -324,11 +400,13 @@ function projectMark(m, subject, fromBroadcasts = []) {
     // 有多少个版本，以及我们最后一次看到它是什么时候。**这两个数是投影里唯一
     // 保留的历史痕迹**——不是为了展示，是为了让人知道「这条还有更多东西，去看
     // canonical」。把历史整个抹掉的话，投影会显得像是全部真相。
-    revisionCount: m.revisions.length,
+    // 被顶掉的那几条（删掉再重标）的修订也算进来——否则页面会说「只有 1 个版本」，
+    // 而它下面的时间线明明列着 2018 和 2026 两次标记。
+    revisionCount: [m, ...superseded].reduce((n, x) => n + x.revisions.length, 0),
     lastSeenAt: r.last_observed_at,
 
     // 「什么时候 → 说了什么」。理由见 broadcastsBySubject。
-    timeline: buildTimeline(m, fromBroadcasts),
+    timeline: buildTimeline([m, ...superseded], fromBroadcasts),
   };
 }
 
