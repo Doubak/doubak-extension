@@ -185,6 +185,84 @@ function fullTextUrl(seg) {
  */
 
 /**
+ * 人名后面那句话 —— **整句，不是前七个字**。
+ *
+ * ## 原来为什么是七个字，以及那个数为什么是错的
+ *
+ * 旧写法是 `([^<\s][^<]{0,6}?)\s*<`：从人名链接之后取最多七个非 `<` 字符。
+ * 七这个数看起来是「最长的动作词」（`收藏图书到豆列` 正好七个字），实际上它是
+ * **「在第一个行内链接前面刹住」**——而那个链接里装着的正是这句话的宾语：
+ *
+ *     收藏游戏到豆列 <a href="…/doulist/45473911/">游戏购买小账本</a>
+ *     上传了17张照片到 <a href="…/game/30246116/">寂静之人</a> 的 <a …>相册</a>
+ *
+ * 于是「收藏到哪个豆列」在档案里一直是空的。实测 **61 条**广播这样丢掉了豆列名。
+ *
+ * 同一个上限还切掉了另外几种整句：`喜欢`（真正的问题不是长度，是它与
+ * `<blockquote>` 之间隔着一个 `:`）、`上传了 N 张照片到 X 的相册`、
+ * `分享了关于 X 的讨论`、`开始收听自己的豆瓣FM`。实测 33 条广播因此完全没有动作。
+ *
+ * ## 现在的判据是**结构**，不是长度
+ *
+ * 从 `class="lnk-people"` 那个链接之后，切到**内容开始的地方**——
+ * `<blockquote>`（有正文时）或者 `.text` 那个 `</div>`（没有正文时），谁先来算谁。
+ * 去掉标签、折叠空白 —— 也就是浏览器渲染行内 HTML 的做法；实体交给唯一那份
+ * `stripTagsAndDecode`（先去标签再解实体，理由见 html-entities.js）。
+ *
+ * 实测这条规则在全部 3423 条广播上：**长度中位数 2、90% 是 2、最长 76**——
+ * 也就是说它没有跑飞，绝大多数仍然是那两个字的标记动作词。
+ *
+ * ## 三件必须成立的事，都实测过
+ *
+ * - **12 个标记动作词一个都不能变形**，否则 `ACTION_STATUS` 查不到，
+ *   状态就成了 null——**一条标记事件会静默消失**。实测：3265 条有状态的广播，
+ *   保住 3265、丢 0、也没有凭空多出来。这是这次改动唯一危险的方向。
+ * - **抽不到就是真的没有。** 剩下 2 条是日记广播，豆瓣压根没写动作词
+ *   （`<span type="note"></span>` 之后直接就是卡片），那 `null` 是对的。
+ * - **结尾的冒号去掉，开头的不去。** 结尾那个是动作与引文之间的分隔符，
+ *   而豆瓣半角全角两种都写：CLAUDE.md 记着 `action` 那 59 对相邻修订差异里有
+ *   **49 对只差冒号宽窄**（老页面 `说:`，新页面 `说：`）。去掉之后这 49 对自动消失。
+ *   开头那个不动：实测有 1 条广播豆瓣就没写动作词，页面上原样显示
+ *   `MewX : 《斯诺登…》预告片`——照抄比替它编一个动词诚实，而 n=1 也不够推出任何规则。
+ *
+ * @param {string} seg 一条广播的容器切片
+ * @returns {string|null}
+ */
+function actionSentence(seg) {
+  const at = seg.indexOf('class="lnk-people"');
+  if (at < 0) return null;
+  const after = seg.indexOf('</a>', at);
+  if (after < 0) return null;
+
+  const rest = seg.slice(after + 4);
+  // 内容从哪儿开始：有正文是 `<blockquote>`，没有正文是 `.text` 的收尾 `</div>`。
+  // 两个都找，取先到的那个 —— 只认一个的话，另一种形状会一路吃到页尾。
+  const stops = [rest.indexOf('<blockquote'), rest.indexOf('</div>')].filter((i) => i >= 0);
+  if (!stops.length) return null;
+
+  // **标签直接删掉，不换成空格** —— 用的就是那份公用的 `stripTagsAndDecode`。
+  //
+  // 第一版换成了空格，怕把 `到豆列` 和 `游戏购买小账本` 粘成一个词。**那个担心是
+  // 我编的**：浏览器渲染行内 HTML 就是「去掉标签、折叠空白」，所以该有空格的地方
+  // 豆瓣源码里本来就有（`收藏游戏到豆列 \n      <a>…`）。反过来，换成空格会造出
+  // 页面上根本没有的空格 —— 实测 4 条：
+  //
+  //     源码    写了《<a>千と千尋の神隠し</a>》的讨论
+  //     页面    写了《千と千尋の神隠し》的讨论
+  //     换空格  写了《 千と千尋の神隠し 》的讨论      ← 书名号里凭空多两个空格
+  //
+  // 判据因此是**「浏览器会把它显示成什么样」**，不是「怎样更保险」。
+  // 这个毛病是**看生成出来的站点**看出来的，不是想出来的。
+  //
+  // 结尾的冒号连同它前面的空白一起去：`喜欢\n      \n:` 折叠成 `喜欢 :`，
+  // 只去冒号会留一个尾随空格，那会让同一个动作出现两种写法。
+  const s = stripTagsAndDecode(rest.slice(0, Math.min(...stops)))
+    .replace(/\s+/g, ' ').trim().replace(/\s*[:：]$/, '');
+
+  return s || null;
+}
+
+/**
  * @param {string} html
  * @param {string} ownerUserId  档案主人的数字 id。**必需**——没有它就分不清哪些是转发来的
  * @returns {{broadcasts: RawBroadcast[], skippedOthers: number, idless: number, unresolvedImages: number}}
@@ -225,7 +303,7 @@ export function extractBroadcasts(html, ownerUserId) {
     unresolvedImages += photos.unresolved;
     const fullText = fullTextUrl(seg);
 
-    const action = /class="lnk-people">[^<]*<\/a>\s*([^<\s][^<]{0,6}?)\s*</.exec(seg)?.[1]?.trim() ?? null;
+    const action = actionSentence(seg);
     // **先切出 blockquote，再在里面找第一个 `<p>`。**
     //
     // 原来是一条正则直接要求 `<blockquote>` 后面紧跟着 `<p>`：
