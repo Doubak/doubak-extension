@@ -45,7 +45,11 @@ export function project({ marks = [], subjects = [], longform = [], broadcasts =
     marks: projectedMarks,
     longform: longform.map(projectLongform),
     doulists: doulists.map(projectDoulist),
-    broadcasts: broadcasts.map((b) => projectBroadcast(b, targetIndex(projectedMarks))),
+    broadcasts: broadcasts.map((b) => projectBroadcast(b, targetIndex(projectedMarks), {
+      subjects: new Set(subjects.map((s) => `${s.medium}:${s.id}`)),
+      doulists: new Set(doulists.map((d) => d.upstream_id)),
+      longform: new Set(longform.map((l) => l.upstream_id)),
+    })),
   };
 }
 
@@ -314,7 +318,7 @@ function targetIndex(projectedMarks) {
  * 「那一刻这句话是什么样」的带日期快照。标记页上的短评会被后来的编辑覆盖，广播里
  * 的不会。
  */
-function projectBroadcast(b, targets) {
+function projectBroadcast(b, targets, have = { subjects: new Set(), doulists: new Set(), longform: new Set() }) {
   const r = b.revisions[b.revisions.length - 1];
   const f = r.fields;
   const target = f.target_id ? (targets.get(f.target_id) ?? null) : null;
@@ -322,11 +326,13 @@ function projectBroadcast(b, targets) {
   return {
     kind: 'broadcast',
     id: b.upstream_id,
-    url: b.url ?? null,
+    url: stableStatusUrl(b.url, b.account?.user_id),
     postedAt: f.posted_at?.iso ?? null,
     postedAtRaw: f.posted_at?.raw ?? null,
     text: f.text ?? null,
     action: f.action ?? null,
+    // 动作句里那几个链接，已经判好该指本地还是指豆瓣。null = 这句话里没有链接。
+    actionParts: resolveActionParts(f.action_parts ?? null, have),
     status: f.status ?? null,
     // 发这条广播时给的星数，见上。
     rating: f.rating ?? null,
@@ -361,6 +367,110 @@ function localLongform(url) {
   if (!m) return null;
   // /topic/ 与 /note/ 是同一种东西的两种 URL 形状，都落在 note/ 目录下。
   return { kind: m[1] === 'review' ? 'review' : 'note', id: m[2] };
+}
+
+/**
+ * 动作句里那几个链接，各自该指到哪儿。
+ *
+ * ## 判据不是「本地有没有」，是「这一类东西我们收不收」
+ *
+ * 这两件事必须分开，混起来就会违反那条写了三遍的规矩（作品名接不回本地时
+ * **绝不回退到豆瓣的 URL**）：
+ *
+ * | 这一类 | 本地有 | 本地没有 |
+ * |---|---|---|
+ * | **收**（作品 / 豆列 / 长文） | 站内链接 | **不给链接**，只留文字 |
+ * | **不收**（相册 / 小组 / 榜单 / 影人 / 短链） | —— | 豆瓣链接（主题给它加 ↗ 角标） |
+ *
+ * 第一行是内容：作品是这份存档要替代豆瓣的东西，接不回来就说明这份档案缺了它，
+ * 而给个站外链接等于把「缺了」粉饰成「在那边」。第二行不是内容：作品相册里的照片
+ * **明确不在范围内**（CLAUDE.md 与 routes.js 的 `UNSUPPORTED_ROUTES` 都写着，判据是
+ * 「它属于条目，不属于账号」），小组与影人页同理。对它们，指出去才是诚实的——
+ * 这份存档从没声称收过它们。
+ *
+ * ## 认不出来的形状，按「不收」处理
+ *
+ * 我们只收三类，而这三类的 URL 形状都认得出。**认不出 = 不是这三类 = 我们没收**，
+ * 所以指出去。反过来（认不出就不给链接）会让相册这类东西悄悄变成一句点不动的话，
+ * 而那正是这个功能要修的毛病。豆瓣哪天新加一种作品 URL 形状会落进这一支——
+ * 代价是那个作品链到豆瓣而不是本地，`test/pages.test.js` 里钉着这三类的形状。
+ *
+ * @param {{text: string, url?: string}[]|null} parts
+ * @param {{ subjects: Set<string>, doulists: Set<string>, longform: Set<string> }} have
+ * @returns {{text: string, href?: string, external?: boolean}[]|null}
+ */
+function resolveActionParts(parts, have) {
+  if (!parts) return null;
+  return parts.map((p) => {
+    if (!p.url) return { text: p.text };
+
+    // **必须钉到结尾。** 作品的 URL 是相册与讨论的**前缀**：
+    //
+    //     作品   https://www.douban.com/game/30246116/
+    //     相册   https://www.douban.com/game/30246116/photos/          ← 只是多了一段
+    //     讨论   https://movie.douban.com/subject/26805209/discussion/615303804/
+    //
+    // 不钉结尾的话，相册被认成作品，于是走「收的那一类」——本地没有那一页就
+    // 不给链接，相册链接**静默消失**，而那正是这个字段要修的毛病。
+    const subject = /\/(?:subject|game|movie|book|music|drama)\/(\d+)\/?(?:[?#]|$)/.exec(p.url);
+    if (subject) {
+      const hit = [...have.subjects].find((k) => k.endsWith(`:${subject[1]}`));
+      return hit
+        ? { text: p.text, href: `${hit.split(':')[0]}/${subject[1]}.md` }
+        : { text: p.text }; // 收这一类但本地没有 —— 不给链接，也不回退到豆瓣
+    }
+
+    const doulist = /\/doulist\/(\d+)\/?(?:[?#]|$)/.exec(p.url);
+    if (doulist) {
+      return have.doulists.has(doulist[1])
+        ? { text: p.text, href: `doulist/${doulist[1]}.md` }
+        : { text: p.text };
+    }
+
+    const lf = localLongform(p.url);
+    if (lf) {
+      return have.longform.has(lf.id)
+        ? { text: p.text, href: `${lf.kind}/${lf.id}.md` }
+        : { text: p.text };
+    }
+
+    // 剩下的都是我们不收的东西：相册、小组、榜单、影人、短链。指出去。
+    return { text: p.text, href: p.url, external: true };
+  });
+}
+
+/**
+ * 广播那条豆瓣永久链接，归一化成一个**跨抓取稳定**的形状。
+ *
+ * ## 记下来的那个 URL 每次抓都不一样
+ *
+ * 实测 3440 条广播，`data-status-url` **2834 条跨捕获变过**，两个轴，都不是内容：
+ *
+ *     追踪参数    …/status/4088086916/?_spm_id=ODIxNjA4NzE   （base64 解开就是 uid）
+ *     用户段      /people/mewcatcher/  ←→  /people/82160871/  （同一个人的两种写法）
+ *
+ * 两个都归一化之后：**0 / 3440 再变**。
+ *
+ * 不处理的话，每次重新生成站点都会有 2827 条链接无缘无故改写 —— 而这个项目是靠
+ * 读 diff 来确认「这次只改了该改的东西」的，那种噪音会把真的改动埋掉。同一类的
+ * 还有 `(N 有用)` 计数、`1740人浏览`、封面 URL 的 CDN 分片。
+ *
+ * ## 归一化放在投影里，不放在 canonical 里
+ *
+ * canonical 存的是**那一刻页面上真的写着什么**（「never normalize at capture time」）。
+ * 投影是有损缓存，本来就是「拿它去渲染」的那一份 —— 与 bundle 里 `url_key` 跟
+ * `url` 并存是同一个道理：`url_key` 是索引，`url` 才是事实。
+ *
+ * 用数字 uid 而不是用户名：用户名会改，而数字 id 是这份档案的归属主键。两种写法
+ * 豆瓣都认（本人实测过 `/people/82160871/status/9647999566/` 打得开）。
+ *
+ * @param {string|null|undefined} url @param {string|null|undefined} ownerId
+ * @returns {string|null}
+ */
+function stableStatusUrl(url, ownerId) {
+  if (!url) return null;
+  const bare = url.split('?')[0].split('#')[0];
+  return ownerId ? bare.replace(/\/people\/[^/]+\//, `/people/${ownerId}/`) : bare;
 }
 
 /** 最后一条修订。**不是**「最新的上游状态」，是「我们最后一次看到的样子」。 */

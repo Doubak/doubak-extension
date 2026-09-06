@@ -370,22 +370,57 @@ export function longformPath(r) {
  *   一整页的死链，而死链在 file:// 下打开是一个目录列表，看起来还挺正常。
  * @returns {string}
  */
+/**
+ * 动作句渲染成 Markdown：句子里那几个链接照旧是链接。
+ *
+ * `收藏游戏到豆列 游戏购买小账本` 在豆瓣上三个词都能点；只留文字的话，站点上
+ * 它是一句点不动的话。分段由投影判好了指哪儿（见 `resolveActionParts`）。
+ *
+ * **每一段的文字都要转义** —— 它是豆瓣给的字，正塞进 Markdown 里。作品名里有
+ * 方括号和下划线是实测过的（`Fate/stay night [Heaven's Feel]`、`SAC_2045`）。
+ *
+ * 站内链接写**文件相对路径**，不写某种 URL 方案（Hugo 一开 uglyURLs 就全断）；
+ * 站外链接原样给绝对 URL，主题按 `href^="http"` 给它加 ↗ 角标。
+ *
+ * @param {{text: string, href?: string, external?: boolean}[]|null} parts
+ * @param {string|null} fallback 没有分段时用的整句
+ * @param {string} linkPrefix
+ * @returns {string|null}
+ */
+function actionMarkdown(parts, fallback, linkPrefix) {
+  if (!parts?.length) return fallback ? plainText(fallback) : null;
+  return parts.map((p) => {
+    const label = plainText(p.text);
+    if (!p.href) return label;
+    // **文字两边的空格不能进链接**：`[ 相册 ](…)` 会把空格画上下划线。
+    const lead = /^\s*/.exec(p.text)[0];
+    const tail = /\s*$/.exec(p.text)[0];
+    const core = plainText(p.text.trim());
+    if (!core) return label;
+    return `${lead}[${core}](${p.external ? p.href : linkPrefix + p.href})${tail}`;
+  }).join('');
+}
+
 export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../' } = {}) {
-  // **时间戳链回豆瓣那条广播。**
+  // **出处放在时间戳下面单独一行，不做成标题本身的链接。**
   //
-  // 与下面两处「**绝不回退到豆瓣的 URL**」不矛盾，那两条说的是**内容**：接不回
-  // 本地作品页的作品名、接不回本地长文的全文，都不许变成站外链接——把内容变成
-  // 站外链接，这份存档就从「豆瓣的替代品」退回成「豆瓣的指路牌」。
+  // 两个理由，第二个是硬的：
   //
-  // 这一条是**出处**，与作品页上那个「豆瓣原页」是同一个东西。广播是唯一没有
-  // 自己页面的记录类型（按月归档，每条只有一个锚点），所以作品页那条前言字段
-  // `douban_url` 在这里没有位置——挂在时间戳上最贴切：时间戳本来就是这条广播的
-  // 身份，而豆瓣那个永久链接指的正是它。
+  // ① 整行时间戳变成链接，在自己的存档里读起来太重——它是时间，不是按钮。
+  // ② **锚点是 SSG 从标题文字生成的。** 往标题里塞「豆瓣原页」四个字，
+  //    `#2021-11-28-202521` 就会变成 `#2021-11-28-202521-豆瓣原页`，
+  //    站内所有指向某条广播的固定链接当场全断。（把链接**套在**时间戳上不会，
+  //    实测锚点不变；但那正是 ① 说的太重。）
   //
-  // 链接不让页面发请求（页脚那句「这个页面也不发一个外部请求」说的是页面自己取
-  // 资源，不是用户点不点），主题给站外链接加了「↗」角标，点之前看得出会离开。
+  // 空链接文字（`[](url)`）也不行：那是一个念不出名字的链接，与「图片链接的 alt
+  // 不许留空」是同一条。所以文字照写，交给主题缩成一个角标——
+  // **版式是主题的事**，正文里不塞 HTML（塞了就得开 unsafe）。
+  //
+  // 与下面两处「绝不回退到豆瓣的 URL」不矛盾：那两条说的是**内容**（接不回本地的
+  // 作品名、全文不许变成站外链接），这一条是**出处**，与作品页的「豆瓣原页」同一件事。
   const stamp = b.postedAtRaw ?? b.postedAt ?? '时间未知';
-  const out = [b.url ? `### [${stamp}](${b.url})` : `### ${stamp}`, ''];
+  const out = [`### ${stamp}`, ''];
+  if (b.url) out.push(`[豆瓣原页](${b.url})`, '');
 
   // 动作那一行：「想看 《某电影》」。接得回本地作品页就接，接不回来就只留文字
   // ——**不回退到豆瓣的 URL**，那会让一份号称离线可看的档案去联网。
@@ -418,8 +453,11 @@ export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../'
    */
   const join = (x, y) => (x && /[：:]$/.test(x) ? `${x}${y}` : [x, y].filter(Boolean).join(' '));
 
+  /** 动作句：句子里那几个链接照旧是链接（豆列名、作品名、相册）。 */
+  const act = actionMarkdown(b.actionParts, b.action, linkPrefix);
+
   /** @type {string|null} 「[封面] 玩过 作品名 ★★★★☆」那一行 */
-  let line = [b.action, stars].filter(Boolean).join(' ') || null;
+  let line = [act, stars].filter(Boolean).join(' ') || null;
 
   if (t) {
     const href = `${linkPrefix}${t.medium}/${t.subjectId}.md`;
@@ -448,7 +486,7 @@ export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../'
     // 没有封面就只剩文字，不放占位图：占位符不是内容。
     const parts = [];
     if (cover) parts.push(`[![${label}](${cover})](${href})`);
-    parts.push(join(b.action, `[${label}](${href})`));
+    parts.push(join(act, `[${label}](${href})`));
     if (stars) parts.push(stars);
     line = parts.filter(Boolean).join(' ');
   } else if (b.targetTitle) {
@@ -460,7 +498,7 @@ export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../'
     //
     // 不给链接：本地没有那一页。**也绝不回退到豆瓣的 URL**——那会让一份号称
     // 离线可看的档案为了一个链接去联网。
-    line = [join(b.action, plainText(b.targetTitle)), stars].filter(Boolean).join(' ');
+    line = [join(act, plainText(b.targetTitle)), stars].filter(Boolean).join(' ');
   }
   if (line) {
     out.push(line, '');

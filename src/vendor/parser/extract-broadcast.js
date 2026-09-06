@@ -28,7 +28,7 @@
  * 与广播附图那条规则同一个判据、同一个理由。
  */
 
-import { stripTagsAndDecode } from './html-entities.js';
+import { stripTagsAndDecode, decodeEntities } from './html-entities.js';
 
 /** 一条广播的外壳。转发不是嵌套结构：豆瓣把原作者那条整个渲染成一个顶层 wrapper。 */
 const WRAPPER = /<div class="new-status status-wrapper[^"]*"[^>]*>/g;
@@ -173,6 +173,8 @@ function fullTextUrl(seg) {
  * @property {string|null} postedAt  秒级时间戳（原始字符串）
  * @property {string|null} text      正文。实测 65% 的广播有（其余是纯标记动作）
  * @property {string|null} action    动作原文（想看 / 收藏图书到豆列 / …）
+ * @property {{text: string, url?: string}[]|null} actionParts  动作句的分段，
+ *   带上句子里那几个链接。**拼起来必须逐字等于 `action`**；没有链接时是 null
  * @property {string|null} status    动作能明确映射到三种标记状态时才有，否则 null
  * @property {number|null} rating    发这条广播时给的星数（1–5）。**与标记的评分不是
  *   一回事**：标记只留最新那个，而广播冻结，所以这是「那一天给了几颗星」
@@ -226,7 +228,7 @@ function fullTextUrl(seg) {
  *   `MewX : 《斯诺登…》预告片`——照抄比替它编一个动词诚实，而 n=1 也不够推出任何规则。
  *
  * @param {string} seg 一条广播的容器切片
- * @returns {string|null}
+ * @returns {{action: string, parts: {text: string, url?: string}[]|null}|null}
  */
 function actionSentence(seg) {
   const at = seg.indexOf('class="lnk-people"');
@@ -256,10 +258,56 @@ function actionSentence(seg) {
   //
   // 结尾的冒号连同它前面的空白一起去：`喜欢\n      \n:` 折叠成 `喜欢 :`，
   // 只去冒号会留一个尾随空格，那会让同一个动作出现两种写法。
-  const s = stripTagsAndDecode(rest.slice(0, Math.min(...stops)))
-    .replace(/\s+/g, ' ').trim().replace(/\s*[:：]$/, '');
+  //
+  // ## 句子里的链接要留住
+  //
+  // 这句话里有链接，而链接里装的正是它的宾语：豆列名、作品名、相册。
+  // 只留文字的话，「上传了 1 张照片到 宝可梦明亮珍珠 的 相册」在站点上就是一句
+  // 点不动的话——而那三个词在豆瓣上都是可以点的。
+  //
+  // 所以除了那句**给人看的整句**（`action`，`ACTION_STATUS` 也要按它精确查表），
+  // 再给一份**结构化的分段**。这与 `bundle/1.4` 给缺口配 `detail` + `url` 是同一个
+  // 形状，理由也一样：拿整句去做子串匹配把链接对回去，靠的是两边的实体解码分毫不差，
+  // 而**对不上时是静默的**——链接不出现，没有任何报错。
+  //
+  // **不变量：`parts.map((p) => p.text).join('') === action`。** 有它，下游重建
+  // 带链接的句子不需要任何匹配；没它，这个字段就只是又一次子串匹配。测试钉着它。
+  //
+  // 只在**真有链接**时才给 `parts`：3423 条广播里带链接的只有 90 条，其余全给一份
+  // 单段数组只是把同一句话存两遍。
+  const raw = rest.slice(0, Math.min(...stops));
 
-  return s || null;
+  /** 一段：去标签解实体、把空白折成单个空格，**首尾的空白保留**（拼回去要靠它）。 */
+  const chunk = (x) => stripTagsAndDecode(x).replace(/\s+/g, ' ');
+
+  /** @type {{text: string, url?: string}[]} */
+  const parts = [];
+  let cursor = 0;
+  for (const m of raw.matchAll(/<a\s[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g)) {
+    if (m.index > cursor) parts.push({ text: chunk(raw.slice(cursor, m.index)) });
+    // href 只解实体，不去标签：真实页面里有 `?icn=status_board&amp;cate=`。
+    parts.push({ text: chunk(m[2]), url: decodeEntities(m[1]) });
+    cursor = m.index + m[0].length;
+  }
+  if (cursor < raw.length) parts.push({ text: chunk(raw.slice(cursor)) });
+
+  // 跨段也要折叠：`到豆列 ` 后面接 ` 游戏购买小账本` 会拼出两个空格，而整句折叠
+  // 只会有一个——不处理的话上面那条不变量就不成立。
+  for (let i = 1; i < parts.length; i += 1) {
+    if (parts[i - 1].text.endsWith(' ') && parts[i].text.startsWith(' ')) {
+      parts[i].text = parts[i].text.slice(1);
+    }
+  }
+  if (parts.length) {
+    parts[0].text = parts[0].text.replace(/^ /, '');
+    const last = parts[parts.length - 1];
+    last.text = last.text.replace(/ $/, '').replace(/\s*[:：]$/, '');
+  }
+  const kept = parts.filter((x) => x.text !== '');
+  const s = kept.map((x) => x.text).join('');
+
+  if (!s) return null;
+  return kept.some((x) => x.url) ? { action: s, parts: kept } : { action: s, parts: null };
 }
 
 /**
@@ -303,7 +351,8 @@ export function extractBroadcasts(html, ownerUserId) {
     unresolvedImages += photos.unresolved;
     const fullText = fullTextUrl(seg);
 
-    const action = actionSentence(seg);
+    const act = actionSentence(seg);
+    const action = act?.action ?? null;
     // **先切出 blockquote，再在里面找第一个 `<p>`。**
     //
     // 原来是一条正则直接要求 `<blockquote>` 后面紧跟着 `<p>`：
@@ -351,6 +400,9 @@ export function extractBroadcasts(html, ownerUserId) {
       // 正文原样保留，只把标签剥掉——里面常有链接（`douc.cc` 短链）与表情。
       text: quote ? stripTags(quote) : null,
       action,
+      // **句子里那几个链接。** 没有链接时是 null，不是空数组：3423 条广播里只有
+      // 90 条带链接，其余给一份单段数组等于把同一句话存两遍。
+      actionParts: act?.parts ?? null,
       status: action ? (ACTION_STATUS[action] ?? null) : null,
       rating,
       targetType: /data-target-type="(\w+)"/.exec(seg)?.[1] ?? null,
