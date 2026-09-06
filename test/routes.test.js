@@ -7,6 +7,7 @@ import {
   checkPrerequisites,
   UNRESOLVED_ROUTES,
   UNSUPPORTED_CATEGORIES,
+  UNSUPPORTED_ROUTES,
   PRIORITY,
 } from '../src/crawl/routes.js';
 
@@ -238,6 +239,39 @@ describe('做不了的路线要写清「为什么做不了」', () => {
     // 表空了不等于该删：下一条查不清的路线还得有地方放，而「查不清」与
     // 「上游没有了」混成一张表之后就再也分不开了。
     assert.deepEqual(Object.keys(UNRESOLVED_ROUTES), []);
+  });
+
+  /**
+   * 三张表各说一件事，混起来其中两件就会长得像第三件：
+   *
+   *   UNRESOLVED_ROUTES        还没查清
+   *   UNSUPPORTED_CATEGORIES   查清了，上游没有了
+   *   UNSUPPORTED_ROUTES       查清了，抓得到，但不在范围内
+   */
+  test('明确不做的路线：说得出谁量的、什么时候量的、以及抓不抓得到', () => {
+    const album = UNSUPPORTED_ROUTES['asset.album_photo'];
+    assert.ok(album, '相册那条决定要留在表上 —— 删了下一个人会重推一遍');
+    assert.match(album.measuredAt, /^\d{4}-\d{2}-\d{2}$/, '没有日期，这句话过两年就没人敢信');
+    assert.equal(album.reachable, true,
+      '这一格记的是范围决定。写成 false 就变成了「抓不到」，那是另一件事');
+  });
+
+  test('相册那条的理由必须说清「不是没有样本」', () => {
+    // 原来 README 上写着「这个账号一个相册都没有，没有样本可量」——那句话是错的，
+    // 而且错得很安静：实测 17 条广播、51 张照片，46 张的缩略图早就在档案里。
+    // 理由退回「没有样本」的话，这条决定就重新变成了一个待办。
+    const { reason } = UNSUPPORTED_ROUTES['asset.album_photo'];
+    // **写成 /51 张/ 是不够的**：那四个字在这段话里出现两次（「一共 51 张」和
+    // 「不进档案的是那 51 张照片本身」），删掉前一句照样绿。变异验过。
+    // 要断言的是**证据本身**——多少条广播、多少张照片——不是那两个数字出现过。
+    assert.match(reason, /17 条广播[\s\S]*一共 51 张/, '样本量（几条广播、几张照片）要写出来');
+    assert.match(reason, /属于那个条目/, '判据是「它属于谁」，不是「谁上传的」');
+    assert.match(reason, /广播本身照抓/, '别让人以为那 17 条广播也不要了');
+  });
+
+  test('两张「不做」的表不许收同一个键 —— 混了就分不开了', () => {
+    const dup = Object.keys(UNSUPPORTED_ROUTES).filter((k) => k in UNSUPPORTED_CATEGORIES);
+    assert.deepEqual(dup, []);
   });
 });
 
