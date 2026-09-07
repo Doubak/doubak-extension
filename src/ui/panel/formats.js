@@ -109,7 +109,11 @@ function entriesFor(all) {
  * 三种产出的 `README` 之类会互相覆盖，而档案页早就为这件事付过一次代价
  * （用户的下载目录里只剩最后一次导出的 manifest）。
  */
-const FORMATS = {
+// 导出出去只为一件事：测试能**跑** `summary()`，而不是拿正则去源码里找那句话。
+// 静态检查在这个文件里是常态（真正的失败要在装好的扩展里点开标签页才发生），
+// 但凡能跑就别只是找——实测过：把 `r.restricted?.length` 改成
+// `false && r.restricted?.length`，找字符串的那版测试一条都不红。
+export const FORMATS = {
   neodb: {
     button: 'export-neodb',
     name: 'NeoDB 导入包',
@@ -120,6 +124,21 @@ const FORMATS = {
       `评分 ${r.ratings} · 短评 ${r.comments} · 标签 ${r.tags}`,
       `书评影评 ${r.reviews} · 日记 ${r.notes + r.articles} · 豆列 ${r.collections}`,
       r.shelfLogs ? `状态历史 ${r.shelfLogs} 条（从广播还原，豆瓣自己已经不显示了）` : null,
+      // **这一条必须出现在卡片上，不能只写进包里那份「怎么导入.md」。**
+      // 按下「导出」的人下一步就是把 zip 传上去，而那份说明要解压才看得到——
+      // 一句正确的话出现在做决定的人读不到的地方，等于没说。
+      //
+      // 「豆瓣锁的」与「作者藏的」分开数：只给一个总数的话，看的人分不出
+      // 「这是我自己藏的」和「这是豆瓣拿下的」，而那正是拿豆瓣的审查冒充用户的意愿。
+      r.restricted?.length
+        ? `⚠ ${r.restricted.length} 篇日记在豆瓣上不公开`
+          + `（${[
+            r.restricted.filter((x) => x.by === 'platform').length ? `豆瓣锁的 ${r.restricted.filter((x) => x.by === 'platform').length}` : null,
+            r.restricted.filter((x) => x.by === 'author').length ? `你自己设的 ${r.restricted.filter((x) => x.by === 'author').length}` : null,
+            r.restricted.filter((x) => x.by === 'unsure').length ? `认不出的 ${r.restricted.filter((x) => x.by === 'unsure').length}` : null,
+          ].filter(Boolean).join(' · ')}），`
+          + '包里写的是「仅提及者可见」——东西照样在你账号里，只是不对外'
+        : null,
     ].filter(Boolean),
     next: '把 neodb-ndjson-import.zip 传到 NeoDB 的「设置 → 数据 → 导入 NeoDB 备份」。'
       + '旁边那几个文件是给你看的，不用上传。',

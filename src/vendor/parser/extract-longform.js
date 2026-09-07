@@ -150,6 +150,104 @@ function bodyText(html) {
 }
 
 /**
+ * 一篇长文的可见性，以及**是谁**让它不公开的。
+ *
+ * ## 「仅自己可见」有两个成因，方向相反
+ *
+ * 实测档案里那篇《想看的被河蟹的电影》读作「仅自己可见」，而它不是作者藏的——
+ * 页面上豆瓣自己写着「含有违规或引发不良讨论的内容……请勿发布同类信息」。
+ *
+ * | | 作者设的私密 | 豆瓣锁定 |
+ * |---|---|---|
+ * | 意思 | 别给人看 | 它公开过，然后被拿下了 |
+ * | 这份存档该怎么办 | 别发出去 | **正是它存在的理由** |
+ *
+ * 合成一个布尔值的话下游只有两种做法，两种都错：一律发出去，等于把作者藏起来的
+ * 东西公开；一律藏起来，等于这份存档替豆瓣把它二次消音——而后者更隐蔽，一条被
+ * 静默藏起来的记录不留任何痕迹给人发现。所以这里返回两个值，**不替下游决定**。
+ *
+ * ## 判据是结构，不是「页面上有没有『仅自己可见』这几个字」
+ *
+ * 按文字认的话，正文里写着这几个字的日记会被判成私密——与广播那条「（全文）必须
+ * 结构性地认，不能按文字认」是同一条规则。两种模板的隐私标记长得完全不同，各自
+ * 锚在自己的容器上：
+ *
+ *     新 /topic/   div.topic-meta        里面找 i.private-tag
+ *     旧 /note/    div.note-footer-stat  里面找 .note-footer-stat-privacy
+ *
+ * **必须限定在容器内**，理由与豆列那条一样：容器找不到时答案是 `unknown`，而不是
+ * `public`。把「认不出来」并进「公开」，等于豆瓣改一次 markup 就把所有私密日记
+ * 静默变成公开——而发出去的东西撤不回来。
+ *
+ * ## `null` 与 `'unknown'` 是两件事
+ *
+ * 与 `又名` 的 `null`（没读详情页）和 `[]`（读了，没有）同一条。实测 2 篇评论页上
+ * 「私密」「仅自己」「可见」「公开」一个字都没有、连容器都不存在——那不是没读到，
+ * 是豆瓣没给评论这个功能，所以是 `null`。日记页上**连容器都找不到**才是 `unknown`，
+ * 那是豆瓣改版的信号，下游必须当私密处理。
+ *
+ * ## `platform` 要正面证据，`author` 只是「豆瓣没出面」
+ *
+ * 判据是那条 `notice-info-type-4` 通告——它是豆瓣在向作者说明自己做了什么。没有它
+ * 就记 `author`。**所以 `author` 的含义到此为止，别在下游读成保证**：实测的 2×2 有
+ * 两格没有样本（旧模板的作者私密、新模板的豆瓣锁定）。判据本身不看模板，所以那个洞
+ * 不影响它成立。
+ *
+ * 通告只在**已经判定私密之后**才去看，这样即使哪天 `notice-info-type-4` 用在别的
+ * 地方，也影响不到一篇公开日记。
+ *
+ * ## 「限定在容器内」这一条今天量不出来，但不撤
+ *
+ * 一致性用例咬得住「容器不在 → unknown」（把它改成 public，用例变红），咬不住
+ * 「标记必须在容器里」——因为手上没有一个页面在容器外还有第二个标记：旧模板的
+ * `note-footer-stat-privacy` 按类名就长在 `note-footer-stat` 里，新模板实测整页
+ * `private-tag` 恰好一次。所以这半条**没有反例，也没有正例**。
+ *
+ * 不撤，理由是它挡的方向：一个飘在别处的标记会把一篇公开日记判成私密，接着记成
+ * `author`，接着被下游扣住不发——那正是「这份存档替豆瓣把它二次消音」的方向。
+ * 与那条「永远为真的守卫不如没有」不同：那一处是**上游保证了它必然为真**，这一处
+ * 只是还没遇到，两者不是一回事。写在这里，免得下一个人把缺测试读成疏忽。
+ *
+ * @param {string} html
+ * @param {'note'|'review'} kind
+ * @returns {{visibility: 'public'|'private'|'unknown'|null,
+ *            restrictedBy: 'author'|'platform'|null,
+ *            restrictionNotice: string|null}}
+ */
+function restriction(html, kind) {
+  const none = { visibility: null, restrictedBy: null, restrictionNotice: null };
+  if (kind !== 'note') return none;
+
+  let box = null;
+  let marker = null;
+  for (const [open, mark] of [
+    [/<div class="topic-meta">/, /<i class="private-tag"/],
+    [/<div class="note-footer-stat">/, /class="note-footer-stat-privacy"/],
+  ]) {
+    const at = open.exec(html)?.index ?? -1;
+    if (at < 0) continue;
+    box = sliceDiv(html, at);
+    marker = mark;
+    break;
+  }
+  // 容器都没有 —— 说不准，**不是公开**
+  if (box == null) return { ...none, visibility: 'unknown' };
+  if (!marker.test(box)) return { ...none, visibility: 'public' };
+
+  const censored = /notice-info-type-4/.test(html);
+  const notice = /<p class="notice-info-text">([\s\S]*?)<\/p>/.exec(html);
+  return {
+    visibility: 'private',
+    restrictedBy: censored ? 'platform' : 'author',
+    // 逐字存豆瓣那句判词：它是豆瓣对用户自己写的东西下的评价，而豆瓣不会替谁
+    // 保存它——与「分享了」被改成「转发了」是同一类上游史料。
+    restrictionNotice: censored && notice
+      ? (decodeEntities(notice[1].replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim() || null)
+      : null,
+  };
+}
+
+/**
  * @typedef {object} RawLongform
  * @property {string} id
  * @property {'note'|'review'} kind
@@ -160,6 +258,9 @@ function bodyText(html) {
  * @property {number|null} rating       只有评论有
  * @property {string|null} subjectUrl   只有评论有
  * @property {string|null} location     只有日记有（发布地）
+ * @property {'public'|'private'|'unknown'|null} visibility  评论恒为 null
+ * @property {'author'|'platform'|null} restrictedBy         不是 private 时为 null
+ * @property {string|null} restrictionNotice                 只有豆瓣锁定时才有
  */
 
 /**
@@ -215,6 +316,7 @@ function note(html) {
     url: /data-url="(https:\/\/[^"]*\/note\/\d+\/?)"/.exec(html)?.[1] ?? null,
     rating: null,
     subjectUrl: null,
+    ...restriction(html, 'note'),
   };
 }
 
@@ -240,6 +342,7 @@ function review(html) {
     // `/subject/26425271/`，而这条评论其实是给游戏写的（`/game/26425271/`），
     // 相对路径会把媒介弄错。
     subjectUrl: /"sameAs":\s*"(https:\/\/[^"]*douban\.com\/[^"]+)"/.exec(html)?.[1] ?? null,
+    ...restriction(html, 'review'),
   };
 }
 
@@ -277,5 +380,6 @@ function topicNote(html) {
     url: /https:\/\/www\.douban\.com\/topic\/\d+\//.exec(html)?.[0] ?? null,
     rating: null,
     subjectUrl: null,
+    ...restriction(html, 'note'),
   };
 }

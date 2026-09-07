@@ -56,6 +56,24 @@ export function instructions(r) {
     L.push('藏起来，所有记录一律按公开导入。要别的可见性，用 `--visibility=1`（仅关注者）或');
     L.push('`--visibility=2`（仅提及者）重新导出——那个选择写在文件里，不在表单里。');
     L.push('');
+    if (r.neodb.restricted?.length) {
+      L.push(`✦ **有 ${r.neodb.restricted.length} 篇长文在豆瓣上不公开，这一份里它们写的是`);
+      L.push('`visibility=2`（仅提及者）**，不跟着上面那个基线走。');
+      L.push('');
+      for (const x of r.neodb.restricted) {
+        L.push(x.by === 'platform'
+          ? `  · ${x.title} —— **豆瓣把它锁成了「仅自己可见」**`
+          : x.by === 'author'
+            ? `  · ${x.title} —— 你自己设成了「仅自己可见」`
+            : `  · ${x.title} —— 这份 canonical 里没有可见性字段（旧档案），按不公开处理`);
+      }
+      L.push('');
+      L.push('**东西照样在你账号里，一个字都不少**，只是不对外可见。这两种的方向正好相反：');
+      L.push('你自己藏起来的，公开出去就撤不回来；而豆瓣锁掉的，留住它恰恰是这份存档存在的');
+      L.push('理由——所以这里既不替你公开，也不替你丢掉。要不要公开，在 NeoDB 那一篇自己的');
+      L.push('页面上改，那是只有你能决定的事。');
+      L.push('');
+    }
     if (r.neodb.noLink) {
       L.push(`⚠ **${r.neodb.noLink} 条没有放进 zip**：这些作品豆瓣已经删掉了，`);
       L.push('档案里连链接都没有，NeoDB 无从定位。它们列在 `neodb/neodb-needs-check.csv` 里，');

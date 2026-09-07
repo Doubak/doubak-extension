@@ -831,6 +831,12 @@ function upsertLongform(store, { lf, account, observation, parserVersion }) {
     rating: lf.rating,
     subject_url: lf.subjectUrl,
     location: lf.location,
+    // **进 fields，所以进摘要，所以豆瓣锁掉一篇日记会产生一条修订** —— 那正是要
+    // 留住的：这条记录曾经是公开的，某一天不是了。与「浏览数变了」那种假修订相反,
+    // 它是记录本身真的变了。
+    visibility: lf.visibility ?? null,
+    restricted_by: lf.restrictedBy ?? null,
+    restriction_notice: lf.restrictionNotice ?? null,
   };
   const digests = digestAll(fields);
 

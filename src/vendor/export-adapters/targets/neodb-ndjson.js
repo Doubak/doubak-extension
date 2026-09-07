@@ -162,6 +162,9 @@ export function buildNeodbNdjson(data, options = {}) {
     reviews: 0,
     notes: 0,
     articles: 0, // 不挂作品的长文，CSV 那边没有去处
+    // 在豆瓣上不公开的长文，逐篇点名（标题 + 是谁让它不公开的）。**要点名而不是
+    // 计数**：这两种的方向相反，看的人得能分出「这是我自己藏的」和「这是豆瓣锁的」。
+    restricted: [],
     collections: 0,
     collectionItems: 0,
     emptyCollections: 0, // 整份豆列一条都没剩下（里面全是评论/小组之类）
@@ -364,6 +367,39 @@ export function buildNeodbNdjson(data, options = {}) {
   for (const piece of data.longform) {
     const f = fieldsOf(piece);
     const published = f.published_at?.iso ?? undefined;
+    // **在豆瓣上不公开的日记，到了 NeoDB 也不公开。**
+    //
+    // 这里与站点那一步不同，而不同之处正是它可以有默认值的原因：站点那边
+    // 「不发出去」= 这一页在网上不存在，于是豆瓣锁掉的东西被这份存档二次消音；
+    // 而这里 **记录照样进用户自己的账号**，只是不对外可见。所以两个方向都安全：
+    // 作者藏的仍然藏着，豆瓣锁的一个字不少地留了下来，要不要公开由用户在 NeoDB
+    // 自己那一页上决定——那正是他能决定、也只有他能决定的事。
+    //
+    // `visibility` 的取值：0 公开 / 1 仅关注者 / 2 仅提及者。2 是 NeoDB 最接近
+    // 「私密」的一档，与私密豆列走同一条。
+    //
+    // 判据是「**不是 public 就收起来**」，不是「private 才收起来」：`unknown`
+    // （豆瓣改版认不出来）和没有这个字段的老 canonical 都归这一边。把「认不出来」
+    // 并进「公开」的话，一次导入就能把该拦的全推上联邦，而联邦是撤不回来的。
+    //
+    // **`null` 与「缺这个字段」是两件事，这里必须分开看。** canonical 里评论恒为
+    // `null`，因为豆瓣压根没给评论这个功能（实测 2 篇评论页上「私密」「仅自己」
+    // 「可见」一个字都没有，连容器都不存在）——那不是「不知道」，是「不适用」。
+    // 把它并进「不知道」的话，每个人的每一篇影评书评都会被收成 visibility=2，
+    // 而它们在豆瓣上本来就挂在作品页上给所有人看。
+    //
+    // 日记那边相反：**缺这个字段的老 canonical 算不公开**。解析器是 0.12.0 才开始
+    // 写它的，而两个方向的代价差着一个量级——把公开的收成 visibility=2，用户在
+    // NeoDB 上点一下就能改回来；把私密的推上联邦，撤不回来。重跑一次解析器就没这
+    // 一栏了。
+    const restricted = piece.kind !== 'review' && f.visibility !== 'public';
+    const pieceVis = restricted ? 2 : vis;
+    if (restricted) {
+      report.restricted.push({
+        title: f.title ?? '(无标题)',
+        by: f.restricted_by === 'platform' ? 'platform' : f.visibility === 'private' ? 'author' : 'unsure',
+      });
+    }
     const url = f.subject_url ?? null;
     const subject = url ? byUrl.get(url) ?? null : null;
 
@@ -372,7 +408,7 @@ export function buildNeodbNdjson(data, options = {}) {
       // NDJSON 有 Article，不挂条目的长文终于有了去处。
       articlesOut.push(line({
         type: 'Article',
-        visibility: vis,
+        visibility: pieceVis,
         metadata: {},
         cover: null,
         content: {
@@ -405,7 +441,7 @@ export function buildNeodbNdjson(data, options = {}) {
     if (piece.kind === 'review') {
       reviewsOut.push(line({
         type: 'Review',
-        visibility: vis,
+        visibility: pieceVis,
         metadata: {},
         content: {
           type: 'Review',
@@ -421,7 +457,7 @@ export function buildNeodbNdjson(data, options = {}) {
     } else {
       notesOut.push(line({
         type: 'Note',
-        visibility: vis,
+        visibility: pieceVis,
         metadata: {},
         content: {
           type: 'Note',

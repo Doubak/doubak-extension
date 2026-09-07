@@ -571,6 +571,16 @@ function projectLongform(rec) {
     location: r.fields.location ?? null,
     rating: r.fields.rating ?? null,
     subjectUrl: r.fields.subject_url ?? null,
+    // **「豆瓣锁的」与「作者藏的」在这里也必须分开传。** 合成一个布尔值的话，站点
+    // 只有两种做法而两种都错：一律照登，等于把作者藏起来的东西发到公网；一律藏起来，
+    // 等于这份存档替豆瓣把它二次消音——后者更隐蔽，一条被静默藏起来的记录不留任何
+    // 痕迹给人发现。而豆瓣锁掉的那一篇，恰恰是这份存档存在的理由。
+    //
+    // canonical 里没有这两个字段的老档案会拿到 null/undefined，与「说不准」是同一
+    // 个处理：**不当作公开**。
+    visibility: r.fields.visibility ?? null,
+    restrictedBy: r.fields.restricted_by ?? null,
+    restrictionNotice: r.fields.restriction_notice ?? null,
     revisionCount: rec.revisions.length,
     lastSeenAt: r.last_observed_at,
   };

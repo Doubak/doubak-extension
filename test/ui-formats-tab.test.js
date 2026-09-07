@@ -13,6 +13,12 @@ import { readFile } from 'node:fs/promises';
 
 const read = (rel) => readFile(new URL(`../${rel}`, import.meta.url), 'utf-8');
 
+// **能跑就别只是找。** 这个文件里静态检查是常态（真正的失败要在装好的扩展里点开
+// 标签页才发生），但 `summary()` 是个纯函数，跑得起来——实测过：把
+// `r.restricted?.length` 改成 `false && r.restricted?.length`，找字符串的那版
+// 测试一条都不红，而跑函数的这版当场红。
+const { FORMATS } = await import('../src/ui/panel/formats.js');
+
 describe('导出页的骨架', () => {
   test('标签按钮与 section 对得上', async () => {
     const html = await read('src/ui/panel.html');
@@ -382,5 +388,56 @@ describe('空档案', () => {
     const mkdirAt = js.indexOf("getDirectoryHandle(format.dir");
     assert.ok(parseAt > 0 && mkdirAt > 0);
     assert.ok(parseAt < mkdirAt, '目录在解析之前就建了');
+  });
+});
+
+/**
+ * 豆瓣上不公开的日记，卡片上要说。
+ *
+ * 按下「导出」的人下一步就是把 zip 传到 NeoDB，而包里那份「怎么导入.md」要解压
+ * 才看得到。**一句正确的话出现在做决定的人读不到的地方，等于没说**——这个项目
+ * 已经为这件事付过一次代价（2026-09-04 那两个对话框）。
+ *
+ * 这里也是静态检查：真正的失败要在装好的扩展里点开那个标签页、跑完一次导出才看得见。
+ */
+describe('不公开的日记要出现在导出卡片上', () => {
+  /** 造一份 report，只填这条测试关心的部分。 */
+  const sum = (restricted) => FORMATS.neodb.summary({
+    marks: 1, ratings: 0, comments: 0, tags: 0, reviews: 0, notes: 0, articles: 0,
+    collections: 0, shelfLogs: 0, restricted,
+  }).join('\n');
+
+  test('一篇都没有的时候，不多出一行', () => {
+    // 一份永远有条目的清单是没人看的清单。
+    assert.doesNotMatch(sum([]), /不公开/);
+    assert.doesNotMatch(sum(undefined), /不公开/);
+  });
+
+  test('**有的时候要说出来** —— 下一步就是把 zip 传上去', () => {
+    const t = sum([{ title: 'a', by: 'platform' }]);
+    assert.match(t, /1 篇日记在豆瓣上不公开/);
+  });
+
+  test('**「豆瓣锁的」与「你自己设的」要分开数**', () => {
+    // 只给一个总数的话，看的人分不出「这是我自己藏的」和「这是豆瓣拿下的」，
+    // 而那正是拿豆瓣的审查冒充用户的意愿——这条改动的全部理由就在这儿。
+    const t = sum([
+      { title: 'a', by: 'platform' }, { title: 'b', by: 'platform' },
+      { title: 'c', by: 'author' }, { title: 'd', by: 'unsure' },
+    ]);
+    assert.match(t, /4 篇/);
+    assert.match(t, /豆瓣锁的 2/);
+    assert.match(t, /你自己设的 1/);
+    assert.match(t, /认不出的 1/);
+  });
+
+  test('只有一类时不带出空栏', () => {
+    assert.doesNotMatch(sum([{ title: 'a', by: 'author' }]), /豆瓣锁的|认不出的/);
+  });
+
+  test('**说清「东西还在你账号里」** —— 不然它读起来像丢了东西', () => {
+    // 「不公开」与「不导出」是两件事。这份存档存在的理由正是留住豆瓣拿掉的东西，
+    // 如果用户以为那篇被锁的日记根本没导出去，他会去做完全不同的事。
+    assert.match(sum([{ title: 'a', by: 'platform' }]), /照样在你账号里/);
   });
 });

@@ -232,6 +232,9 @@ export function longformPage(r, { images = {} } = {}) {
     douban_subject_url: r.subjectUrl,
     douban_revisions: r.revisionCount,
     douban_last_seen: r.lastSeenAt,
+    // 主题要靠它排版，`npm run deploy` 的预演要靠它点名。
+    douban_visibility: r.visibility ?? null,
+    douban_restricted_by: r.restrictedBy ?? null,
   };
 
   let body = r.body ?? '';
@@ -249,7 +252,44 @@ export function longformPage(r, { images = {} } = {}) {
     .split(/(!\[\]\([^)]*\))/)
     .map((seg, i) => (i % 2 === 1 ? seg : plainText(seg, { preserveListMarkers: true })))
     .join('');
-  return frontMatter(fm) + (body ? `\n${body}\n` : '');
+  return frontMatter(fm) + notice(r) + (body ? `\n${body}\n` : '');
+}
+
+/**
+ * 这篇日记在豆瓣上不公开时，正文最前面那一段。
+ *
+ * ## 为什么写进正文，而不是只留在 front matter 里交给主题
+ *
+ * 「Markdown 是产品，HTML 只是它的一个消费者」——`npm run md` 要能单独喂给任何
+ * SSG。只写 front matter 的话，这件事在纯 Markdown 那一棵树里**根本不存在**，
+ * 换个主题就没了。而这不是版式，是内容。
+ *
+ * ## 豆瓣锁的那一条，是这份存档最该说话的地方
+ *
+ * 实测那篇《想看的被河蟹的电影》：页面上豆瓣写着「含有违规或引发不良讨论的内容
+ * ……请勿发布同类信息」，而生成出来的页面**一个字都没提**，正文照登，看着像什么
+ * 都没发生过。一份为「留住豆瓣拿掉的东西」而存在的存档，把「豆瓣把它拿下了」这
+ * 件事漏掉了。
+ *
+ * 豆瓣那句判词逐字引用：它是豆瓣对用户自己写的东西下的评价，而豆瓣不会替谁保存
+ * 它——与「分享了」被改成「转发了」是同一类上游史料。它来自页面，所以要转义
+ * （用户正文那条规矩同样适用于它）。
+ *
+ * ## 作者自己藏的那一条，只说一句，不评论
+ *
+ * 那是用户自己的决定，页面上说明「它在豆瓣上不公开」就够了。真正要拦的地方不在
+ * 这一页，而在 `npm run deploy` 的预演——那才是它变成公网内容的那一步。
+ *
+ * `unknown` 什么都不写：**我们不知道**，而在页面上写一句猜的比不写更糟。它照样
+ * 会出现在部署预演里，因为那一步的判据是「不是 public 就点名」。
+ */
+function notice(r) {
+  if (r.visibility !== 'private') return '';
+  if (r.restrictedBy === 'platform') {
+    const said = r.restrictionNotice ? `豆瓣给出的说法是：${plainText(r.restrictionNotice)}` : '豆瓣没有给出理由。';
+    return `\n> **这篇日记被豆瓣锁成了「仅自己可见」。** ${said}\n`;
+  }
+  return '\n> 这篇日记在豆瓣上设成了「仅自己可见」。\n';
 }
 
 /**
