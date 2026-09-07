@@ -409,35 +409,43 @@ describe('不公开的日记要出现在导出卡片上', () => {
 
   test('一篇都没有的时候，不多出一行', () => {
     // 一份永远有条目的清单是没人看的清单。
-    assert.doesNotMatch(sum([]), /不公开/);
-    assert.doesNotMatch(sum(undefined), /不公开/);
+    assert.doesNotMatch(sum([]), /不公开|被豆瓣锁/);
+    assert.doesNotMatch(sum(undefined), /不公开|被豆瓣锁/);
   });
 
-  test('**有的时候要说出来** —— 下一步就是把 zip 传上去', () => {
-    const t = sum([{ title: 'a', by: 'platform' }]);
-    assert.match(t, /1 篇日记在豆瓣上不公开/);
-  });
-
-  test('**「豆瓣锁的」与「你自己设的」要分开数**', () => {
-    // 只给一个总数的话，看的人分不出「这是我自己藏的」和「这是豆瓣拿下的」，
-    // 而那正是拿豆瓣的审查冒充用户的意愿——这条改动的全部理由就在这儿。
+  test('**豆瓣锁的与作者藏的必须分成两句** —— 处置正好相反', () => {
+    // 合成一句话就是拿豆瓣的审查冒充用户的意愿；在这一版里还更糟——
+    // 豆瓣锁的那一篇是**按公开导入**的，混在「不对外可见」里说，
+    // 会让人以为自己没在往联邦上发东西。
     const t = sum([
       { title: 'a', by: 'platform' }, { title: 'b', by: 'platform' },
       { title: 'c', by: 'author' }, { title: 'd', by: 'unsure' },
     ]);
-    assert.match(t, /4 篇/);
-    assert.match(t, /豆瓣锁的 2/);
-    assert.match(t, /你自己设的 1/);
-    assert.match(t, /认不出的 1/);
+    assert.match(t, /2 篇日记是被豆瓣锁成「仅自己可见」的/);
+    assert.match(t, /按公开导入/);
+    assert.match(t, /2 篇日记在豆瓣上不公开/);
+    assert.match(t, /仅提及者可见/);
   });
 
-  test('只有一类时不带出空栏', () => {
-    assert.doesNotMatch(sum([{ title: 'a', by: 'author' }]), /豆瓣锁的|认不出的/);
+  test('**公开导入那一句要带上「撤不回来」**', () => {
+    // 联邦出去之后别的实例会有副本。这是这张卡片上唯一一个不可逆的后果，
+    // 而做这个决定的人只在这里读得到。
+    assert.match(sum([{ title: 'a', by: 'platform' }]), /联邦|撤不回来/);
+  });
+
+  test('只有一类时不带出空的另一句', () => {
+    assert.doesNotMatch(sum([{ title: 'a', by: 'author' }]), /被豆瓣锁/);
+    assert.doesNotMatch(sum([{ title: 'a', by: 'platform' }]), /仅提及者/);
+  });
+
+  test('认不出是谁设的，跟作者自己藏的一样收起来', () => {
+    // 认不出来不等于豆瓣锁的——后者要正面证据，前者什么都没有。
+    assert.match(sum([{ title: 'a', by: 'unsure' }]), /仅提及者可见/);
   });
 
   test('**说清「东西还在你账号里」** —— 不然它读起来像丢了东西', () => {
-    // 「不公开」与「不导出」是两件事。这份存档存在的理由正是留住豆瓣拿掉的东西，
-    // 如果用户以为那篇被锁的日记根本没导出去，他会去做完全不同的事。
-    assert.match(sum([{ title: 'a', by: 'platform' }]), /照样在你账号里/);
+    // 「不公开」与「不导出」是两件事。收起来的是可见性，不是内容；用户以为那篇
+    // 日记根本没导出去的话，他会去做完全不同的事。
+    assert.match(sum([{ title: 'a', by: 'author' }]), /照样在你账号里/);
   });
 });

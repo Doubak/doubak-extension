@@ -57,22 +57,35 @@ export function instructions(r) {
     L.push('`--visibility=2`（仅提及者）重新导出——那个选择写在文件里，不在表单里。');
     L.push('');
     if (r.neodb.restricted?.length) {
-      L.push(`✦ **有 ${r.neodb.restricted.length} 篇长文在豆瓣上不公开，这一份里它们写的是`);
-      L.push('`visibility=2`（仅提及者）**，不跟着上面那个基线走。');
-      L.push('');
-      for (const x of r.neodb.restricted) {
-        L.push(x.by === 'platform'
-          ? `  · ${x.title} —— **豆瓣把它锁成了「仅自己可见」**`
-          : x.by === 'author'
+      const 锁 = r.neodb.restricted.filter((x) => x.by === 'platform');
+      const 藏 = r.neodb.restricted.filter((x) => x.by !== 'platform');
+      if (锁.length) {
+        L.push(`✦ **有 ${锁.length} 篇日记是被豆瓣锁成「仅自己可见」的，这一份里按公开导入。**`);
+        L.push('');
+        for (const x of 锁) L.push(`  · ${x.title}`);
+        L.push('');
+        L.push('它之所以「仅自己可见」，**恰恰因为它曾经是公开的**——你本来就要它公开，是豆瓣');
+        L.push('把它关掉的。跟着豆瓣一起把它收起来，这份存档就白存了；而 NeoDB 是它今天还能');
+        L.push('公开说话的地方。');
+        L.push('');
+        L.push('⚠ 但这一步**撤不回来**：NeoDB 的 Article 会联邦出去，别的实例会有副本。');
+        L.push('  不想这样的话，加 `--visibility=2` 重新导出，或者导入后在 NeoDB 那一篇上改。');
+        L.push('');
+      }
+      if (藏.length) {
+        L.push(`✦ **有 ${藏.length} 篇日记在豆瓣上不公开，这一份里写的是 \`visibility=2\``);
+        L.push('（仅提及者）**，不跟上面那个基线走。');
+        L.push('');
+        for (const x of 藏) {
+          L.push(x.by === 'author'
             ? `  · ${x.title} —— 你自己设成了「仅自己可见」`
             : `  · ${x.title} —— 这份 canonical 里没有可见性字段（旧档案），按不公开处理`);
+        }
+        L.push('');
+        L.push('**东西照样在你账号里，一个字都不少**，只是不对外可见。要不要公开，在 NeoDB');
+        L.push('那一篇自己的页面上改，那是只有你能决定的事。');
+        L.push('');
       }
-      L.push('');
-      L.push('**东西照样在你账号里，一个字都不少**，只是不对外可见。这两种的方向正好相反：');
-      L.push('你自己藏起来的，公开出去就撤不回来；而豆瓣锁掉的，留住它恰恰是这份存档存在的');
-      L.push('理由——所以这里既不替你公开，也不替你丢掉。要不要公开，在 NeoDB 那一篇自己的');
-      L.push('页面上改，那是只有你能决定的事。');
-      L.push('');
     }
     if (r.neodb.noLink) {
       L.push(`⚠ **${r.neodb.noLink} 条没有放进 zip**：这些作品豆瓣已经删掉了，`);

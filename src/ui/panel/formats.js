@@ -128,17 +128,19 @@ export const FORMATS = {
       // 按下「导出」的人下一步就是把 zip 传上去，而那份说明要解压才看得到——
       // 一句正确的话出现在做决定的人读不到的地方，等于没说。
       //
-      // 「豆瓣锁的」与「作者藏的」分开数：只给一个总数的话，看的人分不出
-      // 「这是我自己藏的」和「这是豆瓣拿下的」，而那正是拿豆瓣的审查冒充用户的意愿。
-      r.restricted?.length
-        ? `⚠ ${r.restricted.length} 篇日记在豆瓣上不公开`
-          + `（${[
-            r.restricted.filter((x) => x.by === 'platform').length ? `豆瓣锁的 ${r.restricted.filter((x) => x.by === 'platform').length}` : null,
-            r.restricted.filter((x) => x.by === 'author').length ? `你自己设的 ${r.restricted.filter((x) => x.by === 'author').length}` : null,
-            r.restricted.filter((x) => x.by === 'unsure').length ? `认不出的 ${r.restricted.filter((x) => x.by === 'unsure').length}` : null,
-          ].filter(Boolean).join(' · ')}），`
-          + '包里写的是「仅提及者可见」——东西照样在你账号里，只是不对外'
-        : null,
+      // **两栏分开，因为处置正好相反。** 豆瓣锁掉的按公开导入（它本来就是公开的，
+      // 是豆瓣把它关掉的），作者自己藏的收成仅提及者可见。合成一句话就是拿豆瓣的
+      // 审查冒充用户的意愿——而这一版里，那还会让人以为自己没在往联邦上发东西。
+      ...(r.restricted?.length ? [
+        r.restricted.filter((x) => x.by === 'platform').length
+          ? `⚠ ${r.restricted.filter((x) => x.by === 'platform').length} 篇日记是被豆瓣锁成「仅自己可见」的，`
+            + '这一份按公开导入（它本来就是公开的）——注意会联邦出去，撤不回来'
+          : null,
+        r.restricted.filter((x) => x.by !== 'platform').length
+          ? `⚠ ${r.restricted.filter((x) => x.by !== 'platform').length} 篇日记在豆瓣上不公开，`
+            + '写成「仅提及者可见」——东西照样在你账号里，只是不对外'
+          : null,
+      ] : []),
     ].filter(Boolean),
     next: '把 neodb-ndjson-import.zip 传到 NeoDB 的「设置 → 数据 → 导入 NeoDB 备份」。'
       + '旁边那几个文件是给你看的，不用上传。',

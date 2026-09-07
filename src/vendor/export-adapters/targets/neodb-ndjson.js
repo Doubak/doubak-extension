@@ -367,20 +367,29 @@ export function buildNeodbNdjson(data, options = {}) {
   for (const piece of data.longform) {
     const f = fieldsOf(piece);
     const published = f.published_at?.iso ?? undefined;
-    // **在豆瓣上不公开的日记，到了 NeoDB 也不公开。**
+    // **在豆瓣上不公开的日记：作者自己藏的收起来，豆瓣锁掉的照常公开。**
     //
-    // 这里与站点那一步不同，而不同之处正是它可以有默认值的原因：站点那边
-    // 「不发出去」= 这一页在网上不存在，于是豆瓣锁掉的东西被这份存档二次消音；
-    // 而这里 **记录照样进用户自己的账号**，只是不对外可见。所以两个方向都安全：
-    // 作者藏的仍然藏着，豆瓣锁的一个字不少地留了下来，要不要公开由用户在 NeoDB
-    // 自己那一页上决定——那正是他能决定、也只有他能决定的事。
+    // 这两种长得一模一样（页面上都写着「仅自己可见」），意思却相反：
+    //
+    //   作者设的     「别给人看」          → 收成 visibility=2
+    //   豆瓣锁的     「它公开过，然后被拿下了」 → **按公开导入**
+    //
+    // 后一条是档案主人定的（2026-09-07），而它的道理正是这个项目的道理：那篇日记
+    // 之所以是「仅自己可见」，**恰恰因为它曾经是公开的**。作者本来就要它公开，
+    // 是豆瓣把它关掉的。把它收成私密等于沿用豆瓣的处置，而这份存档存在的全部理由
+    // 是让被拿掉的东西还能重新说话——NeoDB 是它今天唯一还能公开说话的地方。
+    //
+    // **代价照说**：NeoDB 的 Article 会联邦出去，而这是撤不回来的。所以这一条
+    // 逐篇印在 CLI、`怎么导入.md` 和扩展的导出卡片上，导入之前看得到；要收起来，
+    // `--visibility=2` 一次性收紧全部。
     //
     // `visibility` 的取值：0 公开 / 1 仅关注者 / 2 仅提及者。2 是 NeoDB 最接近
     // 「私密」的一档，与私密豆列走同一条。
     //
-    // 判据是「**不是 public 就收起来**」，不是「private 才收起来」：`unknown`
+    // 收起来那一边的判据是「**不是 public 也不是豆瓣锁的，就收起来**」：`unknown`
     // （豆瓣改版认不出来）和没有这个字段的老 canonical 都归这一边。把「认不出来」
-    // 并进「公开」的话，一次导入就能把该拦的全推上联邦，而联邦是撤不回来的。
+    // 并进「公开」的话，一次导入就能把该拦的全推上联邦——**认不出来不等于豆瓣锁的**，
+    // 后者要正面证据（豆瓣自己那条通告），前者什么证据都没有。
     //
     // **`null` 与「缺这个字段」是两件事，这里必须分开看。** canonical 里评论恒为
     // `null`，因为豆瓣压根没给评论这个功能（实测 2 篇评论页上「私密」「仅自己」
@@ -392,14 +401,15 @@ export function buildNeodbNdjson(data, options = {}) {
     // 写它的，而两个方向的代价差着一个量级——把公开的收成 visibility=2，用户在
     // NeoDB 上点一下就能改回来；把私密的推上联邦，撤不回来。重跑一次解析器就没这
     // 一栏了。
-    const restricted = piece.kind !== 'review' && f.visibility !== 'public';
+    const 谁定的 = f.restricted_by === 'platform' ? 'platform'
+      : f.visibility === 'private' ? 'author' : 'unsure';
+    const 不公开 = piece.kind !== 'review' && f.visibility !== 'public';
+    // 豆瓣锁的那一份照常走基线（`--visibility` 说了算），不单独收紧。
+    const restricted = 不公开 && 谁定的 !== 'platform';
     const pieceVis = restricted ? 2 : vis;
-    if (restricted) {
-      report.restricted.push({
-        title: f.title ?? '(无标题)',
-        by: f.restricted_by === 'platform' ? 'platform' : f.visibility === 'private' ? 'author' : 'unsure',
-      });
-    }
+    // **报告里两边都点名，连豆瓣锁的那一篇一起。** 它是被公开导出的那一篇，
+    // 恰恰更该说——联邦出去撤不回来，而看的人得知道自己正在把什么重新发出去。
+    if (不公开) report.restricted.push({ title: f.title ?? '(无标题)', by: 谁定的 });
     const url = f.subject_url ?? null;
     const subject = url ? byUrl.get(url) ?? null : null;
 
