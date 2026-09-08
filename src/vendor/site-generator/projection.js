@@ -94,9 +94,18 @@ function mergeReMarks(marks) {
 
   return [...groups.values()].map((g) => {
     if (g.length === 1) return { current: g[0], superseded: [] };
+    // **判据必须是全序**，否则同一份 canonical 生成两次可能挑出不同的那条——
+    // 与 bundle 去重那次是同一条教训（V8 的 sort 是稳定的，于是缺一层判据时
+    // 结果由输入次序决定，看起来还很稳）。第三层用上游 id：两条记录正是因为
+    // id 不同才分开的，所以它一定分得开。
+    //
+    // **这三层要与 `doubak-export-adapters` 的 `mergeReMarks` 逐条一致。** 那边
+    // 决定 NeoDB 上留哪一条，这边决定站点上哪一条当页头；两边挑得不一样的话，
+    // 同一个作品在站点上和在 NeoDB 上会是两条不同的记录，而两边都不会报错。
     const sorted = [...g].sort((a, b) => {
       if (seenAt(a) !== seenAt(b)) return seenAt(a) < seenAt(b) ? 1 : -1;
-      return markedAt(a) < markedAt(b) ? 1 : -1;
+      if (markedAt(a) !== markedAt(b)) return markedAt(a) < markedAt(b) ? 1 : -1;
+      return String(a.upstream_id ?? '') < String(b.upstream_id ?? '') ? 1 : -1;
     });
     return { current: sorted[0], superseded: sorted.slice(1) };
   });
