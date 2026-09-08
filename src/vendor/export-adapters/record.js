@@ -96,3 +96,44 @@ export function mergeReMarks(marks) {
   }
   return { marks: out, superseded };
 }
+
+/**
+ * 把五个 ndjson 数组补成下游要的那个形状。
+ *
+ * ## 为什么这几行必须**只有一份实现**
+ *
+ * 读文件的 `loadCanonical()` 与扩展里读 OPFS 的 `withCanonicalShape()` 是
+ * 「一条流水线，两个宿主」的那一对：**字节从哪来是各宿主的事，字节是什么意思
+ * 只能有一份实现**。而 `subjectOf` / `multiRevisionMarks` / `account` /
+ * 「删掉再重标并成一条」全是后者——它们不碰 I/O，只是从同一批记录里算出来的。
+ *
+ * 原来这几行在两边各写了一份，扩展那边的注释还写着「照抄它的定义，不要另发明」。
+ * 2026-09-07 就漂了：命令行这边加了 `mergeReMarks`，扩展那边没有，于是同一份档案
+ * 从扩展导出会多一条 `ShelfMember`（实测《盗梦空间》2 条）。**没有报错，包照样
+ * 生成，导入照样成功**，只是 NeoDB 上那个作品的书架条目由文件里的先后决定。
+ *
+ * 一句注释拦不住这个，而 byte-copy 的 vendor 检查拦得住（两边的 CI 都跑它）。
+ * 所以这里不是「再加一条测试」，是**把重复删掉**。
+ *
+ * @param {{marks: object[], subjects: object[], doulists: object[]}} out
+ * @returns {object} 原样加上 `subjectOf` / `reMarkedSuperseded` / `multiRevisionMarks` / `account`
+ */
+export function canonicalShape(out) {
+  // 作品数据按 `(medium, id)` 定位：豆瓣的 subject id 在不同 medium 下会撞号，
+  // 只按 id 找会把一本书的又名安到一部电影上。
+  const byKey = new Map();
+  for (const s of out.subjects ?? []) byKey.set(`${s.medium}:${s.id}`, s);
+
+  // 删掉再重标的并成一条 —— 见 `mergeReMarks`。**要在 `multiRevisionMarks` 之前**：
+  // 那个数说的是「导出会把几条标记压平」，而被顶掉的那条已经不在导出里了。
+  const merged = mergeReMarks(out.marks ?? []);
+
+  return {
+    ...out,
+    marks: merged.marks,
+    reMarkedSuperseded: merged.superseded,
+    subjectOf: (mark) => byKey.get(`${mark.medium}:${mark.subject?.id}`) ?? null,
+    multiRevisionMarks: merged.marks.filter((m) => (m.revisions?.length ?? 0) > 1).length,
+    account: merged.marks[0]?.account ?? out.doulists?.[0]?.account ?? null,
+  };
+}

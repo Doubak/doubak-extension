@@ -22,6 +22,7 @@
  */
 
 import { parse } from '../vendor/parser/parse.js';
+import { canonicalShape } from '../vendor/export-adapters/record.js';
 import { OpfsBundleSource } from './opfs-bundle-source.js';
 
 /**
@@ -60,24 +61,24 @@ export async function parseLibrary({ entries, openStore, onProgress, ignoreWarni
 /**
  * 把 `parse()` 的产出补成 `loadCanonical()` 的形状。
  *
- * 导出适配器与站点生成器都按后者写的（`subjectOf` / `account` /
- * `multiRevisionMarks`），而那三个字段是**读目录的那个函数**加上去的，不在
- * canonical 文件里。这几行是那段逻辑的等价物——**照抄它的定义，不要另发明**：
- * `subjectOf` 按 `(medium, id)` 定位，因为豆瓣的 subject id 在不同 medium 下
- * 会撞号，只按 id 找会把一本书的又名安到一部电影上。
+ * **这里已经不再自己算了。** 那几行（`subjectOf` / `multiRevisionMarks` /
+ * `account` / 「删掉再重标并成一条」）全是纯计算，属于「字节是什么意思」那一半，
+ * 而那一半只能有一份实现——所以它们在 `vendor/export-adapters/record.js` 的
+ * `canonicalShape()` 里，命令行的 `loadCanonical()` 调的是同一个函数。
+ *
+ * 原来这里是照着那边抄的一份，注释还写着「照抄它的定义，不要另发明」。
+ * **2026-09-07 就漂了**：那边加了删掉再重标的合并，这边没有，于是同一份档案从
+ * 扩展导出会多一条 `ShelfMember`（实测《盗梦空间》2 条），而且不报错、包照样生成、
+ * 导入照样成功——NeoDB 上那个作品的书架条目由文件里的先后决定。一句注释拦不住这个，
+ * byte-copy 的 vendor 检查拦得住（两边 CI 都跑）。
+ *
+ * 留着这个函数只为一件事：**名字是这一侧的词汇**，而且调用点不必知道形状逻辑
+ * 搬去了哪儿。
  *
  * @param {object} out
  */
 export function withCanonicalShape(out) {
-  const byKey = new Map();
-  for (const s of out.subjects) byKey.set(`${s.medium}:${s.id}`, s);
-
-  return {
-    ...out,
-    subjectOf: (mark) => byKey.get(`${mark.medium}:${mark.subject?.id}`) ?? null,
-    multiRevisionMarks: out.marks.filter((m) => (m.revisions?.length ?? 0) > 1).length,
-    account: out.marks[0]?.account ?? out.doulists[0]?.account ?? null,
-  };
+  return canonicalShape(out);
 }
 
 /**

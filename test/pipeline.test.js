@@ -19,13 +19,14 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import { BundleWriter } from '../src/bundle/bundle-writer.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { bundleDirName } from '../src/core/ids.js';
 import { TEST_PRODUCER } from './helpers/producer.js';
 import { OpfsBundleSource } from '../src/pipeline/opfs-bundle-source.js';
-import { parseLibrary, canonicalFiles } from '../src/pipeline/run.js';
+import { parseLibrary, canonicalFiles, withCanonicalShape } from '../src/pipeline/run.js';
 import { buildCanonical, buildNeodb, buildMarkdown, deflateRaw } from '../src/pipeline/targets.js';
 import { zip } from '../src/vendor/export-adapters/zip.js';
 
@@ -326,3 +327,68 @@ async function readZipNames(bytes) {
   }
   return names;
 }
+
+/**
+ * 「字节从哪来是各宿主的事，字节是什么意思只能有一份实现。」
+ *
+ * `withCanonicalShape()`（读 OPFS 这一侧）与 `loadCanonical()`（读文件那一侧）是
+ * 那一对里的一组。**2026-09-07 它们漂过一次**：命令行那边给「删掉再重标」加了合并，
+ * 这边没有，于是同一份档案从扩展导出会多一条 `ShelfMember`（实测《盗梦空间》2 条）。
+ * 不报错、包照样生成、导入照样成功——NeoDB 上那个作品的书架条目由文件里的先后决定。
+ *
+ * 当时这边的注释写着「照抄它的定义，不要另发明」，而**一句注释拦不住这个**。
+ * 现在两边调的是同一个 `canonicalShape()`，byte-copy 的 vendor 检查把它焊死了。
+ * 下面这几条守的是「别又抄回来」。
+ */
+describe('canonical 的形状：两个宿主，一份实现', () => {
+  const mark = (medium, id, upstreamId, seen) => ({
+    medium,
+    upstream_id: upstreamId,
+    subject: { id },
+    account: { user_id: '82160871', username: 'mewcatcher' },
+    revisions: [{ last_observed_at: seen, fields: { marked_at: null } }],
+  });
+  const raw = (marks) => ({ marks, subjects: [], broadcasts: [], longform: [], doulists: [] });
+
+  test('**这一侧不许自己算** —— 它必须就是 vendor 里那个函数', async () => {
+    // 只要还是同一个函数，`vendor.test.js` 的逐字节比对就替这件事把着关；
+    // 哪天有人把逻辑抄回 run.js，这条会红。
+    const src = await readFile(new URL('../src/pipeline/run.js', import.meta.url), 'utf-8');
+    assert.match(src, /import \{ canonicalShape \} from '\.\.\/vendor\/export-adapters\/record\.js'/);
+    assert.match(src, /export function withCanonicalShape\(out\) \{\s*return canonicalShape\(out\);\s*\}/,
+      'withCanonicalShape 又开始自己算了 —— 那正是 2026-09-07 漂掉的方式');
+  });
+
+  test('**删掉再重标的并成一条** —— 这正是漂掉的那一条', () => {
+    const out = withCanonicalShape(raw([
+      mark('movie', '3541415', 'old', '2026-01-01T00:00:00+08:00'),
+      mark('movie', '3541415', 'new', '2026-09-04T00:00:00+08:00'),
+    ]));
+    assert.equal(out.marks.length, 1);
+    assert.equal(out.marks[0].upstream_id, 'new', '留下的该是最后一次看到的那条');
+    assert.equal(out.reMarkedSuperseded, 1, '并了要报数 —— 用户自己不会发现');
+  });
+
+  test('subjectOf 按 (medium, id) 找 —— 豆瓣的 subject id 跨媒介会撞号', () => {
+    const out = withCanonicalShape({
+      ...raw([]),
+      subjects: [{ medium: 'movie', id: '34965089' }, { medium: 'book', id: '34965089' }],
+    });
+    assert.equal(out.subjectOf({ medium: 'book', subject: { id: '34965089' } }).medium, 'book');
+    assert.equal(out.subjectOf({ medium: 'game', subject: { id: '34965089' } }), null);
+  });
+
+  test('multiRevisionMarks 数的是**并完之后**的 —— 被顶掉的那条已经不在导出里了', () => {
+    const two = mark('movie', '1', 'old', '2026-01-01T00:00:00+08:00');
+    two.revisions.push({ last_observed_at: '2026-01-02T00:00:00+08:00', fields: {} });
+    const out = withCanonicalShape(raw([two, mark('movie', '1', 'new', '2026-09-04T00:00:00+08:00')]));
+    assert.equal(out.multiRevisionMarks, 0, '被顶掉的那条的修订数不该算进来');
+  });
+
+  test('没有标记时 account 退到豆列上 —— 只有豆列的档案也是档案', () => {
+    const out = withCanonicalShape({
+      ...raw([]), doulists: [{ account: { user_id: '1', username: 'x' } }],
+    });
+    assert.equal(out.account.username, 'x');
+  });
+});
