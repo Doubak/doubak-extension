@@ -454,6 +454,25 @@ export async function parse(sources, opts = {}) {
         warnings.push({ type: 'extractor_stale', capture: row.capture_id, kind: lfKind });
         continue;
       }
+      // **认不出隐私容器要报出来，而且要带线索。**
+      //
+      // `unknown` 的处置是「当私密处理」——安全，但也因此安静：站点少发一页、导出
+      // 收成「仅提及者可见」，两边都不报错。成因几乎只有一个：豆瓣改了 markup。
+      // 那一页已经如实躺在档案里，改好抽取器重跑就救得回来，**前提是有人知道该去
+      // 改哪儿**——所以带上找过哪两个容器、以及这一页上长得像隐私标记的类名。
+      //
+      // 走 `extractor_stale`（而不是新开一类）是有意的：`parse.test.js` 那条
+      // 「除了已知的几种，不该有别的告警」把整个 `extractor_stale` 家族看死了，
+      // 于是这一条一出现就会让真实档案的测试变红——**告警自己也有人看着**。
+      if (lf.visibility === 'unknown') {
+        warnings.push({
+          type: 'extractor_stale',
+          capture: row.capture_id,
+          kind: 'note_visibility',
+          url: row.url ?? null,
+          ...lf.visibilityHint,
+        });
+      }
       stats.observations += 1;
       upsertLongform(longform, { lf, account: accountOf(src), observation: { ...observationBase }, parserVersion });
       continue;

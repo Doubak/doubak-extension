@@ -150,6 +150,46 @@ function bodyText(html) {
 }
 
 /**
+ * 认不出隐私容器时，留给下一个人的线索。
+ *
+ * ## 为什么是「线索」而不是「报个数」
+ *
+ * `unknown` 的处置是**当私密处理**——安全，但也因此安静：站点少发一页、导出收成
+ * 「仅提及者可见」，两边都不报错。而它的成因几乎只有一个：豆瓣改了 markup。
+ * 那一页已经如实躺在档案里，改好抽取器重跑就能救回来（`recalibratable` 那一套），
+ * **但前提是有人知道该去改哪儿**。只报一个数字的话，下一个人手上只有「有 N 篇认不
+ * 出来」，得自己从头把页面翻一遍——而这个项目里每一个真 bug 都是靠「喂它没见过的
+ * 数据」找出来的，线索留在原地才有用。
+ *
+ * ## 带什么，不带什么
+ *
+ * 带的是**类名**：我们找过哪两个容器，以及这一页上长得像隐私标记的类名有哪些。
+ * 豆瓣换了个名字的话，答案通常就在这一行里。
+ *
+ * **不带正文，一个字都不带。** 这是用户写的日记，而告警是会被贴进 issue 的。同理
+ * 不带 `title`——`parse.js` 那边配上 `capture_id`，谁有档案谁自己去看，没档案的人
+ * 也不需要知道那篇日记叫什么。
+ *
+ * 类名去重、排序、封顶 8 个：不封顶的话一页几百个类名会把告警刷成没人看的东西，
+ * 而这正是这个文件反复记的那条。
+ *
+ * @param {string} html
+ * @returns {{tried: string[], sawClasses: string[]}}
+ */
+function hint(html) {
+  const saw = new Set();
+  for (const m of html.matchAll(/class="([^"]{1,120})"/g)) {
+    for (const c of m[1].split(/\s+/)) {
+      if (/privacy|private|visib|lock|footer-stat|topic-meta|notice-info/i.test(c)) saw.add(c);
+    }
+  }
+  return {
+    tried: ['div.topic-meta', 'div.note-footer-stat'],
+    sawClasses: [...saw].sort().slice(0, 8),
+  };
+}
+
+/**
  * 一篇长文的可见性，以及**是谁**让它不公开的。
  *
  * ## 「仅自己可见」有两个成因，方向相反
@@ -230,8 +270,8 @@ function restriction(html, kind) {
     marker = mark;
     break;
   }
-  // 容器都没有 —— 说不准，**不是公开**
-  if (box == null) return { ...none, visibility: 'unknown' };
+  // 容器都没有 —— 说不准，**不是公开**，并且**把线索一起带出去**（见 visibilityHint）
+  if (box == null) return { ...none, visibility: 'unknown', visibilityHint: hint(html) };
   if (!marker.test(box)) return { ...none, visibility: 'public' };
 
   const censored = /notice-info-type-4/.test(html);
@@ -261,6 +301,9 @@ function restriction(html, kind) {
  * @property {'public'|'private'|'unknown'|null} visibility  评论恒为 null
  * @property {'author'|'platform'|null} restrictedBy         不是 private 时为 null
  * @property {string|null} restrictionNotice                 只有豆瓣锁定时才有
+ * @property {{tried: string[], sawClasses: string[]}} [visibilityHint]
+ *   只在 visibility 是 unknown 时才有。**不进 canonical**，只进告警——它是给改抽取器
+ *   的人看的线索，不是这条记录的事实。
  */
 
 /**

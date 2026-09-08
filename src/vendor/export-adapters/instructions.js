@@ -173,6 +173,12 @@ export function instructions(r) {
   L.push('');
   L.push('canonical 里一条标记记的是**一串观测**：哪个版本的解析器、在什么时候、看见了什么。');
   L.push('三个平台都只收「现在是什么样」，一条记录一行。');
+  if (r.reMarkedSuperseded) {
+    L.push(`✦ 有 **${r.reMarkedSuperseded} 个作品在豆瓣上被删掉后重新标记过**，这一份导出的是`);
+    L.push('现存的那一条。更早那次的短评、评分与标签还在 canonical 里——**导出是当前状态，');
+    L.push('canonical 才是事件日志**，这一条是这句话最直白的例子。');
+    L.push('');
+  }
   if (r.multiRevisionMarks) {
     L.push('');
     L.push(`这份档案里有 **${r.multiRevisionMarks} 条标记改过**，导出的是最后一次。`);

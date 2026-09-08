@@ -409,7 +409,10 @@ export function buildNeodbNdjson(data, options = {}) {
     const pieceVis = restricted ? 2 : vis;
     // **报告里两边都点名，连豆瓣锁的那一篇一起。** 它是被公开导出的那一篇，
     // 恰恰更该说——联邦出去撤不回来，而看的人得知道自己正在把什么重新发出去。
-    if (不公开) report.restricted.push({ title: f.title ?? '(无标题)', by: 谁定的 });
+    // 带上网址：`unsure` 那一栏的下一步动作是**去看那一页**（多半是豆瓣改了 markup，
+    // 解析器的 `note_visibility` 告警里有类名线索），而只报个标题的话，还得先自己
+    // 把它找出来。
+    if (不公开) report.restricted.push({ title: f.title ?? '(无标题)', by: 谁定的, url: piece.url ?? null });
     const url = f.subject_url ?? null;
     const subject = url ? byUrl.get(url) ?? null : null;
 
