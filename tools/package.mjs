@@ -73,8 +73,32 @@ function collect(rel) {
   return out;
 }
 
-const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf-8'));
-const files = INCLUDE.flatMap(collect).sort();
+/**
+ * 打给哪个浏览器。**同一份文件名单，两处差异，逐条写明理由。**
+ *
+ * 为什么不是两份名单：漂移的方向是固定的——Chrome 那份加了个新文件，Firefox 那份
+ * 忘了跟，而症状是装得上、某个功能悄悄不工作。所以名单只有一份，两个包的差别只有
+ * 「用哪个 manifest」与「去掉哪几个用不上的文件」。
+ */
+const TARGETS = {
+  chrome: { manifest: 'manifest.json', suffix: '', drop: [] },
+  firefox: {
+    manifest: 'manifest.firefox.json',
+    suffix: '-firefox',
+    // **这两个在 Firefox 上永远走不到，带着只会让 web-ext lint 报 UNSUPPORTED_API。**
+    // host-offscreen.js 只由 `runtime/host.js` 在 `offscreen.createDocument` 存在时
+    // 动态 import，而 Firefox 上它不存在；offscreen.html 是那个文档本身。
+    // 注意 `src/offscreen/offscreen.js` **要留着**——Firefox 那条路正是靠它的
+    // `handleOp`，两个宿主共用同一份 switch。
+    drop: ['src/runtime/host-offscreen.js', 'src/offscreen/offscreen.html'],
+  },
+};
+
+const targetName = process.argv.includes('--firefox') ? 'firefox' : 'chrome';
+const target = TARGETS[targetName];
+
+const manifest = JSON.parse(readFileSync(join(ROOT, target.manifest), 'utf-8'));
+const files = INCLUDE.flatMap(collect).sort().filter((f) => !target.drop.includes(f));
 
 // ── 几条上传前必须成立的
 const problems = [];
@@ -103,6 +127,9 @@ for (const f of files) {
 // 已经过了一轮审核。
 const manifestRefs = [
   manifest.background?.service_worker,
+  // Firefox 那份是事件页：入口在 `background.scripts` 里。两边都查，否则换个目标
+  // 就等于把这条检查关掉了——而它防的正是「装上才发现少了个文件」。
+  ...(manifest.background?.scripts ?? []),
   ...Object.values(manifest.icons ?? {}),
   ...Object.values(manifest.action?.default_icon ?? {}),
 ].filter(Boolean);
@@ -118,7 +145,19 @@ if (problems.length) {
   process.exit(1);
 }
 
-const bytes = files.reduce((n, f) => n + statSync(join(ROOT, f)).size, 0);
+/**
+ * 包里叫 `manifest.json` 的那一条，内容从哪儿读。
+ *
+ * **包里的名字必须是 `manifest.json`**（浏览器只认这个），而 Firefox 那份在仓库里
+ * 叫 `manifest.firefox.json`。这一层映射只在这一个地方，别处一律按包里的名字说话。
+ *
+ * @param {string} name 包里的路径
+ */
+function sourceOf(name) {
+  return name === 'manifest.json' ? target.manifest : name;
+}
+
+const bytes = files.reduce((n, f) => n + statSync(join(ROOT, sourceOf(f))).size, 0);
 
 if (process.argv.includes('--list')) {
   for (const f of files) console.log(f);
@@ -146,7 +185,7 @@ if (stageAt !== -1) {
   rmSync(dest, { recursive: true, force: true });
   for (const f of files) {
     mkdirSync(join(dest, dirname(f)), { recursive: true });
-    copyFileSync(join(ROOT, f), join(dest, f));
+    copyFileSync(join(ROOT, sourceOf(f)), join(dest, f));
   }
   console.log(`${dest}`);
   console.log(`  ${files.length} 个文件 · ${(bytes / 1024 / 1024).toFixed(2)} MB`);
@@ -156,7 +195,7 @@ if (stageAt !== -1) {
 
 const out = join(ROOT, 'dist');
 mkdirSync(out, { recursive: true });
-const zip = join(out, `doubak-${manifest.version}.zip`);
+const zip = join(out, `doubak-${manifest.version}${target.suffix}.zip`);
 rmSync(zip, { force: true });
 
 writeFileSync(zip, makeZip(files));
@@ -167,7 +206,7 @@ console.log(`  ${files.length} 个文件 · ${(bytes / 1024 / 1024).toFixed(2)} 
 console.log('  上传前请自己再确认一遍：解开它，manifest.json 应当就在根部。');
 
 // 顺手把清单写出来，便于与上一版比对「这次多了/少了什么」。
-writeFileSync(join(out, `doubak-${manifest.version}.files.txt`), `${files.join('\n')}\n`);
+writeFileSync(join(out, `doubak-${manifest.version}${target.suffix}.files.txt`), `${files.join('\n')}\n`);
 
 
 /**
@@ -188,7 +227,7 @@ function makeZip(names) {
   let offset = 0;
 
   for (const name of names) {
-    const raw = readFileSync(join(ROOT, name));
+    const raw = readFileSync(join(ROOT, sourceOf(name)));
     const deflated = deflateRawSync(raw, { level: 9 });
     // 压不小的就原样存。zip 允许逐条选方法，而对已经压过的 png 来说
     // deflate 往往反而更大。

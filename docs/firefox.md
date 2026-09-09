@@ -65,9 +65,25 @@ thenable。所以那一步**不做**——70 处机械改动，理由却站不�
   正式字段可以声明它。
 - `runtime.getContexts` 要 **127**（`src/ui/notify.js` 在用），被 140 顺带覆盖了。
 
+## 已经做完的
+
+- **抓取宿主的接缝**（`src/runtime/host.js`）。按能力挑：`offscreen.createDocument`
+  有就走 offscreen document，没有就直接在后台事件页里跑。在真 Firefox 上验过整条缝，
+  `status` 那一条把 `CrawlRunner` 整个构造在了事件页里——整条抓取链真的在那边跑起来了。
+- **两份 manifest，一个来源**（`tools/make-manifest.mjs`）。`manifest.firefox.json`
+  是算出来的，手改会红。`node tools/package.mjs --firefox` 出 Firefox 那个包。
+- **`web-ext lint`：0 错误、1 警告**（从 10 → 3 → 1）。剩下那条是
+  `KEY_FIREFOX_ANDROID_UNSUPPORTED_BY_MIN_VERSION`——我们不投放安卓，提交 AMO 时
+  按「要不要投放」处理，不是缺陷。
+- 打好的 Firefox 包（去掉了 `host-offscreen.js` 与 `offscreen.html`）在 Firefox 里
+  载入并跑通了整条缝——**验的是发出去的那份，不是仓库**。
+
 ## 还没量的
 
-- **后台事件页能不能扛住几小时的抓取。** 这是最贵的一个，探针答不了，要真跑一次。
+- **后台事件页能不能扛住几小时的抓取。** 这是最贵的一个，探针答不了，要真跑一次
+  ——而且需要一个**登录着豆瓣**的 Firefox 配置，所以它得由档案主人来跑：
+  `node tools/package.mjs --firefox` 出包，`about:debugging` 里「临时载入附加组件」
+  选包里的 `manifest.json`，然后从调试页的「最近 7 天的广播」开始。
   答「否」的话，退路是把抓取放进面板标签页（标签页开着就活着，而整套架构本来就是
   每页写检查点、可恢复的）。
 - `getFile()` 拿到的 `File` 交给 `URL.createObjectURL()` 会不会把整个文件读进内存
