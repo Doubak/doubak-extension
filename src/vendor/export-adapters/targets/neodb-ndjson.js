@@ -158,9 +158,22 @@ function line(obj) {
  */
 export const FEEDBACK_URL = 'https://github.com/Doubak/doubak-data-parser/issues';
 
+/**
+ * 读不出隐私状态的日记，默认写成什么可见性。
+ *
+ * **默认值只许有一处。** 两个宿主（CLI 与扩展面板）都要在「用户没选」的时候用它，
+ * 而各自写一个 `2` 的话，改默认值时必然漏掉一个——**漏掉是静默的**：一边收着、
+ * 一边发出去，两边都不报错。所以宿主的规矩是「没选就别传这个键」，让这一行说了算。
+ *
+ * 取 2（仅提及者可见）而不是 0：两个方向的代价差着一个量级——收错了用户在 NeoDB
+ * 那一页点一下就改回来，发错了 Article 联邦出去撤不回来。
+ */
+export const UNKNOWN_VISIBILITY_DEFAULT = 2;
+
 export function buildNeodbNdjson(data, options = {}) {
   const {
-    shelfHistory = true, visibility = 0, unknownVisibility = 2,
+    shelfHistory = true, visibility = 0,
+    unknownVisibility = UNKNOWN_VISIBILITY_DEFAULT,
     generator = 'doubak-export-adapters',
   } = options;
   if (![0, 1, 2].includes(visibility)) {

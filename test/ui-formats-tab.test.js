@@ -486,13 +486,20 @@ describe('不公开的日记要出现在导出卡片上', () => {
  * 行为都是写死的。所以这几条钉的不只是这一个控件，还有它周围那套判据：默认
  * 站在安全那一边、平时不露面、露面的时候紧挨着解释它的那句话。
  */
-describe('读不出隐私状态的那几篇，用户可以自己拨', () => {
+describe('看不出公不公开的那几篇日记，用户可以自己拨', () => {
   test('选项框在 NeoDB 那张卡片里，而且默认藏着', async () => {
     const html = await read('src/ui/panel.html');
     const m = /<label class="opt" id="export-neodb-unknown-row"([^>]*)>/.exec(html);
     assert.ok(m, 'panel.html 里找不到那个选项框');
     assert.match(m[1], /\bhidden\b/, '默认必须藏着：它对绝大多数档案永远用不上');
     assert.match(html, /<input type="checkbox" id="export-neodb-unknown">/);
+    // **这句话只许用用户在豆瓣上见过的词。** 上一版写的是「读不出隐私状态的那几篇，
+    // 也按其它记录一样导出（不单独收紧）」——三处黑话：「隐私状态」他不知道是什么，
+    // 「按其它记录一样」要先知道其它记录怎样，「不单独收紧」纯粹是我们的词。
+    assert.match(html, /有几篇日记看不出在豆瓣上是公开还是私密，这几篇也一起公开/);
+    for (const 黑话 of ['隐私状态', '不单独收紧', '按其它记录一样', 'visibility']) {
+      assert.ok(!m[0].includes(黑话) , `选项框的文字里不该有「${黑话}」`);
+    }
     // 必须在 NeoDB 那张卡片里、在导出按钮**前面**——决定和动作挨着，
     // 而且是先看见选项再按导出。
     const card = html.slice(html.indexOf('doubak-neodb/'), html.indexOf('结构化数据（canonical）'));
@@ -503,16 +510,27 @@ describe('读不出隐私状态的那几篇，用户可以自己拨', () => {
     );
   });
 
-  test('**不勾是收起来，勾上才放开** —— 默认站在安全那一边', async () => {
+  test('**勾上才放开，不勾则不传** —— 默认值只许有一处', async () => {
     // 两个方向的代价差着一个量级：收错了用户在 NeoDB 那一页点一下就改回来，
-    // 发错了 Article 联邦出去撤不回来。所以默认值必须是收紧的那个。
-    // 突变验过：把三元的两支对调，这一条红。
+    // 发错了 Article 联邦出去撤不回来。所以默认必须是收紧的那个——而这个「默认」
+    // **只许住在共用那份实现里**。面板这边再兜一个 2 的话，两处各自为政，
+    // 改一处不改另一处不会有任何东西报错，而后果是一个宿主收着、另一个发出去。
     const src = await read('src/ui/panel/formats.js');
     assert.match(
       src,
-      /unknownVisibility:\s*\$\('export-neodb-unknown'\)\?\.checked\s*\?\s*0\s*:\s*2/,
-      '不勾必须是 2（收起来），勾上才是 0（跟基线走）',
+      /\.\.\.\(\$\('export-neodb-unknown'\)\?\.checked \? \{ unknownVisibility: 0 \} : \{\}\)/,
+      '勾上传 0，不勾必须整个不传这个键',
     );
+    // 面板里任何地方都不许再出现一个 unknownVisibility 的数字兜底。
+    assert.doesNotMatch(src, /unknownVisibility\s*(\?\?|:)\s*[12]\b/,
+      'formats.js 里不该再写一个默认值');
+  });
+
+  test('**共用那份实现的默认值是收紧的那一边**', async () => {
+    // 值本身在这里断言一次，而它只有这一个来源——两个宿主都靠不传这个键落到它上面。
+    const { UNKNOWN_VISIBILITY_DEFAULT } = await import(
+      '../src/vendor/export-adapters/targets/neodb-ndjson.js');
+    assert.equal(UNKNOWN_VISIBILITY_DEFAULT, 2, '读不出来的默认必须是仅提及者可见');
   });
 
   test('露面由导出结果决定，而且只往「露出来」一个方向走', async () => {

@@ -121,9 +121,11 @@ export const FORMATS = {
     button: 'export-neodb',
     name: 'NeoDB 导入包',
     dir: 'doubak-neodb',
-    // `unknownVisibility` 由卡片上那个选项框决定：不勾（默认）= 2 收起来，
-    // 勾上 = 0 跟基线走。**只影响「说不准」那一栏**，作者自己设成私密的恒为 2。
-    build: (data, o) => buildNeodb(data, { ...o, unknownVisibility: o?.unknownVisibility ?? 2 }),
+    // `unknownVisibility` 由卡片上那个选项框决定，见 runExport。**这里不许兜一个
+    // 默认值**：默认值只住在共用那份实现里（`UNKNOWN_VISIBILITY_DEFAULT`），
+    // 宿主各兜一个的话，改的时候必然漏掉一个，而漏掉是静默的——一边收着、
+    // 一边发出去，两边都不报错。
+    build: (data, o) => buildNeodb(data, o),
     summary: (r) => [
       `标记 ${r.marks} 条`,
       `评分 ${r.ratings} · 短评 ${r.comments} · 标签 ${r.tags}`,
@@ -322,9 +324,12 @@ async function runExport(kind) {
     progress('正在生成文件');
     const built = await format.build(data, {
       sources, write,
-      // 不勾（默认）= 收起来；勾上 = 跟其它记录一样。**默认的那一边是安全的那一边**：
-      // 收错了用户在 NeoDB 那一页点一下就改回来，发错了 Article 联邦出去撤不回来。
-      unknownVisibility: $('export-neodb-unknown')?.checked ? 0 : 2,
+      // 勾上 = 跟其它记录一样（0）；**不勾就不传这个键**，让共用那份实现的默认值
+      // 说了算。这里再写一个 2 的话，它与 `UNKNOWN_VISIBILITY_DEFAULT` 就是两处
+      // 各自为政的默认值，改一处不改另一处不会有任何东西报错。
+      // 默认的那一边是安全的那一边：收错了用户在 NeoDB 那一页点一下就改回来，
+      // 发错了 Article 联邦出去撤不回来。
+      ...($('export-neodb-unknown')?.checked ? { unknownVisibility: 0 } : {}),
     });
 
     for (const [i, f] of built.files.entries()) {
