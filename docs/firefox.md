@@ -108,6 +108,9 @@ Chrome 会忽略不认识的键，**Gecko 校验参数，整条拒收**。而 `s
 **Firefox 上的退化照说**：没有 `requireInteraction`，需要人处理的那条通知会自己
 消失。角标（`action.setBadge*`，实测三个都能用）是那条不会消失的兜底。
 
+修完在真 Firefox 上验过（跑的是打好的那个包）：两条通知都真的发出去了，参数是
+`iconUrl,message,title,type`，而且**第二条没有再去试那个已经知道不行的形状**。
+
 顺带排除掉两个看起来像问题的：`chrome.storage` 与 `chrome.webRequest` 在 Firefox
 上都取不到，但这个扩展**本来就不用它们**——源码里所有相关的行都是注释，解释的正是
 「offscreen document 拿不到 `chrome.storage`，所以抓取状态存 IndexedDB」。
