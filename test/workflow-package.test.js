@@ -61,6 +61,21 @@ describe('打包这件事的文档，跟着目标表走', () => {
     }
   });
 
+  test('AMO 的上架地址**不带语言段**', async () => {
+    // 实测（2026-09-10，拿一个已上架的扩展量的）：不带语言段的那个地址 301 到访客
+    // 自己的语言，`Accept-Language` 说什么就去哪儿——zh-CN 去 /zh-CN/，不带头去
+    // /en-US/。写死 `/en-US/` 的话，这个项目**绝大多数读中文的用户会落在英文页上**，
+    // 而 `_locales` 里特意备了简体与繁體两份商店文案正是为了他们。
+    //
+    // 与两个 Chromium 商店那条「只写扩展 ID、不带名字那一段」是同一条规矩：
+    // 别把一个会变的段写死。
+    for (const f of ['README.md', 'docs/firefox.md', 'docs/release.md', 'docs/store-listing.md']) {
+      const text = await doc(f);
+      const bad = [...text.matchAll(/addons\.mozilla\.org\/[a-z]{2}-[A-Z]{2}\//g)];
+      assert.equal(bad.length, 0, `${f} 里把语言段写死了：${bad.map((m) => m[0])}`);
+    }
+  });
+
   test('AMO 那几样只写在一处，别的地方指过去', async () => {
     // 扩展 id 出现在两处就会分叉，而分叉的方向是「其中一处还写着旧的 id」——
     // 那个字符串是 AMO 眼里「这是同一个扩展」的全部依据，改掉不会报错。

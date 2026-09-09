@@ -215,6 +215,44 @@ blob 就一直在。619 MB 的真实档案照这个比例就是把整份塞进�
 
 - **联系邮箱：`admin@doubak.com`**。manifest 里没有放它的地方，填在 AMO 的提交表单里。
 
+- **上架地址：slug 定为 `doubak`**（2026-09-10 定的）。**还没上架**——实测
+  `.../en-US/firefox/addon/doubak/` 现在是 404，所以站上还不能往那儿指。
+
+  写进代码和文案的时候用**不带语言段**的那一个：
+
+  ```
+  https://addons.mozilla.org/firefox/addon/doubak/
+  ```
+
+  实测（拿一个已上架的扩展量的，因为我们自己那条还是 404）：这个地址 301 到访客
+  自己的语言，`Accept-Language` 说什么就去哪儿——
+
+  | 请求头 | 落到 |
+  |---|---|
+  | `zh-CN` | `/zh-CN/firefox/addon/…` |
+  | `zh-TW` | `/zh-TW/firefox/addon/…` |
+  | `en-US` / 不带 | `/en-US/firefox/addon/…` |
+
+  写死 `/en-US/` 的话，这个项目**绝大多数读中文的用户会落在英文页上**——而
+  `_locales` 里特意备了简体与繁體两份商店文案，正是为了他们。这与两个 Chromium
+  商店那条「只写扩展 ID、不带名字那一段」是同一条规矩：**别把一个会变的段写死**，
+  区别只在那边变的是名字，这边变的是语言。
+
+### 上架那天要改的几处
+
+跨仓库的步骤就是这样丢的（站点的版本号已经栽过一次），所以列在这儿：
+
+| 在哪 | 现在写着什么 | 要改成 |
+|---|---|---|
+| `doubak-website` `index.html` 的 ld+json | `browserRequirements` 里「not yet listed on addons.mozilla.org — load the -firefox.zip …」 | 去掉那半句 |
+| 同上，安装按钮 | 「Firefox：手动加载 / 尚未上架 AMO，跟进 #11」，指向 `/how/#firefox` | 「安装到 Firefox / Firefox 附加组件」，指向上面那个地址 |
+| `doubak-website` `how/index.html` `#firefox` | 「还没上架 AMO，所以现在要手动加载」 | 商店一条 + 手动加载留作备选 |
+| 本仓库 `README.md` | 「AMO（Firefox）：还没上架」 | 上架地址 |
+| `Doubak/doubak-extension#11` | 「跑通就提交」 | 关掉 |
+
+手动加载那一节**不要删**：临时载入仍然是试 `main` 上未发版改动的唯一路子，
+与 Chromium 那边「Releases 里的 zip」那一条同一个地位。
+
 ## 界面那一侧接上了（2026-09-09）
 
 三个写入点（整条链、单份档案、导出页的派生产物）原来各自写着「没有

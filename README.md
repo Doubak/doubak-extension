@@ -245,8 +245,9 @@ webrecorder 的 warcio 独立验证 WARC 输出；同级目录有 `doubak-data-s
 ## 发布到应用商店
 
 - **Chrome 应用商店**：已上架 <https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
-- **AMO（Firefox）**：还没上架（[`#11`](https://github.com/Doubak/doubak-extension/issues/11)）。
-  提交要用的那几样（扩展 id、联系邮箱、版本下限）在 [`docs/firefox.md`](docs/firefox.md)。
+- **AMO（Firefox）**：还没上架（[`#11`](https://github.com/Doubak/doubak-extension/issues/11)），
+  slug 已定为 `doubak`。提交要用的那几样（扩展 id、联系邮箱、版本下限、上架地址该写成
+  哪个形式）在 [`docs/firefox.md`](docs/firefox.md)，上架那天要改的几处也列在那儿。
 
 完整流程（改版本号 → 打标签 → CI 建 release → 核对哈希）在
 [`docs/release.md`](docs/release.md)。打了 `v*` 标签之后 release 上挂的**两份** zip 就是
