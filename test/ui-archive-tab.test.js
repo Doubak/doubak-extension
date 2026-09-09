@@ -381,8 +381,11 @@ describe('档案页（真的跑一遍）', () => {
       bundles: { [`doubak-bundle-${OLDER}`]: bundleFiles(OLDER) },
     });
     try {
-      assert.equal(dom.byId.get('bundle-pick').querySelectorAll('.picker-row').length, 0,
-        '只有一份时不画选择器');
+      assert.deepEqual(
+        dom.byId.get('bundle-pick').querySelectorAll('.picker-row').map((r) => r.dataset.id),
+        [OLDER],
+        '一份也要画出来 —— 这一栏同时是「现在讲的是哪一份」的唯一交代',
+      );
       assert.match(dom.byId.get('storage').textContent, /1 份/);
 
       // 面板背后多出一份（另一个上下文写的、导入的、或者我们漏了一种失效时机）

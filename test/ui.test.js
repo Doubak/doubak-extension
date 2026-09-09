@@ -2131,8 +2131,8 @@ describe('「没找到档案」那句话只有一处实现', () => {
   });
 });
 
-describe('只有一份档案时，左边那栏要让开', () => {
-  test('两半都在：JS 藏它，CSS 收掉那一列', async () => {
+describe('左边那栏：有档案就画，一份都没有才收', () => {
+  test('两半都在：JS 在没档案时藏它，CSS 收掉那一列', async () => {
     // 真实反馈：「the left-side bundle selection list is not visible on Firefox」。
     // **不是 Firefox 的毛病**（那边一条 JS 错误都没有）——是新装的浏览器里一份档案
     // 都没有，而 `renderBundlePicker` 在 ≤1 份时不画选择器，那一栏就成了一条
@@ -2142,7 +2142,15 @@ describe('只有一份档案时，左边那栏要让开', () => {
     // - 只有 JS：栏藏了，但网格仍留着 340px 的第一列，正文被挤进那一列，更糟；
     // - 只有 CSS：没有任何东西带上 `hidden`，规则永远不匹配。
     const js = readPanelSourceSync();
-    assert.match(js, /el\.hidden = items\.length <= 1;/, 'JS 没有把那一栏藏起来');
+    assert.match(js, /el\.hidden = items\.length === 0;/, 'JS 没有在没档案时把那一栏藏起来');
+    // **只有一份时必须画出来。** 原来的判据是 `<= 1`，理由是「没什么可选的」——
+    // 而那只说对了它一半用途：它还是「这一栏在讲哪一份档案」的唯一交代。收掉之后
+    // 右边的摘要与按钮就没了主语，抓出第二份时整页版式又会突然变样。
+    assert.doesNotMatch(
+      js,
+      /el\.hidden = items\.length <= 1;/,
+      '又退回「只有一份就不画」了 —— 这正是被报过两次的那个现象',
+    );
 
     const css = await readRepoFile('src/ui/panel.css');
     assert.match(
