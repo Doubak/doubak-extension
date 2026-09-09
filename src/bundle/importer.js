@@ -622,6 +622,8 @@ function looksLikeBundle(names) {
 export async function scanForBundles(root, { maxDepth = 3, maxDirs = 400 } = {}) {
   /** @type {Array<{label: string, source: ImportSource}>} */
   const found = [];
+  /** 一路上看见的 zip。见 `describeNoBundles`——它们是「没找到」时唯一有用的线索。 */
+  const zips = [];
   let scanned = 0;
   let truncated = false;
 
@@ -636,8 +638,10 @@ export async function scanForBundles(root, { maxDepth = 3, maxDirs = 400 } = {})
     /** @type {Array<[string, FileSystemDirectoryHandle]>} */
     const subs = [];
     for await (const [name, handle] of dir.entries()) {
-      if (handle.kind === 'file') files.push(name);
-      else subs.push([name, handle]);
+      if (handle.kind === 'file') {
+        files.push(name);
+        if (/\.zip$/i.test(name)) zips.push(path === '' ? name : `${path}/${name}`);
+      } else subs.push([name, handle]);
     }
 
     if (looksLikeBundle(files)) {
@@ -651,5 +655,50 @@ export async function scanForBundles(root, { maxDepth = 3, maxDirs = 400 } = {})
   }
 
   await walk(root, root.name, 0);
-  return { found, scanned, truncated };
+  return { found, scanned, truncated, zips };
+}
+
+/**
+ * 一份档案都没找到时说什么。
+ *
+ * ## 为什么这值得一个专门的函数
+ *
+ * Firefox 上导出交出来的是一个 **zip**（那边没有 File System Access），而搬回来
+ * 走的仍然是「选一个文件夹」——**中间隔着一步解压**。跨浏览器让这条路变得很常见：
+ * Firefox 导出 zip → 换到 Chrome → 选那个文件夹 → 「没有找到档案」。
+ *
+ * 那句话**对**，但它指向的下一步是错的：用户会去翻别的文件夹、以为导出坏了，
+ * 而真正要做的只是解压。这正是 `#12` 那个形状——一句正确的拒绝，指向完全错误的
+ * 下一步——所以这里把它堵上。
+ *
+ * ## 判据分两档，方向是「宽一点」
+ *
+ * 这是**措辞**不是数据判定，所以宁可多说一句：
+ *
+ * - 认得出名字的（`doubak-*.zip`）→ 点名，并给出解压之后该选哪个文件夹；
+ * - 只是有别的 zip → 轻一档，「如果那是导出的档案，请先解压」。
+ *
+ * 说重了的代价是一句多余的提示；说漏了的代价是用户以为自己的档案没了。
+ *
+ * @param {object} scan `scanForBundles` 的返回值
+ * @param {string} rootName 用户选的那个文件夹叫什么
+ * @returns {string}
+ */
+export function describeNoBundles(scan, rootName) {
+  const base = `${rootName} 里（连同下面几层）没有找到档案。`
+    + '导出时每份档案会放进一个 doubak-bundle-… 文件夹，选中它，或者选中它的上一级。';
+
+  const zips = scan?.zips ?? [];
+  if (zips.length === 0) return base;
+
+  const ours = zips.filter((z) => /(^|\/)doubak-[^/]*\.zip$/i.test(z));
+  if (ours.length > 0) {
+    return `找到了 ${ours[0].split('/').pop()}。`
+      + '**这是一个 zip 壳子，要先解压。** 解开之后里面是一个 doubak-bundle-… 文件夹，'
+      + '那个才是档案本身——选它，或者选它的上一级。\n'
+      + '（Firefox 上导出得到的是 zip，因为它没有「选文件夹写入」这个能力；'
+      + '解开之后的内容与 Chrome 直接导出的完全一样。）';
+  }
+  return `${base}\n另外，这个文件夹里有 ${zips.length} 个 zip 文件。`
+    + '如果其中哪一个是导出的档案，请**先解压**再选解压出来的文件夹。';
 }

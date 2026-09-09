@@ -15,8 +15,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  readBundleMeta, planImport, compareContents, importBundle, ACTIONS, scanForBundles,
-} from '../src/bundle/importer.js';
+  readBundleMeta, planImport, compareContents, importBundle, ACTIONS, scanForBundles, describeNoBundles } from '../src/bundle/importer.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { sha256Hex } from '../src/core/digest.js';
 
@@ -489,5 +488,92 @@ describe('选中上一级：一次导入好几份', () => {
     const plan = planImport({ candidates, existing: [] });
     assert.equal(plan.count, 3, '找到了三份，计划里却不是三份都导');
     assert.deepEqual(plan.items.map((i) => i.action), ['import', 'import', 'import']);
+  });
+});
+
+/**
+ * 「一份都没找到」时说什么 —— 这是 #12 那个形状的另一处。
+ *
+ * Firefox 上导出交出来的是一个 zip（那边没有 File System Access），而搬回来走的
+ * 仍然是「选一个文件夹」，中间隔着一步解压。跨浏览器让这条路很常见：Firefox 导出
+ * → 换到 Chrome → 选那个文件夹 → 「没有找到档案」。那句话**对**，但它指向的下一步
+ * 是错的：用户会去翻别的文件夹、以为导出坏了，而真正要做的只是解压。
+ */
+describe('没找到档案时，要说得出下一步', () => {
+  /** 与上面那组共用的假目录句柄。 */
+  const dir = (name, children) => ({
+    kind: 'directory',
+    name,
+    async *entries() {
+      for (const [k, v] of Object.entries(children)) {
+        yield [k, v === null ? { kind: 'file', name: k } : v];
+      }
+    },
+  });
+
+  test('**扫描真的会把 zip 收起来** —— 判据的另一半', async () => {
+    // 只测 describeNoBundles 的话，把 scanForBundles 里那行收集删掉是全绿的
+    // ——突变验出来的。消息写得再好，没人把线索交给它也白搭。
+    const root = dir('下载', {
+      'doubak-archive-3eef52.zip': null,
+      '照片.zip': null,
+      '随手记.txt': null,
+    });
+    const scan = await scanForBundles(root);
+    assert.equal(scan.found.length, 0);
+    assert.deepEqual(scan.zips.sort(), ['下载/doubak-archive-3eef52.zip', '下载/照片.zip']);
+    // 端到端：扫出来的东西喂给消息，必须点得出名字。
+    assert.match(describeNoBundles(scan, root.name), /doubak-archive-3eef52\.zip/);
+  });
+
+  test('子目录里的 zip 也算，而且带上路径', async () => {
+    const root = dir('下载', { 备份: dir('备份', { 'doubak-archive-x.zip': null }) });
+    const scan = await scanForBundles(root);
+    assert.deepEqual(scan.zips, ['下载/备份/doubak-archive-x.zip']);
+  });
+
+  test('真找到档案时不会因为旁边有 zip 就啰嗦', async () => {
+    // 「一个永远有内容的提示等于没有提示」——这个仓库记过七次。
+    const root = dir('下载', {
+      'x.zip': null,
+      'doubak-bundle-a': dir('doubak-bundle-a', { 'manifest.json': null, 'index-a.ndjson': null }),
+    });
+    const scan = await scanForBundles(root);
+    assert.equal(scan.found.length, 1, '该找到那份档案');
+  });
+
+  test('看见 doubak 的 zip 就点名，并说清解开之后该选哪个', () => {
+    const msg = describeNoBundles(
+      { found: [], zips: ['下载/doubak-archive-3eef52.zip'] },
+      '下载',
+    );
+    assert.match(msg, /doubak-archive-3eef52\.zip/, '要点出是哪个文件');
+    assert.match(msg, /先解压/);
+    assert.match(msg, /doubak-bundle/, '要说清解开之后该选哪个文件夹');
+    // **不许说它是 Firefox 专用格式** —— 那句话是假的，而且正好把
+    // 「你的数据在你自己手里」说反了。
+    assert.doesNotMatch(msg, /专用格式/);
+    assert.match(msg, /与 Chrome 直接导出的完全一样/, '要把「只是个壳子」说出来');
+  });
+
+  test('只是有别的 zip 时，说得轻一档', () => {
+    const msg = describeNoBundles({ found: [], zips: ['下载/照片.zip', '下载/x.zip'] }, '下载');
+    assert.match(msg, /2 个 zip/);
+    assert.match(msg, /先解压/);
+    assert.doesNotMatch(msg, /doubak-archive/, '别把别人的 zip 说成我们的');
+  });
+
+  test('一个 zip 都没有时，回到原来那句话', () => {
+    // 多说的代价是一句废话，少说的代价是用户以为档案没了——但**常驻的提示等于没有
+    // 提示**，所以没有线索时就不要造一条。
+    const msg = describeNoBundles({ found: [], zips: [] }, '文稿');
+    assert.match(msg, /文稿 里（连同下面几层）没有找到档案/);
+    assert.doesNotMatch(msg, /解压/);
+  });
+
+  test('scan 里没有 zips 这个字段也不能崩', () => {
+    // 老调用方（以及测试）可能只传 found。
+    assert.match(describeNoBundles({ found: [] }, 'x'), /没有找到档案/);
+    assert.match(describeNoBundles(undefined, 'x'), /没有找到档案/);
   });
 });

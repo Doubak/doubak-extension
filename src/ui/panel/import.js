@@ -23,7 +23,7 @@
  */
 
 import {
-  readBundleMeta, planImport, importBundle, scanForBundles, ACTIONS,
+  readBundleMeta, planImport, importBundle, scanForBundles, ACTIONS, describeNoBundles,
 } from '../../bundle/importer.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
 import { bundleDirName } from '../../core/ids.js';
@@ -286,8 +286,10 @@ export function initImport() {
       return;
     }
     if (scan.found.length === 0) {
-      say('error', `${root.name} 里（连同下面几层）没有找到档案。`
-        + '导出时每份档案会放进一个 doubak-bundle-… 文件夹，选中它，或者选中它的上一级。');
+      // 判据与文案都在 importer.js 里——**不写在界面这一侧**。写在这儿的话，
+      // 它就只在这一个宿主、这一个入口上生效，而同一句话命令行那边也要说。
+      // 「一条规则只在它被写下的那个地方生效」这个仓库记过太多次。
+      say('error', describeNoBundles(scan, root.name));
       return;
     }
 

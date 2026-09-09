@@ -2114,3 +2114,19 @@ test('**带 hidden 的元素必须真的藏得住** —— 类上的 display 会
   const 带hidden = [...html.matchAll(/<(\w+)([^>]*\bhidden\b[^>]*)>/g)];
   assert.ok(带hidden.length >= 3, `只扫到 ${带hidden.length} 个带 hidden 的元素，正则多半坏了`);
 });
+
+describe('「没找到档案」那句话只有一处实现', () => {
+  test('面板调 describeNoBundles，而不是自己拼一句', async () => {
+    // 同一句话命令行那边也要说。写在界面里的话，它就只在这一个宿主、这一个入口上
+    // 生效——「一条规则只在它被写下的那个地方生效」这个仓库记过太多次。
+    const src = readPanelSourceSync();
+    assert.match(src, /describeNoBundles\(scan, root\.name\)/);
+    // 那句被换掉的话**要保持被换掉**。删掉的东西才是会悄悄爬回来的那种，
+    // 而一行文案回来了没有任何东西会红。
+    assert.doesNotMatch(
+      src,
+      /里（连同下面几层）没有找到档案/,
+      '那句话又被写回界面里了 —— 它该只住在 importer.js',
+    );
+  });
+});
