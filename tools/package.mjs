@@ -193,25 +193,6 @@ if (stageAt !== -1) {
   process.exit(0);
 }
 
-/**
- * **带着开发用 id 不许出 Firefox 的包**（除非明说 `--dev`）。
- *
- * 上传一个 id 不对的包，AMO 不会报错——它会把它当成一个**新的扩展**建一条上架
- * 记录，于是现有的评价与用户都不在这一份上，已经装了的人也收不到更新。那是那种
- * 「看起来成功了」的失败，而且发生在最不可逆的一步上。
- *
- * `--list` 不受影响：测试要用它，而列文件名不会把任何东西发出去。
- */
-if (targetName === 'firefox') {
-  const id = manifest.browser_specific_settings?.gecko?.id;
-  if (id === 'doubak-dev@localhost' && !process.argv.includes('--dev')) {
-    console.error(`  ✗ 这一份的 gecko.id 还是开发用的 ${id}。`);
-    console.error('    上传 AMO 前必须给真的：DOUBAK_GECKO_ID=… node tools/make-manifest.mjs');
-    console.error('    只是本地装来试的话，加 --dev。');
-    process.exit(1);
-  }
-}
-
 const out = join(ROOT, 'dist');
 mkdirSync(out, { recursive: true });
 const zip = join(out, `doubak-${manifest.version}${target.suffix}.zip`);

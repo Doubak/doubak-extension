@@ -47,29 +47,38 @@ export const FIREFOX_MANIFEST = 'manifest.firefox.json';
 export const FIREFOX_BACKGROUND = { scripts: ['src/background.js'], type: 'module' };
 
 /**
- * 开发用的 id。**它不是也不该像一个真的 AMO id。**
+ * AMO 上的扩展 id。**定下来了，而且永远不能再改。**
  *
- * 与 `manifest.firefox.json` 里提交的那一份一致，测试钉住——哪天有人把真 id
- * 提交进仓库，那条会红。真 id 不进版本库：上传时从环境变量给。
+ * ## 为什么它是一个写死的常量，而不是一个可覆盖的配置
+ *
+ * 这个字符串就是 AMO 眼里「这是同一个扩展」的全部依据。换掉它不会报错——AMO 会把
+ * 新包当成一个**新的扩展**，另建一条上架记录：现有的评价与用户都不在这一份上，
+ * 已经装了的人也永远收不到更新。那是「看起来成功了」的失败，发生在最不可逆的一步。
+ *
+ * 一度做成 `DOUBAK_GECKO_ID` 环境变量。**那是个陷阱**：一个永远不该变的值，配一个
+ * 随手就能改的入口。所以现在写死，并且由测试钉住字面量——改它必须是一次显式的、
+ * 有人看见的改动。
+ *
+ * ## 为什么是 `doubak@doubak.com` 而不是 `admin@doubak.com`
+ *
+ * 「像邮箱」只是格式（校验器认的两个模式：花括号 UUID，或
+ * `^[a-zA-Z0-9-._]*@[a-zA-Z0-9-._]+$`）——**没有任何东西会往这儿发信**，AMO 也不
+ * 验证它存在。`doubak.com` 这样没有 `@` 的会被直接判错，实测过。
+ *
+ * 判据是这两样东西的**寿命不一样**：
+ *
+ * | | 能不能改 | 会不会被看见 |
+ * |---|---|---|
+ * | 这个 id | **永远不能** | 进每一份装机的 manifest，世界可读 |
+ * | 联系邮箱 | 随时能换 | 只在 AMO 的表单里 |
+ *
+ * 把真信箱（`admin@doubak.com`）写进 id，等于把一个真地址塞进每一份分发出去的包里
+ * ——而 id 从来不用来联系任何人，这份暴露换不来任何东西。更麻烦的是那条不对称：
+ * 哪天信箱换了，id 却改不了，会一直指着一个已经不用的地址。
+ *
+ * **别让一个字符串同时当标识符和信箱。**
  */
-export const DEV_GECKO_ID = 'doubak-dev@localhost';
-
-/**
- * AMO 上的扩展 id。**默认没有，而且不许在这里编一个。**
- *
- * 这个扩展在 AMO 上已经有 id 了（归档主人持有）。而 id 一旦写错，后果不是报错：
- * **AMO 会把它当成一个新的扩展**，于是现有那条上架记录、评价与用户全都不在这一份上，
- * 而已经装了的人也收不到更新。这是那种「看起来成功了」的失败。
- *
- * 一度想「不知道就不写」，但 **MV3 下 Firefox 要求必须有 id**（`web-ext lint` 直接
- * 报 `ADDON_ID_REQUIRED` 错误，量过）。所以退而求其次：默认写一个**一眼就不是
- * AMO id** 的开发用值，而真正上传时必须显式给。
- *
- * `doubak-dev@localhost` 这个值是刻意挑的——它不像一个真的扩展 id，误传上去会很
- * 显眼，而不是安安静静地建出一条新的上架记录。`tools/package.mjs --firefox` 带着
- * 这个值时**拒绝出包**，除非显式 `--dev`。
- */
-export const GECKO_ID = process.env.DOUBAK_GECKO_ID || DEV_GECKO_ID;
+export const GECKO_ID = 'doubak@doubak.com';
 
 /**
  * AMO 那边留的联系邮箱：`admin@doubak.com`。
@@ -93,8 +102,7 @@ export function toFirefox(chrome) {
   m.permissions = (chrome.permissions ?? []).filter((p) => p !== 'offscreen');
   m.browser_specific_settings = {
     gecko: {
-      // 见 `GECKO_ID`：不知道就不写，绝不编一个。
-      ...(GECKO_ID ? { id: GECKO_ID } : {}),
+      id: GECKO_ID,
       strict_min_version: STRICT_MIN_VERSION,
       // 这个扩展什么都不收集——凭据与数据一个字节都不离开设备。这不是一句宣传语，
       // 它是整个项目的判据（「服务器关掉也必须能产出完整档案」），而 Firefox 现在

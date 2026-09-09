@@ -19,7 +19,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
-import { toFirefox, STRICT_MIN_VERSION, DEV_GECKO_ID } from '../tools/make-manifest.mjs';
+import { toFirefox, STRICT_MIN_VERSION, GECKO_ID, AMO_CONTACT } from '../tools/make-manifest.mjs';
 
 const ROOT = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const read = (f) => JSON.parse(readFileSync(join(ROOT, f), 'utf-8'));
@@ -69,42 +69,39 @@ describe('那三处差异各自说得出理由', () => {
     );
   });
 
-  test('**仓库里那份带的是开发用 id，不是真的 AMO id**', () => {
-    // 这个扩展在 AMO 上已经有 id 了（归档主人持有），而真 id **不进版本库**。
-    // 写错的后果不是报错：AMO 会把它当成一个新的扩展，现有那条上架记录、评价与
-    // 用户全都不在这一份上，已经装了的人也收不到更新——「看起来成功了」的失败。
+  test('**AMO id 是这一个，而且永远不能改**', () => {
+    // 这个字符串就是 AMO 眼里「这是同一个扩展」的全部依据。换掉它不会报错——
+    // AMO 会把新包当成一个**新的扩展**另建一条上架记录：现有评价与用户都不在这一份
+    // 上，装了的人也永远收不到更新。「看起来成功了」的失败，还发生在最不可逆的一步。
     //
-    // MV3 下 Firefox 又**要求必须有 id**（lint 报 ADDON_ID_REQUIRED，量过），
-    // 所以不能干脆不写；退而求其次写一个一眼就不像 AMO id 的开发值。
-    assert.equal(firefox.browser_specific_settings.gecko.id, DEV_GECKO_ID);
-    assert.match(DEV_GECKO_ID, /@localhost$/, '开发用 id 要一眼看得出不是真的');
+    // 所以这条测试钉的是**字面量**：改它必须是一次显式的、有人看得见的改动，
+    // 而不是某次重构顺手带过去的。
+    assert.equal(firefox.browser_specific_settings.gecko.id, 'doubak@doubak.com');
+    assert.equal(GECKO_ID, 'doubak@doubak.com');
   });
 
-  test('带着开发用 id 不许出 Firefox 的包', () => {
-    // 这条守的是最不可逆的那一步。`--list` 要照常能用（测试在用），
-    // 出包才拦——而拦的是**默认路径**：想本地装来试得显式说 --dev。
-    const r = spawnSync('node', ['tools/package.mjs', '--firefox'], { cwd: ROOT, encoding: 'utf8' });
-    assert.notEqual(r.status, 0, '带着开发 id 居然出包成功了');
-    assert.match(r.stderr, /DOUBAK_GECKO_ID/, '要说清怎么给真的');
-    const dev = spawnSync('node', ['tools/package.mjs', '--list', '--firefox'], { cwd: ROOT, encoding: 'utf8' });
-    assert.equal(dev.status, 0, '--list 不该被拦');
-  });
-
-  test('给了环境变量就用真的那个', () => {
+  test('它不许再变成一个可覆盖的配置', () => {
+    // 一度做成 `DOUBAK_GECKO_ID` 环境变量——**一个永远不该变的值，配一个随手就能
+    // 改的入口**。那是个陷阱，不是灵活性。
     const src = readFileSync(join(ROOT, 'tools/make-manifest.mjs'), 'utf-8');
-    assert.match(src, /process\.env\.DOUBAK_GECKO_ID \|\| DEV_GECKO_ID/);
+    assert.equal(
+      /process\.env\.DOUBAK_GECKO_ID/.test(src),
+      false,
+      'id 又变成环境变量了 —— 它永远不该变，不该有随手改它的入口',
+    );
   });
 
-  test('旧的占位不许再出现', () => {
-    // 这个扩展在 AMO 上已经有 id 了（归档主人持有）。写错的后果不是报错：
-    // AMO 会把它当成一个**新的扩展**，现有那条上架记录、评价与用户全都不在这一份上，
-    // 已经装了的人也收不到更新——那种「看起来成功了」的失败。
-    //
-    // 临时载入与 `web-ext lint` 都不需要 id；只有上传 AMO 时才要，那时显式给
-    // `DOUBAK_GECKO_ID=…`。所以仓库里这一份**不该有 id**。
-    // 我一度自己编了一个 `doubak@doubak.com` —— 那正是「别替我建 AMO id」要挡的事。
-    const all = JSON.stringify(firefox);
-    assert.ok(!all.includes('doubak@doubak.com'), '别再编一个 AMO id 出来');
+  test('格式合法：必须带 `@`', () => {
+    // 校验器认的两个模式之一（实测：`doubak.com` 这种没有 @ 的会被直接判错）。
+    assert.match(GECKO_ID, /^[a-zA-Z0-9\-._]*@[a-zA-Z0-9\-._]+$/);
+  });
+
+  test('**不是那个真信箱**', () => {
+    // `admin@doubak.com` 是能收信的地址，留给 AMO 的联系人字段。id 进的是每一份
+    // 装机包的 manifest，世界可读，而它从来不用来联系任何人——那份暴露换不来任何
+    // 东西。而且哪天信箱换了，id 却改不了，会一直指着一个已经不用的地址。
+    assert.notEqual(GECKO_ID, AMO_CONTACT);
+    assert.ok(!JSON.stringify(firefox).includes(AMO_CONTACT), '真信箱不该进 manifest');
   });
 
   test('声明「什么都不收集」，而这正是版本下限的来源', () => {
