@@ -169,28 +169,81 @@ export async function clearAttention({ kv } = {}) {
 }
 
 /**
+ * 这个浏览器认不认 `requireInteraction` / `silent`。
+ *
+ * `null` = 还没试过。**这是量出来的，不是猜的**，见 `show()`。
+ * 模块级变量：一次浏览器会话里答案不会变，而每条通知都先失败一次是白费。
+ */
+let acceptsExtras = null;
+
+/** 只有 Firefox 不认的那两个键。抽出来是为了让 `show()` 里那个回退看得出来在退什么。 */
+const EXTRA_KEYS = ['requireInteraction', 'silent'];
+
+/**
  * @param {string} id
  * @param {object} opts
  */
 async function show(id, { title, message, requireInteraction = false }) {
   const chrome = globalThis.chrome;
   if (!chrome?.notifications?.create) return; // 没权限或不支持：角标顶上
+
+  const base = {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/128.png'),
+    title,
+    message,
+  };
+  const full = { ...base, requireInteraction, silent: false };
+
   try {
     // 固定 id：同一类事情只留一条，不堆成一串。用户回来时该看到「现在怎么了」，
     // 而不是一部历史。
     await chrome.notifications.clear(id);
-    await chrome.notifications.create(id, {
-      type: 'basic',
-      iconUrl: chrome.runtime.getURL('icons/128.png'),
-      title,
-      message,
-      requireInteraction,
-      silent: false,
-    });
+    if (acceptsExtras === false) {
+      await chrome.notifications.create(id, base);
+      return;
+    }
+    try {
+      await chrome.notifications.create(id, full);
+      acceptsExtras = true;
+    } catch (e) {
+      // **Firefox 会拒收整条通知，而不是忽略它不认的键。** 实测（155）：
+      //
+      //     Type error for parameter options
+      //     (Unexpected properties: requireInteraction, silent) for notifications.create.
+      //
+      // 而这整段本来就裹在一个「发不出去不算事」的 try 里，于是**一条通知都发不出来，
+      // 只在控制台留一行**。抓取要跑几个小时，而通知正是「撞上验证码了，回来点一下」
+      // 唯一会主动找到用户的东西——丢掉它，人回来时看到的是一个停了很久的进度条。
+      //
+      // 判据用「试一次」而不是查 UA 或查版本：能不能收下这两个键，只有它自己知道。
+      if (!isUnexpectedProperties(e)) throw e;
+      acceptsExtras = false;
+      await chrome.notifications.create(id, base);
+    }
   } catch (e) {
     // 通知发不出去绝不能让抓取失败——它只是提示。
     console.log('[doubak] 通知发送失败（不影响抓取）', e);
   }
+}
+
+/**
+ * 这个错是不是「有几个键我不认识」。
+ *
+ * **不是「只要报错就退一档」**：那样的话真正的故障（图标路径不对、没权限）会被
+ * 一次悄悄的重试盖住，而重试同样会失败——于是问题变成「通知没了，也没人知道为什么」。
+ * 只认那一种，其余照旧往上抛给外层记日志。
+ *
+ * @param {unknown} e
+ */
+function isUnexpectedProperties(e) {
+  const msg = String(e?.message ?? e);
+  return /Unexpected propert/i.test(msg) && EXTRA_KEYS.some((k) => msg.includes(k));
+}
+
+/** 测试用：把「试过没有」清回没试过。 */
+export function resetNotifyProbe() {
+  acceptsExtras = null;
 }
 
 /** @param {string} text @param {string} color @param {string} title */

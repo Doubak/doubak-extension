@@ -233,7 +233,7 @@ export function initExport() {
         done.push({ bundleId: id, result: res, error: null });
         // 只在**校验通过**时记「已导出」——没验过就说导出了，等于给一个我们没资格
         // 给的保证（删除确认框会据此决定说得多重）。
-        if (res.problems.length === 0) await noteExported(id);
+        if (res.problems.length === 0) await noteExported(id, dest.kind);
       } catch (e) {
         // **一份失败不中断其余的。** 用户要的是尽可能多地搬走，而不是在第三份上
         // 停下、前两份还留在原地不知道成没成。
@@ -350,7 +350,7 @@ export function initExport() {
         // 「⚠ 其中 N 份没有导出记录，浏览器里这一份可能是唯一的副本」还停在原处
         // ——用户刚把它导出去，界面却仍然说它可能是唯一的副本。整条链的导出一直
         // 是刷新的，单份的没刷，两条路走了不同的做法。
-        await noteExported(bundleId);
+        await noteExported(bundleId, dest.kind);
         await refreshOpenTab();
       }
     } catch (e) {

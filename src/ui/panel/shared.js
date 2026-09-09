@@ -442,8 +442,10 @@ export const invalidateStorageUsage = () => { storageUsage = []; bundleScan = nu
  *
  * @param {string} bundleId
  */
-export async function noteExported(bundleId) {
-  await send({ type: 'markExported', bundleId, at: new Date().toISOString() });
+export async function noteExported(bundleId, kind = 'directory') {
+  await send({
+    type: 'markExported', bundleId, at: new Date().toISOString(), kind,
+  });
   invalidateStorageUsage();
 }
 

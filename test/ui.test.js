@@ -2054,12 +2054,33 @@ describe('抓取停下来不是「失败」—— 面板必须在删除之前说
   });
 
   test('这几句都进得了面板 —— 界面文字不是 Markdown', () => {
-    const js = readPanelSourceSync();
+    // **先去注释再查。** 判据是「会显示出来的那句话里有没有星号」，而原来的写法是
+    // 「这句话前后 180 个字符里有没有星号」——那是个代理：注释里正需要用 `**` 强调
+    // 规矩，于是旁边加一段解释就会让它变红，而被查的那句话一个字都没动。
+    // 这个仓库已经写过「断言面板源码不许按字符位置切」，这里是同一条。
+    const js = readPanelSourceSync()
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
     for (const s of ['未收尾」不等于「没用」', '半途中止的档案照样能解析']) {
       const i = js.indexOf(s);
       assert.notEqual(i, -1, `找不到「${s}」`);
       assert.equal(js.slice(i - 60, i + 120).includes('**'), false, '界面文字里不许有 Markdown 星号');
     }
+  });
+
+  test('**删除确认框把「导出成 zip」与「写进文件夹」分开说**', async () => {
+    // 删除是这个面板唯一不可逆的操作。文件夹那条路是回读目的地、逐个核对过摘要
+    // 之后才记的那一笔；zip 那条**读都读不回来**，而且下载有没有做完我们也看不到。
+    // 在按下删除的那一刻把两者说成同一句「你导出过它」，就是拿一个我们没资格给的
+    // 保证去换用户的档案。
+    const js = readPanelSourceSync();
+    assert.match(js, /exportKind === 'zip'/, '删除确认框没分开两种导出');
+    assert.match(js, /没有校验过/);
+    assert.match(js, /删之前请先把它解开看一眼/, '没让用户先确认那个 zip 解得开');
+    assert.match(js, /并且逐个文件核对过/, '文件夹那条路反而不说自己验过了');
+    // 老记录（裸字符串，没有 kind）必须仍然算「导出过」——升级不该让一份导出过的
+    // 档案突然显示成「可能是唯一的副本」。
+    const bg = await readRepoFile('src/background.js');
+    assert.match(bg, /typeof rec === 'string'/, '老的导出记录读不出来了');
   });
 });
 

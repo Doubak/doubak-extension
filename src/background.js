@@ -617,7 +617,18 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         case 'markExported': {
           // 导出成功后由面板记一笔。**派生状态**——丢了不影响档案本身，只影响
           // 删除确认框说得多重。
-          await getKv().set(exportedKey(msg.bundleId), msg.at ?? new Date().toISOString());
+          //
+          // 记的不只是时间，还有**怎么导出的**：写进文件夹那条路回读核对过每一个
+          // 文件，交给下载那条路（zip）连读都读不回来。删除是这个面板唯一不可逆
+          // 的操作，两种证据强度差得远，不能在那一刻说成同一句话。
+          //
+          // 老记录是个裸字符串（时间），所以这里写对象、读的那边两种都认——
+          // 已经装着的那些不该因为一次升级就变成「没导出过」，那会让人看到一句
+          // 假的「可能是唯一的副本」。
+          await getKv().set(exportedKey(msg.bundleId), {
+            at: msg.at ?? new Date().toISOString(),
+            kind: msg.kind === 'zip' ? 'zip' : 'directory',
+          });
           sendResponse({ ok: true });
           break;
         }
@@ -625,11 +636,18 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         case 'exportRecords': {
           /** @type {Record<string, string>} */
           const out = {};
+          /** @type {Record<string, string>} */
+          const kinds = {};
           for (const id of msg.bundleIds ?? []) {
-            const at = await getKv().get(exportedKey(id));
-            if (at) out[id] = /** @type {string} */ (at);
+            const rec = await getKv().get(exportedKey(id));
+            if (!rec) continue;
+            // 老记录是裸字符串。**认它**——升级不该把一份导出过的档案说成没导出过。
+            if (typeof rec === 'string') { out[id] = rec; kinds[id] = 'directory'; } else {
+              out[id] = rec.at;
+              kinds[id] = rec.kind ?? 'directory';
+            }
           }
-          sendResponse({ ok: true, exportedAt: out });
+          sendResponse({ ok: true, exportedAt: out, exportKind: kinds });
           break;
         }
 

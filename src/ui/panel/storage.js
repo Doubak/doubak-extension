@@ -45,6 +45,7 @@ export async function loadStorage() {
       dirs,
       activeBundleId: active,
       exportedAt: rec?.exportedAt ?? {},
+      exportKind: rec?.exportKind ?? {},
       // 记录读不出来时不许显示成「未导出」——那是替用户下一个我们没资格下的判断。
       exportRecordsUsable: Boolean(rec?.ok),
     }));
@@ -128,14 +129,32 @@ export async function deleteBundle(bundleId, { report = setStorageResult } = {})
       '解析器照常读得出来，导出之后也可以再导入回来。',
     );
   }
-  lines.push(
-    '',
-    u.exportState === 'exported'
-      ? `你在 ${u.exportedAt.slice(0, 16).replace('T', ' ')} 导出过它。`
-      : '⚠ 没有导出记录 —— 浏览器里这一份可能是唯一的副本。',
-    '',
-    '删除不可逆，没有回收站。',
-  );
+  // **导出成一个 zip 与写进文件夹，证据强度差得远，这里必须分开说。**
+  //
+  // 文件夹那条路是回读目的地、逐个核对过 manifest 里的摘要之后才记的这一笔；
+  // zip 那条**读都读不回来**（`exportBundle` 自己就写着「目的地读不回来，无法
+  // 校验」），而且我们看不到浏览器有没有把那个下载做完。它可能下到一半、可能
+  // 存到了一个用户找不到的地方、可能根本解不开。
+  //
+  // 删除是这个面板唯一不可逆的操作。在那一刻把两者说成同一句「你导出过它」，
+  // 就是拿一个我们没资格给的保证去换用户的档案。
+  const when = u.exportState === 'exported'
+    ? u.exportedAt.slice(0, 16).replace('T', ' ')
+    : null;
+  lines.push('');
+  if (when && u.exportKind === 'zip') {
+    lines.push(
+      `你在 ${when} 把它打包成 zip 交给了下载。`,
+      '⚠ zip 写出去就读不回来，所以这一份没有校验过；',
+      '　 下载有没有完成、那个 zip 解不解得开，扩展这边也看不到。',
+      '　 删之前请先把它解开看一眼，确认里面是一个 doubak-bundle-… 文件夹。',
+    );
+  } else if (when) {
+    lines.push(`你在 ${when} 导出过它，并且逐个文件核对过。`);
+  } else {
+    lines.push('⚠ 没有导出记录 —— 浏览器里这一份可能是唯一的副本。');
+  }
+  lines.push('', '删除不可逆，没有回收站。');
   if (!confirm(lines.join('\n'))) return false;
 
   report('idle', `正在删除 ${u.bundleId}…`);

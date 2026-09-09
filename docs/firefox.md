@@ -83,6 +83,52 @@ thenable。所以那一步**不做**——70 处机械改动，理由却站不�
   解压一律用系统 `unzip`，不用我们自己的读回器。
 - **导入时认得出没解压的 zip**，扩展与命令行两处都说得出下一步。
 
+## 通知：Firefox 会把整条拒收，而不是忽略它不认的键（2026-09-09）
+
+审 `chrome.*` 用法时逐个在真 Firefox 上打了一遍，只有这一处是真的坏：
+
+```
+notifications.create(id, {type, iconUrl, title, message, requireInteraction, silent})
+→ Type error for parameter options
+  (Unexpected properties: requireInteraction, silent) for notifications.create.
+```
+
+Chrome 会忽略不认识的键，**Gecko 校验参数，整条拒收**。而 `show()` 整段裹在一个
+「通知发不出去不算事」的 try 里——所以症状是**一条通知都发不出来，只在控制台留一行**。
+
+代价不小：抓取要跑几个小时，通知是「撞上验证码了，回来点一下」**唯一会主动找到
+用户**的东西。丢掉它，人回来时看到的是一个停了很久的进度条，而 `awaiting_human`
+本来就是「暂停，不是错误」。
+
+修法是**试一次**，不是查 UA 也不是查版本——能不能收下那两个键，只有它自己知道；
+失败之后记住，之后直接用基础形状（每条通知都先失败一次会在控制台堆一串红字）。
+判据收窄到「有几个键我不认识」这一种错：写成「只要报错就退一档」的话，真正的故障
+（图标路径不对、没权限）会被一次悄悄的重试盖住，而重试同样会失败。
+
+**Firefox 上的退化照说**：没有 `requireInteraction`，需要人处理的那条通知会自己
+消失。角标（`action.setBadge*`，实测三个都能用）是那条不会消失的兜底。
+
+顺带排除掉两个看起来像问题的：`chrome.storage` 与 `chrome.webRequest` 在 Firefox
+上都取不到，但这个扩展**本来就不用它们**——源码里所有相关的行都是注释，解释的正是
+「offscreen document 拿不到 `chrome.storage`，所以抓取状态存 IndexedDB」。
+
+其余逐个验过：`notifications.clear` / `onClicked`、`action.setBadgeText` /
+`setBadgeBackgroundColor` / `setTitle`、`windows.update`、`permissions.contains`、
+`runtime.getContexts`、`declarativeNetRequest.getSessionRules` —— 全部可用。
+
+## 删除确认框：zip 那条路要单独说
+
+删除是这个面板唯一不可逆的操作，而两种导出的证据强度差得远：
+
+| | 记下这一笔的时候，我们知道什么 |
+|---|---|
+| 文件夹 | 回读了目的地，逐个核对过 manifest 里的 SHA-256 |
+| zip | **什么都不知道**——写出去读不回来，下载有没有做完也看不到 |
+
+所以导出记录现在记的不只是时间，还有**怎么导出的**，删除框据此说两句不同的话；
+zip 那句明确请用户**先解开看一眼**再删。老记录是个裸字符串，读的那边两种都认——
+升级不该让一份导出过的档案突然显示成「浏览器里这一份可能是唯一的副本」。
+
 ## 还没量的
 
 - **后台事件页能不能扛住几小时的抓取。** 这是最贵的一个，探针答不了，要真跑一次

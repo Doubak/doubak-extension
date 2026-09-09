@@ -40,6 +40,10 @@ export function exportedKey(bundleId) {
  * @property {boolean} active      正在抓的就是这一份
  * @property {string | null} exportedAt
  * @property {'exported' | 'not_exported' | 'unknown'} exportState
+ * @property {'directory' | 'zip' | null} exportKind
+ *   **怎么导出的。** 写进文件夹那条路回读核对过每一个文件；打包成 zip 那条读都读
+ *   不回来。删除确认框据此说两句不同的话——在唯一不可逆的那一刻，把两种证据说成
+ *   同一句是拿一个我们没资格给的保证去换用户的档案。
  * @property {boolean} deletable
  * @property {string | null} blockedReason  不能删的原因，给人看
  */
@@ -51,6 +55,7 @@ export function exportedKey(bundleId) {
  * @param {Array<{bundleId: string, dir: string, files: Array<{name: string, bytes: number}>}>} opts.dirs
  * @param {string | null} [opts.activeBundleId]  正在抓的那份
  * @param {Record<string, string>} [opts.exportedAt]  bundleId → ISO 时间
+ * @param {Record<string, string>} [opts.exportKind]  bundleId → 'directory' | 'zip'
  * @param {boolean} [opts.exportRecordsUsable]  导出记录这套机制在这台机器上可不可信
  * @returns {BundleUsage[]}
  */
@@ -58,6 +63,7 @@ export function summarizeBundles({
   dirs,
   activeBundleId = null,
   exportedAt = {},
+  exportKind = {},
   exportRecordsUsable = true,
 }) {
   return dirs
@@ -65,6 +71,9 @@ export function summarizeBundles({
       const bytes = d.files.reduce((n, f) => n + (f.bytes ?? 0), 0);
       const active = d.bundleId === activeBundleId;
       const at = exportedAt[d.bundleId] ?? null;
+      // 记录里没写「怎么导出的」时按 directory 算：这套记录是 2026-09-09 之前
+      // 就有的，而那时只有文件夹一条路。默认成 zip 会给老用户凭空加一句警告。
+      const kind = at ? (exportKind[d.bundleId] ?? 'directory') : null;
 
       /** @type {'exported' | 'not_exported' | 'unknown'} */
       let exportState;
@@ -80,6 +89,7 @@ export function summarizeBundles({
         hasManifest: d.files.some((f) => f.name === 'manifest.json'),
         active,
         exportedAt: at,
+        exportKind: kind,
         exportState,
         deletable: !active,
         // 说清楚为什么不能删，而不是只把按钮灰掉——灰掉的按钮看起来像 bug。
