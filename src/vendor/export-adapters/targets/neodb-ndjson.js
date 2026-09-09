@@ -412,7 +412,19 @@ export function buildNeodbNdjson(data, options = {}) {
     // 带上网址：`unsure` 那一栏的下一步动作是**去看那一页**（多半是豆瓣改了 markup，
     // 解析器的 `note_visibility` 告警里有类名线索），而只报个标题的话，还得先自己
     // 把它找出来。
-    if (不公开) report.restricted.push({ title: f.title ?? '(无标题)', by: 谁定的, url: piece.url ?? null });
+    // `unsure` 有**两个成因，下一步动作正好相反**，所以必须分开报：`unrecognized`
+    // 是豆瓣改了 markup、抽取器认不出隐私容器（重跑解析器救不回来，要改抽取器），
+    // `legacy` 是这份 canonical 生成时解析器还没写这三个字段（重跑一次就有了）。
+    // 合成一句话必然说错一半，而说错的方向是**让人去做那件做不成的事**——与
+    // 站点那边把「缺图」和「图烂了」分开报是同一条。
+    if (不公开) {
+      report.restricted.push({
+        title: f.title ?? '(无标题)',
+        by: 谁定的,
+        why: 谁定的 !== 'unsure' ? null : (f.visibility === 'unknown' ? 'unrecognized' : 'legacy'),
+        url: piece.url ?? null,
+      });
+    }
     const url = f.subject_url ?? null;
     const subject = url ? byUrl.get(url) ?? null : null;
 
