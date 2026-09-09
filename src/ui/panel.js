@@ -48,6 +48,7 @@ import { initExport } from './panel/export.js';
 import { initFormats, resetFormats, loadFormats } from './panel/formats.js';
 import { initImport, resetImport } from './panel/import.js';
 import { initDebugToggle } from './panel/debug-toggle.js';
+import { applyDestinationCopy } from './panel/destination.js';
 
 // ── 标签页切换 ───────────────────────────────────────────────
 
@@ -98,6 +99,10 @@ initStorage();
 initCapturesToggle();
 initLog();
 initDebugToggle();
+
+// 界面上只对一种目的地成立的那几句，按这个浏览器的能力挑一遍。**开机时做一次就够**
+// ——一个浏览器有没有 File System Access 不会在面板开着的时候变。
+applyDestinationCopy();
 
 // 概览是唯一**会自己动**的一页：每两秒重读一次状态。
 // 页面藏起来时不读——面板经常一开就是几小时，没必要在后台空转。

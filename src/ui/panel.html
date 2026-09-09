@@ -98,7 +98,7 @@
       <div class="muted small" id="import-hint">
         系统的对话框一次只能选一个文件夹。要一次导入多份，请选中它们<b>共同的上一级</b>——
         这里会往下找三层，所以按月归档、或者解压之后多套一层，都认得出来。
-        <b>从 Firefox 导出的是一个 zip，请先解压再选</b>——解开之后就是标准的档案文件夹。
+        <span data-when="zip" hidden><b>这个浏览器导出的是一个 zip，请先解压再选</b>——解开之后就是标准的档案文件夹。</span>
       </div>
       <div id="import-result"></div>
       <div id="storage-result"></div>
@@ -202,9 +202,9 @@
            之前**才有用的信息；等导完了再说，用户已经拿着一个不认识的文件了。
            而且一个字都不许说它是「Firefox 专用格式」——解开就是同一个文件夹，
            那句话是假的，判据见 src/ui/panel/destination.js。 -->
-      <div class="hint">
-        <b>Firefox 上会打包成一个 zip。</b> 那边没有「让网页往你选的文件夹里写」这个接口
-        （File System Access），所以产出会打包成一个文件交给下载。
+      <div class="hint" data-when="zip" hidden>
+        <b>这个浏览器会把产出打包成一个 zip。</b> 它没有「让网页往你选的文件夹里写」这个
+        接口（File System Access），所以只能交出一个文件。
         <b>解开之后就是上面那几个文件夹，与在 Chrome、Edge 上导出的完全一样</b>——
         这是个壳子，不是另一种格式。打包期间需要大约两倍的空闲空间。
       </div>
@@ -392,8 +392,9 @@
         <li>
           <b>想要能直接用的东西，去「导出」页。</b>
           结构化数据（NDJSON）、NeoDB 的导入包、或一棵带图片的 Markdown 站点，
-          均由档案现场算出，直接写入你选的文件夹（Firefox 上没有这个接口，
-          会打包成一个 zip 交给下载——<b>解开就是同一个文件夹</b>）。
+          均由档案现场算出，<span data-when="folder" hidden>直接写入你选的文件夹。</span><span
+          data-when="zip" hidden>打包成一个 zip 交给下载——<b>解开就是一个文件夹</b>，
+          与在 Chrome、Edge 上直接导出的一样。</span>
           <b>此步骤可以省略</b>——它们随时可以重新生成，而上一步的档案不能。
         </li>
       </ol>
@@ -406,8 +407,9 @@
       <h2 id="downstream">导出之后：解析与生成站点</h2>
       <div class="hint">
         <b>这几步现在扩展自己就能做</b>——见「导出」页：结构化数据、NeoDB 导入包、
-        Markdown 站点，都是现场从档案算出来直接写进你选的文件夹（Firefox 上打包成
-        一个 zip，解开就是同一个文件夹），不装任何东西。
+        Markdown 站点，都是现场从档案算出来<span data-when="folder" hidden>直接写进你选的
+        文件夹</span><span data-when="zip" hidden>打包成一个 zip 交给下载，解开就是一个
+        文件夹</span>，不装任何东西。
         <br>
         下面这些命令行工具做的是同一件事（用的就是同一份代码），
         适合要改参数、接进脚本、或者只想拿一部分数据的人。

@@ -275,6 +275,52 @@ describe('那句「请用 Chrome 或 Edge」不许在导出路径上长回来', 
     assert.match(js, /scanFileList\(files\)/);
   });
 
+  test('**只对一种目的地成立的话，只在那种浏览器上出现**', async () => {
+    // 写死在 HTML 里的话：Chrome 用户读到一句与自己无关的话（这一页已经很满，一句
+    // 读了发现不适用的提示教会人「灰字可以跳过」），而 Firefox 用户读到的
+    // 「直接写入你选的文件夹」**是假话**。所以两边都标出来，各显示各的。
+    const { applyDestinationCopy } = await import('../src/ui/panel/destination.js');
+    const html = await readFile(new URL('../src/ui/panel.html', import.meta.url), 'utf8');
+
+    // 每一句都要真的带上标记；漏一句的症状是「Chrome 上多一句 Firefox 的话」。
+    const marked = [...html.matchAll(/data-when="(zip|folder)"/g)].map((m) => m[1]);
+    assert.ok(marked.filter((k) => k === 'zip').length >= 4, `zip 那边只标了 ${marked}`);
+    assert.ok(marked.includes('folder'), 'folder 那边一句都没标');
+    // 两种都默认 hidden：漏了那一步的症状该是「少一句话」，不是「多一句错话」。
+    for (const m of html.matchAll(/data-when="(zip|folder)"([^>]*)>/g)) {
+      assert.match(m[2], /\bhidden\b/, `data-when="${m[1]}" 没有默认 hidden`);
+    }
+
+    const make = (kind) => ({ dataset: { when: kind }, hidden: null, kind });
+    const els = [make('zip'), make('zip'), make('folder')];
+    const root = { querySelectorAll: (sel) => els.filter((e) => sel.includes(`"${e.kind}"`)) };
+
+    const prev = globalThis.window;
+    try {
+      globalThis.window = { showDirectoryPicker: () => {} }; // Chrome
+      applyDestinationCopy(root);
+      assert.deepEqual(els.map((e) => e.hidden), [true, true, false],
+        'Chrome 上还在显示 zip 那几句');
+
+      globalThis.window = {}; // Firefox
+      applyDestinationCopy(root);
+      assert.deepEqual(els.map((e) => e.hidden), [false, false, true],
+        'Firefox 上还在说「直接写入你选的文件夹」—— 那是假话');
+    } finally {
+      if (prev === undefined) delete globalThis.window; else globalThis.window = prev;
+    }
+  });
+
+  test('挑那几句用的是**同一个**判据，不是第二次判断', async () => {
+    // 这里判一次、导出时再判一次的话，迟早有一天页面上写着一句话、按钮做的是另一件事。
+    const d = await src('destination.js');
+    const i = d.indexOf('export function applyDestinationCopy');
+    assert.ok(i > 0);
+    assert.match(d.slice(i, i + 400), /!canPickDirectory\(\)/);
+    const panel = await readFile(new URL('../src/ui/panel.js', import.meta.url), 'utf8');
+    assert.match(panel, /^applyDestinationCopy\(\);$/m, '面板开机时没调它 —— 那几句永远不出现');
+  });
+
   test('界面上一个字都不许说它是「Firefox 专用格式」', async () => {
     // 那句话是假的（解开就是同一个目录），而且正好把「你的数据在你自己手里」说反了。
     //

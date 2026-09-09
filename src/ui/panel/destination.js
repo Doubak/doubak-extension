@@ -64,6 +64,31 @@ export function canPickDirectory() {
   return typeof globalThis.window?.showDirectoryPicker === 'function';
 }
 
+/**
+ * 把界面上只对一种目的地成立的句子挑出来显示。
+ *
+ * ## 为什么不能就那么写在 HTML 里
+ *
+ * 「Firefox 上会打包成一个 zip」写死在页面上的话，**Chrome 用户会读到一句与自己
+ * 无关的话**——而这一页已经很满了，一句读了发现不适用的提示，教会人的是「这些灰字
+ * 可以跳过」。下一次真的要紧的那句就也被跳过了。这与「一个永远有条目的失败列表是
+ * 没人看的失败列表」是同一条。
+ *
+ * 反过来同样要紧：Firefox 用户读到「直接写入你选的文件夹」是**一句假话**。
+ * 所以两边都标出来，各显示各的，没有一句是「顺带提一下另一个浏览器」。
+ *
+ * 判据仍然是 `canPickDirectory()`——**按能力问，不按 UA 问**，而且与真正决定走哪条
+ * 路的是同一个函数。要是这里判一次、导出时再判一次，迟早有一天页面上写着一句话、
+ * 按钮做的是另一件事。
+ *
+ * 两种都默认 `hidden`：漏掉这一步的话页面上是**少一句话**，而不是多一句错话。
+ */
+export function applyDestinationCopy(root = globalThis.document) {
+  const zip = !canPickDirectory();
+  for (const el of root?.querySelectorAll?.('[data-when="zip"]') ?? []) el.hidden = !zip;
+  for (const el of root?.querySelectorAll?.('[data-when="folder"]') ?? []) el.hidden = zip;
+}
+
 /** @param {FileSystemDirectoryHandle} root */
 async function purgeStaging(root) {
   try {
