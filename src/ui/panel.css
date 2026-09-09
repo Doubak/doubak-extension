@@ -184,6 +184,9 @@ h2:first-child { margin-top: 0; }
   cursor: pointer;
 }
 .opt input { margin-top: 0.15em; flex: none; }
+/* 禁用的选项要看得出来是禁用的。`:has()` 让整行（包括文字）一起变淡——只淡化那个
+   方框的话，一句照常黑着的说明配一个点不动的框，读起来像是坏了。 */
+.opt:has(input:disabled) { opacity: 0.5; cursor: default; }
 /* 一组单选。`fieldset` 而不是几个裸 label：`legend` 把「日记导出设置为」与这两个
    选项在无障碍树上绑成一组，读屏软件才念得出「这两个是同一个问题的两个答案」。
    浏览器默认给 fieldset 一圈边框和内边距，这里全部清掉——卡片里再套一个框，

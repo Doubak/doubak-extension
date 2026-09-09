@@ -340,7 +340,10 @@ async function runExport(kind) {
       // `UNKNOWN_VISIBILITY_DEFAULT` 就是两处各自为政的默认值，改一处不改另一处
       // 不会有任何东西报错——而后果是一个宿主收着、另一个发出去。
       ...($('export-neodb-notes-private')?.checked ? { notesVisibility: 2 } : {}),
-      ...($('export-neodb-unknown')?.checked ? { unknownVisibility: 0 } : {}),
+      // 禁用时一律当没勾——`disabled` 的元素 `checked` 仍可能是 true（选「私密」
+      // 之前勾过），而那时它不该有任何影响。判据不靠「界面碰巧是什么样」。
+      ...($('export-neodb-unknown')?.checked && !$('export-neodb-unknown')?.disabled
+        ? { unknownVisibility: 0 } : {}),
     });
 
     for (const [i, f] of built.files.entries()) {
@@ -587,6 +590,25 @@ export function initFormats() {
       void runExport(kind);
     });
   }
+
+  // **选了「私密」，那个「读不出来的也公开」就没有意义了，所以把它禁掉。**
+  //
+  // 判据链是「每一级只收紧、不放松」：读不出公私状态的日记，绝不该比**读得出来的**
+  // 日记还公开。所以选「私密」时勾不勾都是私密——行为是对的，问题在于那个勾
+  // **什么都没做，而标签写着「导出成公开状态」**。一个说了要做某事、实际什么也不做、
+  // 还不吭声的控件，正是这个项目反复栽的那一类（封面回退、`remote` 数封面、
+  // 「有 5 张图没取到」）。禁用把「不起作用」变成看得见的。
+  //
+  // 只禁不清：勾选状态留着，用户拨回「公开」就还在——替他把勾清掉是又一次替他
+  // 拿主意，而他并没有改变那个意愿。
+  const syncUnknownEnabled = () => {
+    const box = $('export-neodb-unknown');
+    if (box) box.disabled = !!$('export-neodb-notes-private')?.checked;
+  };
+  for (const id of ['export-neodb-notes-public', 'export-neodb-notes-private']) {
+    $(id)?.addEventListener('change', syncUnknownEnabled);
+  }
+  syncUnknownEnabled();
 
   // 「去档案页」——**点那个标签按钮，不自己复制一遍切换逻辑**。那段逻辑还负责
   // 按需加载（`loadArchive()` / `loadStorage()`），另写一份迟早会分叉。

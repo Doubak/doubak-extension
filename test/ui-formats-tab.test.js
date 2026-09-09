@@ -527,8 +527,8 @@ describe('看不出公不公开的那几篇日记，用户可以自己拨', () =
     const src = await read('src/ui/panel/formats.js');
     assert.match(
       src,
-      /\.\.\.\(\$\('export-neodb-unknown'\)\?\.checked \? \{ unknownVisibility: 0 \} : \{\}\)/,
-      '勾上传 0，不勾必须整个不传这个键',
+      /\$\('export-neodb-unknown'\)\?\.checked && !\$\('export-neodb-unknown'\)\?\.disabled\s*\n?\s*\? \{ unknownVisibility: 0 \} : \{\}/,
+      '勾上且没被禁用才传 0，其余情形整个不传这个键',
     );
     // 面板里任何地方都不许再出现一个 unknownVisibility 的数字兜底。
     assert.doesNotMatch(src, /unknownVisibility\s*(\?\?|:)\s*[12]\b/,
@@ -651,4 +651,22 @@ test('**「按公开导入」那句要跟着单选走**，选了私密就不能�
   assert.doesNotMatch(私密, /按公开导入/, '已经收起来了，不能还说按公开导入');
   assert.doesNotMatch(私密, /撤不回来/, '已经收起来了，不必再吓一次');
   assert.match(私密, /上面选「公开」/, '得告诉他怎么把它重新公开');
+});
+
+test('**选了「私密」就把那个勾禁掉** —— 一个不起作用的勾不许还说自己有用', async () => {
+  // 判据链是「每一级只收紧、不放松」，所以选「私密」时勾不勾都是私密。行为是对的，
+  // 问题在于那个勾**什么都没做，而它的标签写着「导出成公开状态」**——说了要做某事、
+  // 实际什么也不做、还不吭声，正是这个项目反复栽的那一类。
+  const src = await read('src/ui/panel/formats.js');
+  assert.match(src, /box\.disabled = !!\$\('export-neodb-notes-private'\)\?\.checked/);
+  // 两个单选都要挂监听，否则从「私密」拨回「公开」时它解不了禁。
+  assert.match(src, /for \(const id of \['export-neodb-notes-public', 'export-neodb-notes-private'\]\)/);
+  // **开机时也要同步一次**：否则浏览器恢复表单状态（刷新后 Firefox/Chrome 会记住
+  // 单选）时，界面是「私密」而那个勾还是可点的。
+  assert.match(src, /syncUnknownEnabled\(\);/);
+  // 禁用要看得出来。
+  const css = await read('src/ui/panel.css');
+  assert.match(css, /\.opt:has\(input:disabled\)/);
+  // 只禁不清：替用户把勾清掉是又一次替他拿主意，而他并没有改变那个意愿。
+  assert.doesNotMatch(src, /export-neodb-unknown'\)\.checked = false/);
 });
