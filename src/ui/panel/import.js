@@ -23,7 +23,8 @@
  */
 
 import {
-  readBundleMeta, planImport, importBundle, scanForBundles, ACTIONS, describeNoBundles,
+  readBundleMeta, planImport, importBundle, scanForBundles, scanFileList,
+  ACTIONS, describeNoBundles,
 } from '../../bundle/importer.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
 import { bundleDirName } from '../../core/ids.js';
@@ -31,6 +32,7 @@ import { shortId } from '../components.js';
 import {
   $, bytes, scanBundleDirs, invalidateStorageUsage, getLastStatus,
 } from './shared.js';
+import { canPickDirectory } from './destination.js';
 import { loadArchive } from './archive.js';
 import { loadStorage } from './storage.js';
 import { refreshOpenTab } from './overview.js';
@@ -260,13 +262,18 @@ function renderResult(done, plan) {
   say(failed.length ? 'error' : 'ok', box);
 }
 
-export function initImport() {
-  $('import').addEventListener('click', async () => {
-    if (typeof window.showDirectoryPicker !== 'function') {
-      say('error', '这个浏览器不支持选择文件夹（File System Access API）。请使用 Chrome 或 Edge。');
-      return;
-    }
-
+/**
+ * 让用户选一个文件夹，两种浏览器两条路，**结论必须一样**。
+ *
+ * Chrome / Edge 走 `showDirectoryPicker`；Firefox 没有它，走
+ * `<input type="file" webkitdirectory multiple>`——每个 `File` 都带
+ * `webkitRelativePath`，整棵树一次拿全。判据（哪个目录算档案、往下找几层、
+ * 认出没解压的 zip）两边共用 `importer.js` 里的那一份，这里只负责「字节从哪来」。
+ *
+ * @returns {Promise<{scan: object, rootName: string} | null>} null = 用户取消
+ */
+async function pickAndScan() {
+  if (canPickDirectory()) {
     /** @type {FileSystemDirectoryHandle} */
     let root;
     try {
@@ -274,22 +281,67 @@ export function initImport() {
       // 权限提示上写着「查看和修改」还是「查看」，用户是看得见的。
       root = await window.showDirectoryPicker({ mode: 'read', id: 'doubak-export' });
     } catch {
-      return; // 用户取消
+      return null; // 用户取消
     }
+    return { scan: await scanForBundles(root), rootName: root.name };
+  }
 
-    say('idle', '正在查看这个文件夹里有什么…');
-    let scan;
+  const files = await pickDirectoryFiles();
+  if (!files) return null;
+  const scan = scanFileList(files);
+  return { scan, rootName: scan.rootName };
+}
+
+/**
+ * `<input type="file" webkitdirectory>` 那条路。
+ *
+ * 元素是**现造现扔**的：留一个隐藏的 `<input>` 在页面上，它会带着上一次选中的
+ * 文件一直活着（几百个 `File` 句柄），而这一页本来就写着「不留派生状态」。
+ *
+ * 取消要认出来，否则界面会停在「正在查看…」上不动：Firefox 有 `cancel` 事件
+ * （109+，而我们的下限是 140）；没有它的浏览器上，`change` 里拿到空列表也当取消。
+ *
+ * @returns {Promise<FileList | null>}
+ */
+function pickDirectoryFiles() {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.webkitdirectory = true;
+    input.multiple = true;
+    input.hidden = true;
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      input.remove();
+      resolve(v);
+    };
+    input.addEventListener('change', () => finish(input.files?.length ? input.files : null));
+    input.addEventListener('cancel', () => finish(null));
+    document.body.append(input);
+    input.click();
+  });
+}
+
+export function initImport() {
+  $('import').addEventListener('click', async () => {
+    let picked;
     try {
-      scan = await scanForBundles(root);
+      picked = await pickAndScan();
     } catch (e) {
       say('error', `读不了这个文件夹：${e.message}`);
       return;
     }
+    if (!picked) return; // 用户取消
+    const { scan, rootName } = picked;
+
+    say('idle', '正在查看这个文件夹里有什么…');
     if (scan.found.length === 0) {
       // 判据与文案都在 importer.js 里——**不写在界面这一侧**。写在这儿的话，
       // 它就只在这一个宿主、这一个入口上生效，而同一句话命令行那边也要说。
       // 「一条规则只在它被写下的那个地方生效」这个仓库记过太多次。
-      say('error', describeNoBundles(scan, root.name));
+      say('error', describeNoBundles(scan, rootName));
       return;
     }
 

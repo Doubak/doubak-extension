@@ -15,7 +15,8 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  readBundleMeta, planImport, compareContents, importBundle, ACTIONS, scanForBundles, describeNoBundles } from '../src/bundle/importer.js';
+  readBundleMeta, planImport, compareContents, importBundle, ACTIONS, scanForBundles,
+  describeNoBundles, scanFileList, fileListSource } from '../src/bundle/importer.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { sha256Hex } from '../src/core/digest.js';
 
@@ -575,5 +576,158 @@ describe('没找到档案时，要说得出下一步', () => {
     // 老调用方（以及测试）可能只传 found。
     assert.match(describeNoBundles({ found: [] }, 'x'), /没有找到档案/);
     assert.match(describeNoBundles(undefined, 'x'), /没有找到档案/);
+  });
+});
+
+/**
+ * **两个宿主，同一棵树，必须给出同一个答案。**
+ *
+ * Chrome / Edge 走 `showDirectoryPicker` → `scanForBundles`（一层层走目录）；
+ * Firefox 没有那个接口，走 `<input webkitdirectory>` → `scanFileList`（整棵树一次
+ * 拿全）。**字节从哪来是各宿主的事，「哪个目录算一份档案」只能有一份判断。**
+ *
+ * 这两条一旦分家，症状是最难查的那种：同一个文件夹，在一个浏览器上导入了 3 份，
+ * 在另一个上导入了 2 份，**两边都不报错**。所以这里不是各测各的，而是**同一份
+ * 语料喂给两条路，逐项对结论**。
+ */
+describe('走目录与整棵树：两条路的结论必须一样', () => {
+  /**
+   * 同一棵树的两种表示：给 `scanForBundles` 的句柄，给 `scanFileList` 的 File 列表。
+   *
+   * **两边各自从树本身生成，谁也不依赖谁。** 第一版是在 `scanForBundles` 走目录的
+   * 过程中顺手把 File 攒出来的——而它**走到一半就会停**（认出档案不再往下、超过
+   * 深度上限不再往下），于是那些没被走到的文件根本不会进 File 列表。结果是这组
+   * 测试里最要紧的两条**永远不可能失败**：突变验过，把「找到就不往下」和深度上限
+   * 从 `scanFileList` 里整条删掉，全绿。
+   *
+   * 这正是这个仓库记过很多次的形状：检查跑了、数字也合理，但它什么都没量。
+   * 判据必须来自**语料**，不能来自被测的那条路。
+   */
+  function corpus(tree) {
+    const handleOf = (name, node) => ({
+      kind: 'directory',
+      name,
+      async *entries() {
+        for (const [k, v] of Object.entries(node)) {
+          yield [k, v === null ? { kind: 'file', name: k } : handleOf(k, v)];
+        }
+      },
+    });
+    const files = [];
+    const collect = (node, path) => {
+      for (const [k, v] of Object.entries(node)) {
+        if (v === null) files.push({ name: k, webkitRelativePath: `${path}/${k}`, size: 1 });
+        else collect(v, `${path}/${k}`);
+      }
+    };
+    const [rootName] = Object.keys(tree);
+    collect(tree[rootName], rootName);
+    return { root: handleOf(rootName, tree[rootName]), files };
+  }
+
+  const bundleFiles = (id) => ({
+    'manifest.json': null,
+    [`index-${id}.ndjson`]: null,
+    [`data-${id}-00001.warc.gz`]: null,
+  });
+
+  /** 走一遍 scanForBundles 顺便把 File 列表攒出来（`entries()` 是生成器，必须真的走完）。 */
+  async function both(tree) {
+    const { root, files } = corpus(tree);
+    const walked = await scanForBundles(root);
+    const listed = scanFileList(files);
+    return { walked, listed };
+  }
+
+  const cases = {
+    '并排三份 + 一张截图': {
+      exports: {
+        'doubak-bundle-20260801T005010Z-3eef52': bundleFiles('20260801T005010Z-3eef52'),
+        'doubak-bundle-20260903T232811Z-b3c2b6': bundleFiles('20260903T232811Z-b3c2b6'),
+        'doubak-bundle-20240811T121600Z-4983ef': bundleFiles('20240811T121600Z-4983ef'),
+        '截图.png': null,
+      },
+    },
+    '再套两层 —— 解压出来的形状': {
+      下载: {
+        '豆备备份': {
+          '豆备备份': {
+            'doubak-bundle-20260801T005010Z-3eef52': bundleFiles('20260801T005010Z-3eef52'),
+          },
+        },
+      },
+    },
+    '档案目录里居然还有子目录 —— 找到就不许再往下': {
+      exports: {
+        'doubak-bundle-20260801T005010Z-3eef52': {
+          ...bundleFiles('20260801T005010Z-3eef52'),
+          // 真实档案里不会有，但要是有，两条路都必须只报外面那一份。
+          '里面还有一层': bundleFiles('20260903T232811Z-b3c2b6'),
+        },
+      },
+    },
+    '一份都没有，只有个没解压的 zip': {
+      下载: {
+        'doubak-archive-20260909T082446Z-195f8e.zip': null,
+        '别的.zip': null,
+        '随便一个.txt': null,
+      },
+    },
+    '太深了，两条路都够不着': {
+      a: { b: { c: { d: { e: bundleFiles('20260801T005010Z-3eef52') } } } },
+    },
+  };
+
+  for (const [label, tree] of Object.entries(cases)) {
+    test(label, async () => {
+      const { walked, listed } = await both(tree);
+      assert.deepEqual(
+        listed.found.map((f) => f.label).sort(),
+        walked.found.map((f) => f.label).sort(),
+        '两条路找到的档案不一样 —— 同一个文件夹在两个浏览器上会导入不同的东西',
+      );
+      assert.deepEqual(listed.zips.sort(), walked.zips.sort(), '认出来的 zip 不一样');
+      assert.equal(listed.truncated, walked.truncated);
+    });
+  }
+
+  test('没找到时，两条路说的是同一句话', async () => {
+    const tree = {
+      下载: { 'doubak-archive-20260909T082446Z-195f8e.zip': null },
+    };
+    const { walked, listed } = await both(tree);
+    assert.equal(walked.found.length, 0);
+    assert.equal(listed.found.length, 0);
+    // 文案与判据都在 importer.js 里，所以只要 zips 一致，说出来的就一定一致。
+    assert.equal(describeNoBundles(listed, listed.rootName), describeNoBundles(walked, '下载'));
+    assert.match(describeNoBundles(listed, listed.rootName), /先解压/);
+  });
+
+  test('`fileListSource` 是从磁盘切片读的，不是先整个读进内存', async () => {
+    // 真实档案单个段文件可以到 256 MiB，而用户可能一次导八份。判据是「read 只
+    // 碰 slice 出来的那一段」——整份读进来也能通过功能测试，只是会炸内存。
+    const sliced = [];
+    const file = {
+      size: 1000,
+      slice(a, b) {
+        sliced.push([a, b]);
+        return { arrayBuffer: async () => new Uint8Array(b - a).buffer };
+      },
+    };
+    const s = fileListSource(new Map([['data-000001.warc.gz', file]]));
+    assert.deepEqual(await s.list(), ['data-000001.warc.gz']);
+    assert.equal(await s.size('data-000001.warc.gz'), 1000);
+    const got = await s.read('data-000001.warc.gz', 100, 8);
+    assert.equal(got.length, 8);
+    assert.deepEqual(sliced, [[100, 108]], '没走 slice，或者切错了范围');
+    // 不给长度就读到末尾（导入器读小文件时就是这么调的）。
+    await s.read('data-000001.warc.gz', 0);
+    assert.deepEqual(sliced.at(-1), [0, 1000]);
+  });
+
+  test('要的文件不在时**响亮地报错**，不是给一段空字节', async () => {
+    // 静静返回空的话，索引会被解析成「零条捕获」，而那看起来像一份合法的空档案。
+    const s = fileListSource(new Map());
+    await assert.rejects(() => s.read('index-x.ndjson', 0), /没有这个文件/);
   });
 });

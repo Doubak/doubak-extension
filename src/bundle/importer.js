@@ -659,6 +659,114 @@ export async function scanForBundles(root, { maxDepth = 3, maxDirs = 400 } = {})
 }
 
 /**
+ * 一棵**已经在手上**的文件树当导入源。
+ *
+ * ## 为什么会有第二种源
+ *
+ * Firefox 没有 File System Access，所以「选一个文件夹」在那边只有一条路：
+ * `<input type="file" webkitdirectory multiple>`。它给的每个 `File` 都带
+ * `webkitRelativePath`——**整棵树一次就拿全了，连走都不用走**。
+ *
+ * ## 契约没变，所以下面的东西一行都不用改
+ *
+ * 导入器真正认的只有三个方法（`ImportSource = {list, size, read}`），而
+ * `read` 落到 `file.slice(...).arrayBuffer()`——**从磁盘切片，内存是平的**，
+ * 与 `directorySource` 同一个性质。真实档案单个段文件可以到 256 MiB。
+ *
+ * @param {Map<string, File>} files 目录内的文件名 → File
+ * @returns {ImportSource}
+ */
+export function fileListSource(files) {
+  const need = (name) => {
+    const f = files.get(name);
+    if (!f) throw new Error(`没有这个文件：${name}`);
+    return f;
+  };
+  return {
+    async list() {
+      return [...files.keys()].sort();
+    },
+    async size(name) {
+      return need(name).size;
+    },
+    async read(name, offset, length) {
+      const file = need(name);
+      const start = offset ?? 0;
+      const end = length === undefined ? file.size : start + length;
+      return new Uint8Array(await file.slice(start, end).arrayBuffer());
+    },
+  };
+}
+
+/**
+ * 在 `<input webkitdirectory>` 交上来的一堆 File 里找档案。
+ *
+ * **与 `scanForBundles` 必须给出同样的结论**，否则同一个文件夹在两个浏览器上
+ * 会得到不同的答案，而且没有任何东西会报错——这正是这个仓库记了很多次的那种
+ * 「一条规则只在它被写下的那个宿主上生效」。所以判据（`looksLikeBundle`、
+ * 深度上限、目录数上限、认出 zip、排序）全部共用，只有「怎么拿到目录清单」不同。
+ *
+ * 深度是**相对用户选的那个文件夹**算的，与 `scanForBundles` 的 `walk(root, …, 0)`
+ * 对齐：根是 0，再往下三层。
+ *
+ * 有一处天生对不齐，写出来免得被当成 bug：`maxDirs` 在这边**保护不了什么**。
+ * 走目录的那条路上，上限挡住的是「用户手滑选了整个主目录，界面转几分钟不吭声」；
+ * 而 `<input webkitdirectory>` 是**浏览器先枚举完再把结果交给我们的**，等我们
+ * 拿到手，那笔开销已经付过了。留着它只为两条路的结论一致（同一个文件夹，
+ * `truncated` 要么都真要么都假）。空目录也一样：这边根本看不见没有文件的目录，
+ * 所以 `scanned` 可能比那边小一点——它是个诊断数字，不参与任何判定。
+ *
+ * @param {ArrayLike<File>} fileList
+ * @param {object} [opts] @param {number} [opts.maxDepth] @param {number} [opts.maxDirs]
+ * @returns {{found: Array<{label: string, source: ImportSource}>, scanned: number,
+ *   truncated: boolean, zips: string[], rootName: string}}
+ */
+export function scanFileList(fileList, { maxDepth = 3, maxDirs = 400 } = {}) {
+  /** 目录路径 → 该目录**直属**的文件（不含子目录里的） */
+  const byDir = new Map();
+  const zips = [];
+  let rootName = '';
+
+  for (const file of Array.from(fileList)) {
+    // `webkitRelativePath` 以用户选的那个文件夹名开头，例如
+    // `exports/doubak-bundle-xxx/index-xxx.ndjson`。
+    const rel = file.webkitRelativePath || file.name;
+    const parts = rel.split('/');
+    const name = parts.pop();
+    const dir = parts.join('/');
+    if (!rootName && parts.length) [rootName] = parts;
+    if (!byDir.has(dir)) byDir.set(dir, new Map());
+    byDir.get(dir).set(name, file);
+    if (/\.zip$/i.test(name)) zips.push(rel);
+  }
+
+  // 浅的排在前面、同深度按名字——与 `scanForBundles` 的先序遍历同序。
+  const dirs = [...byDir.keys()].sort((a, b) => {
+    const da = a.split('/').length;
+    const db = b.split('/').length;
+    return da !== db ? da - db : (a < b ? -1 : 1);
+  });
+
+  /** @type {Array<{label: string, source: ImportSource}>} */
+  const found = [];
+  let scanned = 0;
+  let truncated = false;
+
+  for (const dir of dirs) {
+    // **已经在某份档案里面了就不再往下**：档案目录里不该有子目录，而多报一层
+    // 会让同一份档案在清单里出现两次。与 `scanForBundles` 找到就 return 同义。
+    if (found.some((f) => dir.startsWith(`${f.label}/`))) continue;
+    if (dir.split('/').length - 1 > maxDepth) continue;
+    if (scanned >= maxDirs) { truncated = true; break; }
+    scanned += 1;
+    const files = [...byDir.get(dir).keys()];
+    if (looksLikeBundle(files)) found.push({ label: dir, source: fileListSource(byDir.get(dir)) });
+  }
+
+  return { found, scanned, truncated, zips, rootName: rootName || '所选文件夹' };
+}
+
+/**
  * 一份档案都没找到时说什么。
  *
  * ## 为什么这值得一个专门的函数

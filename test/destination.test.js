@@ -262,14 +262,17 @@ describe('那句「请用 Chrome 或 Edge」不许在导出路径上长回来', 
     }
   });
 
-  test('**导入那一侧还没做，所以它照旧那么说**', async () => {
-    // 这条不是给导入放行，是把「还没做」钉成一句会红的话：真做了之后这条测试
-    // 会红，改它的人就必须来这儿把导出这边的规则一起扩过去。
-    // 一条禁令写成「所有面板文件都不许」，而其中一个文件今天就在违反它，
-    // 那条禁令活不过一次 CI。
+  test('**导入那一侧也接上了**，同一条规则扩过去了', async () => {
+    // 这条原来是个占位：钉住「导入还没做，所以它照旧说请用 Chrome」，这样真做了
+    // 的那天它会红，改的人必须来这儿把规则扩过去。2026-09-09 做完了，于是它变成
+    // 了跟另外两个写入点一样的正判据。
     const js = await src('import.js');
-    assert.match(js, /请使用 Chrome 或 Edge/,
-      '导入那一侧改好了？那就把上面那条规则扩到 import.js，并删掉这条测试');
+    assert.doesNotMatch(js, /请使用? ?Chrome 或 Edge/,
+      'import.js 又把用户支去换浏览器了 —— 档案要搬回这个浏览器里');
+    assert.match(js, /canPickDirectory\(\)/);
+    // 没有 File System Access 时的那条退路：整棵树一次拿全。
+    assert.match(js, /input\.webkitdirectory = true/);
+    assert.match(js, /scanFileList\(files\)/);
   });
 
   test('界面上一个字都不许说它是「Firefox 专用格式」', async () => {

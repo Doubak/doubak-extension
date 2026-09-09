@@ -2126,7 +2126,7 @@ describe('「没找到档案」那句话只有一处实现', () => {
     // 同一句话命令行那边也要说。写在界面里的话，它就只在这一个宿主、这一个入口上
     // 生效——「一条规则只在它被写下的那个地方生效」这个仓库记过太多次。
     const src = readPanelSourceSync();
-    assert.match(src, /describeNoBundles\(scan, root\.name\)/);
+    assert.match(src, /describeNoBundles\(scan, rootName\)/);
     // 那句被换掉的话**要保持被换掉**。删掉的东西才是会悄悄爬回来的那种，
     // 而一行文案回来了没有任何东西会红。
     assert.doesNotMatch(
