@@ -505,27 +505,38 @@ ul.own li { margin: 2px 0; }
 /* ── 导出页 ───────────────────────────────────────────────────────── */
 
 /*
- * 三种产出并排。**用 grid 而不是 flex**：三张卡片的正文长短不一，flex 下最矮的
- * 那张会缩成一小块，读起来像它比别的两个次要。`1fr` 让三列等宽等高。
+ * 三种产出**一张一行**，不并排。
  *
- * 窄的时候（面板可以被拉得很窄）自动落成一列——`auto-fit` 加一个最小宽度就够，
- * 不需要媒体查询里再写一份断点。
+ * 原来是三列等宽等高（`repeat(auto-fit, minmax(240px, 1fr))`），两处出问题，
+ * 都是量出来的（2026-09-09，headless Firefox 截图对比）：
+ *
+ * **① 那三棵目录树一直是被裁掉的。** `main` 封顶 1000px，三列就是每列约 300px，
+ * 而树最宽的一行要 430px 上下——于是 `标记（看过/在看/想看，含评分短评标签）`
+ * 在页面上永远只显示到「含评分」，后面靠横向滚动。`.tree` 上那句
+ * 「窄面板下让它自己横向滚」写的是一条兜底，**实际上它是常态**：没有哪个窗口宽度
+ * 能让它不裁。而这三棵树恰恰是「按下去会得到什么」的全部交代。
+ *
+ * **② 正文里裂开一个几百像素的洞。** 等高 + `p { flex: 1 }`，于是最矮的两张卡片
+ * 把富余的高度**全塞进了那一段正文里**——NeoDB 那张带一整组单选框，比另外两张高
+ * 一倍，所以洞也就有那么大。报上来的原话是「the paragraph gap been super big」。
+ *
+ * 一行一张之后两个都没了：树完整显示，正文一行说完，卡片各是自己的高度。
+ * 代价是这一页高了约 390px，而它本来就是要滚的。
  */
 .formats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: 1fr;
   gap: var(--s3);
   margin-bottom: var(--s3);
 }
 .format-card {
   border: 1px solid var(--line); border-radius: var(--r2);
   padding: var(--s3); background: var(--bg-alt);
-  display: flex; flex-direction: column;
 }
 .format-card h3 { margin: 0 0 var(--s2); font-size: 13.5px; }
-/* 正文占满剩下的高度，按钮因此贴在底边——三张卡片的按钮排在同一条线上。 */
-.format-card p { flex: 1; margin: 0 0 var(--s3); }
-.format-card .btn-row { margin-top: auto; }
+/* **不许再写 `flex: 1`。** 那是给等高布局把按钮压到底边用的，而它的副作用就是
+   上面第②条那个洞。现在一张一行，按钮自然跟在内容后面。 */
+.format-card p { margin: 0 0 var(--s3); }
 .format-card a { font-size: 12px; }
 
 /*

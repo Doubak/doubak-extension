@@ -687,6 +687,38 @@ test('**选了「私密」就把那个勾禁掉** —— 一个不起作用的�
   assert.doesNotMatch(src, /export-neodb-unknown'\)\.checked = false/);
 });
 
+/**
+ * 三张产出卡片**一张一行**，而且正文不许再吸掉剩余高度。
+ *
+ * 这两条是同一次报告逼出来的（2026-09-09，原话「each .format-card in a row are
+ * having the same height, resulted in the paragraph gap been super big」），
+ * 但坏的其实是两件事，量出来的（headless Firefox 截图对比）：
+ *
+ * ① **正文里裂了个几百像素的洞**：等高布局 ＋ `p { flex: 1 }`，最矮的那两张卡片
+ *    把富余高度全塞进了正文那一段里。NeoDB 那张带一整组单选框、高一倍，洞就有那么大。
+ * ② **三棵目录树一直是被裁掉的**：`main` 封顶 1000px，三列每列约 300px，而树最宽
+ *    的一行要 430px 上下。`.tree` 的 `overflow-x: auto` 上写着「窄面板下让它自己
+ *    横向滚」——**那是常态，不是兜底**：没有哪个窗口宽度能让它不裁。而这三棵树
+ *    正是「按下去会得到什么」的全部交代。
+ *
+ * 第②条谁都没报，因为**被裁掉的东西看不出来**：那一行末尾就是没有省略号的截断。
+ */
+test('产出卡片一张一行，正文不吸高度', async () => {
+  const css = await read('src/ui/panel.css');
+  const block = css.slice(css.indexOf('.formats {'), css.indexOf('/*', css.indexOf('.format-card a')));
+
+  assert.match(block, /grid-template-columns:\s*1fr;/,
+    '又并排了 —— main 封顶 1000px，一并排那三棵目录树就被裁掉，而没人看得出来');
+  assert.doesNotMatch(block, /auto-fit|repeat\(/,
+    '又用回多列了');
+  assert.doesNotMatch(block, /\.format-card p \{[^}]*flex:/,
+    '正文又写上 flex —— 那正是「paragraph gap 特别大」的成因');
+
+  // 等高那套东西一起收掉：留着不起作用的规则，下一个人会以为它还在管事。
+  assert.doesNotMatch(block, /\.format-card \.btn-row \{[^}]*margin-top:\s*auto/,
+    'btn-row 还留着 margin-top:auto —— 一行一张之后它什么都不做');
+});
+
 test('**Markdown 导出也要筛掉豆瓣上不公开的东西**', async () => {
   // 这一条是被一次真实的疏漏逼出来的：命令行那边筛选在 `generate.js` 里，而
   // `generate.js` 是 I/O、不在 vendor 名单上——于是判据搬过来了、调用没搬，
