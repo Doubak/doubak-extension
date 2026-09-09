@@ -161,11 +161,39 @@ describe('打包', () => {
     return out.split('\n').filter((l) => l && !l.includes('个文件'));
   };
 
+  /**
+   * `test/` 底下唯一允许进包的两个。它们是**共享契约**，只是碰巧住在 test/ 底下：
+   * 零 import、不含任何账号信息，开头就写着「浏览器里也要能跑」，而
+   * `selftest/worker.js` 真的 import 它们。
+   *
+   * 不带上的后果实测过：发出去的包里，自检页的 Worker **在加载时就死**，
+   * 调试页那个「打开自检页」按钮点开是一片空白——而本地永远看不出来，
+   * 因为开发时载入的是仓库根目录，`test/` 就在旁边。
+   *
+   * 逐个列，不放开 `test/` 前缀：放开的话下一个进 test/helpers/ 的文件会自动
+   * 搭顺风车，而这条守卫存在的理由是 test/ 里有真实账号的用户名与 uid。
+   */
+  const TEST_FILES_ALLOWED = [
+    'test/helpers/file-store-contract.js',
+    'test/helpers/kv-store-contract.js',
+  ];
+
   test('**测试与开发用的东西不许进包**', () => {
     // test/ 里有真实账号的用户名与数字 uid（刻意保留的，见 CLAUDE.md），
     // 没必要连同扩展分发给每一个装它的人；而审核那边每多一个文件就多一分被问。
-    const leaked = listFiles().filter((f) => /^(test|tools|docs|node_modules|\.git|dist)\//.test(f));
+    const leaked = listFiles()
+      .filter((f) => /^(test|tools|docs|node_modules|\.git|dist)\//.test(f))
+      .filter((f) => !TEST_FILES_ALLOWED.includes(f));
     assert.deepEqual(leaked, [], `这些不该出现在包里：\n${leaked.join('\n')}`);
+  });
+
+  test('**那两个契约文件必须真的在包里** —— 少了自检页的 Worker 加载就死', () => {
+    // 与上一条方向相反：上一条挡「多了」，这一条挡「少了」。只写上一条的话，
+    // 把它们从名单里删掉是全绿的——而那正是 2026-09-09 之前发出去的每一个包。
+    const listed = listFiles();
+    for (const f of TEST_FILES_ALLOWED) {
+      assert.ok(listed.includes(f), `${f} 不在包里，而 selftest/worker.js 会 import 它`);
+    }
   });
 
   test('**manifest 引用到的文件必须都在包里**', () => {

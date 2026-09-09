@@ -48,6 +48,16 @@ const INCLUDE = [
   'icons',
   'src',
   'selftest',
+  // **`selftest/worker.js` 会 import 这两个契约文件。** 它们躺在 `test/` 下，而
+  // `test/` 整个不进包（里面有真实账号的用户名与 uid，那正是这张白名单存在的理由）
+  // ——于是发出去的包里，自检页的 Worker **在加载时就死了**，按钮点开是一片空白。
+  // 本地一切正常，因为开发时载入的是仓库根目录，`test/` 就在旁边。
+  //
+  // 它们不是夹带测试：两个文件都零 import、不含任何账号信息，而且开头就写着
+  // 「刻意不依赖 node:test 或任何断言库：浏览器里也要能跑」——**它们是共享契约，
+  // 只是碰巧住在 test/ 底下**。所以逐个列出来，而不是把 `test/` 整个放进来。
+  'test/helpers/file-store-contract.js',
+  'test/helpers/kv-store-contract.js',
 ];
 
 /** 就算落在上面那些目录里也不要的。 */
@@ -69,8 +79,23 @@ const files = INCLUDE.flatMap(collect).sort();
 // ── 几条上传前必须成立的
 const problems = [];
 
+/**
+ * `test/` 底下**唯一**允许进包的几个文件。
+ *
+ * 逐个列出，不是放开 `test/` 这个前缀——放开前缀的话，下一个进 `test/helpers/` 的
+ * 文件会自动搭上顺风车，而这张守卫存在的理由是 `test/` 里有真实账号的用户名与 uid。
+ * 名单短、要手动加，正是它的价值所在。
+ *
+ * 为什么这几个非进不可，见 INCLUDE 里的说明。
+ */
+const TEST_FILES_ALLOWED = new Set([
+  'test/helpers/file-store-contract.js',
+  'test/helpers/kv-store-contract.js',
+]);
+
 // **不许把测试与开发用的东西打进去。**
 for (const f of files) {
+  if (TEST_FILES_ALLOWED.has(f)) continue;
   if (/^(test|tools|docs|node_modules|\.git)\//.test(f)) problems.push(`不该打包：${f}`);
 }
 

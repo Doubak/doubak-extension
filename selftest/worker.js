@@ -19,6 +19,7 @@ import { recoverBundle } from '../src/bundle/recovery.js';
 import { gunzip } from '../src/core/warc.js';
 import { parseDoubanTimestamp } from '../src/core/time.js';
 import { indexFilename } from '../src/core/ids.js';
+import { extensionVersion } from '../src/core/version.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -219,12 +220,30 @@ async function runRpcContract() {
   return { passed, total: cases.length };
 }
 
+/**
+ * 自检要写档案，就得跟真实抓取一样给出 `producer`。
+ *
+ * **用真的版本号，不用测试里那个假的。** `extensionVersion()` 从 `manifest.json`
+ * 读，而它在窗口、offscreen、Worker 三个上下文里都成立（见 `core/version.js`）——
+ * 自检页存在的理由就是「在真实浏览器里走真实路径」，塞一个常量进去等于把这一段
+ * 换成了假路径。而且这条路自己出过事：第一版用 `chrome.runtime.getManifest()`，
+ * 在面板里好好的，装上之后每一次抓取都在第一下失败。让自检也走一遍它，是免费的覆盖。
+ */
+async function selftestProducer() {
+  return { name: 'doubak-extension', version: await extensionVersion() };
+}
+
 /** 在 OPFS 上真正跑一遍 bundle 写入器。 */
 async function runWriter() {
   const G = 'bundle 写入器（跑在 OPFS 上）';
   const dir = 'doubak-selftest-writer';
   const store = await freshStore(dir);
-  const writer = new BundleWriter({ store, account: { user_id: '82160871', username: 'selftest' } });
+  const producer = await selftestProducer();
+  const writer = new BundleWriter({
+    store,
+    account: { user_id: '82160871', username: 'selftest' },
+    producer,
+  });
   /** @type {any[]} */
   const locs = [];
 
@@ -280,13 +299,16 @@ async function runWriter() {
     }
   });
 
-  return { store, writer, dir };
+  // `producer` 跟着 ctx 走：恢复续写的是**同一份 bundle**，必须用同一个 producer。
+  // 这条路真出过事——恢复路径以前一个字都没传，于是崩溃之后写下的每个段，
+  // WARC `software:` 头全来自那个写死的 '0.0.1'。
+  return { store, writer, dir, producer };
 }
 
 /** 在 OPFS 上验证崩溃恢复。 */
 async function runRecovery(ctx) {
   const G = '崩溃恢复（跑在 OPFS 上）';
-  const { store, writer } = ctx;
+  const { store, writer, producer } = ctx;
   const bundleId = writer.bundleId;
 
   await check(G, '自洽的 bundle 恢复是空操作', async () => {
@@ -315,6 +337,7 @@ async function runRecovery(ctx) {
     const w2 = new BundleWriter({
       store,
       account: { user_id: '82160871' },
+      producer,
       bundleId,
       startSeq: res.lastSeq,
       resume: res.resume,
