@@ -142,15 +142,26 @@ export const FORMATS = {
       // **三栏，不是两栏。** 「说不准」那一栏与作者自己藏的处置看着一样（都收起来），
       // 但成因和下一步完全不同：那是我们没读出来，多半是豆瓣改了页面结构，而它是
       // 唯一一栏用户能自己拨回去的。混进作者那一栏，用户会以为是自己当年设的。
+      // 用户把日记收紧了就说一句。默认那一档不占行——卡片上每多一行常驻的字，
+      // 真正要紧的那几行 ⚠ 就少一分被读到的机会。
+      r.notesVisibility
+        ? `日记按${r.notesVisibility === 1 ? '「仅关注者可见」' : '私密（仅自己可见）'}导出，影评书评不在内`
+        : null,
       ...(r.restricted?.length ? (() => {
         const 锁 = r.restricted.filter((x) => x.by === 'platform');
         const 藏 = r.restricted.filter((x) => x.by === 'author');
         const 说不准 = r.restricted.filter((x) => x.by === 'unsure');
         const 收成 = r.unknownVisibility === 0 ? '跟其它记录一样' : '「仅提及者可见」';
         return [
+          // **这一句必须跟着上面那组单选走。** 写死「按公开导入」的话，用户选了
+          // 「私密」之后它就成了假话——而这张卡片的全部作用就是让他知道自己正在
+          // 把什么重新发出去。已经收起来了就不必再吓一次「撤不回来」。
           锁.length
             ? `⚠ ${锁.length} 篇日记是被豆瓣锁成「仅自己可见」的，`
-              + '这一份按公开导入（它本来就是公开的）——注意会联邦出去，撤不回来'
+              + (r.notesVisibility
+                ? '这一份跟日记那一档一起收起来了（它本来是公开的，是豆瓣把它关掉的——'
+                  + '想重新公开它，上面选「公开」）'
+                : '这一份按公开导入（它本来就是公开的）——注意会联邦出去，撤不回来')
             : null,
           藏.length
             ? `⚠ ${藏.length} 篇日记你自己在豆瓣上设成了「仅自己可见」，`
@@ -324,11 +335,11 @@ async function runExport(kind) {
     progress('正在生成文件');
     const built = await format.build(data, {
       sources, write,
-      // 勾上 = 跟其它记录一样（0）；**不勾就不传这个键**，让共用那份实现的默认值
-      // 说了算。这里再写一个 2 的话，它与 `UNKNOWN_VISIBILITY_DEFAULT` 就是两处
-      // 各自为政的默认值，改一处不改另一处不会有任何东西报错。
-      // 默认的那一边是安全的那一边：收错了用户在 NeoDB 那一页点一下就改回来，
-      // 发错了 Article 联邦出去撤不回来。
+      // **两个开关都只在「非默认」那一边才传值**，默认那一边整个不传，让共用那份
+      // 实现里的常量说了算。在这里兜一个数字的话，它与 `NOTES_VISIBILITY_DEFAULT` /
+      // `UNKNOWN_VISIBILITY_DEFAULT` 就是两处各自为政的默认值，改一处不改另一处
+      // 不会有任何东西报错——而后果是一个宿主收着、另一个发出去。
+      ...($('export-neodb-notes-private')?.checked ? { notesVisibility: 2 } : {}),
       ...($('export-neodb-unknown')?.checked ? { unknownVisibility: 0 } : {}),
     });
 

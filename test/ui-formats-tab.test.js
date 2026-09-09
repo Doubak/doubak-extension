@@ -493,12 +493,13 @@ describe('看不出公不公开的那几篇日记，用户可以自己拨', () =
     assert.ok(m, 'panel.html 里找不到那个选项框');
     assert.match(m[1], /\bhidden\b/, '默认必须藏着：它对绝大多数档案永远用不上');
     assert.match(html, /<input type="checkbox" id="export-neodb-unknown">/);
-    // **这句话只许用用户在豆瓣上见过的词。** 上一版写的是「读不出隐私状态的那几篇，
-    // 也按其它记录一样导出（不单独收紧）」——三处黑话：「隐私状态」他不知道是什么，
-    // 「按其它记录一样」要先知道其它记录怎样，「不单独收紧」纯粹是我们的词。
-    assert.match(html, /有几篇日记看不出在豆瓣上是公开还是私密，这几篇也一起公开/);
-    for (const 黑话 of ['隐私状态', '不单独收紧', '按其它记录一样', 'visibility']) {
-      assert.ok(!m[0].includes(黑话) , `选项框的文字里不该有「${黑话}」`);
+    // **这句话只许用用户在豆瓣上见过的词，而且要把默认值写在括号里。**
+    // 上一版是「读不出隐私状态的那几篇，也按其它记录一样导出（不单独收紧）」——
+    // 三处黑话：「隐私状态」他不知道是什么，「按其它记录一样」要先知道其它记录
+    // 怎样，「不单独收紧」纯粹是我们的词。
+    assert.match(html, /将豆瓣上无法检测私密状态的日记导出成公开状态（默认为私密）/);
+    for (const 黑话 of ['不单独收紧', '按其它记录一样', 'visibility']) {
+      assert.ok(!m[0].includes(黑话), `选项框的文字里不该有「${黑话}」`);
     }
     // 必须在 NeoDB 那张卡片里、在导出按钮**前面**——决定和动作挨着，
     // 而且是先看见选项再按导出。
@@ -557,4 +558,83 @@ test('**帮助页要讲清日记可见性的四种情形**', async () => {
     '影评、书评',                 // 不适用，不是不知道
     'doubak-data-parser/issues',  // 请人报一声
   ]) assert.ok(sec.includes(要有), `帮助页那一节没提到「${要有}」`);
+});
+
+/**
+ * 「日记导出设置为」那一组单选。
+ *
+ * 起因是一条真实的用户反馈：日记导入 NeoDB 之后全都公开了，那人花了一个小时
+ * 逐篇去锁、去删。而卡片上此前对**普通公开日记**一个字都没说——「日记 4」只是
+ * 一个数字，「联邦」二字在整份「怎么导入.md」里只出现一次，还挂在被豆瓣锁掉的
+ * 那一篇上。所以这一组不是「多一个开关」，是**把一个不可逆的后果摆到按钮前面**。
+ */
+describe('日记导出设置为', () => {
+  test('常驻、默认公开、两档，且在导出按钮前面', async () => {
+    const html = await read('src/ui/panel.html');
+    const card = html.slice(html.indexOf('doubak-neodb/'), html.indexOf('结构化数据（canonical）'));
+    assert.ok(card.includes('<legend>日记导出设置为</legend>'), '卡片里找不到这一组');
+    // **不许藏。** 与那个 unknown 选项框相反：日记是人人都有的东西，藏起来等于
+    // 这条反馈里的人第二次也看不见。
+    const group = card.slice(card.indexOf('<fieldset class="opt-group">'), card.indexOf('</fieldset>'));
+    assert.ok(!/\bhidden\b/.test(group), '这一组不许默认藏起来');
+    // 默认是「公开」——保留现状，改的是可见性不是行为。
+    assert.match(group, /id="export-neodb-notes-public" checked/);
+    assert.doesNotMatch(group, /id="export-neodb-notes-private"[^>]*checked/);
+    // 两档，不是三档：在一个不可逆的选择上，每多一档就多一种快速选错的方式。
+    assert.equal((group.match(/type="radio"/g) ?? []).length, 2);
+    assert.ok(card.indexOf('opt-group') < card.indexOf('id="export-neodb"'), '得排在导出按钮前面');
+  });
+
+  test('**那句 ⚠ 要说全三件事**：会变成什么、撤不回来、什么不受影响', async () => {
+    // 少了第一件，用户不知道日记在 NeoDB 上是一篇会出现在时间线上的东西；
+    // 少了第二件，这个选择读起来像随时能改；少了第三件，已经在豆瓣上设成私密的
+    // 人会以为自己非选「私密」不可——而那会把他本来就想公开的日记一起收掉。
+    const html = await read('src/ui/panel.html');
+    const note = /<p class="opt-note">([\s\S]*?)<\/p>/.exec(html)[1];
+    assert.match(note, /会变成「文章」/);
+    assert.match(note, /联邦/);
+    assert.match(note, /无法撤回/);
+    assert.match(note, /已经设成私密的日记将不受影响/);
+  });
+
+  test('**默认那一边不传值** —— 默认只许住在共用实现里', async () => {
+    const src = await read('src/ui/panel/formats.js');
+    assert.match(
+      src,
+      /\.\.\.\(\$\('export-neodb-notes-private'\)\?\.checked \? \{ notesVisibility: 2 \} : \{\}\)/,
+      '选「私密」传 2，选「公开」必须整个不传这个键',
+    );
+    assert.doesNotMatch(src, /notesVisibility\s*(\?\?|:)\s*0\b/, 'formats.js 里不该再写一个默认值');
+  });
+
+  test('**HTML 预选的那一档，必须和共用实现的默认值是同一件事**', async () => {
+    // 这是这一组唯一一处真正的重复：HTML 里 `checked` 在「公开」上，而共用实现的
+    // 默认值是 0。两者对不上的话，界面显示的和实际导出的就是两回事，**而且不报错**。
+    const { NOTES_VISIBILITY_DEFAULT } = await import(
+      '../src/vendor/export-adapters/targets/neodb-ndjson.js');
+    const html = await read('src/ui/panel.html');
+    const checked = /id="export-neodb-notes-(public|private)" checked/.exec(html)[1];
+    assert.equal(checked === 'public' ? 0 : 2, NOTES_VISIBILITY_DEFAULT,
+      '界面预选的那一档与共用实现的默认值对不上');
+  });
+});
+
+test('**「按公开导入」那句要跟着单选走**，选了私密就不能还那么说', () => {
+  // 写死的话，用户选了「私密」之后这句话就成了假话——而这张卡片的全部作用就是
+  // 让他知道自己正在把什么重新发出去。这个项目已经栽过三次「消息说错后果」：
+  // 封面回退那次、`remote` 数封面那次、「有 5 张图没取到」那次。
+  const one = [{ title: '想看的被河蟹的电影', by: 'platform' }];
+  const 公开 = FORMATS.neodb.summary({
+    marks: 1, ratings: 0, comments: 0, tags: 0, reviews: 0, notes: 0, articles: 0,
+    collections: 0, shelfLogs: 0, restricted: one,
+  }).join('\n');
+  const 私密 = FORMATS.neodb.summary({
+    marks: 1, ratings: 0, comments: 0, tags: 0, reviews: 0, notes: 0, articles: 0,
+    collections: 0, shelfLogs: 0, restricted: one, notesVisibility: 2,
+  }).join('\n');
+  assert.match(公开, /按公开导入/);
+  assert.match(公开, /撤不回来/);
+  assert.doesNotMatch(私密, /按公开导入/, '已经收起来了，不能还说按公开导入');
+  assert.doesNotMatch(私密, /撤不回来/, '已经收起来了，不必再吓一次');
+  assert.match(私密, /上面选「公开」/, '得告诉他怎么把它重新公开');
 });

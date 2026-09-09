@@ -168,16 +168,35 @@ export const FEEDBACK_URL = 'https://github.com/Doubak/doubak-data-parser/issues
  * 取 2（仅提及者可见）而不是 0：两个方向的代价差着一个量级——收错了用户在 NeoDB
  * 那一页点一下就改回来，发错了 Article 联邦出去撤不回来。
  */
+/**
+ * 日记（Article / Note）默认导出成什么可见性。
+ *
+ * `0` = 跟 `visibility` 那个总基线走，也就是默认公开。**这是刻意保留的现状**：
+ * 这份存档存在的理由之一，就是让被豆瓣拿下的日记还有一个能重新说话的地方
+ * （见 README〈在豆瓣上「仅自己可见」的日记〉）。改的不是默认值，是**把这个选择
+ * 摆到导出按钮前面**——用户至少看得见、也改得动。
+ *
+ * **只管日记，不管影评书评。** 面板上那个控件写的就是「日记」，而影评书评在豆瓣上
+ * 本来就挂在作品页上给所有人看、豆瓣也没给它们私密这个设置——把它们一起收起来，
+ * 是拿一个用户没做过的决定去改他的东西。
+ */
+export const NOTES_VISIBILITY_DEFAULT = 0;
+
 export const UNKNOWN_VISIBILITY_DEFAULT = 2;
 
 export function buildNeodbNdjson(data, options = {}) {
   const {
     shelfHistory = true, visibility = 0,
+    notesVisibility = NOTES_VISIBILITY_DEFAULT,
     unknownVisibility = UNKNOWN_VISIBILITY_DEFAULT,
     generator = 'doubak-export-adapters',
   } = options;
   if (![0, 1, 2].includes(visibility)) {
     throw new Error(`visibility 只能是 0（公开）/ 1（仅关注者）/ 2（仅提及者），收到 ${visibility}`);
+  }
+  if (![0, 1, 2].includes(notesVisibility)) {
+    throw new Error('notesVisibility 只能是 0（跟基线走）/ 1（仅关注者）/ 2（仅提及者），'
+      + `收到 ${notesVisibility}`);
   }
   if (![0, 1, 2].includes(unknownVisibility)) {
     throw new Error('unknownVisibility 只能是 0（跟基线走）/ 1（仅关注者）/ 2（仅提及者），'
@@ -189,10 +208,22 @@ export function buildNeodbNdjson(data, options = {}) {
   // 的那一栏用同一个词：基线由 `visibility` 说了算，所以基线本身是 1 的时候，
   // 「不单独收紧」得到的是 1 而不是 0。写成「强制公开」的话，`--visibility=1`
   // 配上它就会把认不出来的那几篇发得**比别的记录还开**，而那是撤不回来的方向。
-  const unknownVis = unknownVisibility === 0 ? vis : unknownVisibility;
+  // **三级，每一级的 `0` 都是「跟上一级走」，所以每一级只收紧、不放松。**
+  //
+  //   visibility        所有记录的总基线
+  //     └ notesVisibility   日记这一档（影评书评不在内）
+  //         └ unknownVisibility   其中「看不出公不公开」的那几篇
+  //
+  // 写成「强制公开」的话，`--visibility=1` 配上 `--notes-visibility=0` 会把日记发得
+  // **比别的记录还开**，而那是撤不回来的方向。同理 `--unknown-visibility=0` 继承的是
+  // 日记那一档而不是总基线——否则 `--notes-visibility=2 --unknown-visibility=0`
+  // 会让「读不出来」的那几篇比读得出来的日记还公开，正好是反的。
+  const notesVis = notesVisibility === 0 ? vis : notesVisibility;
+  const unknownVis = unknownVisibility === 0 ? notesVis : unknownVisibility;
 
   const report = {
     // 说明文件与卡片要照实说「这一份里写成了几」，所以把这次的取值带上。
+    notesVisibility,
     unknownVisibility,
     marks: 0,
     ratings: 0,
@@ -456,7 +487,10 @@ export function buildNeodbNdjson(data, options = {}) {
     // 没有可商量的余地；而「说不准」是我们没读出来，用户比我们更清楚自己那几篇
     // 日记到底公不公开，所以那一栏交回给他。开关只在这一栏起作用，就不可能被
     // 用来把一篇**确认是作者藏起来的**日记发出去。
-    const pieceVis = !restricted ? vis : (谁定的 === 'unsure' ? unknownVis : 2);
+    // 影评书评走总基线（豆瓣没给它们私密这个设置，面板上那个控件也只写「日记」）；
+    // 日记走日记那一档。作者自己设成私密的恒为 2，三个开关都动不了它。
+    const 本档 = piece.kind === 'review' ? vis : notesVis;
+    const pieceVis = !restricted ? 本档 : (谁定的 === 'unsure' ? unknownVis : 2);
     // **报告里两边都点名，连豆瓣锁的那一篇一起。** 它是被公开导出的那一篇，
     // 恰恰更该说——联邦出去撤不回来，而看的人得知道自己正在把什么重新发出去。
     // 带上网址：`unsure` 那一栏的下一步动作是**去看那一页**（多半是豆瓣改了 markup，

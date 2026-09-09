@@ -227,13 +227,32 @@
 ├─ neodb-needs-check.csv     ← 没能带走的那几条，及原因
 ├─ neodb-doulist-needs-check.csv
 └─ 怎么导入.md</pre>
-          <!-- **默认藏着，只有真碰上才露面。** 面板上第一个选项框，而它对绝大多数
-               档案永远用不上（读不出隐私状态的日记极少见）。常驻的话就是一个所有人
-               都要读一遍、几乎所有人都不需要的开关；而真需要的时候，它就出现在那条
-               ⚠ 旁边——决定和动作挨着。露面由上一次导出的结果决定，见 formats.js。 -->
+          <!-- **这一组常驻，不藏。** 日记是人人都有的东西，而它在 NeoDB 上会变成
+               「文章」联邦出去、撤不回来——这个后果此前一个字都没在按钮前面出现过
+               （整份「怎么导入.md」里「联邦」只出现一次，还挂在被豆瓣锁掉的那一篇上）。
+               默认仍是「公开」：改的不是行为，是**把这个选择摆到看得见的地方**。 -->
+          <fieldset class="opt-group">
+            <legend>日记导出设置为</legend>
+            <label class="opt">
+              <input type="radio" name="neodb-notes-vis" id="export-neodb-notes-public" checked>
+              公开
+            </label>
+            <label class="opt">
+              <input type="radio" name="neodb-notes-vis" id="export-neodb-notes-private">
+              私密（仅自己可见）
+            </label>
+            <p class="opt-note">
+              ⚠ 日记导出到 NeoDB 会变成「文章」，公开的会被联邦同步到别的实例去，并且无法撤回。
+              在豆瓣上已经设成私密的日记将不受影响，将继续保持私密状态。
+            </p>
+          </fieldset>
+          <!-- **这一条相反，默认藏着，只有真碰上才露面。** 它对绝大多数档案永远用不上
+               （看不出公不公开的日记极少见），常驻就是一个所有人都要读一遍、几乎没人
+               需要的开关；而真需要时它出现在那条 ⚠ 旁边。露面由上一次导出的结果决定，
+               见 formats.js。 -->
           <label class="opt" id="export-neodb-unknown-row" hidden>
             <input type="checkbox" id="export-neodb-unknown">
-            有几篇日记看不出在豆瓣上是公开还是私密，这几篇也一起公开
+            将豆瓣上无法检测私密状态的日记导出成公开状态（默认为私密）
           </label>
           <div class="btn-row">
             <button class="act" id="export-neodb">导出…</button>
@@ -432,7 +451,9 @@
       <table>
         <thead><tr><th>豆瓣上的状态</th><th>导出成什么</th><th>为什么</th></tr></thead>
         <tbody>
-          <tr><td>公开</td><td>跟其它记录一样</td><td>—</td></tr>
+          <tr><td>公开</td><td>看导出卡片上「日记导出设置为」那一档（默认公开）</td>
+            <td>日记在 NeoDB 上是会出现在时间线上的「文章」，公开的会联邦到别的实例去、
+              无法撤回——所以这个选择摆在导出按钮上面，而不是藏在某个高级设置里。</td></tr>
           <tr><td>你自己设成「仅自己可见」</td><td><b>仅提及者可见</b></td>
             <td>东西照样在你账号里，一个字都不少，只是不对外。要不要公开，在 NeoDB 那一篇上自己决定。</td></tr>
           <tr><td><b>被豆瓣锁成「仅自己可见」</b></td><td>跟其它记录一样</td>
@@ -444,7 +465,8 @@
               碰上的话卡片上会出现一个选项框，也会请你到
               <a href="https://github.com/Doubak/doubak-data-parser/issues" target="_blank" rel="noreferrer">GitHub</a>
               报一声——那几页本来就在你的档案里，改好抽取器重新导出就能救回来，不用重新抓豆瓣。</td></tr>
-          <tr><td>影评、书评</td><td>跟其它记录一样</td><td>豆瓣没给它们这个设置，它们本来就挂在作品页上给所有人看。</td></tr>
+          <tr><td>影评、书评</td><td>跟其它记录一样，<b>不受「日记导出设置为」影响</b></td>
+            <td>豆瓣没给它们这个设置，它们本来就挂在作品页上给所有人看。</td></tr>
         </tbody>
       </table>
 

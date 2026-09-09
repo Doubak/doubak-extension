@@ -172,6 +172,14 @@ h2:first-child { margin-top: 0; }
   cursor: pointer;
 }
 .opt input { margin-top: 0.15em; flex: none; }
+/* 一组单选。`fieldset` 而不是几个裸 label：`legend` 把「日记导出设置为」与这两个
+   选项在无障碍树上绑成一组，读屏软件才念得出「这两个是同一个问题的两个答案」。
+   浏览器默认给 fieldset 一圈边框和内边距，这里全部清掉——卡片里再套一个框，
+   看起来像另一张卡片。 */
+.opt-group { border: 0; padding: 0; margin: var(--s3) 0; min-inline-size: 0; }
+.opt-group legend { padding: 0; font-weight: 600; font-size: 0.9em; }
+.opt-group .opt { margin: var(--s1) 0 var(--s1) var(--s2); }
+.opt-note { margin: var(--s1) 0 0; font-size: 0.85em; color: var(--muted); }
 /* 卡片里的那一排还要与上面的文字拉开——「给出下一步」是这套界面的硬规则，
    所以它在样式上也该是卡片的一部分，不是散落在旁边的按钮。 */
 .card .actions { margin-top: var(--s3); }
