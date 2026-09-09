@@ -374,6 +374,10 @@ button.act.icon { padding: var(--s2) var(--s2); line-height: 1; min-width: 2em; 
    `flex-shrink: 1` 会把这只盒子压到那个高度里——它自己是 `overflow: hidden`，
    于是压出去的行既滚不到也没有任何痕迹。 */
 .with-aside > aside .picker { margin-bottom: 0; flex: 1 0 auto; }
+/* 只有一份档案（或一份都没有）时，左边那栏整个让开。
+   不让的话它就是一条 340px 的空白，而右边正写着「还没有档案」——看起来像清单
+   没渲染出来。这不是某个浏览器的毛病：Chrome 上只要你只有一份档案也一样。 */
+.with-aside:has(> aside[hidden]) { grid-template-columns: 1fr; }
 .aside-main { min-width: 0; }
 /* 那一排按钮下面紧跟着导出/校验的结果卡，而卡片只有下外边距。 */
 .aside-main > .btn-row { margin-bottom: var(--s3); }

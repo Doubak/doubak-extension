@@ -46,8 +46,37 @@ export const FIREFOX_MANIFEST = 'manifest.firefox.json';
 /** 事件页的入口。与 Chrome 的 service worker 是同一个文件。 */
 export const FIREFOX_BACKGROUND = { scripts: ['src/background.js'], type: 'module' };
 
-/** AMO 上的扩展 id。 */
-export const GECKO_ID = 'doubak@doubak.com';
+/**
+ * 开发用的 id。**它不是也不该像一个真的 AMO id。**
+ *
+ * 与 `manifest.firefox.json` 里提交的那一份一致，测试钉住——哪天有人把真 id
+ * 提交进仓库，那条会红。真 id 不进版本库：上传时从环境变量给。
+ */
+export const DEV_GECKO_ID = 'doubak-dev@localhost';
+
+/**
+ * AMO 上的扩展 id。**默认没有，而且不许在这里编一个。**
+ *
+ * 这个扩展在 AMO 上已经有 id 了（归档主人持有）。而 id 一旦写错，后果不是报错：
+ * **AMO 会把它当成一个新的扩展**，于是现有那条上架记录、评价与用户全都不在这一份上，
+ * 而已经装了的人也收不到更新。这是那种「看起来成功了」的失败。
+ *
+ * 一度想「不知道就不写」，但 **MV3 下 Firefox 要求必须有 id**（`web-ext lint` 直接
+ * 报 `ADDON_ID_REQUIRED` 错误，量过）。所以退而求其次：默认写一个**一眼就不是
+ * AMO id** 的开发用值，而真正上传时必须显式给。
+ *
+ * `doubak-dev@localhost` 这个值是刻意挑的——它不像一个真的扩展 id，误传上去会很
+ * 显眼，而不是安安静静地建出一条新的上架记录。`tools/package.mjs --firefox` 带着
+ * 这个值时**拒绝出包**，除非显式 `--dev`。
+ */
+export const GECKO_ID = process.env.DOUBAK_GECKO_ID || DEV_GECKO_ID;
+
+/**
+ * AMO 那边留的联系邮箱：`admin@doubak.com`。
+ *
+ * manifest 里**没有**放它的地方——它填在 AMO 的提交表单里，记在这儿只是免得下次去翻。
+ */
+export const AMO_CONTACT = 'admin@doubak.com';
 
 /** 见文件开头：决定它的是 data_collection_permissions（140），不是我们用的 API。 */
 export const STRICT_MIN_VERSION = '140.0';
@@ -64,7 +93,8 @@ export function toFirefox(chrome) {
   m.permissions = (chrome.permissions ?? []).filter((p) => p !== 'offscreen');
   m.browser_specific_settings = {
     gecko: {
-      id: GECKO_ID,
+      // 见 `GECKO_ID`：不知道就不写，绝不编一个。
+      ...(GECKO_ID ? { id: GECKO_ID } : {}),
       strict_min_version: STRICT_MIN_VERSION,
       // 这个扩展什么都不收集——凭据与数据一个字节都不离开设备。这不是一句宣传语，
       // 它是整个项目的判据（「服务器关掉也必须能产出完整档案」），而 Firefox 现在

@@ -168,7 +168,17 @@ export async function loadArchive() {
 function renderBundlePicker(items) {
   const el = $('bundle-pick');
   el.replaceChildren();
-  if (items.length <= 1) return;
+  // 只有一份（或一份都没有）时不画选择器——没什么可选的。
+  //
+  // **但那一栏得跟着让开。** 它是网格里固定 340px 的一列，不藏的话就是一条
+  // 三百多像素宽的空白，而右边正写着「还没有档案」——看起来像清单坏了、没渲染出来。
+  // 真实反馈：「the left-side bundle selection list is not visible on Firefox」。
+  // 那不是 Firefox 的毛病（那边一条 JS 错误都没有），是**新装的浏览器里本来就一份
+  // 档案都没有**，而这个空栏在 Chrome 上只要你只有一份档案，也一模一样。
+  //
+  // 让开这件事靠 CSS（`.with-aside:has(> aside[hidden])`），因为版面是主题的事。
+  el.hidden = items.length <= 1;
+  if (el.hidden) return;
   el.append(bundlePicker({
     items,
     selected: currentBundleId,

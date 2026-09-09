@@ -117,6 +117,22 @@ blob 就一直在。619 MB 的真实档案照这个比例就是把整份塞进�
 第一次量是分两次跑的，两次的空闲基线差了 300 MB——**比要量的信号还大**。那种数字
 不能拿来做决定，所以重做成同一个实例里的一次运行。记在这儿，免得下次又那么量。
 
+## AMO 的两件事
+
+- **id 不在版本库里。** 这个扩展在 AMO 上已经有 id（归档主人持有）。写错的后果不是
+  报错——AMO 会把它当成一个**新的扩展**建一条上架记录，现有的评价与用户都不在这一份
+  上，已经装了的人也收不到更新。而 MV3 下 Firefox 又要求必须有 id
+  （`ADDON_ID_REQUIRED`，量过），不能干脆不写。所以仓库里写的是
+  `doubak-dev@localhost`——一眼就不像真 id——而 `tools/package.mjs --firefox`
+  **带着这个值时拒绝出包**，除非显式 `--dev`。上传前：
+
+  ```sh
+  DOUBAK_GECKO_ID=<真的那个> node tools/make-manifest.mjs
+  node tools/package.mjs --firefox
+  ```
+
+- **联系邮箱：`admin@doubak.com`**。manifest 里没有放它的地方，填在 AMO 的提交表单里。
+
 ## 界面那一侧还没接
 
 三个写入点（整条链、单份档案、导出页的派生产物）今天仍然是「没有

@@ -2130,3 +2130,25 @@ describe('「没找到档案」那句话只有一处实现', () => {
     );
   });
 });
+
+describe('只有一份档案时，左边那栏要让开', () => {
+  test('两半都在：JS 藏它，CSS 收掉那一列', async () => {
+    // 真实反馈：「the left-side bundle selection list is not visible on Firefox」。
+    // **不是 Firefox 的毛病**（那边一条 JS 错误都没有）——是新装的浏览器里一份档案
+    // 都没有，而 `renderBundlePicker` 在 ≤1 份时不画选择器，那一栏就成了一条
+    // 340px 的空白，右边正写着「还没有档案」。Chrome 上只要你只有一份档案，一样。
+    //
+    // 两半缺一不可，所以两条都断言：
+    // - 只有 JS：栏藏了，但网格仍留着 340px 的第一列，正文被挤进那一列，更糟；
+    // - 只有 CSS：没有任何东西带上 `hidden`，规则永远不匹配。
+    const js = readPanelSourceSync();
+    assert.match(js, /el\.hidden = items\.length <= 1;/, 'JS 没有把那一栏藏起来');
+
+    const css = await readRepoFile('src/ui/panel.css');
+    assert.match(
+      css,
+      /\.with-aside:has\(> aside\[hidden\]\)\s*\{[^}]*grid-template-columns:\s*1fr/,
+      'CSS 没有在那一栏藏起来时收掉它那一列',
+    );
+  });
+});
