@@ -1,15 +1,30 @@
 /**
- * 导出：把档案从 OPFS 拷到用户自己选的文件夹。
+ * 导出：把档案从 OPFS 交到用户手上。
  *
  * **续传不需要进度文件**——目标目录本身就是进度。理由见 bundle/exporter.js。
+ *
+ * ## 两种目的地，而「续传」只在其中一种上成立
+ *
+ * 有 File System Access 的浏览器（Chrome / Edge）走文件夹；没有的（Firefox）走
+ * 一个 zip，见 `destination.js`。**这两条路不一样，而且必须让用户看得出不一样：**
+ *
+ * - 文件夹那条：目的地读得回来，所以能逐个核对摘要，也能续导；
+ * - zip 那条：写出去就回不了头。**不能校验，也不能续导**——中断了就得整个重来。
+ *
+ * 把它们说成一样是这个项目最怕的那种「假安心」。所以结果卡片有第三支话术
+ * （`showExportResult` 里的 zip 分支），而不是复用「尚未收尾所以只核对了字节数」
+ * ——那句话的**原因是错的**，而一个说错原因的提示会把人送去修一个不存在的问题。
  */
 
-import { exportBundle, subdirectorySink } from '../../bundle/exporter.js';
+import { exportBundle } from '../../bundle/exporter.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
 import { bundleDirName } from '../../core/ids.js';
 import {
   $, send, bytes, table, countAlreadyExported, getOpfsWorker, noteExported,
 } from './shared.js';
+import {
+  canPickDirectory, directoryDestination, zipDestination, shellReadme,
+} from './destination.js';
 import { refreshOpenTab } from './overview.js';
 import { reader, currentBundleId } from './archive.js';
 
@@ -32,7 +47,7 @@ import { reader, currentBundleId } from './archive.js';
  */
 
 /** 整条链导出的结果：逐份说清楚，别汇总成一句「成功」。 */
-function renderChainExportResult(el, done) {
+function renderChainExportResult(el, done, handed = null) {
   const failed = done.filter((d) => d.error || d.result?.problems.length);
   el.className = `card tone-${failed.length ? 'error' : 'ok'}`;
   el.replaceChildren();
@@ -44,7 +59,11 @@ function renderChainExportResult(el, done) {
   el.append(b);
 
   const total = done.reduce((n, d) => n + (d.result?.bytes ?? 0), 0);
-  el.append(document.createTextNode(`共 ${bytes(total)}，每份各占一个子目录。`));
+  el.append(document.createTextNode(handed
+    ? `共 ${bytes(total)}，打包成 ${handed.name}（${bytes(handed.bytes)}）交给下载。`
+      + '解开之后每份各占一个子目录，与在 Chrome 上导出的逐字节相同。'
+      + 'zip 读不回来，所以这一份没有校验过——请先解开看一眼再删扩展里的。'
+    : `共 ${bytes(total)}，每份各占一个子目录。`));
 
   for (const d of done) {
     const line = document.createElement('div');
@@ -58,8 +77,8 @@ function renderChainExportResult(el, done) {
 }
 
 
-/** @param {object} r */
-function showExportResult(r, folder) {
+/** @param {object} r @param {string} folder @param {'directory'|'zip'} kind @param {object|null} handed */
+function showExportResult(r, folder, kind = 'directory', handed = null) {
   const el = $('export-result');
   el.replaceChildren();
   const b = document.createElement('b');
@@ -82,6 +101,27 @@ function showExportResult(r, folder) {
     ? `其中 ${r.skipped} 个是上次已经导好的，本次补了 ${bytes(r.bytes)}。`
     : '';
 
+  if (kind === 'zip') {
+    // **单独一支话术，不复用下面那句「尚未收尾所以只核对了字节数」。**
+    // 那句话的原因是「没有 manifest」，而这里的原因是「zip 写出去就读不回来」
+    // ——两个完全不同的下一步（一个是「抓完再导一次」，一个是「解开看看」）。
+    // 说错原因的提示会把人送去修一个不存在的问题，这个项目已经栽过几次。
+    b.textContent = `已交给下载：${r.files.length} 个文件，${bytes(totalBytes)}`;
+    el.append(b, document.createTextNode(
+      `打包成 ${handed?.name ?? '一个 zip'}${handed ? `（${bytes(handed.bytes)}）` : ''}。`
+      + `解开之后是文件夹 ${folder}/，与 Chrome、Edge 直接导出的逐字节相同`
+      + '——搬回豆备、喂给解析器，用的都是解开之后的那个文件夹。',
+    ));
+    const caveat = document.createElement('div');
+    caveat.className = 'cap-sub';
+    // 两条代价，都不许省：一条是我们做不到的（校验），一条是用户会撞上的（中断）。
+    caveat.textContent = 'zip 写出去就读不回来，所以这一份没有校验过，也不能续导'
+      + '——中途中断的话要整个重来。请先把它解开看一眼，确认没问题之后再删扩展里的这一份。';
+    el.append(caveat);
+    el.append(nextStepsLine());
+    return;
+  }
+
   if (r.verified) {
     // 只有这一句能说「已校验」：回读了目的地、逐个对上了 manifest 里的摘要。
     b.textContent = `已导出并校验：${r.files.length} 个文件，${bytes(totalBytes)}`;
@@ -98,12 +138,18 @@ function showExportResult(r, folder) {
     ));
   }
 
-  // **在这儿指一下路。** 导完之后「接下来干什么」是必然会冒出来的问题，而在此之前
-  // 面板里唯一提到下游的地方是帮助页那张仓库链接表——那是一排代码仓库，不是一句
-  // 「你可以这么做」。用户走到这一步，手上有一个文件夹和一个疑问。
-  //
-  // 只放一句话加一个跳转，不在这里铺开步骤：这一页已经很满了（导入、导出、校验、
-  // 删除、用量、捕获检查器…），而那些内容属于帮助页。
+  el.append(nextStepsLine());
+}
+
+/**
+ * **在这儿指一下路。** 导完之后「接下来干什么」是必然会冒出来的问题，而在此之前
+ * 面板里唯一提到下游的地方是帮助页那张仓库链接表——那是一排代码仓库，不是一句
+ * 「你可以这么做」。用户走到这一步，手上有一个文件夹和一个疑问。
+ *
+ * 只放一句话加一个跳转，不在这里铺开步骤：这一页已经很满了（导入、导出、校验、
+ * 删除、用量、捕获检查器…），而那些内容属于帮助页。
+ */
+function nextStepsLine() {
   const next = document.createElement('p');
   next.className = 'small muted';
   next.append(document.createTextNode('档案已经在你手里了。想把它解析成结构化数据、'
@@ -120,7 +166,7 @@ function showExportResult(r, folder) {
     $('downstream')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   next.append(a, document.createTextNode('。这两步都在你自己的机器上跑，同样不联网。'));
-  el.append(next);
+  return next;
 }
 
 /** 绑事件。**由 panel.js 显式调用**，不靠 import 的副作用——那种绑定顺序看不出来。 */
@@ -128,12 +174,6 @@ export function initExport() {
   $('export-chain').addEventListener('click', async () => {
     const el = $('export-result');
     if (!currentBundleId) return;
-
-    if (typeof window.showDirectoryPicker !== 'function') {
-      el.className = 'card tone-error';
-      el.textContent = '这个浏览器不支持选择文件夹（File System Access API）。请使用 Chrome 或 Edge。';
-      return;
-    }
 
     const r = await send({ type: 'chain', bundleId: currentBundleId });
     const chain = r?.ok ? (r.chain?.bundles ?? []) : [];
@@ -143,26 +183,43 @@ export function initExport() {
       return;
     }
 
-    /** @type {FileSystemDirectoryHandle} */
-    let parent;
-    try {
-      parent = await window.showDirectoryPicker({ mode: 'readwrite', id: 'doubak-export' });
-    } catch {
-      return; // 用户取消
+    // 选文件夹要用户手势，所以它必须排在 confirm 之前；zip 那条没有可选的东西，
+    // 而**它一开就会在 OPFS 里建中转文件**，所以要排在 confirm 之后。两条路的
+    // 顺序天生相反，因此这里分成「先挑」和「再开」两步。
+    /** @type {FileSystemDirectoryHandle | null} */
+    let parent = null;
+    if (canPickDirectory()) {
+      try {
+        parent = await window.showDirectoryPicker({ mode: 'readwrite', id: 'doubak-export' });
+      } catch {
+        return; // 用户取消
+      }
     }
 
     const ids = chain.map((b) => b.bundleId);
+    const zipName = `doubak-archive-${currentBundleId}-整条链.zip`;
     if (!confirm(
       `将导出 ${ids.length} 份档案（整条链）：\n\n${ids.join('\n')}\n\n`
-      + '每份各占一个子目录 doubak-bundle-<编号>。已存在的同名文件会被覆盖。',
+      + (parent
+        ? '每份各占一个子目录 doubak-bundle-<编号>。已存在的同名文件会被覆盖。'
+        : `这个浏览器不能往文件夹里写，所以打包成一个 zip 交给下载：${zipName}。\n`
+          + '解开之后每份各占一个子目录 doubak-bundle-<编号>，与在 Chrome 上导出的一样。\n'
+          + '打包期间需要大约两倍于档案的空闲空间。'),
     )) return;
+
+    const dest = parent
+      ? directoryDestination(parent)
+      : await zipDestination({
+        zipName,
+        readme: shellReadme(`这条链上的 ${ids.length} 份档案，每份一个 doubak-bundle-<编号> 文件夹`),
+      });
 
     /** @type {Array<{bundleId: string, result: object | null, error: string | null}>} */
     const done = [];
     for (const [i, id] of ids.entries()) {
       const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(id) });
       try {
-        const sink = await subdirectorySink(parent, bundleDirName(id));
+        const sink = await dest.sinkFor(bundleDirName(id));
         const res = await exportBundle({
           store, sink, overwrite: true,
           onProgress: (p) => {
@@ -184,7 +241,19 @@ export function initExport() {
       }
     }
 
-    renderChainExportResult(el, done);
+    // **zip 必须收尾，而且失败要说出来。** 没有中央目录的 zip 打不开，而前面每一份
+    // 都「成功」了——只报各份的结果会得到一张全绿的卡片配一个坏文件。
+    let handed = null;
+    try {
+      handed = await dest.finish();
+    } catch (e) {
+      el.className = 'card tone-error';
+      el.textContent = `打包失败：${e.message}。扩展里的档案一份都没动。`;
+      await dest.abort();
+      return;
+    }
+
+    renderChainExportResult(el, done, handed);
     // `noteExported` 已经失效过缓存了，这里只要重画。
     await refreshOpenTab();
   });
@@ -194,18 +263,14 @@ export function initExport() {
     const bundleId = currentBundleId;
     if (!bundleId) return;
 
-    if (typeof window.showDirectoryPicker !== 'function') {
-      el.className = 'card tone-error';
-      el.textContent = '这个浏览器不支持选择文件夹（File System Access API）。请用 Chrome 或 Edge。';
-      return;
-    }
-
-    /** @type {FileSystemDirectoryHandle} */
-    let dir;
-    try {
-      dir = await window.showDirectoryPicker({ mode: 'readwrite', id: 'doubak-export' });
-    } catch {
-      return; // 用户取消了，什么都不用说
+    /** @type {FileSystemDirectoryHandle | null} */
+    let dir = null;
+    if (canPickDirectory()) {
+      try {
+        dir = await window.showDirectoryPicker({ mode: 'readwrite', id: 'doubak-export' });
+      } catch {
+        return; // 用户取消了，什么都不用说
+      }
     }
 
     const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(bundleId) });
@@ -221,7 +286,13 @@ export function initExport() {
     // 覆盖。现在检查的是这一份自己的子目录，弹出来就意味着**真的**要覆盖同一份
     // 档案的上一次导出。
     const folder = bundleDirName(bundleId);
-    const sink = await subdirectorySink(dir, folder);
+    const dest = dir
+      ? directoryDestination(dir)
+      : await zipDestination({
+        zipName: `doubak-archive-${bundleId}.zip`,
+        readme: shellReadme(`标准的档案目录 ${folder}/`),
+      });
+    const sink = await dest.sinkFor(folder);
     const run = (opts) => exportBundle({
       store, sink, ...opts,
       onProgress: (p) => {
@@ -258,6 +329,10 @@ export function initExport() {
           : `上次导出到一半：${done.ok} 个文件已经完整（${bytes(done.okBytes)}），还差 ${done.missing} 个。\n\n`
             + '继续只会补齐缺的那些，已经完整的不动。确定吗？';
         if (!confirm(msg)) {
+          // 这一支在 zip 那条路上走不到（没有 `list` 就不会有 destination_not_empty），
+          // 但取消时把中转文件收干净是无条件的：留一个半截 zip 在 OPFS 里，下一次
+          // 「用量」会把它算进档案的配额，而它不是档案。
+          await dest.abort().catch(() => {});
           el.className = 'card tone-idle';
           el.textContent = '已取消，什么都没写。';
           return;
@@ -265,7 +340,9 @@ export function initExport() {
         // 续导隐含覆盖：校验不通过的照样重写。
         r = await run({ resume: true });
       }
-      showExportResult(r, folder);
+      // zip 那条路要收尾（写中央目录）才算一个能打开的文件。
+      const handed = await dest.finish();
+      showExportResult(r, folder, dest.kind, handed);
       // 记一笔「导出过了」。派生状态，丢了不影响档案本身——只影响删除确认框说得多重。
       // 只在**校验通过**时记：没验过就说「已导出」，等于给了一个我们没资格给的保证。
       if (r.problems.length === 0) {
@@ -277,6 +354,8 @@ export function initExport() {
         await refreshOpenTab();
       }
     } catch (e) {
+      // 中转文件不留在 OPFS 里白占地方——这一份已经确定不会交给用户了。
+      await dest.abort().catch(() => {});
       el.className = 'card tone-error';
       el.textContent = `导出失败：${e.message}`;
     }

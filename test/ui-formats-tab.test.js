@@ -125,9 +125,20 @@ describe('导出页的行为约束', () => {
   test('**用 createWritable 写，不先攒后写**', async () => {
     // 它写的是临时文件，只在 close() 那一刻整体换上去 —— 中断留下的是
     // 「没有这个文件」，而不是「半个文件」。档案导出器依赖的是同一个性质。
-    const js = await read('src/ui/panel/formats.js');
+    //
+    // 这段实现 2026-09-09 搬进了 `destination.js`：那时目的地多了「一个 zip」这一种
+    // （Firefox 没有 File System Access），而**两份写入器对同一个相对路径迟早会
+    // 摊出不同的目录结构**。检查跟着实现走，不留在这儿看一个已经不在的东西。
+    const js = await read('src/ui/panel/destination.js');
     assert.match(js, /createWritable\(\)/);
     assert.match(js, /await w\.close\(\)/);
+    // 而 formats.js 自己不许再长回一份。判据是「有没有再定义一个」，不是「正文里
+    // 出现没出现 createWritable」——文件头正要讲这条规矩，按后者查就是一条天天
+    // 误报的检查，而一条天天误报的检查等于没有检查。
+    const f = await read('src/ui/panel/formats.js');
+    assert.doesNotMatch(f, /^(function|const) (writerFor|directoryWriter)\b/m,
+      'formats.js 又自己写了一份目录写入器');
+    assert.match(f, /import \{[\s\S]*?directoryWriter[\s\S]*?\} from '\.\/destination\.js'/);
   });
 
   test('**不往 OPFS 里中转**：这一页不碰任何写入接口', async () => {
@@ -173,7 +184,8 @@ describe('依赖方向', () => {
     // 面板的依赖是单向的，破了就等于摊成十个文件的 panel.js。
     const js = await read('src/ui/panel/formats.js');
     const local = [...js.matchAll(/from '\.\/([\w-]+)\.js'/g)].map((m) => m[1]);
-    assert.deepEqual(local, ['shared'], `formats.js 多依赖了：${local.join('、')}`);
+    // `destination` 与 `shared` 同一档：谁也不 import 别的标签页，两边都只被 import。
+    assert.deepEqual(local, ['shared', 'destination'], `formats.js 多依赖了：${local.join('、')}`);
   });
 
   test('panel.js 显式调用 initFormats / resetFormats', async () => {
@@ -385,9 +397,13 @@ describe('空档案', () => {
     // 一个空的 doubak-xxx/ 看起来像「导出过了，只是东西不见了」。
     const js = await read('src/ui/panel/formats.js');
     const parseAt = js.indexOf('await parseLibrary({');
-    const mkdirAt = js.indexOf("getDirectoryHandle(format.dir");
-    assert.ok(parseAt > 0 && mkdirAt > 0);
+    // 目的地在解析之后才开——两种目的地都是：目录那条会建出一个空的 doubak-xxx/，
+    // zip 那条会在 OPFS 里留一个半截中转文件。两个都长得像「导出过了，东西不见了」。
+    const mkdirAt = js.indexOf('directoryDestination(picked)');
+    const zipAt = js.indexOf('await zipDestination({');
+    assert.ok(parseAt > 0 && mkdirAt > 0 && zipAt > 0);
     assert.ok(parseAt < mkdirAt, '目录在解析之前就建了');
+    assert.ok(parseAt < zipAt, 'zip 的中转文件在解析之前就建了');
   });
 });
 

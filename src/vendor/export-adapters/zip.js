@@ -242,7 +242,21 @@ export class ZipWriter {
     for (const e of this._entries) {
       const central = header(46);
       central.u32(0, 0x02014b50);
-      central.u16(4, 20); // version made by
+      // **高字节是「谁做的这个 zip」，而它决定了文件名按什么编码读。**
+      //
+      // 0 = MS-DOS/FAT。实测（2026-09-09，Debian 的 Info-ZIP unzip 6.00 —— 也就是
+      // Debian / Ubuntu 上 `unzip` 的默认实现）：主机字节是 0 的时候，它把文件名
+      // 当 CP437 转一遍，**哪怕通用标志位第 11 位已经写着「这是 UTF-8」**。
+      // 同一个名字、同一份标志位，只改这一个字节：
+      //
+      //     host = 0（DOS）    先看这个.txt  →  ▒▒▒▒▒▒▒+▒▒▒▒.txt
+      //     host = 3（Unix）   先看这个.txt  →  先看这个.txt
+      //
+      // 这个项目的文件名有中文（`怎么导入.md`），所以这不是理论问题：用户在
+      // Linux 上解开导出的包，拿到的是一个名字乱码的文件。Python 的 zipfile
+      // 与 macOS、Windows 的解压都按标志位读，所以**只有最常用的那个命令行工具
+      // 会错**——而它恰好是这个项目的用户最可能用的那个。
+      central.u16(4, (3 << 8) | 20); // version made by：高字节 3 = Unix
       central.u16(6, 20); // version needed
       central.u16(8, e.streamed ? 0x0808 : 0x0800); // UTF-8，流式的再加数据描述符位
       central.u16(10, e.method);
@@ -252,7 +266,14 @@ export class ZipWriter {
       central.u32(20, e.csize);
       central.u32(24, e.usize);
       central.u16(28, e.name.length);
-      central.u32(38, 0); // external attrs
+      // **外部属性的高 16 位是 Unix 权限位，而上面刚把主机声明成了 Unix。**
+      //
+      // 写 0 的话解出来就是 `----------`：实测（同一台机器，改完主机字节之后）
+      // `unzip -t` 照样通过、`unzip` 也照样解得出来，而**解出来的文件读不了**
+      // ——`EACCES`。`-t` 不落盘，所以它验不到这一格。
+      //
+      // 0o100644 = 普通文件 + rw-r--r--。低 16 位（DOS 属性）保持 0。
+      central.u32(38, 0o100644 << 16); // external attrs：Unix 模式 0644
       central.u32(42, e.offset);
       await this._emit(central.bytes);
       await this._emit(e.name);

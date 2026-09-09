@@ -1176,11 +1176,17 @@ describe('面板脚本', () => {
     // 按当前打开的这一份取链，不是永远取最新那条
     assert.match(js, /type: 'chain', bundleId: currentBundleId/);
     // 分子目录，否则 manifest.json 互相覆盖
-    assert.match(js, /subdirectorySink\(parent, bundleDirName\(id\)\)/);
+    assert.match(js, /dest\.sinkFor\(bundleDirName\(id\)\)/);
     // **单份导出也要建子目录** —— 否则往同一个下载目录导几次，早先的 manifest
-    // 全被覆盖，档案编号只剩在文件名里
+    // 全被覆盖，档案编号只剩在文件名里。两种目的地都要：zip 那条解开之后同样是
+    // 一个 doubak-bundle-<编号>/，「搬回来不用改名」靠的就是这一条。
     assert.equal(js.includes('directorySink(dir)'), false, '单份导出还在平铺');
-    assert.match(js, /subdirectorySink\(dir, folder\)/);
+    assert.match(js, /dest\.sinkFor\(folder\)/);
+    const dest = await readRepoFile('src/ui/panel/destination.js');
+    assert.match(dest, /sinkFor: \(subdir\) => subdirectorySink\(dir, subdir\)/,
+      '文件夹那条路平铺了');
+    assert.match(dest, /sinkFor: async \(subdir\) => zipSink\(writer, subdir\)/,
+      'zip 那条路平铺了 —— 解开之后会是一堆散文件，不是一个能搬回来的文件夹');
     // 一份失败不中断其余
     // **按模块取，不按字符位置切。** 原来是从 `$('export-chain')` 第一次出现的地方
     // 切到某个函数名——那默认了「监听器写在渲染函数前面」，而面板一拆成模块，这个

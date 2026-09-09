@@ -15,10 +15,18 @@
  * **② 一次只跑一个。** 三种产出共用同一次解析，同时跑两个等于把最慢的那步做两遍；
  * 而且进度条只有一条，两个一起跑就说不清是谁的进度。所以跑起来之后其余按钮全禁掉。
  *
- * **③ 直接写进用户选的文件夹，不在扩展里中转。** `createWritable()` 写的是临时
- * 文件，只在 `close()` 那一刻整体换上去——所以中断留下的是「没有这个文件」，
- * 而不是「半个文件」。中转一趟只会让派生数据在 OPFS 里再占一份，而那正是 ① 要
- * 躲开的事。
+ * **③ 能直接写进用户选的文件夹时就直接写，不在扩展里中转。** `createWritable()`
+ * 写的是临时文件，只在 `close()` 那一刻整体换上去——所以中断留下的是「没有这个
+ * 文件」，而不是「半个文件」。中转一趟只会让派生数据在 OPFS 里再占一份，而那正是
+ * ① 要躲开的事。
+ *
+ * **这一条 2026-09-09 加了一个限定词，因为它在 Firefox 上不成立**：那边没有
+ * File System Access，导出交出去的是一个 zip，而 zip 只能先流式写进 OPFS 再
+ * `getFile()`（攒成 `Blob` 会把整份拿在内存里，量过，见 docs/firefox.md）。也就是
+ * 说**那条路一定要中转**。这不是把 ① 打破了——中转的是这一次导出的产物，出门就删，
+ * 不是第二个真相来源；而支撑「直接写」的那个理由（原子替换）在那边根本不存在，
+ * 所以没有第二条路可选。代价（导出期间要两倍空闲空间、中断了要重来）写在界面上。
+ * 目的地这件事只在 `destination.js` 里判一次。
  *
  * ## 库里混了两个账号：让你选一个，而不是让你删东西
  *
@@ -52,10 +60,13 @@ import {
 } from './shared.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
 import { parseLibrary } from '../../pipeline/run.js';
-import { buildCanonical, buildNeodb, buildMarkdown } from '../../pipeline/targets.js';
+import { buildCanonical, buildNeodb, buildMarkdown, deflateRaw } from '../../pipeline/targets.js';
 // 请人去报一声的地址，与 CLI、包里那份说明共用同一个常量——同一个地址写三遍必然漂，
 // 而漂掉的那一份会把人送到一个空页面。
 import { FEEDBACK_URL } from '../../vendor/export-adapters/targets/neodb-ndjson.js';
+import {
+  canPickDirectory, directoryDestination, zipDestination, shellReadme, directoryWriter,
+} from './destination.js';
 
 /** 正在跑的那一个。非 null 时其余按钮禁用。 */
 let running = null;
@@ -248,50 +259,11 @@ function setBusy(on, exceptId = null) {
   }
 }
 
-/**
- * 往一个目录句柄里写文件，路径里的 `/` 当子目录。
- *
- * @param {FileSystemDirectoryHandle} root
- * @returns {(rel: string, data: Uint8Array) => Promise<void>}
- */
-function writerFor(root) {
-  /** @type {Map<string, Promise<FileSystemDirectoryHandle>>} 子目录只建一次 */
-  const dirs = new Map();
-
-  const dirFor = (parts) => {
-    const key = parts.join('/');
-    if (!dirs.has(key)) {
-      dirs.set(key, parts.reduce(
-        async (parent, name) => (await parent).getDirectoryHandle(name, { create: true }),
-        Promise.resolve(root),
-      ));
-    }
-    return dirs.get(key);
-  };
-
-  return async (rel, data) => {
-    const parts = rel.split('/');
-    const name = parts.pop();
-    const dir = parts.length ? await dirFor(parts) : root;
-    const fh = await dir.getFileHandle(name, { create: true });
-    // **走 createWritable，不是先攒后写。** 它写的是临时文件，只在 close() 那一刻
-    // 整体换上去——中断留下的是「没有这个文件」，而不是「半个文件」。
-    const w = await fh.createWritable();
-    await w.write(data);
-    await w.close();
-  };
-}
 
 /** @param {string} kind */
 async function runExport(kind) {
   const format = FORMATS[kind];
   const el = $('formats-result');
-
-  if (typeof window.showDirectoryPicker !== 'function') {
-    el.className = 'card tone-error';
-    el.textContent = '这个浏览器不支持选择文件夹（File System Access API）。请使用 Chrome 或 Edge。';
-    return;
-  }
 
   const all = await scanBundleDirs();
   if (!all.length) {
@@ -302,14 +274,18 @@ async function runExport(kind) {
   // 混了账号时只导选中的那个。见文件头「库里混了两个账号」。
   const entries = entriesFor(all);
 
-  /** @type {FileSystemDirectoryHandle} */
-  let picked;
-  try {
-    picked = await window.showDirectoryPicker({ mode: 'readwrite', id: 'doubak-export' });
-  } catch {
-    return; // 用户取消了，什么都不用说
+  /** @type {FileSystemDirectoryHandle | null} */
+  let picked = null;
+  if (canPickDirectory()) {
+    try {
+      picked = await window.showDirectoryPicker({ mode: 'readwrite', id: 'doubak-export' });
+    } catch {
+      return; // 用户取消了，什么都不用说
+    }
   }
 
+  /** @type {import('./destination.js').Destination | null} */
+  let dest = null;
   running = kind;
   setBusy(true, format.button);
   el.className = 'card tone-busy';
@@ -329,8 +305,17 @@ async function runExport(kind) {
       },
     });
 
-    const root = await picked.getDirectoryHandle(format.dir, { create: true });
-    const write = writerFor(root);
+    // **目的地在解析之后才建。** 反过来的话，一次半路失败会留下一个空的
+    // `doubak-xxx/`（或者一个空 zip），而那看起来像「导出过了，只是东西不见了」。
+    dest = picked
+      ? directoryDestination(picked)
+      : await zipDestination({
+        zipName: `${format.dir}.zip`,
+        // 派生产物是 NDJSON / Markdown，压得动，与档案的 `.warc.gz` 不一样。
+        deflateRaw,
+        readme: shellReadme(`文件夹 ${format.dir}/`),
+      });
+    const write = await dest.writerFor(format.dir);
 
     progress('正在生成文件');
     const built = await format.build(data, {
@@ -351,10 +336,14 @@ async function runExport(kind) {
       await write(f.name, f.bytes);
     }
 
+    const handed = await dest.finish();
+
     hideProgress();
-    showResult(format, built, data, entries.length);
+    showResult(format, built, data, entries.length, handed);
 
   } catch (e) {
+    // 半截的中转文件不留在 OPFS 里——它不是档案，却会算进档案的配额。
+    await dest?.abort().catch(() => {});
     hideProgress();
     el.className = 'card tone-error';
     el.replaceChildren();
@@ -385,7 +374,7 @@ async function runExport(kind) {
 }
 
 /** @param {object} format @param {object} built @param {object} data @param {number} bundles */
-function showResult(format, built, data, bundles) {
+function showResult(format, built, data, bundles, handed = null) {
   const el = $('formats-result');
   el.replaceChildren();
 
@@ -424,9 +413,12 @@ function showResult(format, built, data, bundles) {
 
   const where = document.createElement('div');
   where.className = 'cap-sub';
-  where.textContent = account
-    ? `写进了 ${format.dir}/，读的是账号 ${account} 的 ${bundles} 份档案。`
-    : `写进了 ${format.dir}/，读的是扩展里全部 ${bundles} 份档案。`;
+  const whose = account ? `账号 ${account} 的 ${bundles} 份档案` : `扩展里全部 ${bundles} 份档案`;
+  where.textContent = handed
+    // **不说「Firefox 专用格式」**，那句话是假的：解开就是同一个文件夹。见 destination.js。
+    ? `打包成 ${handed.name}（${fmtBytes(handed.bytes)}）交给下载，读的是${whose}。`
+      + `解开之后是文件夹 ${format.dir}/，与在 Chrome、Edge 上直接导出的一样。`
+    : `写进了 ${format.dir}/，读的是${whose}。`;
   el.append(where);
 
   // 那个「读不出来的也公开」选项框**常驻**，这里不做任何显隐。
