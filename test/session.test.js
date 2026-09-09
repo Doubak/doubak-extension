@@ -131,6 +131,94 @@ describe('preflight：开抓前的身份确认', () => {
     const g = new SessionGuard();
     assert.throws(() => g.preflight('<html></html>'), /无法判断登录状态/);
   });
+
+  // ── 「判断不出来」这一支要说得出**为什么**（issue #12）
+  //
+  // 报告人在安卓 Edge 上看到这句话，回帖说「豆瓣网站正常登录的」——他是对的。
+  // 真实原因是豆瓣给手机 UA 发了 m.douban.com。拒绝没错，措辞把人指向了错误的
+  // 方向：他会一遍遍去重新登录，去修一个不存在的登录问题。
+  //
+  // 这个文件开头就写着「`missing_user_id` 与 `session_expired` 必须分开」，
+  // 而「判断不出来」是这两者之外的第三种情况，当时没跟上。
+
+  test('落在手机版站点时，要点名说是手机版，而不是「登录状态判断不出来」', () => {
+    const g = new SessionGuard();
+    assert.throws(
+      () => g.preflight('<html>手机版的壳</html>', {
+        probe: {
+          finalUrl: 'https://m.douban.com/people/mewcatcher/',
+          status: 200,
+          redirectChain: ['https://www.douban.com/people/mewcatcher/'],
+        },
+      }),
+      (e) => {
+        assert.match(e.message, /手机版/);
+        assert.match(e.message, /m\.douban\.com/, '要说出实际落在哪儿');
+        assert.match(e.message, /User-Agent/, '要说出真正的成因');
+        assert.match(e.message, /跟你有没有登录无关/, '**必须**把人从「再登录一次」那条路上拉走');
+        assert.match(e.message, /issues\/12/, '要能一路走到能被回答的地方');
+        return true;
+      },
+    );
+  });
+
+  test('「请求桌面版网站」那个开关帮不上忙，要说出来', () => {
+    // 报告人已经试过了。不说的话下一个人还会再试一遍——它按标签页生效，
+    // 而抓取跑在离屏文档里，压根不是标签页。
+    const g = new SessionGuard();
+    assert.throws(
+      () => g.preflight('x', { probe: { finalUrl: 'https://m.douban.com/x' } }),
+      /桌面版网站/,
+    );
+  });
+
+  test('不是手机版时，把手上的线索原样报出来', () => {
+    // finalUrl / status / redirectChain / 字节数 一直都在 `transport.fetch` 的
+    // 返回值里，只是过去全被丢掉了，只把正文传了进来——于是这句话什么都说不出。
+    const g = new SessionGuard();
+    assert.throws(
+      () => g.preflight('<html>' + 'x'.repeat(5000) + '</html>', {
+        probe: {
+          finalUrl: 'https://www.douban.com/people/x/',
+          status: 418,
+          redirectChain: ['https://www.douban.com/people/x/', 'https://www.douban.com/people/x/'],
+        },
+      }),
+      (e) => {
+        assert.match(e.message, /www\.douban\.com\/people\/x\//);
+        assert.match(e.message, /418/);
+        assert.match(e.message, /5013 字节/);
+        assert.doesNotMatch(e.message, /手机版/, '别把改版说成手机版');
+        return true;
+      },
+    );
+  });
+
+  test('正文短得不像页面时，说的是另一回事', () => {
+    const g = new SessionGuard();
+    assert.throws(
+      () => g.preflight('', { probe: { finalUrl: 'https://www.douban.com/', status: 200 } }),
+      /不是一张正常的豆瓣页面/,
+    );
+  });
+
+  test('没有 probe 也不能抛在自己身上', () => {
+    // 老调用方（以及测试）只传正文。少了线索是「说得少」，不是「崩掉」。
+    const g = new SessionGuard();
+    assert.throws(() => g.preflight('<html></html>'), /无法判断登录状态/);
+  });
+
+  test('**未登录仍然走未登录那句话**，不许被新分支吃掉', () => {
+    // 手机版那一支是在 `unknown` 里加的。要是写成「只要落在 m.douban.com 就报手机版」，
+    // 一个真的没登录、又恰好被跳到手机版的用户就会被告知「跟登录无关」——正好反了。
+    const g = new SessionGuard();
+    assert.throws(
+      () => g.preflight(loggedOutPage(), {
+        probe: { finalUrl: 'https://m.douban.com/people/x/' },
+      }),
+      /当前未登录豆瓣/,
+    );
+  });
 });
 
 describe('verify：每页的廉价复核', () => {

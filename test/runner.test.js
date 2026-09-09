@@ -167,6 +167,33 @@ describe('开工前必须确认身份', () => {
     await assert.rejects(() => runner.start({ username: 'example' }), /登录|会话/);
   });
 
+  /**
+   * `Doubak/doubak-extension#12`：安卓 Edge 上「无法判断登录状态，拒绝开始抓取」。
+   *
+   * 端到端跑一遍，而不是只测 `session.js`——**这条链上真正断掉的是接线**：
+   * `transport.fetch` 一直返回着 `finalUrl` / `status` / `redirectChain`，
+   * 而 runner 只把 `bodyText` 传进 preflight，线索在最后一步被丢掉了。
+   * 只测 `undecidableMessage` 的话，把 `{ probe }` 从 runner 里删掉照样全绿。
+   */
+  test('豆瓣发来手机版页面时，报错要点名手机版（#12）', async () => {
+    const shell = '<html><head><title>豆瓣</title></head><body>手机版的壳</body></html>';
+    const { runner } = harness(() => shell);
+    const b = new TextEncoder().encode(shell);
+    runner._fetchImpl = async () => ({
+      status: 200,
+      // 豆瓣按 UA 把 www 跳到 m —— 实测每一条路线都跳，不只是个人主页。
+      url: 'https://m.douban.com/people/example/',
+      headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
+      arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength),
+    });
+
+    await assert.rejects(() => runner.start({ username: 'example' }), (e) => {
+      assert.match(e.message, /手机版/);
+      assert.match(e.message, /跟你有没有登录无关/);
+      return true;
+    });
+  });
+
   test('身份确认失败时不会留下半个 bundle', async () => {
     const { runner, kv, dirs } = harness(() => LOGIN);
     await assert.rejects(() => runner.start({ username: 'example' }));

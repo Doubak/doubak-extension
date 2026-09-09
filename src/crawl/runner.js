@@ -27,6 +27,7 @@ import { CrawlLoop } from './loop.js';
 import { Frontier } from './frontier.js';
 import { SessionGuard, extractAccountHints, detectLoginState } from './session.js';
 import { Pacer } from './pacing.js';
+import { desktopUserAgent } from './desktop-ua.js';
 import { Transport } from './transport.js';
 import { RequestGate } from './pacing.js';
 import { buildRoutes } from './routes.js';
@@ -49,6 +50,42 @@ const NO_WORK = Object.freeze({
   unresolvedFailures: 0, unresolvedOrderedFailures: 0, awaitingHuman: 0,
   done: true, truncated: false,
 });
+
+/**
+ * 「这一份档案是在手机浏览器上抓的，UA 里的手机标记被去掉了」——写进 `manifest.notes`。
+ *
+ * ## 为什么必须写下来
+ *
+ * 规范给 `producer.user_agent` 写着「抓取时浏览器的真实 User-Agent，原样记录。
+ * 生产者不得伪造 UA」。我们没有伪造（只删了一个词，得到的是同一个浏览器在平板上的
+ * 真实形态，理由见 `desktop-ua.js`），但我们**确实没有原样发出去**，而
+ * `producer.user_agent` 按规范只能放浏览器的真实 UA。两者的差额如果不落在纸面上，
+ * 这份档案就在一个规范明文管着的地方少了一句话。
+ *
+ * `notes` 正是规范给这类东西留的地方（SPEC §6.4.1：重建规则「属于散文而非枚举」）。
+ *
+ * ## 判据是证据，不是意图
+ *
+ * 规则装在 service worker 那一侧，抓取跑在离屏文档里，这里问不到「装上了没有」。
+ * 所以判据取**身份确认那一跳落在哪儿**：UA 认得出是手机、而探测最终没落到
+ * `m.douban.com`，才说明改写真的生效了。凭「我们本来打算改」去写，写出来的可能是假的。
+ *
+ * @param {string | undefined} finalUrl  身份确认那次请求的最终 URL
+ * @returns {string | undefined}
+ */
+function desktopUaNote(finalUrl) {
+  const real = globalThis.navigator?.userAgent;
+  const desktop = desktopUserAgent(real ?? '');
+  if (!desktop) return undefined;
+  if (!finalUrl || /^https?:\/\/m\.douban\.com\//.test(finalUrl)) return undefined;
+  return (
+    '这份档案是在移动版浏览器上抓的。豆瓣会按 User-Agent 里的手机标记发 m.douban.com，'
+    + '而手机版页面上没有这套抓取器需要的结构，所以扩展把发给豆瓣的 User-Agent 改成了 '
+    + `${JSON.stringify(desktop.userAgent)}——即去掉手机标记后的同一个 UA（${desktop.note}），`
+    + '与同一浏览器在平板上发出的那一个相同。未做任何其他改写；'
+    + `producer.user_agent 里记的是浏览器真实的那一个。`
+  );
+}
 
 export class CrawlRunner {
   /**
@@ -241,7 +278,8 @@ export class CrawlRunner {
     // 曾经想过「主页取不到就去广播页补一次」。不需要了，而且那条退路本身有个更深
     // 的问题：它默认「广播条目上的 data-uid 就是本人」，而在作品详情页上那是
     // **评论者**的 ID。见 session.js 里 UID_PATTERNS 的说明。
-    const account = session.preflight(probe.bodyText);
+    const account = session.preflight(probe.bodyText, { probe });
+    this._uaNote = desktopUaNote(probe.finalUrl);
     this._emit({ type: 'preflight', account });
 
     // ── 增量的下界，**在身份确认之后**才挑。
@@ -572,7 +610,8 @@ export class CrawlRunner {
     const session = new SessionGuard();
     const profileUrl = `https://www.douban.com/people/${encodeURIComponent(username)}/`;
     const probe = await transport.fetch(profileUrl);
-    session.preflight(probe.bodyText);
+    session.preflight(probe.bodyText, { probe });
+    this._uaNote = desktopUaNote(probe.finalUrl);
     const producerVersion = this._producerVersion ?? await extensionVersion();
 
     const writer = new BundleWriter({
@@ -928,7 +967,7 @@ export class CrawlRunner {
     // 必须先攒证据再 finalize——否则 manifest 里 coverage 与 crawl_state 都是空的，
     // 等于没有任何完整性依据。
     loop.flushRouteEvidence();
-    const manifest = await writer.finalize({ status });
+    const manifest = await writer.finalize({ status, notes: this._uaNote });
 
     if (status === 'complete') await this._runStore.clearCheckpoint();
     const bundleId = this._run.bundleId;

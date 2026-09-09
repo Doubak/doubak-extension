@@ -89,6 +89,21 @@ export async function loadDebug() {
     const { usage, quota } = await navigator.storage.estimate();
     rows.push(['存储', `已用 ${bytes(usage ?? 0)} / 配额 ${bytes(quota ?? 0)}`]);
   }
+
+  // 发给豆瓣的 User-Agent。**手机浏览器上这一行是能不能开工的关键**：UA 里带着
+  // 手机标记的话豆瓣发的是 m.douban.com，那上面没有登录标志也没有数字 uid，
+  // 抓取会停在「无法判断登录状态」上——而那句话过去不会说出真正的原因。
+  // 见 crawl/desktop-ua.js 与 issue #12。
+  const ua = await send({ type: 'desktopUa' }).catch(() => null);
+  if (ua?.ok) {
+    rows.push(['浏览器 User-Agent', ua.browserUserAgent ?? '(读不到)']);
+    rows.push([
+      '发给豆瓣的 User-Agent',
+      ua.installed
+        ? `${ua.sentUserAgent}（已去掉手机标记：${ua.reason}）`
+        : `与上面相同 —— ${ua.reason}`,
+    ]);
+  }
   // 不显示 persist()：它在扩展里恒为 false，是预期行为而不是风险信号，
   // 保护来自 unlimitedStorage 权限。摆出来只会制造假的不确定性。
   env.replaceChildren(table(['项', '值'], rows));

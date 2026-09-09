@@ -88,6 +88,40 @@ chrome-extension://<扩展ID>/selftest/index.html
 
 跑完点「复制报告」拿到纯文本，`[PASS]` / `[FAIL]` 前缀，失败项汇总在开头。
 
+### 手机浏览器：豆瓣发的是手机版，扩展会把它改回桌面版
+
+装在移动版 Chromium（安卓 Edge、Kiwi 之类）上时，豆瓣按 User-Agent 里的手机标记
+把**每一条路线**都跳到 `m.douban.com`：
+
+```
+www.douban.com/people/<u>/            → m.douban.com/people/<u>/
+movie.douban.com/people/<u>/collect   → m.douban.com/people/<u>/movie/done
+book.douban.com/subject/4820710/      → m.douban.com/book/subject/4820710/
+```
+
+而手机版那张页面（12.5 KB 的壳）上，登录标志与数字用户 ID **一个都没有**，
+于是抓取停在「无法判断登录状态」上——那句话过去不会说出真正的原因
+（[#12](https://github.com/Doubak/doubak-extension/issues/12)）。
+
+所以扩展在这类浏览器上会装一条 `declarativeNetRequest` 规则，**把发给豆瓣的
+User-Agent 里那个手机标记去掉**。三条边界：
+
+- **只删词，不编 UA。** 安卓 Chromium 去掉 `Mobile` 之后，得到的正是同一个浏览器
+  在**安卓平板**上发的那一个——同一系统、同一浏览器、同一份 TLS 指纹。规范里
+  「生产者不得伪造 UA」给的理由就是「伪造出的 UA 与指纹不一致，反而更容易被风控
+  识别」，而拼一个 `(X11; Linux x86_64)` 出来正好撞在那句话上。没量过的形状
+  （比如 iOS 的 `Mobile/15E148`）一律不动，宁可不支持。
+- **只改扩展自己发的请求**（`tabIds: [-1]`）。你在标签页里逛豆瓣照样是手机版——
+  在手机上多半就是想要手机版。这也是浏览器那个「请求桌面版网站」开关帮不上忙的
+  原因：它按标签页生效，而抓取跑在离屏文档里。
+- **桌面浏览器上这条规则压根不装**，发出去的 UA 与之前逐字节相同。
+
+抓出来的档案会在 `manifest.notes` 里写明这件事；`producer.user_agent` 里记的
+仍然是浏览器真实的那一个。调试页的「环境自检」表上有这两个 UA，可以直接核对。
+
+**这一条只解决内容那一侧**：页面回到桌面模板，分类器与抽取器就都对得上了。
+离屏文档在移动版浏览器上能不能扛住几小时的抓取，是另一个问题，还没有实测。
+
 ### 界面
 
 点工具栏图标直接开面板标签页（已经开着就切过去）：

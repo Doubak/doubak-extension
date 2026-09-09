@@ -153,6 +153,69 @@ export function extractAccountHints(html) {
   };
 }
 
+/**
+ * 豆瓣的手机版站点。
+ *
+ * 手机 UA 下**每一条路线都会跳到这儿**，而这上面没有全局导航，也就没有登录标志、
+ * 没有数字 uid——`detectLoginState` 只能返回 `unknown`。见 `desktop-ua.js`。
+ */
+const MOBILE_SITE = /^https?:\/\/m\.douban\.com\//;
+
+/**
+ * 「两个登录标志都没找到」时说点有用的。
+ *
+ * ## 为什么这句话本身就是那个缺陷
+ *
+ * `Doubak/doubak-extension#12`：用户在安卓 Edge 上看到「无法判断登录状态，拒绝开始
+ * 抓取」，回帖说「豆瓣网站正常登录的」——他是对的，登录没问题。真实原因是豆瓣给
+ * 手机 UA 发了 `m.douban.com`，那张 12 KB 的壳页上什么都没有。
+ *
+ * **拒绝是对的，措辞把人指向了错误的方向**：他会一遍遍去重新登录，去修一个不存在的
+ * 登录问题。这个文件已经为同一件事写过一次（`missing_user_id` 与 `session_expired`
+ * 必须分开：前者是改版，后者是没登录，混成一句会让用户反复重登），而
+ * 「判断不出来」这一支当时没跟上——它是这两者之外的第三种情况。
+ *
+ * 手头本来就有判断依据：`transport.fetch` 返回的 `finalUrl` / `status` /
+ * `redirectChain` / 字节数，一个都不缺，只是过去全被丢掉了，只把正文传了进来。
+ *
+ * @param {string} html
+ * @param {{finalUrl?: string, status?: number, redirectChain?: string[]} | undefined} probe
+ * @returns {string}
+ */
+export function undecidableMessage(html, probe) {
+  const bytes = typeof html === 'string' ? html.length : 0;
+  const finalUrl = probe?.finalUrl ?? '';
+
+  if (MOBILE_SITE.test(finalUrl)) {
+    return (
+      '豆瓣把这次请求转到了手机版站点，而手机版页面上没有这个扩展需要的任何东西' +
+      `（登录标志、数字用户 ID 都不在上面），所以判断不出登录状态。最终落在 ${finalUrl}。\n` +
+      '这跟你有没有登录无关——你多半是登录着的。\n' +
+      '原因是浏览器发出去的 User-Agent 带着手机标记，豆瓣据此发手机版。扩展本来会自动' +
+      '去掉那个标记，这次没生效：要么这个浏览器不支持改请求头，要么它的 UA 是我们没' +
+      '量过的形状（那种情况下我们宁可不动，也不会编一个 UA 出去）。\n' +
+      '浏览器里那个「请求桌面版网站」的开关帮不上忙——它只对标签页有效，而抓取跑在' +
+      '离屏文档里，不是标签页。\n' +
+      '请把这段话连同调试页上那行 User-Agent 一起贴到 ' +
+      'https://github.com/Doubak/doubak-extension/issues/12 ，加一种设备只要加一行判据。'
+    );
+  }
+
+  // 不是手机版，那就是另一件事：改版、被挡、或者拿回来的根本不是一张页面。
+  // **把手上有的都报出来**——少了这些，用户只能看到「判断不出来」，而那句话既可能
+  // 意味着没登录、也可能意味着豆瓣改版，两者的下一步完全不同。
+  const hops = probe?.redirectChain?.length ?? 0;
+  return (
+    '无法判断登录状态，拒绝开始抓取：这张页面上「已登录」和「未登录」两个标志都没找到。\n' +
+    `最终落在 ${finalUrl || '(未知)'}，HTTP ${probe?.status ?? '(未知)'}，` +
+    `跳转 ${hops > 0 ? hops - 1 : 0} 次，正文 ${bytes} 字节。\n` +
+    (bytes < 2000
+      ? '正文这么短，多半不是一张正常的豆瓣页面（可能是拦截页或空响应）。'
+      : '页面够长，更像是豆瓣改版了导航栏。') +
+    '\n请把这段话贴到 https://github.com/Doubak/doubak-extension/issues 。'
+  );
+}
+
 /** 会话守卫抛出的错误，带一个机器可读的原因。 */
 export class SessionError extends Error {
   /**
@@ -203,16 +266,17 @@ export class SessionGuard {
    * @param {string} [opts.fallbackFrom]  上一次尝试的失败说明，用来把两次都报出来
    * @returns {AccountHints}
    */
-  preflight(html, { fallbackFrom } = {}) {
+  preflight(html, { fallbackFrom, probe } = {}) {
     const state = detectLoginState(html);
     if (state !== 'logged_in') {
-      throw new SessionError(
-        'session_expired',
-        state === 'logged_out'
-          ? '当前未登录豆瓣。请先登录再开始——未登录不仅看不到私密条目，' +
-            '请求频率上限也更低，继续抓会更容易撞上限流。'
-          : '无法判断登录状态，拒绝开始抓取。',
-      );
+      if (state === 'logged_out') {
+        throw new SessionError(
+          'session_expired',
+          '当前未登录豆瓣。请先登录再开始——未登录不仅看不到私密条目，' +
+            '请求频率上限也更低，继续抓会更容易撞上限流。',
+        );
+      }
+      throw new SessionError('session_expired', undecidableMessage(html, probe));
     }
 
     const hints = extractAccountHints(html);

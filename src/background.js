@@ -50,6 +50,7 @@ import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
 import { FAILURES_PENDING, FINALIZE_FAILED } from './crawl/resume-policy.js';
 import { readLog, clearLog } from './crawl/event-log.js';
 import { installRefererRule } from './crawl/referer-rule.js';
+import { installDesktopUaRule } from './crawl/desktop-ua.js';
 import { preflightStorage } from './storage/quota.js';
 import { exportedKey } from './storage/storage-usage.js';
 import { ensureOffscreen, withOffscreen, serializeScope } from './offscreen/host.js';
@@ -312,6 +313,23 @@ async function ensureRefererRule() {
 }
 void ensureRefererRule();
 
+/**
+ * 手机浏览器上，把发给豆瓣的 UA 里那个手机标记去掉，否则一页都抓不成。
+ *
+ * **桌面浏览器上这一步什么都不做**，连规则都不装——见 `desktop-ua.js`。
+ * 与 Referer 规则同理，每次 service worker 启动都要调（会话规则活不过浏览器重启）。
+ */
+async function ensureDesktopUaRule() {
+  const r = await installDesktopUaRule({
+    onError: (msg, err) => debugLog('桌面版规则', msg, err ?? ''),
+  });
+  debugLog('桌面版规则', r.installed ? `已装上：${r.sentUserAgent}` : `未装：${r.reason}`);
+  desktopUaState = r;
+}
+/** 最近一次安装结果，调试页要读它。 */
+let desktopUaState = { installed: false, sentUserAgent: null, reason: '还没检查。' };
+void ensureDesktopUaRule();
+
 /** 心跳。这是自恢复的主路径。 */
 globalThis.chrome?.alarms?.onAlarm?.addListener(async (alarm) => {
   if (alarm.name !== ALARM_NAME) return;
@@ -433,6 +451,14 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           // 覆盖率页「合起来」那个视角。offscreen 读档案，这里只转发。
           const r2 = await withOffscreen({ op: 'chain', bundleId: msg.bundleId });
           sendResponse({ ok: true, chain: r2.chain });
+          break;
+        }
+
+        case 'desktopUa': {
+          // 调试页要显示「我们发出去的 UA 是什么」。**问的是 service worker**，
+          // 不是面板自己的 `navigator.userAgent`——规则装在这一侧，而面板与离屏
+          // 文档理论上可以不同源。答的是实际生效的那个。
+          sendResponse({ ok: true, ...desktopUaState, browserUserAgent: navigator.userAgent });
           break;
         }
 
