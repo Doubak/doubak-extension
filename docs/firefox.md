@@ -132,6 +132,29 @@ Chrome 会忽略不认识的键，**Gecko 校验参数，整条拒收**。而 `s
 zip 那句明确请用户**先解开看一眼**再删。老记录是个裸字符串，读的那边两种都认——
 升级不该让一份导出过的档案突然显示成「浏览器里这一份可能是唯一的副本」。
 
+## 两个宿主的产出对过了（2026-09-09，28 份真实档案）
+
+档案主人在 Firefox 上导了一次 NeoDB 包，在 Chrome 上又导了一次，两份都在手上。
+拿命令行当第三方裁判（同一批档案喂给 `bin/parse.js` + `bin/export.js`）：
+
+| | 结果 |
+|---|---|
+| `neodb-doulist-needs-check.csv` / `neodb-needs-check.csv` / `怎么导入.md` | **逐字节相同** |
+| `neodb-ndjson-import.zip` 解开之后的内容 | **逐条相同**（两边独有的行各 0 条） |
+| 命令行 vs Firefox 的 `journal.ndjson` | 忽略 `generator` 那一行之后**零差异** |
+| 行序 | ❌ 保持原序逐行比 **27636 行**对不上 |
+
+外层 zip 的字节不同是正常的：Chrome 与 Firefox 的 `CompressionStream('deflate-raw')`
+不是同一个实现，压出来的字节本来就可以不一样。**判据只能是解开之后的内容。**
+
+行序那一条是真的缺陷，已修（见 CLAUDE.md「内容一样、行序不一样」）：两个宿主
+喂进流水线的档案次序相反——扩展的 `listBundleDirs()` 是 `.sort().reverse()`
+（选择器要最新的在最上面），命令行是升序。现在在 `parseLibrary()` 里统一成升序。
+
+**没有在全量上复测过**：那个规模只有浏览器跑得动（Node 里拿磁盘当 store 的临时
+脚本会 OOM）。要复测就是同一批档案两边各导一次，然后
+`diff <(unzip -p A neodb-ndjson-import.zip) <(unzip -p B ...)`。
+
 ## 还没量的
 
 - **后台事件页能不能扛住几小时的抓取。** 这是最贵的一个，探针答不了，要真跑一次
