@@ -34,6 +34,50 @@ import { stripTagsAndDecode, decodeEntities } from './html-entities.js';
 const WRAPPER = /<div class="new-status status-wrapper[^"]*"[^>]*>/g;
 
 /**
+ * 这条广播在豆瓣上是不是只有作者本人看得见。
+ *
+ * 判据钉在**内层** `div.status-item` 的 class 上（`status-item private`）。
+ * **外层那个 wrapper 上没有这个词**，所以不能在整段里随便找 `private` ——
+ * 正文里出现「private」的广播会被误判。
+ *
+ * ## 为什么必须读它
+ *
+ * 抓取跑在用户自己的登录态下，所以时间线上包含**只有他自己看得见**的那些条目。
+ * 不读这个 class，它们与公开广播在 canonical 里就分不出来，而下游（站点）默认
+ * 照发——实测这正是一篇私密日记的全文出现在样张站首页上的原因。日记那一侧
+ * 09-07 已经补了 `visibility`，广播这一侧漏了：**同一条规则，在隔壁那个记录
+ * 类型上缺席。**（这个文件里已经是第三次了：`<span class="comment">` 是电影
+ * 专用、又名只在详情页、豆列早就有可见性。）
+ *
+ * ## 实测
+ *
+ * 真实档案 1112 张时间线页、**21996 个 `status-item` 块**：`private` 恰好 1 个
+ * （那篇《测试一下私密日记？》），`deleted` 7 个，其余 class 后缀为空。
+ * 少得可以人工核对，而这正是它此前没被发现的原因。
+ */
+const ITEM_DIV = /<div\s[^>]*class="([^"]*)"/g;
+
+/**
+ * 这一段里那个 `status-item` 的 class 列表；找不到就是 null。
+ *
+ * **按 token 比，不按前缀比。** 第一版写的是 `class="status-item([^"]*)"`，
+ * 要求 class 以它开头——豆瓣哪天把顺序换成 `private status-item`，整段就认不出
+ * 容器了，于是**所有广播一起变成 null**。而 null 在下游按私密处理，也就是
+ * 一次改版把整个时间线从站点上抹掉。token 比对同时挡住 `status-item-foo`
+ * 这类子串误判。
+ *
+ * @param {string} seg @returns {string[] | null}
+ */
+function itemClasses(seg) {
+  const re = new RegExp(ITEM_DIV.source, 'g');
+  for (let m = re.exec(seg); m; m = re.exec(seg)) {
+    const tokens = m[1].split(/\s+/).filter(Boolean);
+    if (tokens.includes('status-item')) return tokens;
+  }
+  return null;
+}
+
+/**
  * 动作词 → 状态。
  *
  * 只映射明确对应三种标记状态的那些；其余（收藏到豆列、转发、说）**保持 null**，
@@ -393,8 +437,17 @@ export function extractBroadcasts(html, ownerUserId) {
     // 截断这件事本身记在 fullTextUrl 上，不靠正文末尾的字来表达。
     if (quote && fullText) quote = quote.replace(/<a href="[^"]*"[^>]*>（全文）<\/a>\s*$/, '');
 
+    // **只看这一段里第一个 `status-item`。** 转发被豆瓣渲染成顶层 wrapper，
+    // 所以一段里正常只有一个；用第一个而不是「有没有出现过」，是为了不让
+    // 后面某段的 class 漏进来。
+    const itemCls = itemClasses(seg);
+
     broadcasts.push({
       sid: sid[1],
+      // `public` / `private`。词汇与长文那三个字段一致（见 extract-longform.js）。
+      // **认不出容器时不猜**：拿不到 `status-item` 就是 null，跟「读到了，是公开的」
+      // 分开——与又名的 `null`（没读详情页）和 `[]`（读了，没有）同一条。
+      visibility: itemCls ? (itemCls.includes('private') ? 'private' : 'public') : null,
       // 秒级。**比标记页的日期精确**，合并同一条记录的观测时不得用低精度覆盖它。
       postedAt: /class="created_at"[^>]*title="([^"]+)"/.exec(seg)?.[1] ?? null,
       // 正文原样保留，只把标签剥掉——里面常有链接（`douc.cc` 短链）与表情。

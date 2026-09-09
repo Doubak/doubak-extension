@@ -339,6 +339,10 @@ function projectBroadcast(b, targets, have = { subjects: new Set(), doulists: ne
     postedAt: f.posted_at?.iso ?? null,
     postedAtRaw: f.posted_at?.raw ?? null,
     text: f.text ?? null,
+    // 只有作者本人看得见的那些。**默认根本不会走到这里**（`withoutPrivate` 在
+    // `generate()` 入口就筛掉了），带上它是为了 `--include-private` 那条路：
+    // 发出去时页面上得看得出「这条在豆瓣上是不公开的」。
+    visibility: f.visibility ?? null,
     action: f.action ?? null,
     // 动作句里那几个链接，已经判好该指本地还是指豆瓣。null = 这句话里没有链接。
     actionParts: resolveActionParts(f.action_parts ?? null, have),
