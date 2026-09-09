@@ -165,13 +165,27 @@ blob 就一直在。619 MB 的真实档案照这个比例就是把整份塞进�
 里那份，下载会**静默截断**。所以清理挪到下一次导出的开头，代价照说：上一次的中转
 文件会一直占着空间，直到下一次导出。仅剩的窗口是「上一份还在下载时又点了一次导出」。
 
-### 量到的（Firefox 155，真机）
+### 量到的（Firefox 155，真机，**跑的是打好的那个包**）
 
 | 问题 | 结果 |
 |---|---|
 | OPFS 的 `createWritable()` 在窗口里能用吗 | ✅ 能，64 MB 分 64 块写用 **278 ms**（≈230 MB/s） |
-| `getFile()` → `createObjectURL` | ✅ 拿到 `File`，内容逐字节对得上 |
+| `getFile()` → `createObjectURL` | ✅ 拿到 `File`，`href` 确实是 `blob:` |
 | `removeEntry(..., {recursive:true})` | ✅ |
+| `canPickDirectory()` | ✅ `false`，走 zip 那条 |
+| 整条路：导一份档案 → `finish()` → 点下载 | ✅ 3 个文件、0 problems、`verified: false`、说明是「目的地读不回来，无法校验」 |
+| 真的点了 `<a download>` 吗 | ✅ 文件名 `doubak-archive-<编号>.zip` |
+| 第二次导出的**开头**清掉上一份了吗 | ✅ |
+
+产出的那个 zip 传回 Node，用**系统的 `unzip`** 验（判据不能是我们自己的读回器）：
+
+```
+unzip -t                    No errors detected
+解开之后                     doubak-bundle-<编号>/{data-000001.warc.gz,index.ndjson,manifest.json} + 先看这个.txt
+段文件                       200000 字节，与写进去的逐字节相同
+权限                        -rw-r--r--
+中文名                       先看这个.txt（没乱码）
+```
 
 ### 顺手量出来的两个 zip 缺陷（都在上游 `doubak-export-adapters`）
 
