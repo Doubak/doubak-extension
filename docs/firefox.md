@@ -215,8 +215,24 @@ blob 就一直在。619 MB 的真实档案照这个比例就是把整份塞进�
 
 - **联系邮箱：`admin@doubak.com`**。manifest 里没有放它的地方，填在 AMO 的提交表单里。
 
-- **上架地址：slug 定为 `doubak`**（2026-09-10 定的）。**还没上架**——实测
-  `.../en-US/firefox/addon/doubak/` 现在是 404，所以站上还不能往那儿指。
+- **上架地址：slug 定为 `doubak`**（2026-09-10 定的）。
+
+  **slug 已经在账号名下了，但列表页还没公开。** 判据不是页面的 404（那分不出「不存在」
+  与「不公开」），是 AMO 的公开接口：
+
+  | 查什么 | 返回 |
+  |---|---|
+  | 一个不存在的 slug | `{"detail": "Not found."}` |
+  | 一个已上架的（`ublock-origin`） | 完整记录，`status: public` |
+  | `doubak` | `{"detail": "Authentication credentials were not provided.", "is_disabled_by_developer": false}` |
+
+  中间那一档就是「存在，但没公开」。什么时候算上架好了：
+
+  ```sh
+  curl -s https://addons.mozilla.org/api/v5/addons/addon/doubak/ | grep '"status":"public"'
+  ```
+
+  **站上已经指过去了**（档案主人 2026-09-10 决定的，知道在公开之前会 404）。
 
   写进代码和文案的时候用**不带语言段**的那一个：
 
@@ -238,20 +254,20 @@ blob 就一直在。619 MB 的真实档案照这个比例就是把整份塞进�
   商店那条「只写扩展 ID、不带名字那一段」是同一条规矩：**别把一个会变的段写死**，
   区别只在那边变的是名字，这边变的是语言。
 
-### 上架那天要改的几处
+### 上架那天还剩什么
 
-跨仓库的步骤就是这样丢的（站点的版本号已经栽过一次），所以列在这儿：
+站点那三处 2026-09-10 已经提前改完了（ld+json、安装按钮、`/how/#firefox`），
+所以真上架那天只剩两件：
 
-| 在哪 | 现在写着什么 | 要改成 |
-|---|---|---|
-| `doubak-website` `index.html` 的 ld+json | `browserRequirements` 里「not yet listed on addons.mozilla.org — load the -firefox.zip …」 | 去掉那半句 |
-| 同上，安装按钮 | 「Firefox：手动加载 / 尚未上架 AMO，跟进 #11」，指向 `/how/#firefox` | 「安装到 Firefox / Firefox 附加组件」，指向上面那个地址 |
-| `doubak-website` `how/index.html` `#firefox` | 「还没上架 AMO，所以现在要手动加载」 | 商店一条 + 手动加载留作备选 |
-| 本仓库 `README.md` | 「AMO（Firefox）：还没上架」 | 上架地址 |
-| `Doubak/doubak-extension#11` | 「跑通就提交」 | 关掉 |
+| 在哪 | 要做什么 |
+|---|---|
+| 本仓库 `README.md` | 「AMO（Firefox）：还没上架」→ 上架地址 |
+| `Doubak/doubak-extension#11` | 关掉 |
+
+以及把本节上面那句「站上已经指过去了，公开之前会 404」删掉——它到那时就不成立了。
 
 手动加载那一节**不要删**：临时载入仍然是试 `main` 上未发版改动的唯一路子，
-与 Chromium 那边「Releases 里的 zip」那一条同一个地位。
+与 Chromium 那边「Releases 里的 zip」那一条同一个地位。`/how/` 已经按这个说法改过。
 
 ## 界面那一侧接上了（2026-09-09）
 
