@@ -219,6 +219,12 @@ Firefox 上「导入档案…」走 `<input type="file" webkitdirectory multiple
 文件根本不会进列表。突变验出来：把「找到就不往下」和深度上限整条删掉，全绿。
 改成两边各自从语料生成之后，两条突变各红一条。**判据不能来自被测的那条路。**
 
+在真 Firefox 上验过（跑的仍然是打好的那个包）：`input.webkitdirectory` 设得上、
+`cancel` 事件在（用来认「用户按了取消」，否则界面停在「正在查看…」上不动）、
+`scanFileList` 在**真的 `File` 对象**上找出 1 份档案并认出旁边那个 zip、
+`file.slice(8, 12)` 切片读回 4 字节、`readBundleMeta` 认出档案编号，
+以及没找到时说的第一句就是「**这是一个 zip 壳子，要先解压。**」
+
 ### 已知的代价：超过 4 GB 要等写完才报错
 
 `ZipWriter.finish()` 才知道总偏移量，所以 4 GB 的上限是在写完之后才拦的（拦是对的
