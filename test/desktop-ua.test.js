@@ -108,6 +108,35 @@ describe('从真实 UA 推桌面 UA', () => {
     assert.equal(desktopUserAgent(ios), null);
   });
 
+  test('**认得出是手机 ≠ 改得动**，两者分开问', () => {
+    // 撤掉 Firefox 判据的那一刻这两件事就分了家。合在一个函数里的话，调试页会对着
+    // 一台安卓手机写「桌面浏览器，不需要改」——正好把人推回 #12 那条修不好的路上。
+    for (const ua of [
+      'Mozilla/5.0 (Android 14; Mobile; rv:141.0) Gecko/141.0 Firefox/141.0',
+      'Mozilla/5.0 (Android 14; Tablet; rv:141.0) Gecko/141.0 Firefox/141.0',
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 '
+        + '(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    ]) {
+      assert.equal(looksMobile(ua), true, `该认出是手机：${ua}`);
+      assert.equal(desktopUserAgent(ua), null, `但不该动它：${ua}`);
+    }
+  });
+
+  test('安卓平板 Chromium **不算**手机 —— 它本来就拿得到桌面版', () => {
+    // 判据只收「量过会跳」的那几种。把 `Android` 算进来的话，这台本来就能用的设备
+    // 会被告知「认出是手机但我们改不了」，等于凭空造一条假警报。
+    const tablet =
+      'Mozilla/5.0 (Linux; Android 14; SM-X910) AppleWebKit/537.36 (KHTML, like Gecko) '
+      + 'Chrome/151.0.0.0 Safari/537.36';
+    assert.equal(looksMobile(tablet), false);
+  });
+
+  test('改完之后必须**不再**被豆瓣判成手机', () => {
+    // 这是那条守卫真正要问的：不是「还认不认得出我们的判据」，而是「豆瓣还跳不跳」。
+    const out = desktopUserAgent(EDGE_ANDROID).userAgent;
+    assert.equal(looksMobile(out), false);
+  });
+
   test('空的、非字符串的 UA 不抛', () => {
     for (const bad of ['', null, undefined, 42, {}]) {
       assert.equal(desktopUserAgent(/** @type {any} */ (bad)), null);
@@ -203,14 +232,31 @@ describe('安装', () => {
     assert.match(errs[0], /一页都抓不成/);
   });
 
-  test('认出是手机但不认识形状时，理由要说得出来', async () => {
+  test('认出是手机、但改不动时，理由**不许说成「桌面浏览器」**', async () => {
+    // 这正是撤掉 Firefox 判据之后冒出来的假消息：调试页会对着一台安卓手机写
+    // 「桌面浏览器，不需要改」，把人推回 #12 那条修不好的路上。
+    for (const ua of [
+      'Mozilla/5.0 (Android 14; Mobile; rv:141.0) Gecko/141.0 Firefox/141.0',
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 '
+        + '(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    ]) {
+      const r = await installDesktopUaRule({
+        dnr: { updateSessionRules: async () => {} }, userAgent: ua,
+      });
+      assert.equal(r.installed, false);
+      assert.match(r.reason, /手机浏览器/, ua);
+      assert.doesNotMatch(r.reason, /桌面浏览器/, ua);
+    }
+  });
+
+  test('桌面浏览器的理由与上一条必须不同', async () => {
+    // 两条理由长一样的话，用户分不出「你这台本来就没问题」与「你这台我们救不了」。
     const r = await installDesktopUaRule({
       dnr: { updateSessionRules: async () => {} },
-      userAgent:
-        'Mozilla/5.0 (Linux; Android 14; X) AppleWebKit/537.36 Chrome/151.0.0.0 Mobile Mobile Safari/537.36',
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36',
     });
-    assert.equal(r.installed, false);
-    assert.match(r.reason, /不猜/);
+    assert.match(r.reason, /桌面浏览器/);
+    assert.doesNotMatch(r.reason, /手机浏览器/);
   });
 });
 

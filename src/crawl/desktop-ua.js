@@ -99,6 +99,40 @@ export const DESKTOP_UA_RULE_ID = 2;
 export const PAGE_HOST_FILTER = '||douban.com';
 
 /**
+ * **豆瓣会判成手机的标记。这张表只用来说话，不用来动手。**
+ *
+ * 每一行都是对着真实豆瓣量出来的（2026-09-09）：带上它就跳 `m.douban.com`。
+ *
+ * ## 为什么它必须与下面那张表分开
+ *
+ * 一开始只有一张表，「认得出」与「改得动」共用它——那天两者恰好重合，所以看不出
+ * 问题。撤掉 Firefox 那条判据之后它们当场分家：Firefox 安卓的 UA 变成「不认得」，
+ * 于是调试页上会写「**桌面浏览器，不需要改**」——对着一台安卓手机说这句话，
+ * 而且正好把人推回那条修不好的路上，与 #12 里那句「无法判断登录状态」一模一样。
+ *
+ * **这是 `CLAUDE.md` 里记的第 N 条代理断言**：`looksMobile` 当时是「我们能不能处理」
+ * 的代理，被当成了「这是不是一台手机」。分家的那天它开始说假话。
+ *
+ * 所以现在是两张表，各自回答一个问题：
+ *
+ * | | 问什么 | 用在哪 |
+ * |---|---|---|
+ * | `DOUBAN_MOBILE_HINTS` | 豆瓣会把它判成手机吗 | **措辞**，以及「改完了还像不像手机」 |
+ * | `MOBILE_TOKENS` | 我们能不能安全地把它改成桌面版 | **动手** |
+ *
+ * 注意 `Android` 与 `iPad` 都**不在**这张表里：安卓平板 Chromium 的 UA 带 `Android`
+ * 却直接拿到 www（量过），把它算进来就会对着一台本来就能用的设备说「认出是手机但
+ * 改不了」。判据只收**量过会跳**的那几种。
+ */
+const DOUBAN_MOBILE_HINTS = [
+  / Mobile(?= |$)/,   // 安卓 Chromium：`Chrome/151.0.0.0 Mobile Safari/537.36`
+  /[;(] ?Mobile;/,    // Firefox 安卓手机：`(Android 14; Mobile; rv:…)`
+  /[;(] ?Tablet;/,    // Firefox 安卓平板：`(Android 14; Tablet; rv:…)` —— 平板也跳
+  /Mobile\/\w/,       // iOS：`Mobile/15E148`
+  /iPhone/,           // 实测：桌面 UA 后面加个 iPhone 也会跳
+];
+
+/**
  * 已知的手机标记，**按形状逐个列出，不做通配**。
  *
  * 每一条都对应上面那张表里量过的一行。列不出来的形状一律不动——见文件开头：
@@ -132,17 +166,16 @@ const MOBILE_TOKENS = [
 ];
 
 /**
- * 这个 UA 会不会让豆瓣发手机版？
+ * 豆瓣会不会把这个 UA 判成手机？
  *
- * **只回答「我们认不认得出并且改得动」**，不是「这是不是一台手机」。iOS Safari 的
- * `Mobile/15E148` 实测也会跳转，但它是个带版本号的整体，删掉得不到任何真实存在的
- * UA，所以这里**不认它**——认了就得编，而编 UA 是上面那条规范明令禁止的。
+ * **只回答这个，不回答「我们改不改得动」**——那是 `desktopUserAgent` 的事。两者曾经
+ * 是同一个函数，分家的那天它开始对着安卓 Firefox 说「桌面浏览器，不需要改」。
  *
  * @param {string} ua
  * @returns {boolean}
  */
 export function looksMobile(ua) {
-  return typeof ua === 'string' && MOBILE_TOKENS.some((t) => t.shape.test(ua));
+  return typeof ua === 'string' && DOUBAN_MOBILE_HINTS.some((re) => re.test(ua));
 }
 
 /**
@@ -214,7 +247,11 @@ export async function installDesktopUaRule({ dnr, userAgent, onError } = {}) {
       installed: false,
       sentUserAgent: null,
       reason: looksMobile(ua)
-        ? '认出这是手机浏览器，但没有量过它的桌面形态，不猜。'
+        // 这句话对着 Firefox 安卓与 iOS 都成立，而且说的是**不同的**两件事：
+        // 前者量过、结论是没有合法形态；后者是那个标记删不掉。共同点才是要说的：
+        // 改了会得到一个真实浏览器不会发的 UA，那比不支持这台设备更危险。
+        ? '认出这是手机浏览器，但它没有一个能安全改写的形态'
+          + '（改了会得到一个真实浏览器不会发的 UA，指纹对不上反而更容易被风控盯上），所以不动。'
         : '桌面浏览器，不需要改。',
     };
   }
