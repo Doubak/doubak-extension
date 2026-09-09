@@ -52,11 +52,28 @@ describe('从真实 UA 推桌面 UA', () => {
     assert.equal(EDGE_ANDROID.replace(' Mobile', ''), out);
   });
 
-  test('Firefox 安卓：去掉 `Mobile; `', () => {
+  test('**Firefox 安卓一律不动** —— 那上面没有一个满足不变量的 UA', () => {
+    // 一度写过一条 `Mobile; ` 判据。删掉确实能拿到桌面版（量过），但得到的
+    // `(Android 14; rv:141.0)` 是任何 Firefox 都不会发的 UA——而 Firefox 安卓的
+    // 两种真实形态**都**被跳到手机版：
+    //
+    //     (Android 14; Mobile; rv:…) → m      (Android 14; Tablet; rv:…) → m
+    //     (X11; Linux x86_64; rv:…)  → www    ← 只有货真价实的桌面 UA 行
+    //
+    // 也就是说这个方案在 Firefox 上**不成立**，不是少写了一行。在安卓上发桌面 UA
+    // 就是「安卓的 TLS 指纹配 Linux 桌面的 UA」，正是规范那句禁令针对的东西。
+    for (const ua of [
+      'Mozilla/5.0 (Android 14; Mobile; rv:141.0) Gecko/141.0 Firefox/141.0',
+      'Mozilla/5.0 (Android 14; Tablet; rv:141.0) Gecko/141.0 Firefox/141.0',
+    ]) {
+      assert.equal(desktopUserAgent(ua), null, ua);
+    }
+  });
+
+  test('Firefox 桌面本来就拿得到桌面版，更不该动', () => {
     assert.equal(
-      desktopUserAgent('Mozilla/5.0 (Android 14; Mobile; rv:141.0) Gecko/141.0 Firefox/141.0')
-        ?.userAgent,
-      'Mozilla/5.0 (Android 14; rv:141.0) Gecko/141.0 Firefox/141.0',
+      desktopUserAgent('Mozilla/5.0 (X11; Linux x86_64; rv:141.0) Gecko/20100101 Firefox/141.0'),
+      null,
     );
   });
 
@@ -101,7 +118,8 @@ describe('从真实 UA 推桌面 UA', () => {
   test('删完还认得出手机标记的话，一律不动', () => {
     // 防的是「删了一个还剩一个」——那说明这个形状不是我们以为的那个，
     // 而发一个没量过的 UA 出去比不支持这台设备糟糕得多。
-    const twice = 'Mozilla/5.0 (Android 14; Mobile; rv:1.0) Gecko Firefox/1.0 Mobile Safari';
+    const twice =
+      'Mozilla/5.0 (Linux; Android 14; X) AppleWebKit/537.36 Chrome/151.0.0.0 Mobile Mobile Safari/537.36';
     assert.equal(desktopUserAgent(twice), null);
   });
 });
@@ -188,7 +206,8 @@ describe('安装', () => {
   test('认出是手机但不认识形状时，理由要说得出来', async () => {
     const r = await installDesktopUaRule({
       dnr: { updateSessionRules: async () => {} },
-      userAgent: 'Mozilla/5.0 (Android 14; Mobile; rv:1.0) Gecko Firefox/1.0 Mobile Safari',
+      userAgent:
+        'Mozilla/5.0 (Linux; Android 14; X) AppleWebKit/537.36 Chrome/151.0.0.0 Mobile Mobile Safari/537.36',
     });
     assert.equal(r.installed, false);
     assert.match(r.reason, /不猜/);

@@ -43,8 +43,9 @@
  * | 桌面 UA 后面**加**上 ` Mobile` | **www**（加了没用） |
  * | 桌面 UA 后面加上 ` iPhone` | m |
  * | 安卓**平板** Chromium UA（本来就没有 `Mobile`） | **www** |
- * | Firefox 安卓 `(Android 14; Mobile; rv:…)` | m |
- * | 同上去掉 `Mobile;` | **www** |
+ * | Firefox 安卓手机 `(Android 14; Mobile; rv:…)` | m |
+ * | Firefox 安卓**平板** `(Android 14; Tablet; rv:…)` | **m**（平板也跳） |
+ * | Firefox 桌面 `(X11; Linux x86_64; rv:…)` | www |
  *
  * 两个结论，都要紧：
  *
@@ -67,6 +68,11 @@
  *
  * **所以这个模块只会删词，永远不会拼一个 UA 出来。** 认不出来的形状就不动，
  * 并且如实说「没动」——猜一个 UA 比不支持这台设备糟糕得多。
+ *
+ * 这条判据同时**把 Firefox 安卓排除在外**，见下面 `MOBILE_TOKENS` 里那段：它那两种
+ * 真实形态（`Mobile;` / `Tablet;`）都会被跳到手机版，而唯一能拿到桌面版的是货真价实
+ * 的桌面 UA——在安卓上发它就正好是那句禁令针对的东西。**不是少写了一行，是这个方案
+ * 在 Firefox 上不成立。**
  *
  * ## 只改我们自己发的请求
  *
@@ -102,10 +108,27 @@ export const PAGE_HOST_FILTER = '||douban.com';
  */
 const MOBILE_TOKENS = [
   // 安卓 Chromium（Chrome / Edge / 三星浏览器…）：`… Chrome/151.0.0.0 Mobile Safari/537.36`
-  // 删掉之后就是同一个浏览器在**安卓平板**上的 UA。
+  //
+  // 删掉之后**恰好就是同一个浏览器在安卓平板上发的那一个**——实测过：平板 UA 本来就
+  // 没有这个词，而且它直接拿到 www.douban.com。这是这条规则唯一站得住的理由。
   { shape: / Mobile(?= |$)/, replace: '', note: '安卓 Chromium' },
-  // Firefox 安卓：`(Android 14; Mobile; rv:141.0)`
-  { shape: /(?<=[;(] )Mobile; /, replace: '', note: 'Firefox 安卓' },
+
+  // **Firefox 安卓不在这张表里，而这不是「还没做」。**
+  //
+  // 一度写了一条 `Mobile; ` 的判据。删掉确实能拿到桌面版（量过），但得到的
+  // `(Android 14; rv:141.0)` 是**任何 Firefox 都不会发的 UA**——Firefox 安卓只有
+  // 两种形态，而**两种都被跳到手机版**：
+  //
+  //     (Android 14; Mobile; rv:141.0)  → m.douban.com
+  //     (Android 14; Tablet; rv:141.0)  → m.douban.com     ← 平板也跳
+  //     (X11; Linux x86_64; rv:141.0)   → www.douban.com   ← 只有桌面那个行
+  //
+  // 也就是说，Firefox 安卓上**不存在**一个满足本文件那条不变量的 UA：能拿到桌面版的
+  // 只有货真价实的桌面 UA，而在安卓上发它就是「安卓的 TLS 指纹配 Linux 桌面的 UA」,
+  // 正是规范那句禁令针对的东西。这不是我们少写了一行，是这个方案在 Firefox 上不成立。
+  //
+  // 这一条留给 #11（Firefox 支持）的第 0 步去定，那时能在真机上量。现在写上等于一条
+  // 永远不会触发（Firefox 还不是宿主）、而且**头一句就是假的**的判据。
 ];
 
 /**
