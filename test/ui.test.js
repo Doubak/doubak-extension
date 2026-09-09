@@ -2096,3 +2096,21 @@ describe('一次只能选一个文件夹 —— 这话要在点开对话框之�
     }
   });
 });
+
+test('**带 hidden 的元素必须真的藏得住** —— 类上的 display 会默默盖掉它', async () => {
+  // 浏览器自带的 `[hidden] { display: none }` 特指度只有 0,1,0，跟一条 `.foo` 一样，
+  // 而作者样式表同分时赢。所以给类写了 `display` 之后，那个类上的 `hidden` 就**默默**
+  // 失效——`el.hidden = true` 照常执行，「HTML 里有 hidden」的断言照常通过，元素却
+  // 一直看得见。2026-09-09 真踩到了：导出卡片上那个「默认藏着」的选项框从第一天起
+  // 就一直露着，是从一张用户发来的截图上看出来的，不是从测试上。
+  const css = await readRepoFile('src/ui/panel.css');
+  assert.match(css, /\[hidden\]\s*\{[^}]*display:\s*none\s*!important/,
+    'panel.css 里必须有一条兜住全部的 [hidden]，否则任何一条类上的 display 都能盖掉它');
+
+  // 再顺着真实用法查一遍：HTML 里每一个带 hidden 的元素，它的类都不许在别处被写上
+  // display——除非那条兜底规则在，而上面已经断言过了。这一条是为了「兜底被人删掉」
+  // 之外的情形：有人把兜底改成不带 !important 时，这里给出的是具体是哪个元素。
+  const html = await readRepoFile('src/ui/panel.html');
+  const 带hidden = [...html.matchAll(/<(\w+)([^>]*\bhidden\b[^>]*)>/g)];
+  assert.ok(带hidden.length >= 3, `只扫到 ${带hidden.length} 个带 hidden 的元素，正则多半坏了`);
+});

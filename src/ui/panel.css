@@ -133,6 +133,18 @@ nav button[aria-selected="true"] {
 }
 
 main { padding: var(--s5) var(--s5) 60px; max-width: 1000px; }
+/* **任何带 hidden 的元素都必须真的看不见。**
+ *
+ * 浏览器自带的 `[hidden] { display: none }` 特指度只有 0,1,0，跟一条 `.foo` 一样——
+ * 而作者样式表在同分时赢。于是任何给某个类写了 `display` 的规则，都会**默默地**
+ * 让那个类上的 `hidden` 属性失效：JS 里 `el.hidden = true` 照常执行、测试里
+ * 「HTML 上有 hidden」也照常通过，元素却一直看得见。
+ *
+ * 这个文件里原来只有 `section[hidden]` 一条，是给标签页补的——也就是说这个坑踩过
+ * 一次，只是当时按住了一种元素。2026-09-09 又踩了一次：`.opt { display: flex }`
+ * 让导出卡片上那个「默认藏着、碰上才露面」的选项框从第一天起就一直露着。
+ * 所以改成兜住全部，`!important` 在这里是对的：这不是版式偏好，是「藏起来」的定义。 */
+[hidden] { display: none !important; }
 section[hidden] { display: none; }
 h2 { font-size: 14.5px; margin: var(--s5) 0 var(--s2); }
 h2:first-child { margin-top: 0; }
