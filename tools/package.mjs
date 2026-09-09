@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 /**
- * 打一个可以上传到 Chrome 应用商店的 zip。
+ * 打一个可以上传到应用商店的 zip。
  *
- *   node tools/package.mjs            # 产出 dist/doubak-<版本>.zip
- *   node tools/package.mjs --list     # 只列要打进去的文件，不写盘
- *   node tools/package.mjs --stage D  # 把同一份名单摊到目录 D（给「加载已解压的扩展程序」用）
+ *   node tools/package.mjs                      # dist/doubak-<版本>.zip（Chrome / Edge）
+ *   node tools/package.mjs --firefox            # dist/doubak-<版本>-firefox.zip（AMO）
+ *   node tools/package.mjs --list               # 只列要打进去的文件，不写盘
+ *   node tools/package.mjs --stage D            # 把同一份名单摊到目录 D（直接加载用）
+ *
+ * `--firefox` 与后两个都能叠加。两个目标共用**同一份**文件名单，差别只有
+ * `TARGETS` 表里那三格（用哪份 manifest、文件名后缀、去掉哪几个文件）。
  *
  * ## 为什么需要一个脚本
  *
@@ -189,7 +193,11 @@ if (stageAt !== -1) {
   }
   console.log(`${dest}`);
   console.log(`  ${files.length} 个文件 · ${(bytes / 1024 / 1024).toFixed(2)} MB`);
-  console.log('  这个目录可以直接用 chrome://extensions 的「加载已解压的扩展程序」打开。');
+  console.log(targetName === 'firefox'
+    // 说的是**这一个目标**该怎么装。两句都印的话，人得先判断哪句是给自己的，
+    // 而这行字存在的理由正是省掉那一步。
+    ? '  用 about:debugging 的「临时载入附加组件…」，选这个目录里的 manifest.json。'
+    : '  这个目录可以直接用 chrome://extensions 的「加载已解压的扩展程序」打开。');
   process.exit(0);
 }
 

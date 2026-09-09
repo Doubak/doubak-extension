@@ -8,8 +8,20 @@ name: package
 # 以后也仍然可行。但那要求先 clone 整个仓库——`test/` 里有真实账号的用户名与 uid，
 # `docs/` 有几十页文档，都不是装扩展需要的东西。
 #
-# 这里产出的是**照 tools/package.mjs 那份白名单挑过的那 89 个文件**，和上传应用商店
-# 的是同一份名单（名单只有一份，见那个脚本的注释）。
+# 这里产出的是**照 tools/package.mjs 那份白名单挑过的文件**，和上传应用商店的是
+# 同一份名单（名单只有一份，见那个脚本的注释）。
+#
+# ## 两个商店，两个包，同一份名单
+#
+# Chrome / Edge 收 `manifest.json`（`background.service_worker` + `offscreen` 权限）；
+# AMO 收 `manifest.firefox.json`（`background.scripts`，去掉 `offscreen`，加
+# `browser_specific_settings.gecko`），并且少两个在那边永远走不到的文件。
+# 差别全在 `tools/package.mjs` 的 `TARGETS` 表里，**这里一个字都不重复**——
+# CI 里另写一份文件名单，漂移的方向就是「shipped test/」，而那里面有真实账号的
+# 用户名与 uid。
+#
+# **两个包每次推送都打。** 只在发版当天才第一次打 Firefox 那个的话，它就会在最不该
+# 出问题的那天第一次出问题——这正是下面那条「每次推送都打」的理由，只是多了一个目标。
 #
 # ## 不给每个提交发 release
 #
@@ -59,22 +71,54 @@ jobs:
       #
       # **每次推送都打**，哪怕平时没人下载它：打 zip 这条路要是只在发版当天才第一次
       # 跑，它就是在最不该出问题的那天第一次出问题。
-      - name: 打 zip（给应用商店）
+      # `manifest.firefox.json` 是**算出来的**，不是手写的。先核对再打包：手改过的
+      # 那份能装、能跑，只是与 Chrome 那份悄悄分了家——而分家的方向是「Firefox 那份
+      # 少了一个新权限」，症状是装得上、某个功能不工作。
+      #
+      # `npm test` 里也有同一条，但那是另一个工作流：**这一份是发出去的东西，它的
+      # 检查得跟着它自己走。**
+      - name: manifest.firefox.json 必须是算出来的那一份
+        run: node tools/make-manifest.mjs --check
+
+      - name: 打 zip（Chrome / Edge 应用商店）
         run: node tools/package.mjs
 
-      # 摊成目录（给「加载已解压的扩展程序」）。
+      - name: 打 zip（AMO）
+        run: node tools/package.mjs --firefox
+
+      # 摊成目录（给「加载已解压的扩展程序」/「临时载入附加组件」）。
       #
-      # 与上一步不是重复：应用商店收 zip，chrome://extensions 的「加载已解压」要目录。
+      # 与上一步不是重复：商店收 zip，而 `chrome://extensions` 的「加载已解压」要目录，
+      # `about:debugging` 的「临时载入附加组件」要目录里的 `manifest.json`。
       # GitHub 会把上传的目录再压一层，所以下载下来解压出的就是可直接加载的那个目录。
-      - name: 摊成可直接加载的目录
+      - name: 摊成可直接加载的目录（Chrome / Edge）
         run: node tools/package.mjs --stage dist/unpacked
 
-      - name: 上传（解压即可加载）
+      - name: 摊成可直接加载的目录（Firefox）
+        run: node tools/package.mjs --firefox --stage dist/unpacked-firefox
+
+      - name: 上传（Chrome / Edge，解压即可加载）
         uses: actions/upload-artifact@v4
         with:
           name: doubak-${{ steps.v.outputs.version }}-unpacked
           path: dist/unpacked/
           if-no-files-found: error
+
+      - name: 上传（Firefox，解压即可临时载入）
+        uses: actions/upload-artifact@v4
+        with:
+          name: doubak-${{ steps.v.outputs.version }}-firefox-unpacked
+          path: dist/unpacked-firefox/
+          if-no-files-found: error
+
+      # AMO 会拿 web-ext lint 的结果卡上架，所以**在这儿撞，别在提交那天撞**。
+      # 验的是**打好的那个包**，不是仓库：仓库根上放的是 Chrome 那份 manifest，
+      # 而发出去的不是它。
+      #
+      # 版本钉死。`npx web-ext`（不带版本）等于每次 CI 都从 npm 取一份当天的最新，
+      # 而这个项目连一个运行时依赖都不收——校验工具漂了，红绿就不再说明代码变了。
+      - name: web-ext lint（AMO 的门槛）
+        run: npx --yes web-ext@10 lint --source-dir dist/unpacked-firefox
 
       # 文件清单进运行摘要，不再单独传一份产物。
       #
@@ -85,17 +129,27 @@ jobs:
       # 真正有用的只有「这次打进去了哪些文件」，而那是一段文本，摘要页直接能看。
       - name: 清单写进运行摘要
         run: |
-          list="dist/doubak-${{ steps.v.outputs.version }}.files.txt"
+          v="${{ steps.v.outputs.version }}"
           {
-            echo "### 包内容 v${{ steps.v.outputs.version }}"
+            echo "### 包内容 v$v"
             echo
-            echo "<details><summary>$(wc -l < "$list") 个文件</summary>"
-            echo
+            # **两份的差异单独列一行。** 两个几百行的清单摆在一起，人是不会去逐行比的；
+            # 而这里唯一值得看的就是「两边差了哪几个文件」，那一行应当短到能一眼读完。
+            echo "两个包的差异："
             echo '```'
-            cat "$list"
+            diff "dist/doubak-$v.files.txt" "dist/doubak-$v-firefox.files.txt" || true
             echo '```'
             echo
-            echo '</details>'
+            for t in "" "-firefox"; do
+              list="dist/doubak-$v$t.files.txt"
+              echo "<details><summary>${t:+Firefox}${t:-Chrome / Edge}：$(wc -l < "$list") 个文件</summary>"
+              echo
+              echo '```'
+              cat "$list"
+              echo '```'
+              echo
+              echo '</details>'
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
       # 用 runner 自带的 gh，不引第三方 action。第三方 action 是供应链面，而这个
@@ -113,9 +167,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > dist/release-notes.md <<'EOF'
-          ## 怎么装
+          下面有**两个包，别装错**：`-firefox` 结尾的那个是给 Firefox 的，另一个是给 Chrome / Edge 的。两边的 manifest 不一样，装错了会直接加载失败。
 
-          下面那个 `.zip` 是给应用商店的格式，**Chrome 不能直接装 zip**。请：
+          ## Chrome / Edge
+
+          那个 `.zip` 是给应用商店的格式，**Chrome 不能直接装 zip**。请：
 
           1. 下载并解压；
           2. 打开 `chrome://extensions`，右上角打开「开发者模式」；
@@ -123,12 +179,25 @@ jobs:
 
           Edge 同理（`edge://extensions`）。
 
+          ## Firefox
+
+          1. 下载 `-firefox.zip` 并解压；
+          2. 打开 `about:debugging#/runtime/this-firefox`；
+          3. 点「临时载入附加组件…」，选解压出来那个目录里的 `manifest.json`。
+
+          「临时载入」的意思就是字面意思：**关掉浏览器就没了**，但抓下来的档案还在（下次载入还能接着增量抓）。上架 AMO 之前只有这一条路。
+
+          Firefox 上导出得到的是一个 zip，不是一个文件夹——那边没有「让网页往你选的文件夹里写」这个接口。解开之后与 Chrome 导出的完全一样，搬回来、喂给解析器用的都是解开后的那个文件夹。
+
+          ---
+
           装好之后点扩展图标，面板里有一步步的指引。抓下来的东西只待在你自己的浏览器里，在你把它导出到本机文件夹之前，不会去任何别的地方。
 
           ---
           EOF
           gh release create "$GITHUB_REF_NAME" \
             "dist/doubak-${{ steps.v.outputs.version }}.zip" \
+            "dist/doubak-${{ steps.v.outputs.version }}-firefox.zip" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
             --notes-file dist/release-notes.md
