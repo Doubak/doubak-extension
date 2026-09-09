@@ -124,6 +124,12 @@ export const SOURCES = [
     /** canonical → 投影 → Markdown。图片路径是传进来的，所以这几个是纯的。 */
     files: [
       'yaml.js',
+      // 「豆瓣上不公开的东西默认不发」的判据。**必须跟着一起搬**：命令行那边它由
+      // `generate.js` 调用，而 `generate.js` 是 I/O，不在名单里——只搬上面那几个纯
+      // 模块的话，扩展这条路会静默地把私密日记、私密豆列、只有自己看得见的广播
+      // 一起写进导出的 Markdown 树。这正是最初那条泄漏的同一形状：
+      // **规则在一个宿主上有，在另一个上没有。**
+      'private.js',
       'projection.js',
       'markdown.js',
       'search.js',

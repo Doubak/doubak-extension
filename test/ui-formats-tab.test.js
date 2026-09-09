@@ -670,3 +670,19 @@ test('**选了「私密」就把那个勾禁掉** —— 一个不起作用的�
   // 只禁不清：替用户把勾清掉是又一次替他拿主意，而他并没有改变那个意愿。
   assert.doesNotMatch(src, /export-neodb-unknown'\)\.checked = false/);
 });
+
+test('**Markdown 导出也要筛掉豆瓣上不公开的东西**', async () => {
+  // 这一条是被一次真实的疏漏逼出来的：命令行那边筛选在 `generate.js` 里，而
+  // `generate.js` 是 I/O、不在 vendor 名单上——于是判据搬过来了、调用没搬，
+  // 扩展这条路照样把私密日记、私密豆列、只有自己看得见的广播写进 Markdown 树。
+  // **规则在一个宿主上有、在另一个上没有**，正是最初那条泄漏的同一形状。
+  const src = await read('src/pipeline/targets.js');
+  assert.match(src, /project\(withoutPrivate\(data, \{ includePrivate \}\)\)/,
+    'buildMarkdown 必须先筛再投影');
+  assert.match(src, /from '\.\.\/vendor\/site-generator\/private\.js'/,
+    '判据必须是搬过来的那一份字节，不许在这儿另写一个');
+
+  // 判据本身也得真的在 vendor 名单里，否则上面那个 import 指向一个会过期的副本。
+  const list = await read('tools/sync-vendor.mjs');
+  assert.match(list, /'private\.js',/);
+});

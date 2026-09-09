@@ -21,6 +21,7 @@ import { project } from '../vendor/site-generator/projection.js';
 import { buildPages } from '../vendor/site-generator/pages.js';
 import { canonicalFiles } from './run.js';
 import { indexImages, exportImages, reallyMissing } from './images.js';
+import { withoutPrivate } from '../vendor/site-generator/private.js';
 
 const enc = new TextEncoder();
 
@@ -114,8 +115,14 @@ export async function buildNeodb(data, options = {}) {
  *   图片直接流出去，不在内存里攒——一份真实档案有 3000 多张
  * @param {(p: {done: number, total: number}) => void} [opts.onImageProgress]
  */
-export async function buildMarkdown(data, { sources, write, onImageProgress }) {
-  const p = project(data);
+export async function buildMarkdown(data, { sources, write, onImageProgress, includePrivate = false }) {
+  // **筛掉豆瓣上不公开的东西，与命令行那边同一份判据。**
+  //
+  // 命令行那边这一步在 `generate.js` 里，而 `generate.js` 是 I/O、不在 vendor 名单
+  // 上——所以这一行必须自己写，而**判据本身**（`withoutPrivate`）是搬过来的同一份
+  // 字节。少了它，扩展这条路会静默地把私密日记、私密豆列、只有自己看得见的广播
+  // 一起写进导出的 Markdown 树，而那正是「一条规则只在一个宿主上生效」的老毛病。
+  const p = project(withoutPrivate(data, { includePrivate }));
 
   // 想要哪些图：封面、正文内嵌的、广播附图。**广播附图是用户自己上传的**，
   // 比封面更不可替代——封面豆瓣还有一份，这些没有第二处。
