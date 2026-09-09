@@ -245,15 +245,19 @@
               ⚠ 日记导出到 NeoDB 会变成「文章」，公开的会被联邦同步到别的实例去，并且无法撤回。
               在豆瓣上已经设成私密的日记将不受影响，将继续保持私密状态。
             </p>
+            <!-- **同属这一组，也一样常驻。**
+                 原来它默认藏着、只在「上一次导出发现了这种日记」时才露面——那是错的，
+                 而且不只是啰嗦：**`unsure` 是抽取器在解析那一刻的判断，不是档案的属性。**
+                 同一批冻住的 bundle，扩展升级换了抽取器就可能不再是 unsure；反过来豆瓣
+                 改版之后新抓的页面也可能变成 unsure。所以那个露面条件描述的是
+                 「档案 × 抽取器版本」这个组合，而不是用户的数据——升级一次它就会在用户
+                 可能正需要它的时候消失。常驻反而是诚实的。（这也解释了为什么它此前
+                 一直看得见：`.opt { display:flex }` 把 hidden 盖掉了，见 panel.css。） -->
+            <label class="opt" id="export-neodb-unknown-row">
+              <input type="checkbox" id="export-neodb-unknown">
+              将豆瓣上无法检测私密状态的日记导出成公开状态（默认为私密）
+            </label>
           </fieldset>
-          <!-- **这一条相反，默认藏着，只有真碰上才露面。** 它对绝大多数档案永远用不上
-               （看不出公不公开的日记极少见），常驻就是一个所有人都要读一遍、几乎没人
-               需要的开关；而真需要时它出现在那条 ⚠ 旁边。露面由上一次导出的结果决定，
-               见 formats.js。 -->
-          <label class="opt" id="export-neodb-unknown-row" hidden>
-            <input type="checkbox" id="export-neodb-unknown">
-            将豆瓣上无法检测私密状态的日记导出成公开状态（默认为私密）
-          </label>
           <div class="btn-row">
             <button class="act" id="export-neodb">导出…</button>
             <a href="https://neodb.social/users/data/" target="_blank" rel="noreferrer noopener">上传页面 ↗</a>

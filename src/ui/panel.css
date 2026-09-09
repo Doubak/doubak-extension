@@ -190,8 +190,11 @@ h2:first-child { margin-top: 0; }
    看起来像另一张卡片。 */
 .opt-group { border: 0; padding: 0; margin: var(--s3) 0; min-inline-size: 0; }
 .opt-group legend { padding: 0; font-weight: 600; font-size: 0.9em; }
+/* 组内一律靠紧，缩进对齐——这一组是**一个问题**，不是几个各自独立的开关。
+   那个复选框原来在 fieldset 外面，于是它的 `margin-top` 与整组的 `margin-bottom`
+   折叠成 `--s3`，看起来离上面那两个单选老远，像是另一件事。 */
 .opt-group .opt { margin: var(--s1) 0 var(--s1) var(--s2); }
-.opt-note { margin: var(--s1) 0 0; font-size: 0.85em; color: var(--muted); }
+.opt-note { margin: var(--s1) 0 var(--s1) var(--s2); font-size: 0.85em; color: var(--muted); }
 /* 卡片里的那一排还要与上面的文字拉开——「给出下一步」是这套界面的硬规则，
    所以它在样式上也该是卡片的一部分，不是散落在旁边的按钮。 */
 .card .actions { margin-top: var(--s3); }

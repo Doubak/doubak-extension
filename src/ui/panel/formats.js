@@ -426,15 +426,11 @@ function showResult(format, built, data, bundles) {
     : `写进了 ${format.dir}/，读的是扩展里全部 ${bundles} 份档案。`;
   el.append(where);
 
-  // **那个选项框只在真碰上的时候才露面。** 它对绝大多数档案永远用不上，常驻的话
-  // 就是一个所有人都要读一遍、几乎所有人都不需要的开关。而真碰上的时候，它就出现
-  // 在那条 ⚠ 旁边——上一次导出已经安全地收起来了，用户带着「是哪几篇、为什么」
-  // 这两个信息再决定要不要拨回去，比在什么都不知道的时候先勾一个框强得多。
-  // 露了就不再收回去：这一份档案里有这种日记这件事，不会因为换个格式导一次就消失。
-  const 说不准 = (built.report.restricted ?? []).filter((x) => x.by === 'unsure');
-  const optRow = $('export-neodb-unknown-row');
-  if (optRow && 说不准.length) optRow.hidden = false;
-
+  // 那个「读不出来的也公开」选项框**常驻**，这里不做任何显隐。
+  // 曾经的写法是「上一次导出发现了这种日记才露面」，那是错的：**`unsure` 是抽取器
+  // 在解析那一刻的判断，不是档案的属性**——同一批冻住的 bundle，扩展升级换了抽取器
+  // 就可能不再是 unsure。那个条件描述的是「档案 × 抽取器版本」这个组合，
+  // 于是升级一次，控件就会在用户可能正需要它的时候消失。
   for (const line of format.summary(built.report)) {
     const d = document.createElement('div');
     d.className = 'cap-sub';

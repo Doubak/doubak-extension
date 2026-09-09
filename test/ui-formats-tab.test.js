@@ -487,11 +487,19 @@ describe('不公开的日记要出现在导出卡片上', () => {
  * 站在安全那一边、平时不露面、露面的时候紧挨着解释它的那句话。
  */
 describe('看不出公不公开的那几篇日记，用户可以自己拨', () => {
-  test('选项框在 NeoDB 那张卡片里，而且默认藏着', async () => {
+  test('选项框常驻，而且跟上面那两个单选同属一组', async () => {
     const html = await read('src/ui/panel.html');
     const m = /<label class="opt" id="export-neodb-unknown-row"([^>]*)>/.exec(html);
     assert.ok(m, 'panel.html 里找不到那个选项框');
-    assert.match(m[1], /\bhidden\b/, '默认必须藏着：它对绝大多数档案永远用不上');
+    // **不许再藏。** 藏的那一版判据是「上一次导出发现了这种日记」，而
+    // `unsure` 是**抽取器在解析那一刻的判断，不是档案的属性**：同一批冻住的
+    // bundle，扩展升级换了抽取器就可能不再是 unsure。那个条件描述的是
+    // 「档案 × 抽取器版本」这个组合，于是升级一次控件就会在用户可能正需要它的
+    // 时候消失。（它此前也从没真藏住过——`.opt { display:flex }` 盖掉了 hidden。）
+    assert.ok(!/\bhidden\b/.test(m[1]), '这个选项框不许再默认藏起来');
+    // 必须在 fieldset 里面：它是「日记导出设置为」这一个问题的子项，不是另一件事。
+    const group = html.slice(html.indexOf('<fieldset class="opt-group">'), html.indexOf('</fieldset>'));
+    assert.ok(group.includes('export-neodb-unknown-row'), '得在那一组里面，否则版式上会离得老远');
     assert.match(html, /<input type="checkbox" id="export-neodb-unknown">/);
     // **这句话只许用用户在豆瓣上见过的词，而且要把默认值写在括号里。**
     // 上一版是「读不出隐私状态的那几篇，也按其它记录一样导出（不单独收紧）」——
@@ -534,13 +542,14 @@ describe('看不出公不公开的那几篇日记，用户可以自己拨', () =
     assert.equal(UNKNOWN_VISIBILITY_DEFAULT, 2, '读不出来的默认必须是仅提及者可见');
   });
 
-  test('露面由导出结果决定，而且只往「露出来」一个方向走', async () => {
+  test('**formats.js 里不许再有这个控件的显隐逻辑**', async () => {
+    // 显隐一旦跟「上一次导出的结果」挂钩，控件就在描述「档案 × 抽取器版本」这个
+    // 组合，而不是用户的数据——升级一次抽取器它就会消失，而那正是用户可能需要它的
+    // 时候。常驻反而是诚实的。
     const src = await read('src/ui/panel/formats.js');
-    assert.match(src, /restricted\s*\?\?\s*\[\]\)\.filter\(\(x\) => x\.by === 'unsure'\)/);
-    assert.match(src, /if \(optRow && 说不准\.length\) optRow\.hidden = false;/);
-    // **不许再藏回去。** 这一份档案里有这种日记，不会因为换个格式导一次就消失；
-    // 而一个刚刚出现过、又自己消失的控件，用户会以为是自己看错了。
-    assert.doesNotMatch(src, /optRow\.hidden = true/);
+    assert.doesNotMatch(src, /export-neodb-unknown-row/,
+      'formats.js 不该再碰这一行的显隐');
+    assert.doesNotMatch(src, /optRow/);
   });
 });
 
@@ -576,12 +585,17 @@ describe('日记导出设置为', () => {
     // **不许藏。** 与那个 unknown 选项框相反：日记是人人都有的东西，藏起来等于
     // 这条反馈里的人第二次也看不见。
     const group = card.slice(card.indexOf('<fieldset class="opt-group">'), card.indexOf('</fieldset>'));
-    assert.ok(!/\bhidden\b/.test(group), '这一组不许默认藏起来');
+    // **只看开标签。** 上一版扫的是整段，于是段里一句解释 `hidden` 的注释就把它绊倒了
+    // ——「这一组藏没藏」是开标签上的一个属性，不是「这段文字里有没有这个词」。
+    // 又一次「判据比要守的性质宽」，只是这次是测试自己犯的。
+    assert.ok(!/\bhidden\b/.test(/<fieldset[^>]*>/.exec(group)[0]), '这一组不许默认藏起来');
     // 默认是「公开」——保留现状，改的是可见性不是行为。
     assert.match(group, /id="export-neodb-notes-public" checked/);
     assert.doesNotMatch(group, /id="export-neodb-notes-private"[^>]*checked/);
     // 两档，不是三档：在一个不可逆的选择上，每多一档就多一种快速选错的方式。
-    assert.equal((group.match(/type="radio"/g) ?? []).length, 2);
+    assert.equal((group.match(/type="radio"/g) ?? []).length, 2, '两档，不是三档');
+    // 那个复选框也在这一组里（它是这个问题的子项），但它是 checkbox 不是第三档。
+    assert.equal((group.match(/type="checkbox"/g) ?? []).length, 1);
     assert.ok(card.indexOf('opt-group') < card.indexOf('id="export-neodb"'), '得排在导出按钮前面');
   });
 
