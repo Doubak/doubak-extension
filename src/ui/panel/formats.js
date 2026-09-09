@@ -53,6 +53,9 @@ import {
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
 import { parseLibrary } from '../../pipeline/run.js';
 import { buildCanonical, buildNeodb, buildMarkdown } from '../../pipeline/targets.js';
+// 请人去报一声的地址，与 CLI、包里那份说明共用同一个常量——同一个地址写三遍必然漂，
+// 而漂掉的那一份会把人送到一个空页面。
+import { FEEDBACK_URL } from '../../vendor/export-adapters/targets/neodb-ndjson.js';
 
 /** 正在跑的那一个。非 null 时其余按钮禁用。 */
 let running = null;
@@ -118,7 +121,9 @@ export const FORMATS = {
     button: 'export-neodb',
     name: 'NeoDB 导入包',
     dir: 'doubak-neodb',
-    build: (data) => buildNeodb(data),
+    // `unknownVisibility` 由卡片上那个选项框决定：不勾（默认）= 2 收起来，
+    // 勾上 = 0 跟基线走。**只影响「说不准」那一栏**，作者自己设成私密的恒为 2。
+    build: (data, o) => buildNeodb(data, { ...o, unknownVisibility: o?.unknownVisibility ?? 2 }),
     summary: (r) => [
       `标记 ${r.marks} 条`,
       `评分 ${r.ratings} · 短评 ${r.comments} · 标签 ${r.tags}`,
@@ -131,16 +136,36 @@ export const FORMATS = {
       // **两栏分开，因为处置正好相反。** 豆瓣锁掉的按公开导入（它本来就是公开的，
       // 是豆瓣把它关掉的），作者自己藏的收成仅提及者可见。合成一句话就是拿豆瓣的
       // 审查冒充用户的意愿——而这一版里，那还会让人以为自己没在往联邦上发东西。
-      ...(r.restricted?.length ? [
-        r.restricted.filter((x) => x.by === 'platform').length
-          ? `⚠ ${r.restricted.filter((x) => x.by === 'platform').length} 篇日记是被豆瓣锁成「仅自己可见」的，`
-            + '这一份按公开导入（它本来就是公开的）——注意会联邦出去，撤不回来'
-          : null,
-        r.restricted.filter((x) => x.by !== 'platform').length
-          ? `⚠ ${r.restricted.filter((x) => x.by !== 'platform').length} 篇日记在豆瓣上不公开，`
-            + '写成「仅提及者可见」——东西照样在你账号里，只是不对外'
-          : null,
-      ] : []),
+      //
+      // **三栏，不是两栏。** 「说不准」那一栏与作者自己藏的处置看着一样（都收起来），
+      // 但成因和下一步完全不同：那是我们没读出来，多半是豆瓣改了页面结构，而它是
+      // 唯一一栏用户能自己拨回去的。混进作者那一栏，用户会以为是自己当年设的。
+      ...(r.restricted?.length ? (() => {
+        const 锁 = r.restricted.filter((x) => x.by === 'platform');
+        const 藏 = r.restricted.filter((x) => x.by === 'author');
+        const 说不准 = r.restricted.filter((x) => x.by === 'unsure');
+        const 收成 = r.unknownVisibility === 0 ? '跟其它记录一样' : '「仅提及者可见」';
+        return [
+          锁.length
+            ? `⚠ ${锁.length} 篇日记是被豆瓣锁成「仅自己可见」的，`
+              + '这一份按公开导入（它本来就是公开的）——注意会联邦出去，撤不回来'
+            : null,
+          藏.length
+            ? `⚠ ${藏.length} 篇日记你自己在豆瓣上设成了「仅自己可见」，`
+              + '写成「仅提及者可见」——东西照样在你账号里，只是不对外'
+            : null,
+          说不准.length
+            ? `⚠ ${说不准.length} 篇日记读不出在豆瓣上公不公开，这一份写成${收成}`
+            : null,
+          // **碰上的人是唯一能告诉我们的人**，而那几页已经如实躺在他的档案里——
+          // 改好抽取器重跑就救得回来，不用重新抓豆瓣。不请的话它会一直安静地
+          // 按不公开处理下去，而「安静」正是这一条最贵的地方。
+          说不准.some((x) => x.why === 'unrecognized')
+            ? `🙏 其中有读不出来的，多半是豆瓣改了日记页的结构。麻烦到 ${FEEDBACK_URL} `
+              + '报一声（把日志里那条 note_visibility 告警贴上），改好之后重新导出就能救回来'
+            : null,
+        ];
+      })() : []),
     ].filter(Boolean),
     next: '把 neodb-ndjson-import.zip 传到 NeoDB 的「设置 → 数据 → 导入 NeoDB 备份」。'
       + '旁边那几个文件是给你看的，不用上传。',
@@ -295,7 +320,12 @@ async function runExport(kind) {
     const write = writerFor(root);
 
     progress('正在生成文件');
-    const built = await format.build(data, { sources, write });
+    const built = await format.build(data, {
+      sources, write,
+      // 不勾（默认）= 收起来；勾上 = 跟其它记录一样。**默认的那一边是安全的那一边**：
+      // 收错了用户在 NeoDB 那一页点一下就改回来，发错了 Article 联邦出去撤不回来。
+      unknownVisibility: $('export-neodb-unknown')?.checked ? 0 : 2,
+    });
 
     for (const [i, f] of built.files.entries()) {
       progress('正在写文件', i + 1, built.files.length);
@@ -379,6 +409,15 @@ function showResult(format, built, data, bundles) {
     ? `写进了 ${format.dir}/，读的是账号 ${account} 的 ${bundles} 份档案。`
     : `写进了 ${format.dir}/，读的是扩展里全部 ${bundles} 份档案。`;
   el.append(where);
+
+  // **那个选项框只在真碰上的时候才露面。** 它对绝大多数档案永远用不上，常驻的话
+  // 就是一个所有人都要读一遍、几乎所有人都不需要的开关。而真碰上的时候，它就出现
+  // 在那条 ⚠ 旁边——上一次导出已经安全地收起来了，用户带着「是哪几篇、为什么」
+  // 这两个信息再决定要不要拨回去，比在什么都不知道的时候先勾一个框强得多。
+  // 露了就不再收回去：这一份档案里有这种日记这件事，不会因为换个格式导一次就消失。
+  const 说不准 = (built.report.restricted ?? []).filter((x) => x.by === 'unsure');
+  const optRow = $('export-neodb-unknown-row');
+  if (optRow && 说不准.length) optRow.hidden = false;
 
   for (const line of format.summary(built.report)) {
     const d = document.createElement('div');

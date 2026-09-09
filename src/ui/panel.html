@@ -227,6 +227,14 @@
 ├─ neodb-needs-check.csv     ← 没能带走的那几条，及原因
 ├─ neodb-doulist-needs-check.csv
 └─ 怎么导入.md</pre>
+          <!-- **默认藏着，只有真碰上才露面。** 面板上第一个选项框，而它对绝大多数
+               档案永远用不上（读不出隐私状态的日记极少见）。常驻的话就是一个所有人
+               都要读一遍、几乎所有人都不需要的开关；而真需要的时候，它就出现在那条
+               ⚠ 旁边——决定和动作挨着。露面由上一次导出的结果决定，见 formats.js。 -->
+          <label class="opt" id="export-neodb-unknown-row" hidden>
+            <input type="checkbox" id="export-neodb-unknown">
+            读不出隐私状态的那几篇，也按其它记录一样导出（不单独收紧）
+          </label>
           <div class="btn-row">
             <button class="act" id="export-neodb">导出…</button>
             <a href="https://neodb.social/users/data/" target="_blank" rel="noreferrer noopener">上传页面 ↗</a>
@@ -414,6 +422,31 @@
         需要 Node 20 或更高版本。三个仓库均为零依赖、零构建步骤，
         <code>git clone</code> 之后即可运行，无需执行 <code>npm install</code>。
       </div>
+
+      <!-- **这一节是给导出包里那三行 ⚠ 兜底的。** 卡片上写得下的是「发生了什么」，
+           写不下的是「为什么」——而问「为什么我的日记被收起来了」的人会来帮助页找。 -->
+      <h2 id="note-visibility">导出到 NeoDB 时，日记的可见性</h2>
+      <p>
+        豆瓣上的「仅自己可见」有<b>两个方向相反的成因</b>，所以导出时分开处理：
+      </p>
+      <table>
+        <thead><tr><th>豆瓣上的状态</th><th>导出成什么</th><th>为什么</th></tr></thead>
+        <tbody>
+          <tr><td>公开</td><td>跟其它记录一样</td><td>—</td></tr>
+          <tr><td>你自己设成「仅自己可见」</td><td><b>仅提及者可见</b></td>
+            <td>东西照样在你账号里，一个字都不少，只是不对外。要不要公开，在 NeoDB 那一篇上自己决定。</td></tr>
+          <tr><td><b>被豆瓣锁成「仅自己可见」</b></td><td>跟其它记录一样</td>
+            <td>它之所以不公开，<b>恰恰因为它曾经是公开的</b>——是豆瓣把它关掉的。跟着一起收起来，这份存档就白存了。
+              注意 NeoDB 的日记会联邦出去，这一步撤不回来。</td></tr>
+          <tr><td><b>读不出来</b></td><td>默认<b>仅提及者可见</b>，可在卡片上拨</td>
+            <td>多半是豆瓣改了日记页的结构，抽取器认不出隐私容器了。「读不出来」不是「确认公开」，
+              所以默认收起来：收错了你点一下就改回来，发错了撤不回来。
+              碰上的话卡片上会出现一个选项框，也会请你到
+              <a href="https://github.com/Doubak/doubak-data-parser/issues" target="_blank" rel="noreferrer">GitHub</a>
+              报一声——那几页本来就在你的档案里，改好抽取器重新导出就能救回来，不用重新抓豆瓣。</td></tr>
+          <tr><td>影评、书评</td><td>跟其它记录一样</td><td>豆瓣没给它们这个设置，它们本来就挂在作品页上给所有人看。</td></tr>
+        </tbody>
+      </table>
 
       <h2>各标签页的用途</h2>
       <table>

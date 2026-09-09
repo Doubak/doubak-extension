@@ -16,6 +16,8 @@
  * @param {{neodb?: object, neodbCsv?: object, letterboxd?: object, goodreads?: object,
  *          doulists: number, multiRevisionMarks: number, shelfHistory?: boolean}} r
  */
+import { FEEDBACK_URL } from './targets/neodb-ndjson.js';
+
 export function instructions(r) {
   const L = [];
   L.push('# 怎么把这些文件导进去');
@@ -72,36 +74,68 @@ export function instructions(r) {
         L.push('  不想这样的话，加 `--visibility=2` 重新导出，或者导入后在 NeoDB 那一篇上改。');
         L.push('');
       }
-      if (藏.length) {
-        L.push(`✦ **有 ${藏.length} 篇日记在豆瓣上不公开，这一份里写的是 \`visibility=2\``);
-        L.push('（仅提及者）**，不跟上面那个基线走。');
+      // **作者自己藏的和「说不准」的分成两栏。** 前者恒为 2，后者由
+      // `--unknown-visibility` 说了算——合成一栏的话，用户把它调成 0 之后，
+      // 「只是不对外可见」这句话对作者那几篇仍然成立、对这几篇却成了假话。
+      const 作者藏的 = 藏.filter((x) => x.by === 'author');
+      const 说不准 = 藏.filter((x) => x.by !== 'author');
+      if (作者藏的.length) {
+        L.push(`✦ **有 ${作者藏的.length} 篇日记是你自己在豆瓣上设成「仅自己可见」的，`);
+        L.push('这一份里写成 `visibility=2`（仅提及者）**，不跟上面那个基线走。');
         L.push('');
-        for (const x of 藏) {
-          // `unsure` 的两个成因**下一步动作正好相反**，写成一句就必然把一半人
-          // 支去做一件做不成的事：老档案重跑一次解析器就有了，而豆瓣改版那种
-          // 重跑多少次都还是认不出来，要改的是抽取器。
-          L.push(x.by === 'author'
-            ? `  · ${x.title} —— 你自己设成了「仅自己可见」`
-            : x.why === 'unrecognized'
-              ? `  · ${x.title} —— **这一篇的隐私状态没能读出来**（多半是豆瓣改了页面结构），`
-                + '按不公开处理'
-              : `  · ${x.title} —— 这份 canonical 里没有可见性字段（旧档案），按不公开处理`);
-        }
+        for (const x of 作者藏的) L.push(`  · ${x.title}`);
         L.push('');
         L.push('**东西照样在你账号里，一个字都不少**，只是不对外可见。要不要公开，在 NeoDB');
         L.push('那一篇自己的页面上改，那是只有你能决定的事。');
         L.push('');
-        if (藏.some((x) => x.why === 'legacy')) {
-          L.push('  标着「旧档案」的那几篇：**重新跑一次解析器就有了**，这三个字段是解析器');
-          L.push('  0.12.0 才开始写的，页面本来就在档案里。');
-        }
-        if (藏.some((x) => x.why === 'unrecognized')) {
-          L.push('  标着「没能读出来」的那几篇：**重跑解析器救不回来**——豆瓣多半改了日记页的');
-          L.push('  结构，抽取器认不出隐私容器了。解析时会有一条 `note_visibility` 告警，里面');
-          L.push('  带着那一页上长得像隐私标记的类名，是修抽取器的线索。在那之前它们按不公开');
-          L.push('  处理，因为「认不出来」不是「确认公开」。');
+      }
+      if (说不准.length) {
+        // 照实说这一份里写成了几——`--unknown-visibility` 能改，写死 2 就会在
+        // 用户改过之后变成一句假话，而这一段的全部作用就是让人知道发生了什么。
+        // **整句拼，不要拼加粗记号**：上一版把 `**` 拆在两个分支里拼，
+        // 其中一条分支上的记号是奇数个，Markdown 直接渲染错。
+        L.push(r.neodb.unknownVisibility === 0
+          ? `✦ **有 ${说不准.length} 篇日记读不出在豆瓣上公不公开，这一份里跟上面那个基线走**`
+            + '（`--unknown-visibility=0`）。'
+          : `✦ **有 ${说不准.length} 篇日记读不出在豆瓣上公不公开，这一份里写成 \`visibility=`
+            + `${r.neodb.unknownVisibility}\`（${r.neodb.unknownVisibility === 1 ? '仅关注者' : '仅提及者'}）**，`
+            + '不跟上面那个基线走。');
+        L.push('');
+        // 两个成因**下一步动作正好相反**，写成一句就必然把一半人支去做一件
+        // 做不成的事：老档案重跑一次解析器就有了，而豆瓣改版那种重跑多少次
+        // 都还是认不出来，要改的是抽取器。
+        for (const x of 说不准) {
+          L.push(x.why === 'unrecognized'
+            ? `  · ${x.title} —— **隐私状态没能读出来**（多半是豆瓣改了页面结构）`
+            : `  · ${x.title} —— 这份 canonical 里没有可见性字段（旧档案）`);
         }
         L.push('');
+        L.push('**「读不出来」不是「确认公开」**，所以默认按不公开处理：收错了你在 NeoDB');
+        L.push('那一页点一下就改回来，发错了 Article 联邦出去就撤不回来了。');
+        L.push('');
+        if (说不准.some((x) => x.why === 'legacy')) {
+          L.push('  标着「旧档案」的那几篇：**重新跑一次解析器就有了**，这三个字段是解析器');
+          L.push('  0.12.0 才开始写的，页面本来就在档案里。');
+          L.push('');
+        }
+        if (说不准.some((x) => x.why === 'unrecognized')) {
+          L.push('  标着「没能读出来」的那几篇：**重跑解析器救不回来**——豆瓣多半改了日记页的');
+          L.push('  结构，抽取器认不出隐私容器了。');
+          L.push('');
+          // **主动请人报一声。** 碰上的人是唯一能告诉我们的人，而那几页已经如实
+          // 躺在他自己的档案里——改好抽取器重跑就救得回来。不请的话它会一直安静地
+          // 按不公开处理下去，而「安静」正是这一条最贵的地方。
+          L.push(`  🙏 **麻烦到 ${FEEDBACK_URL} 报一声。**`);
+          L.push('  解析的时候会有一条 `note_visibility` 告警，里面带着那一页上长得像隐私标记的');
+          L.push('  类名——把它贴上就行。改好抽取器之后，你这份档案重跑一遍就能救回来，');
+          L.push('  **不用重新抓豆瓣**，那几页本来就在档案里。');
+          L.push('');
+        }
+        if (r.neodb.unknownVisibility !== 0) {
+          L.push('  确定这几篇本来就是公开的，用 `--unknown-visibility=0` 重新导出，');
+          L.push('  它们就跟基线走。');
+          L.push('');
+        }
       }
     }
     if (r.neodb.noLink) {

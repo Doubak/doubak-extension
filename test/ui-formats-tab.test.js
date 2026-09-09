@@ -402,9 +402,9 @@ describe('空档案', () => {
  */
 describe('不公开的日记要出现在导出卡片上', () => {
   /** 造一份 report，只填这条测试关心的部分。 */
-  const sum = (restricted) => FORMATS.neodb.summary({
+  const sum = (restricted, extra = {}) => FORMATS.neodb.summary({
     marks: 1, ratings: 0, comments: 0, tags: 0, reviews: 0, notes: 0, articles: 0,
-    collections: 0, shelfLogs: 0, restricted,
+    collections: 0, shelfLogs: 0, restricted, ...extra,
   }).join('\n');
 
   test('一篇都没有的时候，不多出一行', () => {
@@ -413,18 +413,47 @@ describe('不公开的日记要出现在导出卡片上', () => {
     assert.doesNotMatch(sum(undefined), /不公开|被豆瓣锁/);
   });
 
-  test('**豆瓣锁的与作者藏的必须分成两句** —— 处置正好相反', () => {
+  test('**三栏各说各的** —— 豆瓣锁的、作者藏的、读不出来的', () => {
     // 合成一句话就是拿豆瓣的审查冒充用户的意愿；在这一版里还更糟——
     // 豆瓣锁的那一篇是**按公开导入**的，混在「不对外可见」里说，
     // 会让人以为自己没在往联邦上发东西。
+    // 「读不出来」也得单独一栏：它与作者藏的处置看着一样（都收起来），但成因
+    // 和下一步完全不同，而且它是唯一一栏用户能自己拨回去的。混进作者那一栏，
+    // 用户会以为是自己当年设的。
     const t = sum([
       { title: 'a', by: 'platform' }, { title: 'b', by: 'platform' },
       { title: 'c', by: 'author' }, { title: 'd', by: 'unsure' },
     ]);
     assert.match(t, /2 篇日记是被豆瓣锁成「仅自己可见」的/);
     assert.match(t, /按公开导入/);
-    assert.match(t, /2 篇日记在豆瓣上不公开/);
+    assert.match(t, /1 篇日记你自己在豆瓣上设成了「仅自己可见」/);
+    assert.match(t, /1 篇日记读不出在豆瓣上公不公开/);
     assert.match(t, /仅提及者可见/);
+  });
+
+  test('**读不出来的那一栏要照实说这一次写成了几**', () => {
+    // 卡片上那个选项框能把它拨成「跟其它记录一样」。写死「仅提及者可见」的话，
+    // 用户勾了框之后这句话就成了假话——而这张卡片的全部作用就是让他知道
+    // 刚才发生了什么。
+    const one = [{ title: 'd', by: 'unsure', why: 'legacy' }];
+    assert.match(sum(one, { unknownVisibility: 2 }), /写成「仅提及者可见」/);
+    assert.match(sum(one, { unknownVisibility: 0 }), /写成跟其它记录一样/);
+  });
+
+  test('**读不出来的时候要请人去 GitHub 报一声，别的时候不要**', () => {
+    // 碰上的人是唯一能告诉我们的人，而那几页已经如实躺在他的档案里——
+    // 改好抽取器重跑就救得回来。但**一句永远在的求助等于没人看的求助**，
+    // 所以两个方向都要测。
+    assert.match(
+      sum([{ title: 'd', by: 'unsure', why: 'unrecognized' }]),
+      /github\.com\/Doubak\/doubak-data-parser\/issues/,
+    );
+    for (const r of [
+      [{ title: 'd', by: 'unsure', why: 'legacy' }],
+      [{ title: 'c', by: 'author' }],
+      [{ title: 'a', by: 'platform' }],
+      [],
+    ]) assert.doesNotMatch(sum(r), /doubak-data-parser\/issues/);
   });
 
   test('**公开导入那一句要带上「撤不回来」**', () => {
@@ -448,4 +477,66 @@ describe('不公开的日记要出现在导出卡片上', () => {
     // 日记根本没导出去的话，他会去做完全不同的事。
     assert.match(sum([{ title: 'a', by: 'author' }]), /照样在你账号里/);
   });
+});
+
+/**
+ * 「读不出隐私状态」那个选项框。
+ *
+ * 这是**面板上第一个选项框**——在它之前，整个界面一个 `<input>` 都没有，所有
+ * 行为都是写死的。所以这几条钉的不只是这一个控件，还有它周围那套判据：默认
+ * 站在安全那一边、平时不露面、露面的时候紧挨着解释它的那句话。
+ */
+describe('读不出隐私状态的那几篇，用户可以自己拨', () => {
+  test('选项框在 NeoDB 那张卡片里，而且默认藏着', async () => {
+    const html = await read('src/ui/panel.html');
+    const m = /<label class="opt" id="export-neodb-unknown-row"([^>]*)>/.exec(html);
+    assert.ok(m, 'panel.html 里找不到那个选项框');
+    assert.match(m[1], /\bhidden\b/, '默认必须藏着：它对绝大多数档案永远用不上');
+    assert.match(html, /<input type="checkbox" id="export-neodb-unknown">/);
+    // 必须在 NeoDB 那张卡片里、在导出按钮**前面**——决定和动作挨着，
+    // 而且是先看见选项再按导出。
+    const card = html.slice(html.indexOf('doubak-neodb/'), html.indexOf('结构化数据（canonical）'));
+    assert.ok(card.includes('export-neodb-unknown-row'), '得在 NeoDB 那张卡片里');
+    assert.ok(
+      card.indexOf('export-neodb-unknown-row') < card.indexOf('id="export-neodb"'),
+      '得排在导出按钮前面',
+    );
+  });
+
+  test('**不勾是收起来，勾上才放开** —— 默认站在安全那一边', async () => {
+    // 两个方向的代价差着一个量级：收错了用户在 NeoDB 那一页点一下就改回来，
+    // 发错了 Article 联邦出去撤不回来。所以默认值必须是收紧的那个。
+    // 突变验过：把三元的两支对调，这一条红。
+    const src = await read('src/ui/panel/formats.js');
+    assert.match(
+      src,
+      /unknownVisibility:\s*\$\('export-neodb-unknown'\)\?\.checked\s*\?\s*0\s*:\s*2/,
+      '不勾必须是 2（收起来），勾上才是 0（跟基线走）',
+    );
+  });
+
+  test('露面由导出结果决定，而且只往「露出来」一个方向走', async () => {
+    const src = await read('src/ui/panel/formats.js');
+    assert.match(src, /restricted\s*\?\?\s*\[\]\)\.filter\(\(x\) => x\.by === 'unsure'\)/);
+    assert.match(src, /if \(optRow && 说不准\.length\) optRow\.hidden = false;/);
+    // **不许再藏回去。** 这一份档案里有这种日记，不会因为换个格式导一次就消失；
+    // 而一个刚刚出现过、又自己消失的控件，用户会以为是自己看错了。
+    assert.doesNotMatch(src, /optRow\.hidden = true/);
+  });
+});
+
+test('**帮助页要讲清日记可见性的四种情形**', async () => {
+  // 卡片上写得下的是「发生了什么」，写不下的是「为什么」——而问「为什么我的
+  // 日记被收起来了」的人会来帮助页找。这一节缺席的话，那三行 ⚠ 就没有落脚处。
+  // 与「加了一个标签页，帮助页三处全没跟上」是同一条：都不会报错。
+  const html = await read('src/ui/panel.html');
+  const sec = html.slice(html.indexOf('id="note-visibility"'), html.indexOf('<h2>各标签页的用途</h2>'));
+  assert.ok(sec.length > 200, '帮助页里找不到那一节');
+  for (const 要有 of [
+    '你自己设成「仅自己可见」',   // 收成仅提及者
+    '被豆瓣锁成「仅自己可见」',   // 照常公开——这一条最反直觉，必须写出来
+    '读不出来',                   // 默认收起来，可拨
+    '影评、书评',                 // 不适用，不是不知道
+    'doubak-data-parser/issues',  // 请人报一声
+  ]) assert.ok(sec.includes(要有), `帮助页那一节没提到「${要有}」`);
 });

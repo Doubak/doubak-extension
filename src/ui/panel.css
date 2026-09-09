@@ -163,6 +163,15 @@ h2:first-child { margin-top: 0; }
  * 漏挂的那个会红。
  */
 .btn-row { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+/* 卡片里的选项。**面板上第一个选项框**，所以这条规则是新开的而不是抄来的。
+   `align-items: flex-start` 而不是 center：这行字会折行，居中会把方框吊到
+   两行之间；`margin-block` 与按钮行留开，免得看起来像按钮的一部分。 */
+.opt {
+  display: flex; align-items: flex-start; gap: var(--s1);
+  margin: var(--s2) 0; font-size: 0.9em; color: var(--muted);
+  cursor: pointer;
+}
+.opt input { margin-top: 0.15em; flex: none; }
 /* 卡片里的那一排还要与上面的文字拉开——「给出下一步」是这套界面的硬规则，
    所以它在样式上也该是卡片的一部分，不是散落在旁边的按钮。 */
 .card .actions { margin-top: var(--s3); }

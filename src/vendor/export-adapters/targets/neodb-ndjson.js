@@ -145,15 +145,42 @@ function line(obj) {
  *            sidecars: {name: string, text: string}[], report: object}}
  *   `files` 进 zip，`sidecars` 写在 zip 旁边——后者是给人看的，不会被导入。
  */
+/**
+ * 认不出隐私容器时，让人去报一声的地方。
+ *
+ * **抽取器在解析器那个仓库里，修也修在那儿**，所以指过去的是它而不是本仓库。
+ * 三个界面（CLI、包里那份说明、扩展的导出卡片）共用这一个常量：同一个地址写三遍
+ * 必然漂，而漂掉的那一份会把人送到一个空页面。
+ *
+ * 之所以要主动请人报：`unknown` 几乎只有一个成因——豆瓣改了日记页的结构——而
+ * **碰上的人是唯一能告诉我们的人**。那一页已经如实躺在他自己的档案里，改好抽取器
+ * 重跑就救得回来；没人报的话，它会一直安静地按不公开处理下去。
+ */
+export const FEEDBACK_URL = 'https://github.com/Doubak/doubak-data-parser/issues';
+
 export function buildNeodbNdjson(data, options = {}) {
-  const { shelfHistory = true, visibility = 0, generator = 'doubak-export-adapters' } = options;
+  const {
+    shelfHistory = true, visibility = 0, unknownVisibility = 2,
+    generator = 'doubak-export-adapters',
+  } = options;
   if (![0, 1, 2].includes(visibility)) {
     throw new Error(`visibility 只能是 0（公开）/ 1（仅关注者）/ 2（仅提及者），收到 ${visibility}`);
   }
+  if (![0, 1, 2].includes(unknownVisibility)) {
+    throw new Error('unknownVisibility 只能是 0（跟基线走）/ 1（仅关注者）/ 2（仅提及者），'
+      + `收到 ${unknownVisibility}`);
+  }
   /** 0 的时候不写这个键：少一个键，服务端的默认就是公开，两边意思一样。 */
   const vis = visibility === 0 ? undefined : visibility;
+  // **`unknownVisibility=0` 的意思是「跟基线走」，不是「一律公开」。** 与豆瓣锁掉
+  // 的那一栏用同一个词：基线由 `visibility` 说了算，所以基线本身是 1 的时候，
+  // 「不单独收紧」得到的是 1 而不是 0。写成「强制公开」的话，`--visibility=1`
+  // 配上它就会把认不出来的那几篇发得**比别的记录还开**，而那是撤不回来的方向。
+  const unknownVis = unknownVisibility === 0 ? vis : unknownVisibility;
 
   const report = {
+    // 说明文件与卡片要照实说「这一份里写成了几」，所以把这次的取值带上。
+    unknownVisibility,
     marks: 0,
     ratings: 0,
     comments: 0,
@@ -401,12 +428,22 @@ export function buildNeodbNdjson(data, options = {}) {
     // 写它的，而两个方向的代价差着一个量级——把公开的收成 visibility=2，用户在
     // NeoDB 上点一下就能改回来；把私密的推上联邦，撤不回来。重跑一次解析器就没这
     // 一栏了。
-    const 谁定的 = f.restricted_by === 'platform' ? 'platform'
+    // **`platform` 要两个条件同时成立，不能只看 `restricted_by`。** 这一栏是唯一
+    // 会被公开导出的「不公开」，所以它的判据必须是正面证据：先判定为 `private`，
+    // 而且豆瓣自己那条通告在。只看 `restricted_by` 的话，`unknown` 配上一个
+    // `platform`（schema 上合法，我们的解析器不产出，但别的产出方或手改的
+    // canonical 可以）就会被当成豆瓣锁的、按公开发出去——正好绕过
+    // 「认不出来 ≠ 豆瓣锁的」这条，而绕过的方向是撤不回来的那个方向。
+    const 谁定的 = (f.visibility === 'private' && f.restricted_by === 'platform') ? 'platform'
       : f.visibility === 'private' ? 'author' : 'unsure';
     const 不公开 = piece.kind !== 'review' && f.visibility !== 'public';
     // 豆瓣锁的那一份照常走基线（`--visibility` 说了算），不单独收紧。
     const restricted = 不公开 && 谁定的 !== 'platform';
-    const pieceVis = restricted ? 2 : vis;
+    // **作者自己藏的恒为 2，只有「说不准」那一栏可调。** 作者的意思是明确的，
+    // 没有可商量的余地；而「说不准」是我们没读出来，用户比我们更清楚自己那几篇
+    // 日记到底公不公开，所以那一栏交回给他。开关只在这一栏起作用，就不可能被
+    // 用来把一篇**确认是作者藏起来的**日记发出去。
+    const pieceVis = !restricted ? vis : (谁定的 === 'unsure' ? unknownVis : 2);
     // **报告里两边都点名，连豆瓣锁的那一篇一起。** 它是被公开导出的那一篇，
     // 恰恰更该说——联邦出去撤不回来，而看的人得知道自己正在把什么重新发出去。
     // 带上网址：`unsure` 那一栏的下一步动作是**去看那一页**（多半是豆瓣改了 markup，
