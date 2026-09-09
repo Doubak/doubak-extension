@@ -537,6 +537,13 @@ ul.own li { margin: 2px 0; }
  * 是同一个道理。
  */
 .progress { margin-bottom: var(--s3); }
+/* 「停下」与进度文字并排：进度条整宽在上，下面一行左边说在干什么、右边是出口。
+   **不给它 tone-error 那种红**——按停不是出错，而一个红按钮会让人以为按下去
+   会毁掉什么。真正会毁掉东西的（删除）才用那个颜色。 */
+.progress > :last-child:is(button) { margin-top: var(--s2); }
+.progress:has(> button) { display: grid; grid-template-columns: 1fr auto; gap: 0 var(--s2); }
+.progress:has(> button) > progress { grid-column: 1 / -1; }
+.progress:has(> button) > .muted { align-self: center; }
 /* 原生 <progress> 的默认外观每个平台都不一样，所以整个重画。
    `appearance: none` 之后要靠伪元素上色，Chrome / Edge 是这两个。 */
 .progress progress {

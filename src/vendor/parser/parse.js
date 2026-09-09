@@ -89,7 +89,11 @@ const STATUS = { collect: 'done', do: 'doing', wish: 'wish' };
  *   因为「字节从哪儿来」本来就该各写各的。
  * @param {{parserVersion?: string, timezone?: string, ignoreWarnings?: boolean,
  *   skipCaptures?: Set<string>,
- *   onProgress?: (p: {done: number, total: number, phase: string}) => void}} [opts]
+ *   onProgress?: (p: {done: number, total: number, phase: string}) => void,
+ *   signal?: AbortSignal}} [opts]
+ *   `signal` 一旦 abort，逐页那个循环下一轮就抛 `已取消`（`error.name === 'AbortError'`），
+ *   **产出全部丢弃**——canonical 只活在内存里，所以取消不会留下半份东西。
+ *   两万页的档案在扩展里要跑好几分钟，没有它就叫不停。
  *   `ignoreWarnings` 只放行「混了多个账号」那一条，且照样把它写进 `warnings`。
  *   `skipCaptures` 是一组 capture_id，摄取时跳过——`bin/verify.js` 查出字节对不上的
  *   那几条走这里。**它是一个普通的 Set，不是一项新的宿主契约**，所以扩展那边
@@ -97,6 +101,23 @@ const STATUS = { collect: 'done', do: 'doing', wish: 'wish' };
  *   `onProgress` 给界面用：分母是本地 index 的行数，**是可信的**——那跟豆瓣的
  *   计数不是一回事（后者有时统计于审查之前、有时之后）。
  */
+/**
+ * 取消就抛，且抛得**认得出来**。
+ *
+ * `name` 设成 `AbortError`，与平台的 `AbortSignal.throwIfAborted()` 一致——调用方
+ * 要能把「用户按了停」与「解析真的出错了」分开：前者不该弹一张红色的失败卡片。
+ * 这里不直接用平台那个方法，是因为它抛的 `DOMException` 在 Node 里没有中文消息，
+ * 而这个消息会**原样出现在界面上**。
+ *
+ * @param {AbortSignal} [signal]
+ */
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const e = new Error('已取消');
+  e.name = 'AbortError';
+  throw e;
+}
+
 export async function parse(sources, opts = {}) {
   const parserVersion = opts.parserVersion ?? PARSER_VERSION;
   const tz = opts.timezone ?? 'Asia/Shanghai';
@@ -383,6 +404,7 @@ export async function parse(sources, opts = {}) {
     });
   }
 
+  throwIfAborted(opts.signal);
   work.sort((a, b) => (a.row.observed_at < b.row.observed_at ? -1 : 1));
 
   // **详情页必须全部先读完。**
@@ -406,6 +428,16 @@ export async function parse(sources, opts = {}) {
     // 进度只在这一处报。**它是逐页的**，而 work 已经排好序，所以调用方拿到的
     // 分母从头到尾不变——一个会变的分母比没有分母更糟。
     opts.onProgress?.({ done: done += 1, total: work.length, phase: 'parse' });
+
+    // 取消也只在这一处看。真实档案是**两万页**，而这个循环里没有一处会自己停下来
+    // ——扩展里按下「导出」之后就再也叫不停，只能等，或者关掉整个面板（那样连
+    // 已经打开的档案句柄都一起没了）。
+    //
+    // 检查放在**取字节之前**：`payload()` 要解压一整个段，放在它后面的话最坏还要
+    // 再等一次解压。而这个循环里没有任何要收尾的东西（没开文件、没占锁），
+    // 所以直接抛就是干净的——canonical 全在内存里，抛掉就没了，这正是想要的：
+    // **取消不留半份产物。**
+    throwIfAborted(opts.signal);
 
     let html;
     try {

@@ -71,6 +71,25 @@ import {
 /** 正在跑的那一个。非 null 时其余按钮禁用。 */
 let running = null;
 
+/**
+ * 正在跑的那次导出的取消器。
+ *
+ * 与 `running` 一对：`running` 答「有没有在跑」（禁按钮用），这个答「怎么叫停它」。
+ * 合成一个的话，「跑完了」与「还能不能停」就分不开了——而按钮是在 `finally` 里
+ * 才恢复的，中间那一小段仍然要能停。
+ *
+ * @type {AbortController | null}
+ */
+let aborter = null;
+
+/** 取消就抛，`name` 与 `pipeline/run.js`、解析器那边一致。 */
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const e = new Error('已取消');
+  e.name = 'AbortError';
+  throw e;
+}
+
 /** 选中要导哪个账号（`user_id`）。库里只有一个账号时是 null。 */
 let account = null;
 
@@ -241,6 +260,9 @@ function progress(text, done = 0, total = 0) {
   const bar = $('formats-bar');
   if (total) bar.value = Math.round((done / total) * 100);
   else bar.removeAttribute('value');
+  // **已经按了停就不要再改这行字。** 否则「正在停下来…」会被下一次进度盖掉，
+  // 界面又变回「正在解析 12345 / 18838」——看起来就像那一下没按上。
+  if (aborter?.signal.aborted) return;
   $('formats-progress-text').textContent = total ? `${text} ${done} / ${total}` : text;
 }
 
@@ -256,6 +278,13 @@ function setBusy(on, exceptId = null) {
     btn.disabled = on;
     if (on && f.button === exceptId) btn.textContent = '正在导出…';
     else if (!on) btn.textContent = '导出…';
+  }
+  // **「停下」也要恢复。** 按过一次之后它是禁用的、写着「正在停…」；不复位的话
+  // 下一次导出开始时那个按钮就是个死的，而它恰恰是这次唯一的出口。
+  const stop = $('formats-stop');
+  if (stop) {
+    stop.disabled = false;
+    stop.textContent = '停下';
   }
 }
 
@@ -287,6 +316,8 @@ async function runExport(kind) {
   /** @type {import('./destination.js').Destination | null} */
   let dest = null;
   running = kind;
+  // 一次只跑一个（见文件头第②条），所以「正在跑的那次」也只有一个。
+  aborter = new AbortController();
   setBusy(true, format.button);
   el.className = 'card tone-busy';
   el.textContent = `正在解析 ${entries.length} 份档案…`;
@@ -298,6 +329,7 @@ async function runExport(kind) {
     // `doubak-xxx/`，而一个空目录看起来像「导出过了，只是东西不见了」。
     const { data, sources } = await parseLibrary({
       entries,
+      signal: aborter.signal,
       openStore: (entry) => new WorkerFileStore({ worker: getOpfsWorker(), dir: entry.dir }),
       onProgress: (p) => {
         if (p.phase === 'open') progress('正在打开档案', p.done, p.total);
@@ -332,6 +364,10 @@ async function runExport(kind) {
     });
 
     for (const [i, f] of built.files.entries()) {
+      // 写这一段通常很快，但 Markdown 那一路要写几千张图。**停在这儿留下的是半份
+      // 产物**，与解析阶段不一样——所以下面 catch 里对 zip 那条路会把中转文件删掉，
+      // 而目录那条路只能如实说「写了一半」。
+      throwIfAborted(aborter.signal);
       progress('正在写文件', i + 1, built.files.length);
       await write(f.name, f.bytes);
     }
@@ -345,6 +381,24 @@ async function runExport(kind) {
     // 半截的中转文件不留在 OPFS 里——它不是档案，却会算进档案的配额。
     await dest?.abort().catch(() => {});
     hideProgress();
+
+    // **用户按了停，不是出错。** 一张红色的「导出失败」会让人以为自己弄坏了什么，
+    // 然后去查一个不存在的问题——这个项目为「一句正确的话指向错误的下一步」已经
+    // 付过几次代价。判据是 `name`，不是消息文本：文本会被翻译、会被改。
+    if (e?.name === 'AbortError') {
+      el.className = 'card tone-idle';
+      el.replaceChildren();
+      const b = document.createElement('b');
+      b.textContent = '已停下';
+      el.append(b, document.createTextNode(
+        dest && dest.kind !== 'zip'
+          // 目录那条路可能已经写进去几个文件了，如实说。
+          ? '已经写出去的文件留在你选的文件夹里，可能是不完整的一份——重新导一次会覆盖它们。'
+          : '什么都没有写出去。档案一个字节都没动，随时可以再导一次。',
+      ));
+      return;
+    }
+
     el.className = 'card tone-error';
     el.replaceChildren();
     const b = document.createElement('b');
@@ -369,6 +423,7 @@ async function runExport(kind) {
     }
   } finally {
     running = null;
+    aborter = null;
     setBusy(false);
   }
 }
@@ -582,6 +637,17 @@ export function initFormats() {
       void runExport(kind);
     });
   }
+
+  // **按下去就立刻改样子。** 解析那一轮最长要跑到下一页才检查 signal，中间这段
+  // 时间里按钮如果毫无反应，人会以为没按上，然后再按几下。
+  $('formats-stop').addEventListener('click', () => {
+    if (!aborter || aborter.signal.aborted) return;
+    aborter.abort();
+    const b = $('formats-stop');
+    b.disabled = true;
+    b.textContent = '正在停…';
+    $('formats-progress-text').textContent = '正在停下来（当前这一页读完就停）…';
+  });
 
   // **选了「私密」，那个「读不出来的也公开」就没有意义了，所以把它禁掉。**
   //

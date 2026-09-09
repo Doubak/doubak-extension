@@ -26,6 +26,22 @@ import { canonicalShape } from '../vendor/export-adapters/record.js';
 import { OpfsBundleSource } from './opfs-bundle-source.js';
 
 /**
+ * 取消就抛，`name` 与解析器那边一致。
+ *
+ * **不从 vendor 里 import 它**：那是 `parse.js` 的内部函数，不在导出面上。抄这四行
+ * 比把一个内部函数变成公开接口便宜——而两边一旦不一致，症状是界面把一次主动取消
+ * 显示成一张红色的「导出失败」，测试钉着这一条。
+ *
+ * @param {AbortSignal} [signal]
+ */
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const e = new Error('已取消');
+  e.name = 'AbortError';
+  throw e;
+}
+
+/**
  * 解析扩展存储里的全部档案。
  *
  * @param {object} opts
@@ -34,22 +50,47 @@ import { OpfsBundleSource } from './opfs-bundle-source.js';
  * @param {(entry: object) => object} opts.openStore  entry → 一个能 exists/read 的 store
  * @param {(p: {phase: string, done: number, total: number, note?: string}) => void} [opts.onProgress]
  * @param {boolean} [opts.ignoreWarnings] 只放行「混了多个账号」，且照样写进 warnings
+ * @param {AbortSignal} [opts.signal] 用户按了「停下」。逐页那个循环下一轮就抛
+ *   `AbortError`，产出全部丢弃——canonical 只活在内存里，所以取消不留半份东西。
  * @returns {Promise<{data: object, sources: object[]}>} `data` 是 `parse()` 的产出，外加 `subjectOf` / `account` /
  *   `multiRevisionMarks`——导出适配器要的是 `loadCanonical()` 那个形状，而它读的是
  *   目录，这边没有目录可读。
  */
-export async function parseLibrary({ entries, openStore, onProgress, ignoreWarnings = false }) {
+export async function parseLibrary({
+  entries, openStore, onProgress, ignoreWarnings = false, signal,
+}) {
   if (!entries.length) throw new Error('扩展里一份档案都没有');
 
-  onProgress?.({ phase: 'open', done: 0, total: entries.length });
+  // **按档案编号升序喂进去，与命令行那边逐字一致**（`bundle-source.js` 的 `openAll`
+  // 结尾那句 `.sort((a, b) => a.bundleId < b.bundleId ? -1 : 1)`）。
+  //
+  // 结论与顺序无关——那是解析器的既有性质，有测试钉着。但**产出的行顺序跟着插入
+  // 顺序走**，而插入顺序就是这里的喂入顺序。传进来的 `entries` 排的是**界面的序**：
+  // `listBundleDirs()` 是 `.sort().reverse()`（选择器要最新的在最上面），
+  // `entriesFor()` 又按账号分了组。于是同一批档案，命令行与扩展导出的
+  // `journal.ndjson` 内容一模一样、行序完全不同。
+  //
+  // 实测（2026-09-09，同一批 28 份真实档案）：内容逐条相同（两边独有的行各 0 条），
+  // 而保持原序逐行比有 27636 行对不上。**这不是「谁对谁错」，两份都对**——坏掉的是
+  // 「同样的档案产出同样的字节」，而这个项目正是靠读 diff 确认「这次只改了该改的」。
+  //
+  // 排序放在这儿而不是调用方：调用方排的是给人看的序，两件事在同一个数组上，
+  // 而下一个调用方不会知道还得再排一次。**界面的序到这里为止。**
+  const ordered = [...entries].sort((a, b) => (a.bundleId < b.bundleId ? -1 : 1));
+
+  onProgress?.({ phase: 'open', done: 0, total: ordered.length });
   const sources = [];
-  for (const [i, entry] of entries.entries()) {
+  for (const [i, entry] of ordered.entries()) {
+    // **打开这一段也要能停。** 二十几份档案，每份都要把 index 读进来解析（一份真实
+    // 档案九千多行），所以「还没开始解析」不等于「按了停就立刻停」。
+    throwIfAborted(signal);
     sources.push(await OpfsBundleSource.open({ store: openStore(entry), entry }));
-    onProgress?.({ phase: 'open', done: i + 1, total: entries.length, note: entry.bundleId });
+    onProgress?.({ phase: 'open', done: i + 1, total: ordered.length, note: entry.bundleId });
   }
 
   const out = await parse(sources, {
     ignoreWarnings,
+    signal,
     onProgress: (p) => onProgress?.({ phase: 'parse', done: p.done, total: p.total }),
   });
 
