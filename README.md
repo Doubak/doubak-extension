@@ -36,16 +36,25 @@
 
 ```sh
 npm test                       # 跑测试（Node 内置的测试运行器，不需要 npm install）
-node tools/package.mjs         # 打一个可上传应用商店的 zip → dist/
+node tools/package.mjs         # Chrome / Edge 的 zip → dist/doubak-<版本>.zip
+node tools/package.mjs --firefox               # AMO 的 zip → dist/doubak-<版本>-firefox.zip
 node tools/package.mjs --list  # 只看会打包哪些文件
 node tools/package.mjs --stage dist/unpacked   # 摊成一个可直接加载的目录
+node tools/make-manifest.mjs   # 重新生成 manifest.firefox.json（--check 只核对）
 ```
 
 需要 Node ≥ 20。
 
+**两个包，同一份文件名单。** 差别只有 `tools/package.mjs` 的 `TARGETS` 表里那三格：
+用哪份 manifest、文件名后缀、去掉哪两个在 Firefox 上永远走不到的文件
+（`host-offscreen.js` 与 `offscreen.html`）。`manifest.firefox.json` 是**算出来的**，
+手改会被测试打回——它与 Chrome 那份分家的方向是「Firefox 那份少了一个新权限」，
+症状是装得上、某个功能悄悄不工作。
+
 ### 装载到浏览器
 
-四条路，装出来是同一个扩展。
+四条路，装出来是同一个扩展。**Firefox 用的是另一个包**（`-firefox` 结尾的那个），
+两份 manifest 不一样，装错了是直接加载失败，而失败信息不会提到是拿错了包。
 
 **从 Chrome 应用商店装**（多数人走这条）：
 <https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
@@ -53,20 +62,36 @@ node tools/package.mjs --stage dist/unpacked   # 摊成一个可直接加载的�
 这里装。
 
 **下一个发布版**（不想走商店时）：从
-[Releases](https://github.com/Doubak/doubak-extension/releases) 拿 `doubak-<版本>.zip`，
-**解压**，然后 `chrome://extensions` → 打开开发者模式 → 加载已解压的扩展程序 → 选解压
-出来的那个目录。注意那份 zip 是应用商店的提交格式，**Chrome 不能直接装 zip**，必须先解压。
-它与商店里的是同一个包：同一条 CI 打出来，时间戳清零，逐字节相同。
+[Releases](https://github.com/Doubak/doubak-extension/releases) 拿 zip，**先解压**，
+然后按浏览器分两条路——那两份都是商店的提交格式，收件人是商店，不是浏览器：
 
-**从仓库直接装**：同样是「加载已解压的扩展程序」，选本仓库根目录。这个项目没有构建
-步骤，源码就是浏览器里跑的东西，所以这条路一直有效——代价是它带着 `test/` 和 `docs/`，
-不是分发出去的那份。
+| | 拿哪个 | 怎么装 |
+|---|---|---|
+| Chrome / Edge | `doubak-<版本>.zip` | `chrome://extensions` → 开发者模式 → 加载已解压的扩展程序 → 选解压出的目录 |
+| Firefox | `doubak-<版本>-firefox.zip` | `about:debugging#/runtime/this-firefox` → 临时载入附加组件… → 选目录里的 `manifest.json` |
+
+Chrome 那份与商店里的是同一个包：同一条 CI 打出来，时间戳清零，逐字节相同。
+Firefox 的「临时载入」是字面意思，**关掉浏览器就没了**；但 OPFS 里的档案还在，下次
+载入还能接着增量抓。AMO 上架之前只有这一条路（`#11`）。
+
+**从仓库直接装**：Chrome / Edge 同样是「加载已解压的扩展程序」，选本仓库根目录。
+这个项目没有构建步骤，源码就是浏览器里跑的东西，所以这条路一直有效——代价是它带着
+`test/` 和 `docs/`，不是分发出去的那份。**Firefox 走不了这一条**：仓库根上那份
+`manifest.json` 是 Chrome 形状的，载入时 Firefox 直接拒绝，原话是
+
+```
+Could not install add-on: background.service_worker is currently disabled.
+Add background.scripts.
+```
+
+先 `node tools/package.mjs --firefox --stage dist/unpacked-firefox`，再选那个目录里的
+`manifest.json`。
 
 **试 main 上还没发版的改动**：GitHub 的
 [Actions → package](https://github.com/Doubak/doubak-extension/actions/workflows/package.yml)
-里挑一次运行，下载 `doubak-<版本>-unpacked`，解压即可加载。它只有那 119 个运行时真正
-需要的文件。**下载构建产物需要登录 GitHub**（匿名取是 401），所以面向用户的地方一律
-指向 Releases。
+里挑一次运行，下载 `doubak-<版本>-unpacked`（Firefox 是 `-firefox-unpacked`），解压
+即可加载。里面只有运行时真正需要的文件。**下载构建产物需要登录 GitHub**（匿名取是
+401），所以面向用户的地方一律指向 Releases。
 
 发版流程见 [`docs/release.md`](docs/release.md)。
 
@@ -213,23 +238,26 @@ User-Agent 里那个手机标记去掉**。三条边界：
 **导入**也做完了：换机器、清过站点数据之后，以前导出的档案搬得回来，
 之后照样能增量抓取——否则「导出之后可以安全删除」这句话只成立一半。
 
-测试：`npm test`（零安装即可跑，78 个测试文件、1728 个测试）。装了可选开发依赖后会额外用
+测试：`npm test`（零安装即可跑，85 个测试文件、1888 个测试）。装了可选开发依赖后会额外用
 webrecorder 的 warcio 独立验证 WARC 输出；同级目录有 `doubak-data-specs`
 时会额外跑跨仓库一致性检查（规范常量的新鲜度、产出与校验器的一致性）。
 
-## 发布到 Chrome 应用商店
+## 发布到应用商店
 
-**已上架**：<https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
+- **Chrome 应用商店**：已上架 <https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
+- **AMO（Firefox）**：还没上架（[`#11`](https://github.com/Doubak/doubak-extension/issues/11)）。
+  提交要用的那几样（扩展 id、联系邮箱、版本下限）在 [`docs/firefox.md`](docs/firefox.md)。
 
 完整流程（改版本号 → 打标签 → CI 建 release → 核对哈希）在
-[`docs/release.md`](docs/release.md)。打了 `v*` 标签之后 release 上挂的那份 zip 就是提交
-用的，不需要另外打。想在本地打一份：
+[`docs/release.md`](docs/release.md)。打了 `v*` 标签之后 release 上挂的**两份** zip 就是
+提交用的，不需要另外打。想在本地各打一份：
 
 ```sh
-node tools/package.mjs
+node tools/package.mjs            # dist/doubak-<版本>.zip
+node tools/package.mjs --firefox  # dist/doubak-<版本>-firefox.zip
 ```
 
-产出 `dist/doubak-<版本>.zip`。几件要知道的：
+几件要知道的：
 
 - **打包用白名单，不是黑名单。** 名单在 `tools/package.mjs` 的 `INCLUDE` 里。黑名单漏一条会**多打进去一个不该有的东西且没人发现**；白名单漏一条则是扩展装上就报错 —— 后者一眼就能看见。有测试守着 `test/` `tools/` `docs/` 不许进包。
 - **`selftest/` 必须打包进去。** 它没有被 `manifest.json` 引用，只被调试页那个按钮 `getURL` 打开 —— 漏了它，那个按钮就是个死链。

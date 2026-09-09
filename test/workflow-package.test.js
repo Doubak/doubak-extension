@@ -18,6 +18,62 @@ import { readFile } from 'node:fs/promises';
 
 const yml = () => readFile(new URL('../.github/workflows/package.yml', import.meta.url), 'utf8');
 
+const doc = (f) => readFile(new URL(`../${f}`, import.meta.url), 'utf8');
+
+describe('打包这件事的文档，跟着目标表走', () => {
+  /**
+   * 判据从 `TARGETS` 来，**不是抄一张目标清单**。
+   *
+   * 抄一张的话，加第三个目标（Safari？）时它照样全绿，而症状是「文档里没有这个包」
+   * ——那正是 2026-09-09 已经发生过一次的事：代码、manifest、测试都做完了，
+   * CI 和文档还只知道一个包，是仓库主人问了才发现的。
+   */
+  const targets = async () => {
+    const src = await doc('tools/package.mjs');
+    const table = src.slice(src.indexOf('const TARGETS = {'), src.indexOf('const targetName'));
+    return [...table.matchAll(/^ {2}(\w+): ?\{?/gm)].map((m) => m[1]);
+  };
+
+  test('目标表能读出来，而且不止一个 —— 读不出来的话下面几条全是空转', async () => {
+    const t = await targets();
+    assert.ok(t.length >= 2, `只读出 ${t.length} 个目标：${t}`);
+    assert.deepEqual(t.sort(), ['chrome', 'firefox']);
+  });
+
+  for (const f of ['README.md', 'docs/release.md']) {
+    test(`${f} 里每个目标都有它自己的打包命令`, async () => {
+      const text = await doc(f);
+      for (const t of await targets()) {
+        const cmd = t === 'chrome'
+          ? /node tools\/package\.mjs(?![\s\S]{0,3}--firefox)/
+          : new RegExp(`node tools/package\\.mjs --${t}`);
+        assert.match(text, cmd, `${f} 里没写 ${t} 那个包怎么打`);
+      }
+    });
+  }
+
+  test('两个商店在 README 与 release.md 里各有交代', async () => {
+    // 「上架了没有」是读者会立刻问的第一件事，而它两边不一样。
+    for (const f of ['README.md', 'docs/release.md']) {
+      const text = await doc(f);
+      assert.match(text, /chromewebstore\.google\.com/, `${f} 没提 Chrome 应用商店`);
+      assert.match(text, /AMO/, `${f} 没提 AMO`);
+    }
+  });
+
+  test('AMO 那几样只写在一处，别的地方指过去', async () => {
+    // 扩展 id 出现在两处就会分叉，而分叉的方向是「其中一处还写着旧的 id」——
+    // 那个字符串是 AMO 眼里「这是同一个扩展」的全部依据，改掉不会报错。
+    const home = await doc('docs/firefox.md');
+    assert.match(home, /doubak@doubak\.com/, 'firefox.md 里没有那个 id');
+    for (const f of ['README.md', 'docs/release.md', 'docs/store-listing.md']) {
+      const text = await doc(f);
+      assert.ok(!text.includes('doubak@doubak.com'), `${f} 里又抄了一份扩展 id`);
+      assert.match(text, /firefox\.md/, `${f} 没指向那一处`);
+    }
+  });
+});
+
 describe('打包工作流', () => {
   test('两个目标都打 zip', async () => {
     const s = await yml();
