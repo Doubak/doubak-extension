@@ -354,7 +354,9 @@ describe('service worker 那边要认这条缝', () => {
 
   test('错误码要能过 offscreen 那条边', async () => {
     // `reason` 是挂在 Error 上的，而消息通道只认 JSON——不显式带过去就只剩一句话。
-    const host = await readFile(new URL('../src/offscreen/host.js', import.meta.url), 'utf-8');
+    // 判据在**接缝**上，不在某一个宿主实现里：`withHost` 是两条路共用的那一层，
+    // 而「错误码要还原成异常」这件事两个浏览器上必须一模一样。
+    const host = await readFile(new URL('../src/runtime/host.js', import.meta.url), 'utf-8');
     assert.match(host, /err\)\.reason = r\.reason/, 'host 要把错误码装回 Error 上');
     const off = await readFile(new URL('../src/offscreen/offscreen.js', import.meta.url), 'utf-8');
     assert.match(off, /reason: typeof e\?\.reason === 'string'/, 'offscreen 要把错误码送过界');

@@ -53,7 +53,7 @@ import { installRefererRule } from './crawl/referer-rule.js';
 import { installDesktopUaRule } from './crawl/desktop-ua.js';
 import { preflightStorage } from './storage/quota.js';
 import { exportedKey } from './storage/storage-usage.js';
-import { ensureOffscreen, withOffscreen, serializeScope } from './offscreen/host.js';
+import { ensureHost, withHost, serializeScope } from './runtime/host.js';
 import {
   notifyNeedsAction, notifyDone, clearAttention, wireNotificationClicks, openPanel,
 } from './ui/notify.js';
@@ -129,7 +129,7 @@ function getSupervisor() {
         //
         // 每次都先确保 offscreen 在：「我上次建过了」这个念头在 service worker
         // 里本身就不可靠，它的内存随时清零。
-        await withOffscreen({ op: 'resume' });
+        await withHost({ op: 'resume' });
         await drive();
       },
       onBlocked: async (decision) => {
@@ -160,7 +160,7 @@ function getSupervisor() {
  * 所以先把它从 checkpoint 装回内存。**不驱动**——用户要的是处理失败，不是接着抓。
  */
 async function ensureRunLoaded() {
-  const st = await withOffscreen({ op: 'status' }).catch(() => null);
+  const st = await withHost({ op: 'status' }).catch(() => null);
   if (st?.status?.active) return true;
   const cp = await getRunStore().loadCheckpoint();
   if (!cp) return false;
@@ -174,7 +174,7 @@ async function ensureRunLoaded() {
   //
   // 用户看到的原本是「重试失败：当前未登录豆瓣」——像是重试功能坏了。
   try {
-    await withOffscreen({ op: 'resume' });
+    await withHost({ op: 'resume' });
   } catch (err) {
     const reason = /** @type {any} */ (err)?.reason;
     if (reason) {
@@ -188,7 +188,7 @@ async function ensureRunLoaded() {
 
 /** 推进一段有界的抓取，跑完就收尾。 */
 async function drive() {
-  const r = await withOffscreen({ op: 'drive' });
+  const r = await withHost({ op: 'drive' });
   debugLog('推进结果', JSON.stringify(r.result));
 
   // 软封锁挡住的条目**不能**当成跑完了。它们不在 unresolvedFailures 里（状态是
@@ -218,7 +218,7 @@ async function drive() {
     /** @type {any} */
     let fin;
     try {
-      fin = await withOffscreen({ op: 'finish', status: 'complete' });
+      fin = await withHost({ op: 'finish', status: 'complete' });
     } catch (err) {
       // **「已经没有进行中的抓取了」不是收尾失败。** 上面那道判断挡的是「收尾正在
       // 进行」，这里挡的是「收尾已经做完了」——同一条缝的两侧，两边都得认。
@@ -394,7 +394,7 @@ globalThis.chrome?.permissions?.onRemoved?.addListener(async (removed) => {
   try {
     const r = await checkHostAccess();
     if (!r || r.granted) return;
-    await withOffscreen({ op: 'pause', reason: HOST_PERMISSION_LOST }).catch(() => {}); // 它可能已经关了
+    await withHost({ op: 'pause', reason: HOST_PERMISSION_LOST }).catch(() => {}); // 它可能已经关了
     await getSupervisor().pauseRun(HOST_PERMISSION_LOST);
     await notifyNeedsAction(HOST_PERMISSION_LOST, { kv: getKv() });
   } catch (e) {
@@ -420,7 +420,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         case 'status': {
           const cp = await getRunStore().loadCheckpoint();
           // offscreen 不在就**不去建**——只是看一眼状态，没必要为此把它拉起来。
-          const st = await withOffscreen({ op: 'status' }).catch(() => null);
+          const st = await withHost({ op: 'status' }).catch(() => null);
           sendResponse({
             ok: true,
             // 「现在在不在跑」只有 offscreen 答得出（`busyWith` / `runner`）。这里
@@ -442,14 +442,14 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         }
 
         case 'chainDiff': {
-          const rd = await withOffscreen({ op: 'chainDiff', bundleId: msg.bundleId });
+          const rd = await withHost({ op: 'chainDiff', bundleId: msg.bundleId });
           sendResponse({ ok: true, diff: rd.diff });
           break;
         }
 
         case 'chain': {
           // 覆盖率页「合起来」那个视角。offscreen 读档案，这里只转发。
-          const r2 = await withOffscreen({ op: 'chain', bundleId: msg.bundleId });
+          const r2 = await withHost({ op: 'chain', bundleId: msg.bundleId });
           sendResponse({ ok: true, chain: r2.chain });
           break;
         }
@@ -468,7 +468,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           // `incremental` 只是**预告**：真正的下界要等身份确认之后才挑（判据是数字
           // uid，那时才知道）。所以这里问的是「有没有可用的基准」，界面措辞也照这个
           // 保守程度写。
-          const inc = await withOffscreen({ op: 'peekIncremental' }).catch(() => null);
+          const inc = await withHost({ op: 'peekIncremental' }).catch(() => null);
           sendResponse({
             ok: true,
             permissions: await checkHostAccess(),
@@ -498,10 +498,10 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
             );
           }
 
-          await ensureOffscreen();
+          await ensureHost();
           // 身份确认在 offscreen 那侧与 start 一起做——它们必须是一个临界区，
           // 否则两个「开始抓取」会各自发一次身份确认请求。
-          const started = await withOffscreen({
+          const started = await withHost({
             op: 'start',
             options: serializeScope(scopeToOptions(msg?.scope)),
             // 全量 / 增量 / 增量+重抓详情页。**默认增量，但由用户决定**。
@@ -519,7 +519,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           if (!cp) throw new Error('没有可恢复的抓取');
           // 全本 checkpoint 在档案里，offscreen 自己读（见上面 onResume 的说明）。
           try {
-            await withOffscreen({ op: 'resume' });
+            await withHost({ op: 'resume' });
           } catch (err) {
             // **「已经有一段在跑」不是「继续失败」。**
             //
@@ -545,7 +545,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
 
         case 'abort': {
           // 中止这次抓取。**不可逆**：之后不能再继续，界面上必须先确认过。
-          const m = await withOffscreen({ op: 'abort' });
+          const m = await withHost({ op: 'abort' });
           // 调度镜像也要清掉，否则心跳会一直想去恢复一份已经收尾的档案。
           await getSupervisor().finishRun();
           await clearAttention({ kv: getKv() });
@@ -556,7 +556,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         case 'pause':
           // 原因要带过去：档案里的 checkpoint 由 offscreen 写，而**那份才是**
           // 恢复时真正被读的。SW 这边的 `pauseRun` 只更新调度镜像。
-          await withOffscreen({ op: 'pause', reason: 'user_paused' });
+          await withHost({ op: 'pause', reason: 'user_paused' });
           await getSupervisor().pauseRun('user_paused');
           sendResponse({ ok: true });
           break;
@@ -579,7 +579,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           // 界面要能分开说——否则两种情况看起来都是「按了没反应」。
           const loaded = await ensureRunLoaded();
           const r = loaded
-            ? await withOffscreen({ op: 'retryFailed', routeKey: msg.routeKey })
+            ? await withHost({ op: 'retryFailed', routeKey: msg.routeKey })
             : { count: 0 };
           if (r.count > 0) {
             await clearAttention({ kv: getKv() });
@@ -593,7 +593,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           await ensureRunLoaded();
           // 用户看过失败清单之后决定「就这样收尾」。规范允许带着缺口 complete
           // （bundle/v1 §5.0），前提是每处缺口都如实记录、且该路线 advanced=false。
-          await withOffscreen({ op: 'finish', status: 'complete', acceptLeafGaps: true });
+          await withHost({ op: 'finish', status: 'complete', acceptLeafGaps: true });
           await getSupervisor().finishRun();
           await clearAttention({ kv: getKv() });
           sendResponse({ ok: true });
@@ -605,7 +605,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           // 用户可能点得很快，而消息也可能是从别处发来的。真正的检查在 offscreen
           // 那边（只有它知道现在在抓哪一份）。
           if (!msg.bundleId || !msg.dir) throw new Error('缺少 bundleId 或 dir');
-          await withOffscreen({ op: 'deleteBundle', bundleId: msg.bundleId, dir: msg.dir });
+          await withHost({ op: 'deleteBundle', bundleId: msg.bundleId, dir: msg.dir });
           // 删掉的正好是指针指向的那一份 → 指针成了悬空的，一起清掉。
           const cur = await getRunStore().loadCheckpoint();
           if (cur?.bundle_id === msg.bundleId) await getRunStore().clearCheckpoint();
@@ -634,7 +634,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         }
 
         case 'dryRun': {
-          const r = await withOffscreen({ op: 'dryRun', scenario: msg.scenario });
+          const r = await withHost({ op: 'dryRun', scenario: msg.scenario });
           sendResponse({ ok: true, result: r.result });
           break;
         }

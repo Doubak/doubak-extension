@@ -142,6 +142,66 @@ describe('offscreen document 的能力契约', () => {
   });
 });
 
+/**
+ * 只跟**静态** import。
+ *
+ * 与上面那个的区别正是这次接缝的全部要点：`runtime/host.js` 用**动态** import 挑
+ * 宿主，所以 Chrome 的 service worker **运行时根本不会加载** `host-page.js`
+ * （进而不会加载 `offscreen.js`）。要表达这条性质，就只能顺着静态图走——
+ * 跟着动态 import 走的话，两种写法看起来一模一样，而它们的运行时后果相反。
+ *
+ * @returns {string[]} 仓库相对路径
+ */
+function staticallyReachableFrom(entry) {
+  const seen = new Set();
+  const queue = [normalize(entry)];
+  while (queue.length) {
+    const file = queue.shift();
+    if (seen.has(file) || !existsSync(file)) continue;
+    seen.add(file);
+    const text = stripComments(readFileSync(file, 'utf8'));
+    for (const m of text.matchAll(/\bfrom\s*['"]([^'"]+)['"]/g)) {
+      if (m[1].startsWith('.')) queue.push(normalize(join(dirname(file), m[1])));
+    }
+  }
+  return [...seen];
+}
+
+describe('两个宿主，一道缝', () => {
+  const IMPLS = ['src/runtime/host-offscreen.js', 'src/runtime/host-page.js'];
+
+  test('两个实现导出的东西一模一样', () => {
+    // 少一个的话，症状是「换个浏览器某个操作就没反应」——而两边都不报错。
+    const shape = (f) => [...readFileSync(f, 'utf8').matchAll(/export\s+(?:async\s+)?function\s+(\w+)/g)]
+      .map((m) => m[1]).sort();
+    const [a, b] = IMPLS.map(shape);
+    assert.ok(a.length >= 3, `host-offscreen 只导出了 ${a.length} 个函数，判据多半坏了`);
+    assert.deepEqual(a, b, '两个宿主实现的接口对不上');
+    for (const fn of ['ensureHost', 'hasHost', 'callHost']) assert.ok(a.includes(fn), `缺 ${fn}`);
+  });
+
+  test('**service worker 的静态图里不许有 offscreen.js**', () => {
+    // 这是那个动态 import 唯一要保住的东西。写成静态 import 的话，Chrome 的
+    // service worker 会在加载 background.js 时把整条抓取链一起拉进来——而
+    // `offscreen.js` 一加载就注册消息监听器、起 Worker，那些副作用在 service
+    // worker 里根本不成立。
+    const graph = staticallyReachableFrom('src/background.js');
+    assert.ok(graph.length > 10, `静态图只有 ${graph.length} 个模块，判据多半坏了`);
+    assert.ok(graph.includes(normalize('src/runtime/host.js')), 'background 该引到那道缝');
+    for (const f of ['src/offscreen/offscreen.js', 'src/runtime/host-page.js', 'src/runtime/host-offscreen.js']) {
+      assert.ok(!graph.includes(normalize(f)), `${f} 被 service worker 静态拉进去了`);
+    }
+  });
+
+  test('但动态图里够得着 —— 否则那道缝根本没接上', () => {
+    // 反方向也要测：只测「静态图里没有」的话，把 `pickHost()` 整个删掉也是绿的。
+    const graph = reachableFrom('src/background.js');
+    for (const f of ['src/runtime/host-offscreen.js', 'src/runtime/host-page.js', 'src/offscreen/offscreen.js']) {
+      assert.ok(graph.includes(normalize(f)), `${f} 在动态图里也够不着 —— 宿主挑不出来`);
+    }
+  });
+});
+
 describe('service worker 那一侧', () => {
   test('通知只在 service worker 里发 —— offscreen 发不了', () => {
     // 这条是上面那张表里「通知一律由 service worker 发」的另一半：光禁止不够，

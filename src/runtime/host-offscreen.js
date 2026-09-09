@@ -1,12 +1,15 @@
 /**
- * service worker 这一侧：保证 offscreen document 在，并往它发命令。
+ * Chrome 那条路：service worker 起一个 offscreen document，Worker 起在它里面。
+ *
+ * **这个文件只在 Chrome 上被加载**（`host.js` 按能力动态 import 挑一个）。
+ * Firefox 没有 `chrome.offscreen`，它的后台本来就是页面，见 `host-page.js`。
  *
  * 为什么抓取跑在 offscreen 里，见 `src/offscreen/offscreen.js` 开头。简版：
  * service worker 不是专用 Worker，`createSyncAccessHandle()` 用不了，所以它
  * 写不了 OPFS；而把字节转发过去也不行，`chrome.runtime.sendMessage` 只认 JSON。
  */
 
-import { OFFSCREEN_TARGET } from './protocol.js';
+import { OFFSCREEN_TARGET } from '../offscreen/protocol.js';
 
 export const OFFSCREEN_PATH = 'src/offscreen/offscreen.html';
 
@@ -20,8 +23,8 @@ let creating = null;
  * 内存里什么都不剩，所以「我上次建过了」这个念头本身就不可靠——只能每次都问
  * 浏览器。
  */
-export async function ensureOffscreen() {
-  if (await hasOffscreen()) return;
+export async function ensureHost() {
+  if (await hasHost()) return;
 
   // 并发保护：闹钟、界面命令、启动检查可能同时走到这里，而重复
   // createDocument 会抛「Only a single offscreen document may be created」。
@@ -47,7 +50,7 @@ export async function ensureOffscreen() {
 }
 
 /** @returns {Promise<boolean>} */
-export async function hasOffscreen() {
+export async function hasHost() {
   // getContexts 是权威答案。用 ping 试探是不行的——offscreen 正在启动时
   // ping 会失败，于是我们会去建第二个，然后撞上「只能有一个」。
   if (chrome.runtime.getContexts) {
@@ -58,7 +61,7 @@ export async function hasOffscreen() {
     return ctx.length > 0;
   }
   // 老一点的 Chrome 没有 getContexts。退回到 ping，并接受它偶尔误判。
-  return callOffscreen({ op: 'ping' }).then((r) => Boolean(r?.ok), () => false);
+  return callHost({ op: 'ping' }).then((r) => Boolean(r?.ok), () => false);
 }
 
 /**
@@ -70,39 +73,6 @@ export async function hasOffscreen() {
  *
  * @param {object} msg
  */
-export function callOffscreen(msg) {
+export function callHost(msg) {
   return chrome.runtime.sendMessage({ target: OFFSCREEN_TARGET, ...msg });
-}
-
-/**
- * 确保在，然后发命令。
- *
- * @param {object} msg
- */
-export async function withOffscreen(msg) {
-  await ensureOffscreen();
-  const r = await callOffscreen(msg);
-  if (!r) throw new Error('offscreen 没有答复——它可能刚被关掉，下一次心跳会重建');
-  if (!r.ok) {
-    // 错误码要带过来。丢了它，上层只能拿字符串去猜——而「会话失效」与「这次操作
-    // 失败了」该走的路完全不同。
-    const err = new Error(r.error ?? 'offscreen 报了一个没有说明的错误');
-    if (r.reason) /** @type {any} */ (err).reason = r.reason;
-    throw err;
-  }
-  return r;
-}
-
-/**
- * `Map` 过不了 JSON 边界（会变成 `{}`），拆成数组对再传。
- *
- * 这类「结构在边界上被静默拍平」不会报错，只会让下界变成空的——于是一次本该
- * 到某天为止的增量抓取变成全量重抓。
- *
- * @param {object} options
- */
-export function serializeScope(options = {}) {
-  const o = { ...options };
-  if (o.floors instanceof Map) o.floors = [...o.floors];
-  return o;
 }

@@ -549,262 +549,275 @@ async function runDryRun(scenario) {
  * 是广播式的，面板、自检页、offscreen 都会收到同一条。不加这个判别，三方会互相
  * 抢答，而先答的那个赢。
  */
+/**
+ * 一条命令的全部判断。**两个宿主共用这一份。**
+ *
+ * Chrome 上它由 offscreen document 的消息监听器调用；Firefox 上没有 offscreen，
+ * 抓取就跑在后台事件页里，宿主**直接调它**，一条消息都不发。
+ *
+ * 所以它返回**答复对象**（含出错时的 `{ok:false, error, reason}`），而不是调
+ * `sendResponse`——把答复方式留在外面，是这两条路能共用同一份 switch 的唯一办法。
+ * 分成两份的话，「一条流水线，两个宿主」就在这儿断了，而断了是静默的：两边都能跑，
+ * 只是有一天开始给出不同的答案。
+ *
+ * @param {{op: string, [k: string]: any}} msg
+ * @returns {Promise<{ok: boolean, [k: string]: any}>}
+ */
+export async function handleOp(msg) {
+  try {
+    switch (msg.op) {
+      case 'ping':
+        return { ok: true };
+
+      case 'start': {
+        // 身份确认与开工必须是**一个**临界区。分成两条消息的话，两个「开始
+        // 抓取」会各自发一次身份确认请求，然后其中一个才在 start 处失败——
+        // 那一次多出来的请求已经发出去了。
+        const started = await lock.run('开始抓取', async () => {
+          const r = getRunner();
+          if (r.active) throw new Error('已有抓取在进行中');
+          const opts = reviveScope(msg.options);
+          // 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
+          const who = opts.username ? { username: opts.username } : await r.discoverUsername();
+          // 全量是**用户明说的**，那就一个下界都不挑——当作从来没抓过。
+          if (msg.mode === CRAWL_MODES.FULL) {
+            return r.start({ ...opts, username: who.username });
+          }
+          // 增量：从既有档案里挑下界。**在身份确认之后**才挑（判据是数字 uid），
+          // 所以交给 runner 在正确的时刻回调。小范围试跑自带 floors，那时不会调用。
+          return r.start({
+            ...opts,
+            username: who.username,
+            resolveFloors: (account) => incrementalOptions(account, msg.mode),
+          });
+        });
+        return { ok: true, bundleId: started.bundleId, account: started.account };
+      }
+
+      case 'resume': {
+        await lock.run('恢复抓取', async () => {
+          const r = getRunner();
+          if (r.active) {
+            // 已经在内存里，但**可能停着**（用户点过暂停）。交给 runner 去判断：
+            // 停着就清掉停机状态并把等待人工的条目放回队列；本来就在跑就是空操作。
+            //
+            // 早先这里 `if (r.active) return` 直接跳过，于是「继续」什么也没做。
+            await r.resume(null);
+            return;
+          }
+          // **自己读档案里的 checkpoint。** service worker 读不了 OPFS，它手上
+          // 只有一份三个字段的调度摘要——拿那个去 resume 会丢掉游标与 frontier。
+          const cp = await getRunStore().loadCheckpoint();
+          if (!cp) throw new Error('档案里没有 checkpoint，无从恢复');
+          await r.resume(cp);
+        });
+        return { ok: true };
+      }
+
+      case 'drive':
+        return { ok: true, result: await drive() };
+
+      case 'pause':
+        // **刻意不加锁。** 加了的话「暂停」会在一段 22 秒的批次期间失灵，而
+        // 用户按暂停往往正是因为他看到了不对的东西。pause 只是给 frontier
+        // 立一个标志，不发请求。
+        await getRunner().pause(msg.reason);
+        return { ok: true };
+
+      case 'abort':
+        // 中止：收尾成 aborted 并放开指针，之后这份档案就能删了。
+        // **不加锁**：它要在抓取正跑着的时候也能按下去，跟暂停同理。
+        return { ok: true, manifest: await getRunner().abort() };
+
+      case 'finish':
+        return {
+          ok: true,
+          manifest: await getRunner().finish(msg.status, {
+            acceptLeafGaps: Boolean(msg.acceptLeafGaps),
+          }),
+        };
+
+      case 'retryFailed':
+        // 不加锁：它只是把 frontier 里的状态改回 pending，不发请求。
+        // 真正的抓取由随后的 drive() 推进，那一步是有锁的。
+        return { ok: true, count: await getRunner().retryFailed({ routeKey: msg.routeKey }) };
+
+      case 'chain': {
+        // 覆盖率页「合起来」那个视角。只读档案、不发请求，所以不加锁。
+        //
+        // **先分链。** 一堆档案不等于一条链：`previous_bundle_id` 为 null 的那些
+        // 各自是一条链的起点（增量做出来之前的每一次抓取都是独立全量）。全当成
+        // 一条会让档案数虚高，而且任何一份的缺口都会污染全部。
+        const entries = await readChainEntries();
+        const chains = splitChains(entries);
+        // 指定了档案就给**它所在的那条链**（导出整条链、以及在档案页上看链时要用）；
+        // 没指定就给最新那条（覆盖率页的默认视角）。
+        const head = msg.bundleId
+          ? chainOf(entries, msg.bundleId)
+          : (chains[0] ?? []);
+        const cov = chainCoverage(head);
+        return {
+          ok: true,
+          chain: {
+            bundles: head.map((e) => ({
+              bundleId: e.bundleId,
+              completedAt: e.completedAt,
+              previousBundleId: e.previousBundleId,
+              username: e.accountUsername,
+            })),
+            routes: [...cov].map(([routeKey, v]) => ({ routeKey, ...v })),
+            holes: findChainHoles(head),
+            // 不在这条链上的那些。**要说出来**：用户手上可能有好几次独立的全量，
+            // 而界面只讲最新那条链——不提的话看起来像档案丢了。
+            others: chains
+              .filter((c) => c[0]?.bundleId !== head[0]?.bundleId)
+              .map((c) => ({ head: c[0]?.bundleId, size: c.length })),
+          },
+        };
+      }
+
+      case 'chainDiff': {
+        // 档案页：这一份里哪些是新增的、哪些又抓了一次，以及跨链的版本历史。
+        //
+        // **只读 index，不解压任何记录。** 一份真实档案 3347 条，解压是几秒钟的
+        // 事；而这两个问题的答案全在 index 里。
+        const slices = [];
+        for (const dir of await WorkerFileStore.listBundleDirs(getOpfsWorker())) {
+          const id = bundleIdFromDirName(dir);
+          if (!id) continue;
+          try {
+            const store = new WorkerFileStore({ worker: getOpfsWorker(), dir });
+            const reader = new BundleReader({ store, bundleId: id });
+            const m = (await reader.hasManifest()) ? await reader.manifest() : null;
+            slices.push({
+              bundleId: id,
+              completedAt: m?.completed_at ?? null,
+              entries: (await reader.index()).map((e) => ({
+                url_key: e.url_key,
+                capture_id: e.capture_id,
+                observed_at: e.observed_at,
+                verdict: e.verdict,
+              })),
+            });
+          } catch (e) {
+            debugLog('读不出这份索引，跳过', dir, e);
+          }
+        }
+        const cur = slices.find((s) => s.bundleId === msg.bundleId);
+        if (!cur) {
+          return { ok: true, diff: { repeated: [], versionCount: 0 } };
+        }
+
+        // **只跟同一条链上的比。**
+        //
+        // 「新增 / 已抓取多次」问的是「这一份相对上一份多了什么」——那是**增量**
+        // 的语义，只在链内成立。拿它跟不相干的全量档案比，会把每一张列表页都
+        // 标成「已抓取多次」（那些 URL 每次全量都会抓），技术上没说错，但毫无
+        // 意义：几次独立的全量本来就是各自完整的快照，不是彼此的增量。
+        //
+        // 于是一份**基准档案**（没有上游）看到的应当是：什么都不标。
+        //
+        // 注意这与「这一页我是不是已经有了」正好相反，那个按账号跨链算——
+        // 两个问题，两种范围。
+        const entries = await readChainEntries();
+        const chainIds = new Set(chainOf(entries, msg.bundleId).map((e) => e.bundleId));
+        const d = diffAgainstChain(cur, slices.filter((s) => chainIds.has(s.bundleId)));
+        return {
+          ok: true,
+          // **只回个数。** 早先回的是截断到 200 条的清单，而界面拿那个清单的长度
+          // 当总数显示——于是永远写着「200 个」，那是截断后的长度，不是真实数量。
+          // 而界面本来也只需要个数（清单几百行，没人看）。
+          diff: { repeated: d.repeated, versionCount: d.versions.length },
+        };
+      }
+
+      case 'peekIncremental': {
+        // 开抓**之前**看一眼有没有可用的基准，纯粹为了界面上那一行。
+        //
+        // 这里拿不到数字 uid（还没 preflight），所以**不按账号过滤**——于是它可能
+        // 比真实结果乐观。措辞因此写成「有没有可用的基准」而不是「这次一定增量」。
+        // 不加锁：只读档案，不发请求。
+        try {
+          const entries = await readChainEntries();
+          const picks = pickFloors(entries);
+          return {
+            ok: true,
+            result: {
+              routes: [...picks.keys()],
+              bundles: entries.length,
+            },
+          };
+        } catch {
+          return { ok: true, result: null };
+        }
+        break;
+      }
+
+      case 'status':
+        // 同样不加锁：读状态必须在抓取跑着的时候也能读到。
+        return { ok: true, status: getRunner().status(), busyWith: lock.holder };
+
+      case 'deleteBundle': {
+        // 删除走**这条唯一的写入路径**，而不是让面板的只读 Worker 破例。
+        // 理由不只是洁癖：安全检查需要「现在在抓哪一份」这个知识，而它只在这里。
+        const { bundleId, dir } = msg;
+        const st = getRunner().status();
+        if (st.active && st.bundleId === bundleId) {
+          throw new Error(
+            `档案 ${bundleId} 正在抓，不能删。删了它，写入器下一次落盘就会往一个` +
+              '不存在的目录里写——请先暂停或等它结束。',
+          );
+        }
+        // 经由**可写的那个** Worker 删。offscreen 自己不 import OpfsFileStore：
+        // 那条边界（只有专用 Worker 直接碰 OPFS）有测试钉着，而且它挡住了
+        // 「反正 destroy 用不到 sync handle，破例一次也行」这种滑坡。
+        await WorkerFileStore.destroy(getOpfsWorker(), dir);
+        debugLog('已删除档案目录', dir);
+        return { ok: true };
+      }
+
+      case 'dryRun':
+        // 演练不发网络请求，但会和抓取抢 frontier / 写入器状态，所以照样要锁。
+        return {
+          ok: true,
+          result: await lock.run('演练', () => runDryRun(msg.scenario)),
+        };
+
+      default:
+        return { ok: false, error: `抓取宿主不认识的命令：${msg.op}` };
+    }
+  } catch (e) {
+    // **错误码要一起过界。**
+    //
+    // 原来只送 `error` 字符串，于是 `SessionError('session_expired')` 到了另一边
+    // 就只是一句话。上层无从分辨「这次操作本身失败了」与「会话失效了，整场都得
+    // 停」——而这两件事该走的界面完全不同。
+    //
+    // 真实症状：用户点「重试抓不下来的页面」，屏幕上出现
+    // 「重试失败：当前未登录豆瓣」——看起来像重试功能坏了，实际是会话过期，
+    // 而界面里本来就有一块专门处理它的（「我登录好了，继续」）。
+    return {
+      ok: false,
+      error: String(e?.message ?? e),
+      reason: typeof e?.reason === 'string' ? e.reason : null,
+    };
+  }
+}
+
+/**
+ * service worker 发来的命令。
+ *
+ * 只认 `target === TARGET` 的消息，其余一概不理——`chrome.runtime.sendMessage`
+ * 是广播式的，面板、自检页、offscreen 都会收到同一条。不加这个判别，三方会互相
+ * 抢答，而先答的那个赢。
+ *
+ * **这一层只做消息适配**，判断全在 `handleOp` 里——Firefox 那边没有 offscreen
+ * document，抓取就跑在后台事件页里，宿主直接调 `handleOp`，一条消息都不发。
+ * 两条路必须共用同一份 switch，否则「一条流水线，两个宿主」在这儿就断了。
+ */
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.target !== OFFSCREEN_TARGET) return; // 不返回 true，把答复权留给别人
-  (async () => {
-    try {
-      switch (msg.op) {
-        case 'ping':
-          sendResponse({ ok: true });
-          break;
-
-        case 'start': {
-          // 身份确认与开工必须是**一个**临界区。分成两条消息的话，两个「开始
-          // 抓取」会各自发一次身份确认请求，然后其中一个才在 start 处失败——
-          // 那一次多出来的请求已经发出去了。
-          const started = await lock.run('开始抓取', async () => {
-            const r = getRunner();
-            if (r.active) throw new Error('已有抓取在进行中');
-            const opts = reviveScope(msg.options);
-            // 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
-            const who = opts.username ? { username: opts.username } : await r.discoverUsername();
-            // 全量是**用户明说的**，那就一个下界都不挑——当作从来没抓过。
-            if (msg.mode === CRAWL_MODES.FULL) {
-              return r.start({ ...opts, username: who.username });
-            }
-            // 增量：从既有档案里挑下界。**在身份确认之后**才挑（判据是数字 uid），
-            // 所以交给 runner 在正确的时刻回调。小范围试跑自带 floors，那时不会调用。
-            return r.start({
-              ...opts,
-              username: who.username,
-              resolveFloors: (account) => incrementalOptions(account, msg.mode),
-            });
-          });
-          sendResponse({ ok: true, bundleId: started.bundleId, account: started.account });
-          break;
-        }
-
-        case 'resume': {
-          await lock.run('恢复抓取', async () => {
-            const r = getRunner();
-            if (r.active) {
-              // 已经在内存里，但**可能停着**（用户点过暂停）。交给 runner 去判断：
-              // 停着就清掉停机状态并把等待人工的条目放回队列；本来就在跑就是空操作。
-              //
-              // 早先这里 `if (r.active) return` 直接跳过，于是「继续」什么也没做。
-              await r.resume(null);
-              return;
-            }
-            // **自己读档案里的 checkpoint。** service worker 读不了 OPFS，它手上
-            // 只有一份三个字段的调度摘要——拿那个去 resume 会丢掉游标与 frontier。
-            const cp = await getRunStore().loadCheckpoint();
-            if (!cp) throw new Error('档案里没有 checkpoint，无从恢复');
-            await r.resume(cp);
-          });
-          sendResponse({ ok: true });
-          break;
-        }
-
-        case 'drive':
-          sendResponse({ ok: true, result: await drive() });
-          break;
-
-        case 'pause':
-          // **刻意不加锁。** 加了的话「暂停」会在一段 22 秒的批次期间失灵，而
-          // 用户按暂停往往正是因为他看到了不对的东西。pause 只是给 frontier
-          // 立一个标志，不发请求。
-          await getRunner().pause(msg.reason);
-          sendResponse({ ok: true });
-          break;
-
-        case 'abort':
-          // 中止：收尾成 aborted 并放开指针，之后这份档案就能删了。
-          // **不加锁**：它要在抓取正跑着的时候也能按下去，跟暂停同理。
-          sendResponse({ ok: true, manifest: await getRunner().abort() });
-          break;
-
-        case 'finish':
-          sendResponse({
-            ok: true,
-            manifest: await getRunner().finish(msg.status, {
-              acceptLeafGaps: Boolean(msg.acceptLeafGaps),
-            }),
-          });
-          break;
-
-        case 'retryFailed':
-          // 不加锁：它只是把 frontier 里的状态改回 pending，不发请求。
-          // 真正的抓取由随后的 drive() 推进，那一步是有锁的。
-          sendResponse({ ok: true, count: await getRunner().retryFailed({ routeKey: msg.routeKey }) });
-          break;
-
-        case 'chain': {
-          // 覆盖率页「合起来」那个视角。只读档案、不发请求，所以不加锁。
-          //
-          // **先分链。** 一堆档案不等于一条链：`previous_bundle_id` 为 null 的那些
-          // 各自是一条链的起点（增量做出来之前的每一次抓取都是独立全量）。全当成
-          // 一条会让档案数虚高，而且任何一份的缺口都会污染全部。
-          const entries = await readChainEntries();
-          const chains = splitChains(entries);
-          // 指定了档案就给**它所在的那条链**（导出整条链、以及在档案页上看链时要用）；
-          // 没指定就给最新那条（覆盖率页的默认视角）。
-          const head = msg.bundleId
-            ? chainOf(entries, msg.bundleId)
-            : (chains[0] ?? []);
-          const cov = chainCoverage(head);
-          sendResponse({
-            ok: true,
-            chain: {
-              bundles: head.map((e) => ({
-                bundleId: e.bundleId,
-                completedAt: e.completedAt,
-                previousBundleId: e.previousBundleId,
-                username: e.accountUsername,
-              })),
-              routes: [...cov].map(([routeKey, v]) => ({ routeKey, ...v })),
-              holes: findChainHoles(head),
-              // 不在这条链上的那些。**要说出来**：用户手上可能有好几次独立的全量，
-              // 而界面只讲最新那条链——不提的话看起来像档案丢了。
-              others: chains
-                .filter((c) => c[0]?.bundleId !== head[0]?.bundleId)
-                .map((c) => ({ head: c[0]?.bundleId, size: c.length })),
-            },
-          });
-          break;
-        }
-
-        case 'chainDiff': {
-          // 档案页：这一份里哪些是新增的、哪些又抓了一次，以及跨链的版本历史。
-          //
-          // **只读 index，不解压任何记录。** 一份真实档案 3347 条，解压是几秒钟的
-          // 事；而这两个问题的答案全在 index 里。
-          const slices = [];
-          for (const dir of await WorkerFileStore.listBundleDirs(getOpfsWorker())) {
-            const id = bundleIdFromDirName(dir);
-            if (!id) continue;
-            try {
-              const store = new WorkerFileStore({ worker: getOpfsWorker(), dir });
-              const reader = new BundleReader({ store, bundleId: id });
-              const m = (await reader.hasManifest()) ? await reader.manifest() : null;
-              slices.push({
-                bundleId: id,
-                completedAt: m?.completed_at ?? null,
-                entries: (await reader.index()).map((e) => ({
-                  url_key: e.url_key,
-                  capture_id: e.capture_id,
-                  observed_at: e.observed_at,
-                  verdict: e.verdict,
-                })),
-              });
-            } catch (e) {
-              debugLog('读不出这份索引，跳过', dir, e);
-            }
-          }
-          const cur = slices.find((s) => s.bundleId === msg.bundleId);
-          if (!cur) {
-            sendResponse({ ok: true, diff: { repeated: [], versionCount: 0 } });
-            break;
-          }
-
-          // **只跟同一条链上的比。**
-          //
-          // 「新增 / 已抓取多次」问的是「这一份相对上一份多了什么」——那是**增量**
-          // 的语义，只在链内成立。拿它跟不相干的全量档案比，会把每一张列表页都
-          // 标成「已抓取多次」（那些 URL 每次全量都会抓），技术上没说错，但毫无
-          // 意义：几次独立的全量本来就是各自完整的快照，不是彼此的增量。
-          //
-          // 于是一份**基准档案**（没有上游）看到的应当是：什么都不标。
-          //
-          // 注意这与「这一页我是不是已经有了」正好相反，那个按账号跨链算——
-          // 两个问题，两种范围。
-          const entries = await readChainEntries();
-          const chainIds = new Set(chainOf(entries, msg.bundleId).map((e) => e.bundleId));
-          const d = diffAgainstChain(cur, slices.filter((s) => chainIds.has(s.bundleId)));
-          sendResponse({
-            ok: true,
-            // **只回个数。** 早先回的是截断到 200 条的清单，而界面拿那个清单的长度
-            // 当总数显示——于是永远写着「200 个」，那是截断后的长度，不是真实数量。
-            // 而界面本来也只需要个数（清单几百行，没人看）。
-            diff: { repeated: d.repeated, versionCount: d.versions.length },
-          });
-          break;
-        }
-
-        case 'peekIncremental': {
-          // 开抓**之前**看一眼有没有可用的基准，纯粹为了界面上那一行。
-          //
-          // 这里拿不到数字 uid（还没 preflight），所以**不按账号过滤**——于是它可能
-          // 比真实结果乐观。措辞因此写成「有没有可用的基准」而不是「这次一定增量」。
-          // 不加锁：只读档案，不发请求。
-          try {
-            const entries = await readChainEntries();
-            const picks = pickFloors(entries);
-            sendResponse({
-              ok: true,
-              result: {
-                routes: [...picks.keys()],
-                bundles: entries.length,
-              },
-            });
-          } catch {
-            sendResponse({ ok: true, result: null });
-          }
-          break;
-        }
-
-        case 'status':
-          // 同样不加锁：读状态必须在抓取跑着的时候也能读到。
-          sendResponse({ ok: true, status: getRunner().status(), busyWith: lock.holder });
-          break;
-
-        case 'deleteBundle': {
-          // 删除走**这条唯一的写入路径**，而不是让面板的只读 Worker 破例。
-          // 理由不只是洁癖：安全检查需要「现在在抓哪一份」这个知识，而它只在这里。
-          const { bundleId, dir } = msg;
-          const st = getRunner().status();
-          if (st.active && st.bundleId === bundleId) {
-            throw new Error(
-              `档案 ${bundleId} 正在抓，不能删。删了它，写入器下一次落盘就会往一个` +
-                '不存在的目录里写——请先暂停或等它结束。',
-            );
-          }
-          // 经由**可写的那个** Worker 删。offscreen 自己不 import OpfsFileStore：
-          // 那条边界（只有专用 Worker 直接碰 OPFS）有测试钉着，而且它挡住了
-          // 「反正 destroy 用不到 sync handle，破例一次也行」这种滑坡。
-          await WorkerFileStore.destroy(getOpfsWorker(), dir);
-          debugLog('已删除档案目录', dir);
-          sendResponse({ ok: true });
-          break;
-        }
-
-        case 'dryRun':
-          // 演练不发网络请求，但会和抓取抢 frontier / 写入器状态，所以照样要锁。
-          sendResponse({
-            ok: true,
-            result: await lock.run('演练', () => runDryRun(msg.scenario)),
-          });
-          break;
-
-        default:
-          sendResponse({ ok: false, error: `offscreen 不认识的命令：${msg.op}` });
-      }
-    } catch (e) {
-      // **错误码要一起过界。**
-      //
-      // 原来只送 `error` 字符串，于是 `SessionError('session_expired')` 到了另一边
-      // 就只是一句话。上层无从分辨「这次操作本身失败了」与「会话失效了，整场都得
-      // 停」——而这两件事该走的界面完全不同。
-      //
-      // 真实症状：用户点「重试抓不下来的页面」，屏幕上出现
-      // 「重试失败：当前未登录豆瓣」——看起来像重试功能坏了，实际是会话过期，
-      // 而界面里本来就有一块专门处理它的（「我登录好了，继续」）。
-      sendResponse({
-        ok: false,
-        error: String(e?.message ?? e),
-        reason: typeof e?.reason === 'string' ? e.reason : null,
-      });
-    }
-  })();
+  handleOp(msg).then(sendResponse);
   return true;
 });
 
@@ -823,4 +836,4 @@ function reviveScope(options = {}) {
   return o;
 }
 
-debugLog('offscreen 已就绪', new Date().toISOString());
+debugLog('抓取宿主已就绪', new Date().toISOString());

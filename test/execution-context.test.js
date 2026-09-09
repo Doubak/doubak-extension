@@ -98,12 +98,18 @@ describe('执行上下文约束', () => {
 
   test('service worker 不直接读写档案', async () => {
     // service worker 也**不是**专用 Worker，`createSyncAccessHandle()` 在里面
-    // 用不了。所以它连 OpfsFileStore 都不该 import——那是 offscreen 的事。
+    // 用不了。所以它连 OpfsFileStore 都不该 import——那是宿主的事。
     const src = await read('src/background.js');
     assert.equal(/from\s+['"][^'"]*opfs-store\.js['"]/.test(src), false);
     assert.equal(src.includes('WorkerFileStore'), false, 'service worker 里没有 Worker 可用');
-    // 它必须经由 offscreen
-    assert.match(src, /offscreen\/host\.js/);
+    // 它必须经由宿主接缝，而且**只认那道缝**：直接引某一个实现，就是把
+    // 「抓取跑在哪儿」这个判断从一处散回调用点，而两个浏览器的答案不一样。
+    assert.match(src, /runtime\/host\.js/);
+    assert.equal(
+      /host-(offscreen|page)\.js/.test(src),
+      false,
+      'background.js 直接引了某一个宿主实现——该只引 runtime/host.js',
+    );
   });
 
   test('service worker 用 ScheduleStore，不用完整的 RunStore', async () => {
@@ -134,9 +140,14 @@ describe('执行上下文约束', () => {
     // 之所以搬进 offscreen，就是为了让字节根本不用过这条界。
     //
     // 这里挡的是最可能被写出来的那种回退：有人为了「只把落盘搬过去」，往
-    // host.js 里加一个带 bytes 的命令。
-    const host = await read('src/offscreen/host.js');
-    assert.equal(/bytes/.test(host), false, 'host.js 里出现了 bytes —— 字节不许走这条通道');
+    // 宿主接缝里加一个带 bytes 的命令。
+    //
+    // **三个文件都要查。** Firefox 那条路是直接调函数、没有 JSON 边界，所以
+    // 「反正过得去」的诱惑恰恰最大——而只在一个宿主上成立的约束等于没有约束。
+    for (const f of ['src/runtime/host.js', 'src/runtime/host-offscreen.js', 'src/runtime/host-page.js']) {
+      const host = await read(f);
+      assert.equal(/bytes/.test(host), false, `${f} 里出现了 bytes —— 字节不许走这条通道`);
+    }
   });
 
   test('offscreen 只用 chrome.runtime，其余能力走标准 Web API', async () => {
@@ -203,9 +214,22 @@ describe('执行上下文约束', () => {
   test('offscreen 的入口模块不会被 service worker 拉进来', async () => {
     // offscreen.js 一加载就起 Worker、注册消息监听器。那些副作用绝不能在
     // service worker 里发生，所以协议常量必须住在一个没有副作用的模块里。
-    const host = await read('src/offscreen/host.js');
-    assert.equal(host.includes("'./offscreen.js'"), false);
+    const host = await read('src/runtime/host-offscreen.js');
+    assert.equal(host.includes("offscreen.js'"), false);
     assert.match(host, /protocol\.js/);
+
+    // **而 Firefox 那条路正相反：它要的就是把整条链拉进当前上下文。**
+    // 所以 `host.js` 必须**动态** import 挑一个——静态引两个的话，Chrome 的
+    // service worker 会把 host-page.js（进而是 offscreen.js）一起拖进来，
+    // 那正是这条测试要挡的事，只是换了个入口。
+    const seam = await read('src/runtime/host.js');
+    assert.match(seam, /import\('\.\/host-page\.js'\)/, 'host.js 必须动态加载宿主实现');
+    assert.equal(
+      /^\s*import\s+[^\n]*host-page\.js/m.test(stripComments(seam)),
+      false,
+      'host.js 静态引了 host-page.js —— 那会把整条抓取链拖进 service worker',
+    );
+    assert.match(await read('src/runtime/host-page.js'), /offscreen\.js/, 'Firefox 那条路要共用 handleOp');
 
     const protocol = await read('src/offscreen/protocol.js');
     // 只许有导出常量，不许有任何顶层调用

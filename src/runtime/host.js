@@ -1,0 +1,110 @@
+/**
+ * 抓取跑在哪儿：**按能力挑一个宿主**。
+ *
+ * ## 为什么需要这一层
+ *
+ * 抓取不能跑在后台脚本自己身上，判据是两条硬的：
+ *
+ * - OPFS 的原地读写 `createSyncAccessHandle()` **只在专用 Worker 里可用**；
+ * - 字节**过不了** `chrome.runtime.sendMessage`（那条通道只认 JSON，
+ *   `Uint8Array` 过去会变成 `{"0":1,…}`）。
+ *
+ * 所以后台必须能起一个专用 Worker。而**它能不能起，各浏览器不一样**：
+ *
+ * | | 后台是什么 | 能直接起 Worker 吗 | 于是 |
+ * |---|---|---|---|
+ * | Chrome / Edge | service worker | ❌ | 先开一个 offscreen document，Worker 起在它里面 |
+ * | Firefox | 事件**页** | ✅ | **不需要 offscreen**，直接起 —— 少一层，不是多一层 |
+ *
+ * Firefox 那一格是实测的（2026-09-09，Firefox 155，见 `docs/firefox.md`）：
+ * 事件页里 `document` / `window` / `Worker` 都在，从它起的专用 Worker 里
+ * `createSyncAccessHandle()` 写入读回逐字节相符，共享的 FileStore 契约 20 条全过。
+ *
+ * ## 判据是**能力**，不是浏览器名字
+ *
+ * `typeof api.offscreen?.createDocument === 'function'`。按 UA 或者按
+ * 「有没有 browser 这个全局」去挑，都会在某天静默走错分支，而走错的症状是
+ * **抓取根本起不来**——那是这个扩展唯一的不可逆步骤的入口。
+ *
+ * ## 留给第三个宿主的位置
+ *
+ * `pickHost()` 是一张表，不是一个 `if`。将来要加的两种都已经看得见形状：
+ * 移动版浏览器，以及万一 Firefox 的事件页扛不住几小时的抓取时的退路——把抓取放进
+ * 面板标签页（标签页开着就活着，而整套架构本来就是每页写检查点、可恢复的）。
+ * 加一个宿主 = 加一个实现文件 + 表里加一行，不该动这里的任何调用方。
+ *
+ * ## 为什么是动态 import
+ *
+ * `host-page.js` 会把整条抓取链拉进当前上下文（它就是要在这儿跑）。在 Chrome 的
+ * service worker 里静态引它，等于把一堆 DOM/Worker 代码拖进一个没有 DOM 的上下文
+ * ——`offscreen.js` 一加载就注册监听器、起 Worker。所以**只加载挑中的那一个**。
+ */
+
+/** @typedef {{ensureHost(): Promise<void>, hasHost(): Promise<boolean>, callHost(msg: object): Promise<any>}} HostImpl */
+
+/** @type {Promise<HostImpl> | null} */
+let picked = null;
+
+/** 挑中的实现。**只加载这一个。** */
+function pickHost() {
+  const api = globalThis.browser ?? globalThis.chrome;
+  if (typeof api?.offscreen?.createDocument === 'function') {
+    return import('./host-offscreen.js');
+  }
+  return import('./host-page.js');
+}
+
+/** @returns {Promise<HostImpl>} */
+function host() {
+  picked ??= pickHost();
+  return picked;
+}
+
+/**
+ * 确保宿主在。
+ *
+ * 可以放心重复调用：**每次唤醒都调一次**才是对的用法。后台脚本死了以后内存里
+ * 什么都不剩，所以「我上次建过了」这个念头本身就不可靠——只能每次都问浏览器。
+ */
+export async function ensureHost() {
+  return (await host()).ensureHost();
+}
+
+/** @returns {Promise<boolean>} */
+export async function hasHost() {
+  return (await host()).hasHost();
+}
+
+/**
+ * 往宿主发一条命令。
+ *
+ * **绝不传字节。** Chrome 那条路上这是一条 JSON 通道；Firefox 那条路上虽然是
+ * 直接调函数，字节照样不该从这儿过——整条抓取链搬进宿主，就是为了让字节根本不用
+ * 过这条界。两个宿主共用同一条约束，才不会有一天只在其中一边成立。
+ *
+ * @param {object} msg
+ */
+export async function callHost(msg) {
+  return (await host()).callHost(msg);
+}
+
+/**
+ * 确保在，然后发命令，并把出错还原成异常。
+ *
+ * @param {object} msg
+ */
+export async function withHost(msg) {
+  await ensureHost();
+  const r = await callHost(msg);
+  if (!r) throw new Error('抓取宿主没有答复——它可能刚被关掉，下一次心跳会重建');
+  if (!r.ok) {
+    // 错误码要带过来。丢了它，上层只能拿字符串去猜——而「会话失效」与「这次操作
+    // 失败了」该走的路完全不同。
+    const err = new Error(r.error ?? '抓取宿主报了一个没有说明的错误');
+    if (r.reason) /** @type {any} */ (err).reason = r.reason;
+    throw err;
+  }
+  return r;
+}
+
+export { serializeScope } from './serialize-scope.js';

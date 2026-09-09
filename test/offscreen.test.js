@@ -16,7 +16,7 @@ import { readFile } from 'node:fs/promises';
 // 不会报类型错，只会静默地永远不匹配。
 import { readFileSync } from 'node:fs';
 
-import { serializeScope } from '../src/offscreen/host.js';
+import { serializeScope } from '../src/runtime/serialize-scope.js';
 import { handleOpfsRpc, WRITE_OPS } from '../src/storage/opfs-rpc.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { PAUSE_REASONS } from '../src/crawl/resume-policy.js';
@@ -532,7 +532,7 @@ describe('增量：offscreen 这一侧的接线', () => {
 
 describe('错误码要过得了 offscreen 那道界', () => {
   const src = readFileSync(new URL('../src/offscreen/offscreen.js', import.meta.url), 'utf-8');
-  const host = readFileSync(new URL('../src/offscreen/host.js', import.meta.url), 'utf-8');
+  const host = readFileSync(new URL('../src/runtime/host.js', import.meta.url), 'utf-8');
 
   test('offscreen 报错时把 reason 一起送出去', () => {
     // 只送 error 字符串的话，`SessionError('session_expired')` 到了另一边就只是
