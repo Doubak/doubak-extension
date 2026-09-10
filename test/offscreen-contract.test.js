@@ -203,32 +203,9 @@ describe('两个宿主，一道缝', () => {
     }
   });
 
-  test('service worker 走得到的那条路上，一处 import() 都不许有（#12）', () => {
-    // 上面那条只说了「谁不许在静态图里」，说不出「怎么加载」。而 1.4.0 的回归
-    // 恰恰在后者：两条分支都写成 `import()`，于是**连 Chrome 那条路也依赖一个
-    // 规范明文禁止的特性**才走得通。
-    //
-    // 判据按规范写，不按手边浏览器的宽容度写：桌面 Chrome / Edge 放行了它，
-    // 安卓 Edge 没有，而放行本身不是「这条路是通的」。
-    //
-    // 唯一的例外是 Firefox 那条分支——它只在没有 offscreen 时才求值，而那时
-    // 后台是事件页，禁令管不着。所以例外按**文件加目标**点名，不是整个文件放行。
-    const graph = staticallyReachableFrom('src/background.js');
-    let checked = 0;
-    for (const f of graph) {
-      const text = stripComments(readFileSync(f, 'utf8'));
-      const calls = [...text.matchAll(/\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g)].map((m) => m[2]);
-      checked += 1;
-      for (const spec of calls) {
-        assert.ok(
-          f === normalize('src/runtime/host.js') && spec === './host-page.js',
-          `${f} 里有 import('${spec}') —— service worker 上 import() 是规范禁止的（#12）。`
-          + '要么静态引，要么把它挪到只有事件页才走得到的分支上。',
-        );
-      }
-    }
-    assert.ok(checked > 10, `只扫了 ${checked} 个文件，判据多半坏了`);
-  });
+  // 「怎么加载」不在这儿测 —— 那是 `test/context-capabilities.test.js` 的事：
+  // 它按上下文列出「这儿根本没有的东西」，`import()` 只是其中一条，而例外按
+  // 「哪个文件、引哪个目标」点名。同一条规矩写两遍会漂，所以这儿只留指路。
 
   test('但动态图里够得着 —— 否则那道缝根本没接上', () => {
     // 反方向也要测：只测「静态图里没有」的话，把 `pickHost()` 整个删掉也是绿的。
