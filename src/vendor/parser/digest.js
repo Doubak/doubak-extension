@@ -61,18 +61,33 @@ function sortedKeys(root) {
 /**
  * 一整组字段的摘要。
  *
- * **键必须与 fields 一一对应**，包括值为 null 的那些——`{rating: null}` 与「没有
+ * **键必须与 fields 一一对应，减去明写出来的豁免**，包括值为 null 的那些——`{rating: null}` 与「没有
  * rating 这个键」是两件事（前者是"页面上确实没有"，后者是"这次没抽到"），摘要表
  * 要能把它们区分开。
  *
+ * ## 豁免是**明写**的，不是漏算
+ *
+ * 一个字段没有摘要，含义是「它不参与修订判定」。这是个决定，而它在数据上与「忘了
+ * 算」长得一模一样——所以它必须是调用点显式传进来的一个集合，而不是某处 `delete`
+ * 掉一个键。canonical 的 `validate.py` 会核对这组键，多一个少一个都报错。
+ *
+ * 今天只有一处：作品的 `cover_url`，判据是它的 `cover_url_key`。见 `cover-url-key.js`。
+ *
  * @param {Record<string, unknown>} fields
+ * @param {Set<string>} [exempt]  不算摘要的字段名
  * @returns {Record<string, string|null>}
  */
-export function digestAll(fields) {
+export function digestAll(fields, exempt = EMPTY) {
   const out = {};
-  for (const [k, v] of Object.entries(fields)) out[k] = fieldDigest(v);
+  for (const [k, v] of Object.entries(fields)) {
+    if (exempt.has(k)) continue;
+    out[k] = fieldDigest(v);
+  }
   return out;
 }
+
+/** `digestAll` 的默认豁免集：空。 */
+const EMPTY = new Set();
 
 /**
  * 两组字段是不是同一版内容。

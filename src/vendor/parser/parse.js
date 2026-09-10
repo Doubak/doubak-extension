@@ -21,6 +21,7 @@ import { extractSubjectDetail } from './extract-subject.js';
 import { extractLongform } from './extract-longform.js';
 import { extractDoulist, mergeDoulistPages } from './extract-doulist.js';
 import { digestAll, sameRevision } from './digest.js';
+import { coverUrlKey } from './cover-url-key.js';
 import {
   absenceAuthority, isContent, hasUnknownVerdict, isRecalibratable, implausible,
 } from './authority.js';
@@ -63,8 +64,8 @@ import {
 //        完全没有动作（传照片到相册、喜欢、分享讨论…）。改判据为结构（切到
 //        `<blockquote>` 或 `.text` 的 `</div>`），实测 33 → 2，而那 2 条豆瓣本来就
 //        没写动作词。12 个标记动作词一个都没变形：3265 条有状态的广播保住 3265、丢 0。
-export const PARSER_VERSION = 'doubak-data-parser/0.13.0';
-export const CANONICAL_VERSION = 'canonical/1.0';
+export const PARSER_VERSION = 'doubak-data-parser/0.14.0';
+export const CANONICAL_VERSION = 'canonical/1.1';
 
 /** 路线状态词 → canonical 的封闭词表。 */
 const STATUS = { collect: 'done', do: 'doing', wish: 'wish' };
@@ -630,6 +631,15 @@ export async function parse(sources, opts = {}) {
 }
 
 /**
+ * 作品修订里**不算摘要**的字段。
+ *
+ * 只有 `cover_url`，判据是 `cover_url_key`。**别往这里加东西**，除非那个字段也
+ * 有一个说得清的索引兄弟——每加一个，就有一个字段的变化从此不会开修订，而那是
+ * 静默的。
+ */
+const SUBJECT_DIGEST_EXEMPT = new Set(['cover_url']);
+
+/**
  * 身份分层，**并且跨层归并**。见 canonical/IDENTITY.md §2.3。
  *
  * ## 为什么不能只按每次观测各自定层
@@ -764,9 +774,16 @@ function upsertSubject(store, { m, medium, observation, parserVersion, detail })
     // 不同的捕获、也可能不一致，而「页面当时就是这么说的」两边都算数。
     info: detail?.info ?? null,
     cover_url: m.coverUrl,
+    // 封面 URL 的**索引**：抹掉量过的那一族 CDN 分片主机。判据用它，事实用上面
+    // 那个——豆瓣挪过一次图（实测每张海报只挪一次、不挪回去），而那会让 111 条
+    // 作品修订凭空冒出来，两版之间唯一的差别是 img1 还是 img3。见 cover-url-key.js。
+    cover_url_key: coverUrlKey(m.coverUrl),
     raw_meta: m.rawMeta,
   };
-  const digests = digestAll(fields);
+  // **`cover_url` 不算摘要**，所以它不参与修订判定；判据是紧挨着它的那个 key。
+  // 豁免明写在这儿而不是事后 delete 一个键：没有摘要的字段含义是「不参与判定」，
+  // 那是个决定，得看得见。canonical 的 validate.py 会核对这组键。
+  const digests = digestAll(fields, SUBJECT_DIGEST_EXEMPT);
 
   // 又名来自另一张捕获，出处要跟着记——canonical 的每一条断言都得能指回
   // WARC 里的具体字节。

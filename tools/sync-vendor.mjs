@@ -96,6 +96,7 @@ export const SOURCES = [
       'extract-subject.js',
       'sha256.js',
       'digest.js',
+      'cover-url-key.js',
       'topology.js',
       'authority.js',
       'parse.js',
