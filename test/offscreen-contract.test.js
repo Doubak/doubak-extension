@@ -185,12 +185,49 @@ describe('两个宿主，一道缝', () => {
     // service worker 会在加载 background.js 时把整条抓取链一起拉进来——而
     // `offscreen.js` 一加载就注册消息监听器、起 Worker，那些副作用在 service
     // worker 里根本不成立。
+    //
+    // **`host-offscreen.js` 不在这张禁止名单上，而且必须在图里**（#12）：它只引
+    // `protocol.js`（常量，零副作用），而 service worker 里 `import()` 是**规范
+    // 禁止**的，所以 Chrome 那条路只能静态引。1.4.0 把它也写成动态 import，
+    // 桌面上看不出来（Chrome 给扩展开了口子），安卓 Edge 上一按开始就炸。
     const graph = staticallyReachableFrom('src/background.js');
     assert.ok(graph.length > 10, `静态图只有 ${graph.length} 个模块，判据多半坏了`);
     assert.ok(graph.includes(normalize('src/runtime/host.js')), 'background 该引到那道缝');
-    for (const f of ['src/offscreen/offscreen.js', 'src/runtime/host-page.js', 'src/runtime/host-offscreen.js']) {
+    assert.ok(
+      graph.includes(normalize('src/runtime/host-offscreen.js')),
+      'host-offscreen.js 不在 service worker 的静态图里 —— 那它只能靠 import() 加载，'
+      + '而 import() 在 ServiceWorkerGlobalScope 上是规范禁止的（#12）',
+    );
+    for (const f of ['src/offscreen/offscreen.js', 'src/runtime/host-page.js']) {
       assert.ok(!graph.includes(normalize(f)), `${f} 被 service worker 静态拉进去了`);
     }
+  });
+
+  test('service worker 走得到的那条路上，一处 import() 都不许有（#12）', () => {
+    // 上面那条只说了「谁不许在静态图里」，说不出「怎么加载」。而 1.4.0 的回归
+    // 恰恰在后者：两条分支都写成 `import()`，于是**连 Chrome 那条路也依赖一个
+    // 规范明文禁止的特性**才走得通。
+    //
+    // 判据按规范写，不按手边浏览器的宽容度写：桌面 Chrome / Edge 放行了它，
+    // 安卓 Edge 没有，而放行本身不是「这条路是通的」。
+    //
+    // 唯一的例外是 Firefox 那条分支——它只在没有 offscreen 时才求值，而那时
+    // 后台是事件页，禁令管不着。所以例外按**文件加目标**点名，不是整个文件放行。
+    const graph = staticallyReachableFrom('src/background.js');
+    let checked = 0;
+    for (const f of graph) {
+      const text = stripComments(readFileSync(f, 'utf8'));
+      const calls = [...text.matchAll(/\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g)].map((m) => m[2]);
+      checked += 1;
+      for (const spec of calls) {
+        assert.ok(
+          f === normalize('src/runtime/host.js') && spec === './host-page.js',
+          `${f} 里有 import('${spec}') —— service worker 上 import() 是规范禁止的（#12）。`
+          + '要么静态引，要么把它挪到只有事件页才走得到的分支上。',
+        );
+      }
+    }
+    assert.ok(checked > 10, `只扫了 ${checked} 个文件，判据多半坏了`);
   });
 
   test('但动态图里够得着 —— 否则那道缝根本没接上', () => {

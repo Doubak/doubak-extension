@@ -219,11 +219,21 @@ describe('执行上下文约束', () => {
     assert.match(host, /protocol\.js/);
 
     // **而 Firefox 那条路正相反：它要的就是把整条链拉进当前上下文。**
-    // 所以 `host.js` 必须**动态** import 挑一个——静态引两个的话，Chrome 的
-    // service worker 会把 host-page.js（进而是 offscreen.js）一起拖进来，
-    // 那正是这条测试要挡的事，只是换了个入口。
+    // 所以 `host.js` 里两条分支的加载方式必须**不一样**，而且各有各的理由：
+    //
+    // - `host-page.js` 只能**动态**引。静态引的话 Chrome 的 service worker 会把
+    //   它（进而是 offscreen.js）一起拖进来，那正是这条测试要挡的事，换了个入口。
+    // - `host-offscreen.js` 只能**静态**引。`import()` 在 ServiceWorkerGlobalScope
+    //   上是**规范禁止**的（w3c/ServiceWorker#1356）；桌面 Chrome 给扩展开了口子，
+    //   安卓 Edge 没有。1.4.0 两条都写成动态，于是 Chrome 那条路也得靠一个规范
+    //   禁止的特性才走得通——桌面上看不出来，安卓 Edge 上一按开始就炸（#12）。
     const seam = await read('src/runtime/host.js');
-    assert.match(seam, /import\('\.\/host-page\.js'\)/, 'host.js 必须动态加载宿主实现');
+    assert.match(seam, /import\('\.\/host-page\.js'\)/, 'host.js 必须动态加载事件页那条实现');
+    assert.match(
+      stripComments(seam),
+      /^\s*import\s+[^\n]*host-offscreen\.js/m,
+      'host.js 得静态引 host-offscreen.js —— service worker 上 import() 是规范禁止的（#12）',
+    );
     assert.equal(
       /^\s*import\s+[^\n]*host-page\.js/m.test(stripComments(seam)),
       false,

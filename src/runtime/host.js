@@ -26,31 +26,73 @@
  * 「有没有 browser 这个全局」去挑，都会在某天静默走错分支，而走错的症状是
  * **抓取根本起不来**——那是这个扩展唯一的不可逆步骤的入口。
  *
+ * ## 两条分支的加载方式**必须不一样**（`#12`，2026-09-10）
+ *
+ * 1.4.0 里两条都写成动态 `import()`，于是安卓 Edge 上一按开始就是：
+ *
+ * ```
+ * import() is disallowed on ServiceWorkerGlobalScope by the HTML specification.
+ * ```
+ *
+ * **规范就是这么写的**（w3c/ServiceWorker#1356）。桌面 Chrome / Edge 给扩展的
+ * service worker 开了口子，安卓 Edge 没有——也就是说 1.4.0 让 **Chrome 那条路
+ * 也依赖一个规范明文禁止的特性**才走得通，只是桌面上看不出来。1.3.6 能跑正是
+ * 因为它写的是静态 import。
+ *
+ * 所以两条分支分开处理，理由各自成立：
+ *
+ * - **Chrome 那条静态引**。`host-offscreen.js` 只引 `protocol.js`（一堆常量，
+ *   零副作用），拉进 service worker 没有任何代价——这也是 1.3.6 的写法。
+ * - **Firefox 那条动态引**。`host-page.js` 会把整条抓取链拉进当前上下文
+ *   （它就是要在这儿跑），静态引的话 Chrome 的 service worker 会连
+ *   `offscreen.js` 一起拖进来，而那个文件一加载就注册监听器、起 Worker。
+ *   而 Firefox 的后台是**事件页**，`import()` 在那里本来就是允许的——
+ *   这条禁令只管 service worker。
+ *
+ * 一般化的那句：**一个上下文放行了规范禁止的东西，不等于那条路是通的。**
+ * 判据要按规范写，而不是按手边那个浏览器的宽容度写。
+ *
  * ## 留给第三个宿主的位置
  *
  * `pickHost()` 是一张表，不是一个 `if`。将来要加的两种都已经看得见形状：
  * 移动版浏览器，以及万一 Firefox 的事件页扛不住几小时的抓取时的退路——把抓取放进
  * 面板标签页（标签页开着就活着，而整套架构本来就是每页写检查点、可恢复的）。
  * 加一个宿主 = 加一个实现文件 + 表里加一行，不该动这里的任何调用方。
- *
- * ## 为什么是动态 import
- *
- * `host-page.js` 会把整条抓取链拉进当前上下文（它就是要在这儿跑）。在 Chrome 的
- * service worker 里静态引它，等于把一堆 DOM/Worker 代码拖进一个没有 DOM 的上下文
- * ——`offscreen.js` 一加载就注册监听器、起 Worker。所以**只加载挑中的那一个**。
  */
+
+import * as offscreenHost from './host-offscreen.js';
 
 /** @typedef {{ensureHost(): Promise<void>, hasHost(): Promise<boolean>, callHost(msg: object): Promise<any>}} HostImpl */
 
 /** @type {Promise<HostImpl> | null} */
 let picked = null;
 
-/** 挑中的实现。**只加载这一个。** */
-function pickHost() {
+/** 我们是不是正跑在一个 service worker 里。 */
+function inServiceWorker() {
+  return typeof ServiceWorkerGlobalScope !== 'undefined'
+    && globalThis instanceof ServiceWorkerGlobalScope;
+}
+
+/** 挑中的实现。**Chrome 那条是静态引的，见文件头。** */
+async function pickHost() {
   const api = globalThis.browser ?? globalThis.chrome;
-  if (typeof api?.offscreen?.createDocument === 'function') {
-    return import('./host-offscreen.js');
+  if (typeof api?.offscreen?.createDocument === 'function') return offscreenHost;
+
+  // 既没有 offscreen，又跑在 service worker 里：事件页那条路在这儿走不通
+  // （没有 document、没有 Worker），而且去 `import()` 它只会撞上上面那条禁令。
+  //
+  // **这一条要说得比那句规范错误有用。** #12 的教训就是「一句正确的话指向了
+  // 完全错误的下一步」——用户看到 `import() is disallowed…` 只会去重装扩展。
+  if (inServiceWorker()) {
+    throw new Error(
+      '这个浏览器上跑不了抓取：它的后台是 service worker，却没有 offscreen document，'
+      + '而档案必须写在专用 Worker 里（OPFS 的 createSyncAccessHandle 只在那儿可用）。\n'
+      + '不是登录问题，也不是重装能解决的。请到 '
+      + 'https://github.com/Doubak/doubak-extension/issues 报一声，'
+      + '带上浏览器名字和版本号——加一种宿主就是加一个实现文件。',
+    );
   }
+
   return import('./host-page.js');
 }
 
