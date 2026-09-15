@@ -121,6 +121,27 @@ chrome-extension://<扩展ID>/selftest/index.html
 
 跑完点「复制报告」拿到纯文本，`[PASS]` / `[FAIL]` 前缀，失败项汇总在开头。
 
+### 把面板截成一张图
+
+面板的界面几乎全是 JS 画的，静态读 `panel.html` 一行都看不到。这台量具让它在
+headless Firefox 里真的跑一遍，**不用装扩展**：
+
+```sh
+node tools/panel-shot.mjs formats --out=/tmp/导出页.png
+node tools/panel-shot.mjs overview --state=crawling      # 抓取中 / paused / failures
+node tools/panel-shot.mjs archive --bundles=14           # 往 OPFS 里铺 14 份假档案
+node tools/panel-shot.mjs help --height=5200 --theme=light
+node tools/panel-shot.mjs overview --measure             # 只报各页高度
+```
+
+要 Firefox（`FIREFOX=…` 可指定）；**它不是测试的一部分**，没有它 `npm test` 照常全绿。
+2026-09-15 那次 UI 改动就是拿它量的——导出页三张卡片改小标签（1080 → 780px）、
+帮助页加目录（实测 4584px，是第二长那页的 4.6 倍）。它也让一个打算做的改动**没做**：
+档案清单铺满 14 份看过之后，原样留着了。
+
+假后台写错了会在屏幕上显示成产品的 bug（真栽过两次），所以
+`test/panel-shot.test.js` 钉住「面板发得出的每一种消息都有着落」。
+
 ### 手机浏览器：豆瓣发的是手机版，扩展会把它改回桌面版
 
 装在移动版 Chromium（安卓 Edge、Kiwi 之类）上时，豆瓣按 User-Agent 里的手机标记
@@ -246,7 +267,7 @@ User-Agent 里那个手机标记去掉**。三条边界：
 **导入**也做完了：换机器、清过站点数据之后，以前导出的档案搬得回来，
 之后照样能增量抓取——否则「导出之后可以安全删除」这句话只成立一半。
 
-测试：`npm test`（零安装即可跑，89 个测试文件、1929 个测试）。装了可选开发依赖后会额外用
+测试：`npm test`（零安装即可跑，90 个测试文件、1931 个测试）。装了可选开发依赖后会额外用
 webrecorder 的 warcio 独立验证 WARC 输出；同级目录有 `doubak-data-specs`
 时会额外跑跨仓库一致性检查（规范常量的新鲜度、产出与校验器的一致性）。
 
