@@ -125,7 +125,8 @@ release 上那两份都是**商店的提交格式**，收件人是商店，不�
   出来那个目录里的 `manifest.json`。
 
 「临时载入」是字面意思：**关掉浏览器就没了**。但 OPFS 里的档案还在，下次载入还能接着
-增量抓——这一句要说，否则用户会以为重启一次就白抓了。上架 AMO 之前只有这一条路。
+增量抓——这一句要说，否则用户会以为重启一次就白抓了。**这条路的地位与 Chromium 那边
+「下 Releases 里的 zip」一样**：想试还没发版的改动才走它，正常装走商店。
 
 release 正文分两段写这个，因为这是所有人会先踩的一步。
 
@@ -164,7 +165,7 @@ git tag -d v1.2.0
 
 ### Chrome 应用商店
 
-已上架：<https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
+公开地址：<https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
 
 Release 上那份 `doubak-<版本>.zip` 就是提交用的，不需要另外打。**上架之后每次发版都要再传一次**
 ——商店里的版本不会跟着 GitHub 的 release 自己走，而站点上的「安装到 Chrome」指向
@@ -176,7 +177,9 @@ Release 上那份 `doubak-<版本>.zip` 就是提交用的，不需要另外打�
 
 ### AMO（Firefox）
 
-**还没上架**（`Doubak/doubak-extension#11`）。传的是 `doubak-<版本>-firefox.zip`。
+传的是 `doubak-<版本>-firefox.zip`。**「上架了没有」和公开地址都在
+[`firefox.md`](firefox.md)，这儿不写**——那种句子会在上架那天悄悄变成假话，
+而它此前散在五个文件里。
 
 提交时要用的那几样——扩展 id（**永远不能改**，理由写在那儿）、联系邮箱、
 `strict_min_version` 为什么是 140、`web-ext lint` 剩下的那条警告是什么

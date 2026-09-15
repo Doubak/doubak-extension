@@ -56,10 +56,17 @@ node tools/make-manifest.mjs   # 重新生成 manifest.firefox.json（--check �
 四条路，装出来是同一个扩展。**Firefox 用的是另一个包**（`-firefox` 结尾的那个），
 两份 manifest 不一样，装错了是直接加载失败，而失败信息不会提到是拿错了包。
 
-**从 Chrome 应用商店装**（多数人走这条）：
-<https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
-（链接只写扩展 ID、不带名字那一段——带名字的形式在改名之后会失效）。Edge 也能从
-这里装。
+**从商店装**（多数人走这条，之后自动更新）：
+
+| | 地址 |
+|---|---|
+| Chrome / Edge | <https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe> |
+| Firefox | <https://addons.mozilla.org/firefox/addon/doubak/>（需要 Firefox 140 以上） |
+
+Edge 也能从 Chrome 应用商店装。两个地址都**只写不会变的那一段**：Chromium 那边是扩展
+ID、不带名字（带名字的形式在改名之后会失效），AMO 那边不带语言段（不带语言段的地址会
+301 到访客自己的语言，写死 `/en-US/` 会把这个项目绝大多数读中文的用户送到英文页上，
+而 `_locales` 里备了简繁两份商店文案正是为了他们）。
 
 **下一个发布版**（不想走商店时）：从
 [Releases](https://github.com/Doubak/doubak-extension/releases) 拿 zip，**先解压**，
@@ -71,8 +78,9 @@ node tools/make-manifest.mjs   # 重新生成 manifest.firefox.json（--check �
 | Firefox | `doubak-<版本>-firefox.zip` | `about:debugging#/runtime/this-firefox` → 临时载入附加组件… → 选目录里的 `manifest.json` |
 
 Chrome 那份与商店里的是同一个包：同一条 CI 打出来，时间戳清零，逐字节相同。
-Firefox 的「临时载入」是字面意思，**关掉浏览器就没了**；但 OPFS 里的档案还在，下次
-载入还能接着增量抓。AMO 上架之前只有这一条路（`#11`）。
+Firefox 的「临时载入」是字面意思，**关掉浏览器就没了**，下次要再点一次；但 OPFS 里的
+档案还在，下次载入还能接着增量抓。**这条路的地位与 Chromium 那边「下 Releases 里的
+zip」一样**——想试还没发版的改动才走它，正常装走上面那个商店地址。
 
 **从仓库直接装**：Chrome / Edge 同样是「加载已解压的扩展程序」，选本仓库根目录。
 这个项目没有构建步骤，源码就是浏览器里跑的东西，所以这条路一直有效——代价是它带着
@@ -238,16 +246,18 @@ User-Agent 里那个手机标记去掉**。三条边界：
 **导入**也做完了：换机器、清过站点数据之后，以前导出的档案搬得回来，
 之后照样能增量抓取——否则「导出之后可以安全删除」这句话只成立一半。
 
-测试：`npm test`（零安装即可跑，85 个测试文件、1888 个测试）。装了可选开发依赖后会额外用
+测试：`npm test`（零安装即可跑，89 个测试文件、1918 个测试）。装了可选开发依赖后会额外用
 webrecorder 的 warcio 独立验证 WARC 输出；同级目录有 `doubak-data-specs`
 时会额外跑跨仓库一致性检查（规范常量的新鲜度、产出与校验器的一致性）。
 
 ## 发布到应用商店
 
-- **Chrome 应用商店**：已上架 <https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
-- **AMO（Firefox）**：还没上架（[`#11`](https://github.com/Doubak/doubak-extension/issues/11)），
-  slug 已定为 `doubak`。提交要用的那几样（扩展 id、联系邮箱、版本下限、上架地址该写成
-  哪个形式）在 [`docs/firefox.md`](docs/firefox.md)，上架那天要改的几处也列在那儿。
+- **Chrome 应用商店**：<https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe>
+- **AMO（Firefox）**：<https://addons.mozilla.org/firefox/addon/doubak/>
+
+**这儿只写地址，不写「上架了没有」**——那种句子会在上架那天悄悄变成假话，而它此前散在
+五个文件里，见 [`docs/firefox.md`](docs/firefox.md)「上架那天」。提交要用的那几样
+（扩展 id、联系邮箱、版本下限、地址该写成哪个形式）也在那一份。
 
 完整流程（改版本号 → 打标签 → CI 建 release → 核对哈希）在
 [`docs/release.md`](docs/release.md)。打了 `v*` 标签之后 release 上挂的**两份** zip 就是

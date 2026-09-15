@@ -215,24 +215,27 @@ blob 就一直在。619 MB 的真实档案照这个比例就是把整份塞进�
 
 - **联系邮箱：`admin@doubak.com`**。manifest 里没有放它的地方，填在 AMO 的提交表单里。
 
-- **上架地址：slug 定为 `doubak`**（2026-09-10 定的）。
+- **上架地址：slug 定为 `doubak`**（2026-09-10 定的），**2026-09-13 上架**：
+  <https://addons.mozilla.org/firefox/addon/doubak/>
 
-  **slug 已经在账号名下了，但列表页还没公开。** 判据不是页面的 404（那分不出「不存在」
-  与「不公开」），是 AMO 的公开接口：
+  **「上架了没有」这件事，整个项目只写在这一处。** 别处（`README.md`、
+  `docs/release.md`）只写地址，指过来——理由见下面「上架那天」那一节，
+  `test/workflow-package.test.js` 里有一条守着它。
+
+  **判据不是页面的 404**，那分不出「不存在」与「不公开」。是 AMO 的公开接口，
+  而它分得出三档：
 
   | 查什么 | 返回 |
   |---|---|
   | 一个不存在的 slug | `{"detail": "Not found."}` |
-  | 一个已上架的（`ublock-origin`） | 完整记录，`status: public` |
-  | `doubak` | `{"detail": "Authentication credentials were not provided.", "is_disabled_by_developer": false}` |
+  | 占上了、还没公开（`doubak` 在 09-10 到 09-13 之间就是这一档） | `{"detail": "Authentication credentials were not provided.", "is_disabled_by_developer": false}` |
+  | 已公开（现在的 `doubak`，或者 `ublock-origin`） | 完整记录，`status: public` |
 
-  中间那一档就是「存在，但没公开」。什么时候算上架好了：
+  所以随时可以自己问一句：
 
   ```sh
   curl -s https://addons.mozilla.org/api/v5/addons/addon/doubak/ | grep '"status":"public"'
   ```
-
-  **站上已经指过去了**（档案主人 2026-09-10 决定的，知道在公开之前会 404）。
 
   写进代码和文案的时候用**不带语言段**的那一个：
 
@@ -240,8 +243,8 @@ blob 就一直在。619 MB 的真实档案照这个比例就是把整份塞进�
   https://addons.mozilla.org/firefox/addon/doubak/
   ```
 
-  实测（拿一个已上架的扩展量的，因为我们自己那条还是 404）：这个地址 301 到访客
-  自己的语言，`Accept-Language` 说什么就去哪儿——
+  实测（2026-09-10 量的，那时我们自己那条还是 404，所以拿一个已上架的扩展量）：
+  这个地址 301 到访客自己的语言，`Accept-Language` 说什么就去哪儿——
 
   | 请求头 | 落到 |
   |---|---|
@@ -254,20 +257,38 @@ blob 就一直在。619 MB 的真实档案照这个比例就是把整份塞进�
   商店那条「只写扩展 ID、不带名字那一段」是同一条规矩：**别把一个会变的段写死**，
   区别只在那边变的是名字，这边变的是语言。
 
-### 上架那天还剩什么
+### 上架那天：清单列了两处，实际是五处（收尾于 2026-09-15）
 
-站点那三处 2026-09-10 已经提前改完了（ld+json、安装按钮、`/how/#firefox`），
-所以真上架那天只剩两件：
+这一节原来叫「上架那天还剩什么」，说站点那三处 09-10 已经提前改完，真上架那天
+**只剩两件**——改 `README.md`、关掉 `#11`。
 
-| 在哪 | 要做什么 |
+09-13 真上架之后 grep 了一遍。说着「还没上架」「上架之前只有这一条路」的地方，
+**在两个仓库的五个文件里**：
+
+| 在哪 | 说了什么 |
 |---|---|
-| 本仓库 `README.md` | 「AMO（Firefox）：还没上架」→ 上架地址 |
-| `Doubak/doubak-extension#11` | 关掉 |
+| `README.md` | 装载表把 Firefox 指向 `about:debugging` 的临时载入；「AMO 上架之前只有这一条路（`#11`）」；「AMO（Firefox）：还没上架」 |
+| `docs/release.md` | 「上架 AMO 之前只有这一条路」；AMO 那一节整节以「还没上架」开头 |
+| `docs/firefox.md` | 本节，以及上面那句「slug 已经在账号名下了，但列表页还没公开」 |
+| `doubak-website/how/index.html` | 注释里「而且还没上架」——而同一段注释还说首页那个按钮「指到这儿」，可按钮 09-10 就改成直接指 AMO 了 |
+| `doubak-website/assets/browsers/README.md` | 「Firefox 那个按钮不通向商店」 |
 
-以及把本节上面那句「站上已经指过去了，公开之前会 404」删掉——它到那时就不成立了。
+**清单漏掉三处不是疏忽，是它的写法。** 它是照着**写它的人当时开着的那几页**列的
+（`README.md` 和 issue 页），不是 grep 出来的。这与本文件记过的「一张两行的表，
+读的人就会做两分法」是同一族：**一张清单只覆盖写它的人当时看得见的范围**，
+而过期的说法恰恰散在他没看的地方。
+
+代价是真的，不是纸面上的：09-13 到 09-15 之间，照 `README.md` 装的 Firefox 用户
+会去做一次**关掉浏览器就没了**的临时载入，而商店里那一份已经一点就装了两天。
+
+所以修法不是把清单补长——下一次照样会漏一处——而是**让别处根本没有状态可漏**：
+「上架了没有」只写在本文件，`README.md` 与 `docs/release.md` 只写地址、指过来。
+`test/workflow-package.test.js` 守着这一条，与守扩展 id 的那条是同一个形状
+（同样的理由：一句话出现在两处就会分叉，而分叉的方向是「其中一处还是旧的」）。
 
 手动加载那一节**不要删**：临时载入仍然是试 `main` 上未发版改动的唯一路子，
-与 Chromium 那边「Releases 里的 zip」那一条同一个地位。`/how/` 已经按这个说法改过。
+与 Chromium 那边「Releases 里的 zip」那一条同一个地位。`/how/` 与 `README.md`
+都已经按这个说法改过。
 
 ## 界面那一侧接上了（2026-09-09）
 

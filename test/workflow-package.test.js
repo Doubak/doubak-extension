@@ -87,6 +87,50 @@ describe('打包这件事的文档，跟着目标表走', () => {
       assert.match(text, /firefox\.md/, `${f} 没指向那一处`);
     }
   });
+
+  test('**「上架了没有」也只写在那一处**，别的地方只写地址', async () => {
+    // 2026-09-13 上架 AMO，09-15 仓库里还有五个文件说着相反的话，其中 `README.md`
+    // 的装载表把 Firefox 用户指向 `about:debugging` 的临时载入——一条**关掉浏览器
+    // 就没了**的路，而商店里那一份已经一点就装了两天。
+    //
+    // `docs/firefox.md` 里那节清单当时列了**两处**，真实是五处：它是照着写它的人
+    // 当时开着的那几页列的（README 和 issue 页），不是 grep 出来的。所以要修的
+    // 不是清单——下一次照样漏一处——而是**让别处根本没有状态可漏**。
+    //
+    // **这是个词禁，说出来**（这个文件记过第八条代理断言，就是禁词禁错了东西）：
+    // 禁的是「上架了没有」这一类**会过期的断言**，不是这几个字本身。所以
+    // `docs/firefox.md` 不在名单里——它就是那一处，而且要记这段历史，必然逐字
+    // 写着这些词。
+    //
+    // 只禁「还没上架」那一族、不禁「已上架」，是有意的不对称：前者会随着上架那天
+    // 这件**一定会发生**的事变成假话，后者变假要等下架——罕见，而且下架本身就很响。
+    const STALE = /还没上架|尚未上架|上架之前|上架前|即将上架/;
+    for (const f of ['README.md', 'docs/release.md', 'docs/store-listing.md']) {
+      const hit = (await doc(f)).split('\n').filter((l) => STALE.test(l));
+      assert.deepEqual(hit, [], `${f} 里又写了一句会过期的上架状态`);
+    }
+
+    // 反向：那一处得真的在写它，否则上面三条只证明「谁都不说」。判据取**怎么核**
+    // 而不是「写着已上架」——页面 404 分不出「不存在」与「不公开」，这条 curl 才是
+    // 判据，删掉它就没人能自己答这个问题了。
+    const home = await doc('docs/firefox.md');
+    assert.match(home, /api\/v5\/addons\/addon\/doubak\//, 'firefox.md 里没有「怎么核上架状态」');
+    assert.match(home, /"status":"public"/, 'firefox.md 里没写判据是哪个字段');
+  });
+
+  test('**装它的第一条路是商店地址**，两个商店都得在 README 里', async () => {
+    // 判据取**地址**而不是「提到 AMO」：整改之前 README 也提到了 AMO，提的是
+    // 「还没上架」。读者要的是能点的那一个。
+    const text = await doc('README.md');
+    assert.match(
+      text, /addons\.mozilla\.org\/firefox\/addon\/doubak\//,
+      'README 里没有 AMO 的公开地址',
+    );
+    assert.match(
+      text, /chromewebstore\.google\.com\/detail\//,
+      'README 里没有 Chromium 商店的地址',
+    );
+  });
 });
 
 describe('打包工作流', () => {
