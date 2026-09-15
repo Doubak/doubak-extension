@@ -920,7 +920,7 @@ describe('面板脚本', () => {
     // **比的是位置，不是「存在」。** 只断言 id 在不在，把它移回页尾照样绿。
     const html = await readRepoFile('src/ui/panel.html');
     const about = html.indexOf('<div id="about">');
-    const steps = html.indexOf('<h2>使用步骤</h2>');
+    const steps = html.indexOf('<h2 id="steps"');
     const links = html.indexOf('<div id="links">');
     assert.ok(about > 0 && steps > 0 && links > 0, '帮助页少了 #about / 使用步骤 / #links');
     assert.ok(about < steps, '身份带（版本号在里面）跑到「使用步骤」后面去了');
@@ -2215,4 +2215,38 @@ test('**panel.html 里没有重名的 id**', async () => {
   const dup = [...new Set(ids.filter((x) => (seen.has(x) ? true : (seen.add(x), false))))];
   assert.deepEqual(dup, [], `这几个 id 重名了：${dup.join('、')}`
     + ' —— getElementById 只会返回靠前的那一个，另一处就此静默失效');
+});
+
+/**
+ * 帮助页的目录，必须与这一页真实的 `<h2>` 一条不差、顺序一致。
+ *
+ * 这一页实测 **4584px**，是面板里第二长那页（导出，990px）的 **4.6 倍**，十节八张表
+ * 全竖着摞——而它偏偏是「已经有问题了才会翻开」的一页。目录就是为这件事加的。
+ *
+ * **判据从 `<h2>` 反推，不抄一份清单。** 抄一份的话，加一节而忘了加目录项，测试照样
+ * 全绿，症状是**那一节从此没人找得到**——与 `sync-vendor` 的名单、打包目标表是同一族，
+ * 而这个仓库为「一张手抄的清单漏了五条」已经付过一次（见 `ui/route-names.js` 的文件头）。
+ *
+ * 两个方向都要钉：目录缺一节（找不到），或目录多一条（点了跳不动，而**锚点跳不动
+ * 是静默的**——浏览器什么都不做，看起来像页面卡了一下）。
+ */
+test('**帮助页的目录与它的 <h2> 完全对应**', async () => {
+  const html = await readRepoFile('src/ui/panel.html');
+  const help = html.slice(html.indexOf('<section id="tab-help"'));
+  const end = help.indexOf('</section>');
+  const sec = help.slice(0, end > 0 ? end : undefined);
+  assert.ok(sec.length > 2000, '帮助页那一段没切出来');
+
+  const heads = [...sec.matchAll(/<h2 id="([\w-]+)">([^<]+)<\/h2>/g)].map((m) => [m[1], m[2]]);
+  assert.ok(heads.length >= 8, `只扫到 ${heads.length} 个带 id 的 <h2>`);
+  // 每一个 <h2> 都得有 id：没有 id 的那一节，目录根本指不过去。
+  const bare = [...sec.matchAll(/<h2(?![^>]*\bid=)[^>]*>([^<]+)<\/h2>/g)].map((m) => m[1]);
+  assert.deepEqual(bare, [], `这几节没有 id，目录指不过去：${bare.join('、')}`);
+
+  const toc = sec.slice(sec.indexOf('<nav class="toc"'), sec.indexOf('</nav>'));
+  assert.ok(toc.includes('href="#'), '目录没切出来');
+  const links = [...toc.matchAll(/href="#([\w-]+)"/g)].map((m) => m[1]);
+
+  assert.deepEqual(links, heads.map(([id]) => id),
+    '目录与页面上的 <h2> 对不上（缺一条 = 那一节没人找得到；多一条 = 点了跳不动，而跳不动是静默的）');
 });

@@ -25,6 +25,24 @@ const read = (rel) => readFile(new URL(`../${rel}`, import.meta.url), 'utf-8');
  *
  * @param {string} html
  */
+/**
+ * 帮助页里某一节的源码，按 `<h2>` 的 **id** 切。
+ *
+ * **不按标题原文切。** 这个文件里原来五处都写着
+ * `slice(indexOf('<h2>各标签页的用途</h2>'))`——标题一加 `id` 属性，那个字面量就
+ * 再也匹配不上，`indexOf` 返回 -1，`slice(-1)` 得到最后一个字符，检查悄悄变成空转。
+ * 2026-09-15 给这一页加目录时四条测试同时红，就是这么来的（红是对的，它们至少
+ * 没有默默通过）。id 是拿来被引用的，标题文字是拿来读的——判据该钉在前者上。
+ *
+ * @param {string} html @param {string} id
+ */
+function helpSection(html, id) {
+  const from = html.indexOf(`<h2 id="${id}"`);
+  assert.ok(from >= 0, `帮助页里找不到 #${id} 那一节 —— 下面几条会空切`);
+  const next = html.indexOf('<h2 ', from + 1);
+  return html.slice(from, next > from ? next : undefined);
+}
+
 function neodbCard(html) {
   const from = html.indexOf('<div class="format-card" id="format-neodb"');
   const to = html.indexOf('<div class="format-card" id="format-canonical"');
@@ -415,7 +433,7 @@ describe('帮助页不许落下这一页', () => {
     const tabs = [...html.matchAll(/<button data-tab="(\w+)"/g)].map((m) => m[1]);
     assert.ok(tabs.length >= 6, `只找到 ${tabs.length} 个标签，正则大概坏了`);
 
-    const table = html.slice(html.indexOf('<h2>各标签页的用途</h2>'));
+    const table = helpSection(html, 'tab-purpose');
     const rows = table.slice(0, table.indexOf('</table>'));
     const NAMES = {
       overview: '概览', coverage: '覆盖率', archive: '档案',
@@ -430,7 +448,7 @@ describe('帮助页不许落下这一页', () => {
     const html = await read('src/ui/panel.html');
     const js = await read('src/ui/panel/formats.js');
     const dirs = [...js.matchAll(/dir: '([^']+)'/g)].map((m) => m[1]);
-    const table = html.slice(html.indexOf('<h2>主要按钮说明</h2>'));
+    const table = helpSection(html, 'buttons');
     const rows = table.slice(0, table.indexOf('</table>'));
     for (const d of dirs) {
       assert.ok(rows.includes(d), `按钮表里没提到 ${d}/`);
@@ -441,7 +459,7 @@ describe('帮助页不许落下这一页', () => {
     // 「档案没导出就可能永远没了」与「派生数据随时能重算」是这套界面最重要的
     // 一组对比。步骤里把两者摆在一起，读的人才知道哪一步是不能跳的。
     const html = await read('src/ui/panel.html');
-    const steps = html.slice(html.indexOf('<h2>使用步骤</h2>'));
+    const steps = helpSection(html, 'steps');
     const list = steps.slice(0, steps.indexOf('</ol>'));
     assert.match(list, /「导出」页/, '使用步骤没提到导出页');
     assert.match(list, /此步骤不可省略/, '没说档案那一步不能跳');
@@ -663,7 +681,7 @@ test('**帮助页要讲清日记可见性的四种情形**', async () => {
   // 日记被收起来了」的人会来帮助页找。这一节缺席的话，那三行 ⚠ 就没有落脚处。
   // 与「加了一个标签页，帮助页三处全没跟上」是同一条：都不会报错。
   const html = await read('src/ui/panel.html');
-  const sec = html.slice(html.indexOf('id="note-visibility"'), html.indexOf('<h2>各标签页的用途</h2>'));
+  const sec = helpSection(html, 'note-visibility');
   assert.ok(sec.length > 200, '帮助页里找不到那一节');
   for (const 要有 of [
     '你自己设成「仅自己可见」',   // 收成仅提及者

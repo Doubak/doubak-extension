@@ -502,6 +502,19 @@ ul.own { margin-bottom: 0; padding-left: calc(var(--s3) + 1.1em); }
 ul.own li { margin: 2px 0; }
 .content-item.bad .t { color: var(--text-dim); font-weight: normal; }
 
+/* ── 帮助页的目录 ─────────────────────────────────────────────────────
+   一行一行地摞下去就不是目录了，所以让它自己折行、挤在一起。**不用 `.subtabs`
+   那套下划线**：那一套的意思是「互斥的几个视角，选一个」，而这里十节全在页面上，
+   点了只是滚过去——长得像标签会让人以为点了别的会被收起来。 */
+.toc {
+  display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3);
+  margin: var(--s3) 0 var(--s5);
+  padding: var(--s3); border: 1px solid var(--line);
+  border-radius: var(--r2); background: var(--bg-alt);
+}
+.toc a { font-size: 12.5px; color: var(--text-dim); text-decoration: none; }
+.toc a:hover { color: var(--brand); text-decoration: underline; }
+
 /* ── 导出页 ───────────────────────────────────────────────────────── */
 
 /*
