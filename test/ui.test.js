@@ -2250,3 +2250,82 @@ test('**帮助页的目录与它的 <h2> 完全对应**', async () => {
   assert.deepEqual(links, heads.map(([id]) => id),
     '目录与页面上的 <h2> 对不上（缺一条 = 那一节没人找得到；多一条 = 点了跳不动，而跳不动是静默的）');
 });
+
+/**
+ * 主按钮：**面板里第一次出现 `.act.primary`**。
+ *
+ * 在这之前，`.act.primary` 这条样式在 `panel.css` 里躺着（填充品牌色、白字、600），
+ * `components.js` 的 `button()` 实现了它、JSDoc 也写着 `kind?: 'primary'|'danger'`
+ * ——**而 `overview.js` 的 `setActions()` 写死成 `kind === 'danger' ? … : 'act'`**，
+ * 于是从这条路传 `'primary'` 会被静默丢掉。一个样式存在、被文档承诺、调用点却表达
+ * 不出来，与「一个说了要做某事、实际什么也不做的控件」是同一族。
+ *
+ * **主按钮只标「此刻该做的那件事」，不是「把按钮染绿」。** 判据写在下面三条里，
+ * 第三条是最要紧的：真正的二选一不许有主按钮。
+ */
+describe('主按钮', () => {
+  const classOf = (dom, label) =>
+    [...dom.byId.get('actions').children].find((b) => b.textContent === label)?.className ?? null;
+
+  test('空闲时「开始抓取」是主按钮', async () => {
+    // 首次打开面板，它是这一页上唯一该做的事，而此前它与别的按钮长得一模一样。
+    const dom = await loadUi({ which: 'panel', onMessage: IDLE });
+    try {
+      assert.match(classOf(dom, '开始抓取') ?? '', /\bprimary\b/, '「开始抓取」不是主按钮');
+    } finally { dom.restore(); }
+  });
+
+  test('暂停时「继续」是主按钮，而「中止这次抓取」仍然是 danger', async () => {
+    // 两者必须长得不一样：一个是往前走，一个不可逆。danger 刻意只描边不填色
+    // （填充的红在一排里最抢眼，会把人往最不该误点的那个引，见 panel.css）。
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => (msg.type === 'status'
+        ? { ok: true, checkpoint: null, busyWith: null,
+            runner: { active: true, stopped: true, stoppedBy: 'user_paused',
+                      bundleId: '20260915T203114Z-8ab41c', failures: [], routes: [] } }
+        : IDLE(msg)),
+    });
+    try {
+      assert.match(classOf(dom, '继续') ?? '', /\bprimary\b/, '「继续」不是主按钮');
+      const stop = classOf(dom, '中止这次抓取') ?? '';
+      assert.match(stop, /\bdanger\b/, '「中止这次抓取」丢了 danger');
+      assert.doesNotMatch(stop, /\bprimary\b/, '中止不许是主按钮');
+    } finally { dom.restore(); }
+  });
+
+  test('**真正的二选一里不许有主按钮**', async () => {
+    // 抓不下来几个页面时，「继续并重试」与「就这样收尾」是一个**用户才有权做的
+    // 决定**（后者会把缺口如实写进 manifest，且那条路线不推进水位线）。把其中一个
+    // 染成主按钮，就是替他拿主意——而这一档的默认值本来就不该由我们给。
+    const failures = [{ url: 'https://movie.douban.com/subject/1292052/', ordered: false }];
+    const dom = await loadUi({
+      which: 'panel',
+      onMessage: (msg) => (msg.type === 'status'
+        ? { ok: true, checkpoint: null, busyWith: null,
+            runner: { active: true, stopped: true, stoppedBy: 'failures_pending',
+                      bundleId: '20260915T203114Z-8ab41c', failures, routes: [] } }
+        : IDLE(msg)),
+    });
+    try {
+      const labels = [...dom.byId.get('actions').children].map((b) => b.textContent);
+      const pair = labels.filter((l) => /重试|就这样收尾/.test(l));
+      assert.equal(pair.length, 2, `那两个按钮没出来：${labels.join(' / ')}`);
+      for (const l of pair) {
+        assert.doesNotMatch(classOf(dom, l) ?? '', /\bprimary\b/,
+          `「${l}」成了主按钮 —— 这一档是用户的决定，不是我们的推荐`);
+      }
+    } finally { dom.restore(); }
+  });
+
+  test('**样式要算进 setActions 的缓存键**', async () => {
+    // 这一条只能读源码：`setActions` 不导出，而缓存那条路要两次渲染**同一句标签、
+    // 不同样式**才走得到，面板里现在还没有这种一对。
+    //
+    // 不算进去的后果是「改了没生效」：标签没变，于是只换 onclick、className 留在
+    // 上一次的样子。这是这个文件反复记的那一类——不报错，只是悄悄不对。
+    const src = await readRepoFile('src/ui/panel/overview.js');
+    const line = /const key = buttons\.map\(([^\n]*)\)/.exec(src)?.[1] ?? '';
+    assert.ok(line.includes('k'), `缓存键没把样式算进去：${line}`);
+  });
+});

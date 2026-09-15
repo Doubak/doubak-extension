@@ -107,7 +107,9 @@ function setState(tone, title, why = '') {
  */
 function setActions(buttons) {
   const el = $('actions');
-  const key = buttons.map(([l]) => l).join('\u0000');
+  // **样式也要进这把钥匙。** 缓存这条路只换 onclick，不动 className——同一句标签
+  // 换了样式就会留在旧样子上，而那种「改了没生效」最难看出来。
+  const key = buttons.map(([l, , k]) => `${l}\u0001${k ?? ''}`).join('\u0000');
   if (el.dataset.key === key) {
     // 标签一样，但回调可能捕获了新的状态，所以只换 onclick。
     const bs = el.querySelectorAll('button');
@@ -118,9 +120,14 @@ function setActions(buttons) {
   el.replaceChildren();
   for (const [label, fn, kind] of buttons) {
     const b = document.createElement('button');
-    // 第三个元素是**样式**：不可逆的动作要看起来不一样（用边框而不是填充色，
-    // 填充的红按钮在一排里反而最抢眼，会把人往那儿引）。
-    b.className = kind === 'danger' ? 'act danger' : 'act';
+    // 第三个元素是**样式**，原样交给 class（`act danger` / `act primary`）。
+    //
+    // 原来这儿写死成 `kind === 'danger' ? … : 'act'`，于是 `.act.primary`
+    // ——CSS 里有、`components.js` 的 button() 实现了、它的 JSDoc 也写着
+    // `kind?: 'primary'|'danger'`——**在这条路上传进来会被静默丢掉**。面板里因此
+    // 一个主按钮都没有。一个样式存在、被文档承诺、而调用点表达不出来，
+    // 与「一个说了要做某事、实际什么也不做的控件」是同一族。
+    b.className = kind ? `act ${kind}` : 'act';
     b.textContent = label;
     b.onclick = fn;
     el.append(b);
@@ -247,7 +254,7 @@ export async function refresh() {
         ['warn', '抓取已停下', `原因：${r.stoppedBy}`, '继续'];
       setState(tone, title, why);
       setActions([
-        ...(action ? [[action, resumeCrawl]] : []),
+        ...(action ? [[action, resumeCrawl, 'primary']] : []),
         // **只要有抓不下来的条目就摆出来，不管是哪种停法。**
         //
         // 原来只在没有「继续」时才给（failures_pending），理由是「决定在失败清单
@@ -291,7 +298,7 @@ export async function refresh() {
       ['warn', '抓取已停下', `原因：${s.checkpoint.pause_reason}`, '继续'];
     setState(tone, title, why);
     setActions([
-      ...(action ? [[action, resumeCrawl]] : []),
+      ...(action ? [[action, resumeCrawl, 'primary']] : []),
       // **没有「继续」时也必须有出路。**
       //
       // `failures_pending` 刻意不给「继续」，因为该做的决定是「重试」还是
@@ -368,7 +375,7 @@ export async function refresh() {
       pendingCommand = null;
     }
     refresh();
-  }]]);
+  }, 'primary']]);
 
   // **空闲态下这张表归 `showLastRun()` 管，这里不许再动它。**
   //
