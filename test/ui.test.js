@@ -2187,3 +2187,32 @@ describe('左边那栏：有档案就画，一份都没有才收', () => {
     );
   });
 });
+
+/**
+ * **`id` 在一份文档里不许重名。**
+ *
+ * 这条是被自己写的一个 bug 逼出来的（2026-09-15，`#13`）：导出页那组新的小标签
+ * 起名 `formats-bar`，而同一页上早就有一个 `<progress id="formats-bar">`。
+ * `getElementById` 返回文档里**靠前**的那一个，于是
+ * `$('formats-bar').querySelectorAll('button[data-format]')` 拿到的是那个
+ * `<progress>`，返回空集——**三张小标签一张都点不动，而且什么都不抛**。
+ *
+ * 当时全套测试绿着。事后把 bug 原样放回去量过：**只有这一条会红；把这一条去掉，
+ * 1923 条测试全绿，而那个界面已经是死的。**
+ *
+ * 成因值得记住：这一页的检查几乎都是拿正则读 HTML **文本**的（真正的失败要在装好
+ * 的扩展里点开标签页才发生），而 `id="formats-bar"` 在文本里出现两次，两条测试
+ * 各自匹配到其中一个，都满意。**静态检查读的是文本，`getElementById` 读的是文档
+ * ——重名正好是这两者分家的地方。**
+ *
+ * 所以这条不查任何具体的名字，只查「有没有重的」，并且断言自己真的扫到了东西。
+ */
+test('**panel.html 里没有重名的 id**', async () => {
+  const html = await readRepoFile('src/ui/panel.html');
+  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(ids.length > 80, `只扫到 ${ids.length} 个 id，正则大概坏了`);
+  const seen = new Set();
+  const dup = [...new Set(ids.filter((x) => (seen.has(x) ? true : (seen.add(x), false))))];
+  assert.deepEqual(dup, [], `这几个 id 重名了：${dup.join('、')}`
+    + ' —— getElementById 只会返回靠前的那一个，另一处就此静默失效');
+});

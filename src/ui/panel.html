@@ -193,8 +193,7 @@
            三种产出各建各的子目录（见 formats.js 的 FORMATS[].dir）。 -->
       <div class="hint">
         <b>不用先建文件夹。</b> 点「导出…」时选一个现成的目录就行（比如「下载」），
-        三种产出会各自在里面建一个子目录，<b>不会互相覆盖</b>：
-        <code>doubak-neodb/</code>、<code>doubak-canonical/</code>、<code>doubak-markdown/</code>。
+        产出会在里面自建一个子目录（名字就是下面那棵树的第一行），三种<b>不会互相覆盖</b>。
         同一个目录可以反复导，同名文件会被新的覆盖。
       </div>
 
@@ -230,10 +229,34 @@
       </div>
       <div id="formats-result"></div>
 
+      <!-- **三种产出是三张小标签，不是竖着摞的三张卡片**（`#13`，档案主人的原话是
+           「竖着排看起来也挺费劲的」）。这一页已经为布局改过一次：2026-09-09 从三列
+           等宽改成一张一行，修掉了「目录树被裁掉」和「正文里裂个几百像素的洞」两件事
+           （见 panel.css 里那段），代价是这一页高了约 390px——而那正是这次要收掉的。
+           小标签把两者都拿到手：**每张卡片仍然独占整宽**（树不被裁、正文不吸高度，
+           panel.css 里那两条规则原样还在），而**一次只出现一张**（不用滚过另外两张）。
+
+           样式复用档案页那对「生 / 熟」小标签（`.subtabs` / `.subtab`），因为做的是
+           同一件事：在互斥的几个视角之间切。**但切换逻辑不共用**——那一对允许
+           「都不选」（点开哪个才渲染哪个），这一组是恰好选一个。硬把两种语义塞进
+           一个函数，就是这个项目反复栽的那类假统一。
+
+           顺序按「多数人要哪个」排：NeoDB 是维护者与用户都在等的那条路，所以它是
+           默认选中的那一张。 -->
+      <div id="formats-tabs" class="subtabs" role="tablist" aria-label="导出哪一种">
+        <button class="subtab" id="subtab-neodb" role="tab" data-format="neodb"
+                aria-selected="true" aria-controls="format-neodb">NeoDB 导入包</button>
+        <button class="subtab" id="subtab-canonical" role="tab" data-format="canonical"
+                aria-selected="false" aria-controls="format-canonical">结构化数据</button>
+        <button class="subtab" id="subtab-markdown" role="tab" data-format="markdown"
+                aria-selected="false" aria-controls="format-markdown">Markdown 站点</button>
+      </div>
+
       <div class="formats">
-        <!-- 顺序按「多数人要哪个」排：NeoDB 是维护者与用户都在等的那条路。 -->
-        <div class="format-card">
-          <h3>导到 NeoDB</h3>
+        <!-- 卡片上**不再写一遍标题**：选中的那张小标签就在它正上方，同样几个字写两遍
+             只是占地方。无障碍那一侧由 `aria-labelledby` 接住——这一块的名字就是那张
+             标签，比一个额外的 <h3> 更准。 -->
+        <div class="format-card" id="format-neodb" role="tabpanel" aria-labelledby="subtab-neodb">
           <p class="muted small">
             一个 zip，直接传到 NeoDB 的「设置 → 数据 → 导入 NeoDB 备份」。
             标记、评分、短评、标签、书评影评、日记、豆列，以及豆瓣自己已经不显示的
@@ -282,10 +305,10 @@
           </div>
         </div>
 
-        <div class="format-card">
-          <h3>结构化数据（canonical）</h3>
+        <div class="format-card" id="format-canonical" role="tabpanel"
+             aria-labelledby="subtab-canonical" hidden>
           <p class="muted small">
-            五个 NDJSON 文件，每行一条 JSON，<code>jq</code> 直接能读。
+            五个 NDJSON 文件（这套格式叫 <b>canonical</b>），每行一条 JSON，<code>jq</code> 直接能读。
             这是所有下游工具的输入，也是十年后拿着这个文件夹的人最容易读懂的那一份。
           </p>
           <pre class="tree">doubak-canonical/
@@ -301,8 +324,8 @@
           </div>
         </div>
 
-        <div class="format-card">
-          <h3>Markdown 站点</h3>
+        <div class="format-card" id="format-markdown" role="tabpanel"
+             aria-labelledby="subtab-markdown" hidden>
           <p class="muted small">
             一棵带 YAML 头的 Markdown 树，外加图片与搜索索引，交给 Hugo / Astro /
             Eleventy / Jekyll 都能出站点。<b>图片一并导出</b>，所以离线也看得见。
@@ -487,7 +510,9 @@
           <tr><td><b>读不出来</b></td><td>默认<b>仅提及者可见</b>，可在卡片上拨</td>
             <td>多半是豆瓣改了日记页的结构，抽取器认不出隐私容器了。「读不出来」不是「确认公开」，
               所以默认收起来：收错了你点一下就改回来，发错了撤不回来。
-              碰上的话卡片上会出现一个选项框，也会请你到
+              卡片上那个选项框<b>一直都在</b>——「读不出来」是抽取器在解析那一刻的判断，
+              不是档案的属性，所以按「上一次导出有没有遇到」来决定显不显示，会让它在升级
+              抽取器之后、你可能正需要它的时候消失。真遇到时导出结果里还会请你到
               <a href="https://github.com/Doubak/doubak-data-parser/issues" target="_blank" rel="noreferrer">GitHub</a>
               报一声——那几页本来就在你的档案里，改好抽取器重新导出就能救回来，不用重新抓豆瓣。</td></tr>
           <tr><td>影评、书评</td><td>跟其它记录一样，<b>不受「日记导出设置为」影响</b></td>

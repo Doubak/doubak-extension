@@ -13,6 +13,25 @@ import { readFile } from 'node:fs/promises';
 
 const read = (rel) => readFile(new URL(`../${rel}`, import.meta.url), 'utf-8');
 
+/**
+ * 只切出 NeoDB 那一张卡片。
+ *
+ * **边界必须断言自己找到了。** 原来这两处各写一遍
+ * `slice(indexOf('doubak-neodb/'), indexOf('结构化数据（canonical）'))`，而
+ * 2026-09-15 把第二个标题删掉了（三种产出改成小标签，标题由标签本身承担）——
+ * `indexOf` 返回 -1，`slice(x, -1)` 就一路切到文件末尾：**两条测试仍然全绿，
+ * 检查的却是整份 panel.html 的后半截**。这个文件里已经记过一次「判据比要守的
+ * 性质宽」，那次是测试自己犯的，这次也是。
+ *
+ * @param {string} html
+ */
+function neodbCard(html) {
+  const from = html.indexOf('<div class="format-card" id="format-neodb"');
+  const to = html.indexOf('<div class="format-card" id="format-canonical"');
+  assert.ok(from >= 0 && to > from, 'NeoDB 那张卡片的边界没找到 —— 下面几条会空切');
+  return html.slice(from, to);
+}
+
 // **能跑就别只是找。** 这个文件里静态检查是常态（真正的失败要在装好的扩展里点开
 // 标签页才发生），但 `summary()` 是个纯函数，跑得起来——实测过：把
 // `r.restricted?.length` 改成 `false && r.restricted?.length`，找字符串的那版
@@ -39,7 +58,7 @@ describe('导出页的骨架', () => {
     // 代码仓库，不是一句「你可以这么做」。
     const html = await read('src/ui/panel.html');
     const section = html.slice(html.indexOf('<section id="tab-formats"'), html.indexOf('<section id="tab-debug"'));
-    const cards = section.split('<div class="format-card">').slice(1);
+    const cards = section.split(/<div class="format-card"[^>]*>/).slice(1);
     assert.equal(cards.length, 3, `卡片数不对：${cards.length}`);
     for (const card of cards) {
       assert.match(card, /<a href="https:\/\/[^"]+"[^>]*>[^<]*↗<\/a>/,
@@ -78,6 +97,62 @@ describe('导出页的骨架', () => {
     }
   });
 
+  test('**三张小标签、三块面板、三种产出，三者一一对上**', async () => {
+    // 加第四种产出而忘了加标签，症状是**那一种从此点不到**——按钮还在 DOM 里、
+    // 事件也绑上了，只是它所在的那一块永远 hidden。不抛错，测试也不会红，
+    // 除非有人把这三者拴在一起数。
+    const html = await read('src/ui/panel.html');
+    const section = html.slice(html.indexOf('<section id="tab-formats"'), html.indexOf('<section id="tab-debug"'));
+    const tabs = [...section.matchAll(/<button class="subtab" id="([\w-]+)" role="tab" data-format="(\w+)"/g)];
+    assert.equal(tabs.length, 3, `小标签数不对：${tabs.length}`);
+    // 顺序也钉住：第一张是默认选中的那张，而「先摆哪个」是有理由的
+    // （NeoDB 是维护者与用户都在等的那条路）。
+    assert.deepEqual(tabs.map((m) => m[2]), Object.keys(FORMATS));
+  });
+
+  test('**恰好一张选中，而且选中的那块才是露出来的**', async () => {
+    // 两块都不 hidden 的话，页面上就是两张卡片摞着——正是这次要修掉的样子，
+    // 而它看起来只是「没生效」，不像出错。
+    const html = await read('src/ui/panel.html');
+    const section = html.slice(html.indexOf('<section id="tab-formats"'), html.indexOf('<section id="tab-debug"'));
+    const selected = [...section.matchAll(/<button class="subtab"[^>]*aria-selected="true"/g)];
+    assert.equal(selected.length, 1, `默认选中了 ${selected.length} 张标签`);
+
+    const panels = [...section.matchAll(/<div class="format-card" id="([\w-]+)"[^>]*?(hidden)?>/gs)]
+      .map((m) => ({ id: m[1], hidden: /\bhidden\b/.test(m[0]) }));
+    assert.equal(panels.length, 3, `面板数不对：${panels.length}`);
+    assert.equal(panels.filter((x) => !x.hidden).length, 1,
+      `露出来的面板有 ${panels.filter((x) => !x.hidden).length} 块，应当恰好 1 块`);
+    assert.equal(panels[0].hidden, false, '露出来的那块不是第一块');
+  });
+
+  test('**标签与面板互相指着对方**，不是靠名字拼出来的', async () => {
+    // `aria-controls` / `aria-labelledby` 一对一。少了任何一半，读屏都说不出
+    // 「这一块属于哪张标签」；而更要紧的是切换逻辑就读 `aria-controls`——
+    // 指错了就是点了没反应，且不抛异常（`getElementById` 拿不到就是 null）。
+    const html = await read('src/ui/panel.html');
+    const section = html.slice(html.indexOf('<section id="tab-formats"'), html.indexOf('<section id="tab-debug"'));
+    const tabs = [...section.matchAll(/<button class="subtab" id="([\w-]+)"[\s\S]*?aria-controls="([\w-]+)"/g)]
+      .map((m) => ({ tab: m[1], panel: m[2] }));
+    assert.equal(tabs.length, 3, `扫到 ${tabs.length} 张标签，正则大概坏了`);
+    for (const { tab, panel } of tabs) {
+      assert.match(section, new RegExp(`<div class="format-card" id="${panel}"`), `${tab} 指向的面板不存在`);
+      assert.match(section, new RegExp(`id="${panel}"[\\s\\S]{0,120}?aria-labelledby="${tab}"`),
+        `${panel} 没有指回 ${tab}`);
+    }
+  });
+
+  test('**切换按 aria-controls 走，而且键盘走得动**', async () => {
+    const js = await read('src/ui/panel/formats.js');
+    assert.match(js, /getAttribute\('aria-controls'\)/, '切换没读 aria-controls —— 拼 id 的话两边会各说各的');
+    assert.ok(!/formats?-\$\{|'format-' \+/.test(js), '又去拼面板 id 了');
+    // 一组标签在 Tab 键序列里只占一站，进去之后靠左右键换。
+    assert.match(js, /ArrowLeft/, '左右键没接');
+    assert.match(js, /tabIndex = on \? 0 : -1/, '没有漫游 tabindex —— 三张全可 Tab，键盘要多按两下');
+    // 选中跟着焦点走：漫游 tabindex 之后不 focus 的话，下一次按键还是从原处算。
+    assert.match(js, /next\.focus\(\)/, '换了标签但焦点没跟过去');
+  });
+
   test('**有一条通往档案页的出口**', async () => {
     // 「我要的是档案本身，不是这些算出来的东西」是一定会出现的念头，
     // 而这一页上没有任何东西提到 WARC。
@@ -95,6 +170,20 @@ describe('导出页的行为约束', () => {
     assert.match(js, /function setBusy/, '没有 setBusy');
     assert.match(js, /btn\.disabled = on/, 'setBusy 没有真的禁按钮');
     assert.match(js, /if \(running\) return;/, '点击时没有挡住并发');
+  });
+
+  test('**灰掉的那两个按钮要说出自己为什么是灰的**', async () => {
+    // `#13` 之前三张卡片竖着摞，正在跑的那张就在旁边，灰掉的关系一眼看得出。
+    // 改成小标签之后，切过去只剩一个灰按钮——而**一个不说原因的禁用控件，与一个
+    // 坏掉的按钮长得一模一样**。顶上那条进度条还在，但那要求人自己把两件事连起来。
+    const js = await read('src/ui/panel/formats.js');
+    const body = js.slice(js.indexOf('function setBusy'), js.indexOf('async function runExport'));
+    assert.ok(body.length > 100, 'setBusy 的正文没切出来，正则大概坏了');
+    const m = body.match(/exceptId \? '([^']+)' : '([^']+)'/);
+    assert.ok(m, '忙的时候两种按钮写的是同一句话');
+    const [, running, others] = m;
+    assert.notEqual(others, running, '灰掉的那两个与正在跑的那个写的一样');
+    assert.notEqual(others, '导出…', '灰掉的那两个还写着「导出…」 —— 灰着却不说为什么');
   });
 
   test('**进度条不写宽度**，样式全在 CSS 里', async () => {
@@ -527,7 +616,7 @@ describe('看不出公不公开的那几篇日记，用户可以自己拨', () =
     }
     // 必须在 NeoDB 那张卡片里、在导出按钮**前面**——决定和动作挨着，
     // 而且是先看见选项再按导出。
-    const card = html.slice(html.indexOf('doubak-neodb/'), html.indexOf('结构化数据（canonical）'));
+    const card = neodbCard(html);
     assert.ok(card.includes('export-neodb-unknown-row'), '得在 NeoDB 那张卡片里');
     assert.ok(
       card.indexOf('export-neodb-unknown-row') < card.indexOf('id="export-neodb"'),
@@ -583,6 +672,15 @@ test('**帮助页要讲清日记可见性的四种情形**', async () => {
     '影评、书评',                 // 不适用，不是不知道
     'doubak-data-parser/issues',  // 请人报一声
   ]) assert.ok(sec.includes(要有), `帮助页那一节没提到「${要有}」`);
+
+  // **而且不许说它是「碰上了才出现」的。** 那个控件 2026-09-09 改成常驻，帮助页
+  // 这一句一直停在旧行为上（2026-09-15 才发现，改导出页布局时读到的）——一份说
+  // 控件会自己出现的说明书，配上一个一直在那儿的控件，读者只会以为自己看错了页。
+  // 判据钉的是「别再说它会出现」，而不是某一句具体的措辞。
+  assert.doesNotMatch(
+    sec, /碰上的话卡片上会出现|碰上了才(会)?(出现|显示)/,
+    '帮助页又说那个选项框是碰上才出现的 —— 它是常驻的，有测试钉着',
+  );
 });
 
 /**
@@ -596,7 +694,7 @@ test('**帮助页要讲清日记可见性的四种情形**', async () => {
 describe('日记导出设置为', () => {
   test('常驻、默认公开、两档，且在导出按钮前面', async () => {
     const html = await read('src/ui/panel.html');
-    const card = html.slice(html.indexOf('doubak-neodb/'), html.indexOf('结构化数据（canonical）'));
+    const card = neodbCard(html);
     assert.ok(card.includes('<legend>日记导出设置为</legend>'), '卡片里找不到这一组');
     // **不许藏。** 与那个 unknown 选项框相反：日记是人人都有的东西，藏起来等于
     // 这条反馈里的人第二次也看不见。

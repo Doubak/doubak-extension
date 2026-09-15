@@ -271,13 +271,20 @@ function hideProgress() {
   $('formats-bar').removeAttribute('value');
 }
 
-/** 跑起来之后其余按钮全禁掉。见文件头第②条。 */
+/**
+ * 跑起来之后其余按钮全禁掉。见文件头第②条。
+ *
+ * **另外两个按钮要说出自己为什么是灰的**（`#13` 之后才必须这样）。三张卡片竖着摞
+ * 的时候，正在跑的那张就在旁边，灰掉的关系一眼就看得出；改成小标签之后，切过去
+ * 只剩一个灰按钮，而**一个不说原因的禁用控件与一个坏掉的按钮长得一模一样**。
+ * 上面那条进度条确实还在页面顶上，但那要求人自己把两件事连起来。
+ */
 function setBusy(on, exceptId = null) {
   for (const f of Object.values(FORMATS)) {
     const btn = $(f.button);
     btn.disabled = on;
-    if (on && f.button === exceptId) btn.textContent = '正在导出…';
-    else if (!on) btn.textContent = '导出…';
+    if (on) btn.textContent = f.button === exceptId ? '正在导出…' : '正在导另一种…';
+    else btn.textContent = '导出…';
   }
   // **「停下」也要恢复。** 按过一次之后它是禁用的、写着「正在停…」；不复位的话
   // 下一次导出开始时那个按钮就是个死的，而它恰恰是这次唯一的出口。
@@ -629,8 +636,60 @@ export async function loadFormats() {
   }
 }
 
+/**
+ * 三种产出之间切一张（`#13`）。
+ *
+ * **判据是 `aria-controls`，不是 `data-format` 拼出来的 id。** 拼 id 的话，
+ * HTML 里改一个名字、JS 这边不改，结果是「点了没反应」——而它不抛异常，因为
+ * `$()` 拿不到就是 null。让标签自己说出它管哪一块，两边就不可能各说各的。
+ *
+ * **不共用档案页那对小标签的逻辑**：那一对允许「都不选」（点第二下收起来），
+ * 这一组是恰好选一个。把两种语义塞进一个函数，就是这个项目反复栽的那类假统一。
+ *
+ * @param {string} id 要选中的那张标签的 id
+ */
+function selectFormat(id) {
+  for (const b of $('formats-tabs').querySelectorAll('button[data-format]')) {
+    const on = b.id === id;
+    b.setAttribute('aria-selected', String(on));
+    // 漫游 tabindex：一组标签在 Tab 键序列里**只占一站**，进来之后用左右键换。
+    // 三张全都可 Tab 的话，键盘用户要按三下才能走过这一组。
+    b.tabIndex = on ? 0 : -1;
+    const panel = document.getElementById(b.getAttribute('aria-controls') ?? '');
+    if (panel) panel.hidden = !on;
+  }
+}
+
+/** 当前选中那张标签的按钮。 */
+function currentFormatTab() {
+  const bar = $('formats-tabs');
+  return bar.querySelector('button[aria-selected="true"]') ?? bar.querySelector('button[data-format]');
+}
+
 /** 绑事件。**由 panel.js 显式调用**，不靠 import 的副作用。 */
 export function initFormats() {
+  // 小标签：点，以及左右 / Home / End。**导出跑着的时候照样能切**——切的是看哪一段
+  // 说明，不是切要导什么（要导什么在按下「导出…」那一刻就定了）。挡住它只会让
+  // 等待的那几分钟里连字都读不了。
+  const bar = $('formats-tabs');
+  bar.addEventListener('click', (e) => {
+    const btn = /** @type {HTMLElement} */ (e.target)?.closest?.('button[data-format]');
+    if (btn) selectFormat(btn.id);
+  });
+  bar.addEventListener('keydown', (e) => {
+    const keys = { ArrowLeft: -1, ArrowRight: 1 };
+    const all = [...bar.querySelectorAll('button[data-format]')];
+    const i = all.indexOf(currentFormatTab());
+    let next = null;
+    if (e.key in keys) next = all[(i + keys[e.key] + all.length) % all.length];
+    else if (e.key === 'Home') next = all[0];
+    else if (e.key === 'End') next = all[all.length - 1];
+    if (!next) return;
+    e.preventDefault();
+    selectFormat(next.id);
+    next.focus(); // 漫游 tabindex 之后，焦点必须跟着选中走，否则下一次按键又从原处算
+  });
+
   for (const [kind, f] of Object.entries(FORMATS)) {
     $(f.button).addEventListener('click', () => {
       if (running) return;
@@ -680,6 +739,10 @@ export function initFormats() {
 export function resetFormats() {
   running = null;
   account = null;
+  // 小标签回到第一张。**不记住上次看的是哪一种**——与这一页的账号选择器同一条理由：
+  // 面板重开是一次新的开始，而一个记着的选择会让人以为自己已经选过了。
+  const first = $('formats-tabs')?.querySelector('button[data-format]');
+  if (first) selectFormat(first.id);
   hideProgress();
   $('formats-result').className = '';
   $('formats-result').replaceChildren();
