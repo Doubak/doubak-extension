@@ -2,8 +2,8 @@
 
 跟踪 issue：[`Doubak/doubak-extension#11`](https://github.com/Doubak/doubak-extension/issues/11)。
 
-这一页记的是**量出来的东西**，不是计划。计划在别处；这里每一行都有一个明确的是/否，
-以及它是怎么得到的。凡是没量过的，写「没量过」，不写「应该可以」。
+这一页记录的是**实测数据与事实**，而非计划。计划在别处；这里每一行都有明确的是/否，
+以及它是怎么得到的。凡是未经实测的，一律标为「未测」，不写「应该可以」。
 
 测量环境：Firefox **155.0.1**（`/usr/bin/firefox`，headless），`npx web-ext run` 临时载入，
 一个只有探针的后台事件页（`background.scripts`）。对照组是 Chrome 152 上的自检页。
@@ -12,7 +12,7 @@
 
 > 「Firefox 系的浏览器数据存储的接口不太一样，导致没有办法很容易的移植过去」
 
-**档案存储那一侧一行都不用改**——OPFS 连同 `createSyncAccessHandle()` 在从后台事件页
+**档案存储端一行代码都不用改**——OPFS 连同 `createSyncAccessHandle()` 在从后台事件页
 起的专用 Worker 里完全可用，共享的 FileStore 契约 20 条全过。真正没有的是
 **File System Access**（`showDirectoryPicker`），也就是**把字节交到用户磁盘上**那一步。
 
@@ -81,11 +81,11 @@ thenable。所以那一步**不做**——70 处机械改动，理由却站不�
   流式、大成员走「存储 + 数据描述符」）与 `src/bundle/zip-sink.js`。判据是一条不变量，
   有测试钉住：**同一份档案，写进目录与写进 zip，解开之后逐个文件字节相同**。
   解压一律用系统 `unzip`，不用我们自己的读回器。
-- **导入时认得出没解压的 zip**，扩展与命令行两处都说得出下一步。
+- **导入时能识别未解压的 zip**，扩展与命令行两处都能提示下一步操作。
 
 ## 通知：Firefox 会把整条拒收，而不是忽略它不认的键（2026-09-09）
 
-审 `chrome.*` 用法时逐个在真 Firefox 上打了一遍，只有这一处是真的坏：
+审查 `chrome.*` 用法时在真实 Firefox 环境中逐项测试，只有这一处确实存在缺陷：
 
 ```
 notifications.create(id, {type, iconUrl, title, message, requireInteraction, silent})
@@ -108,10 +108,10 @@ Chrome 会忽略不认识的键，**Gecko 校验参数，整条拒收**。而 `s
 **Firefox 上的退化照说**：没有 `requireInteraction`，需要人处理的那条通知会自己
 消失。角标（`action.setBadge*`，实测三个都能用）是那条不会消失的兜底。
 
-修完在真 Firefox 上验过（跑的是打好的那个包）：两条通知都真的发出去了，参数是
+修复后在真实 Firefox 上验证通过（运行的是正式打包后的产物）：两条通知均成功发出，参数是
 `iconUrl,message,title,type`，而且**第二条没有再去试那个已经知道不行的形状**。
 
-顺带排除掉两个看起来像问题的：`chrome.storage` 与 `chrome.webRequest` 在 Firefox
+顺带排除了两个疑似问题：`chrome.storage` 与 `chrome.webRequest` 在 Firefox
 上都取不到，但这个扩展**本来就不用它们**——源码里所有相关的行都是注释，解释的正是
 「offscreen document 拿不到 `chrome.storage`，所以抓取状态存 IndexedDB」。
 
@@ -135,7 +135,7 @@ zip 那句明确请用户**先解开看一眼**再删。老记录是个裸字符
 ## 两个宿主的产出对过了（2026-09-09，28 份真实档案）
 
 档案主人在 Firefox 上导了一次 NeoDB 包，在 Chrome 上又导了一次，两份都在手上。
-拿命令行当第三方裁判（同一批档案喂给 `bin/parse.js` + `bin/export.js`）：
+以命令行工具作为第三方比对基准（同一批档案输入给 `bin/parse.js` + `bin/export.js`）：
 
 | | 结果 |
 |---|---|
@@ -151,7 +151,7 @@ zip 那句明确请用户**先解开看一眼**再删。老记录是个裸字符
 喂进流水线的档案次序相反——扩展的 `listBundleDirs()` 是 `.sort().reverse()`
 （选择器要最新的在最上面），命令行是升序。现在在 `parseLibrary()` 里统一成升序。
 
-**没有在全量上复测过**：那个规模只有浏览器跑得动（Node 里拿磁盘当 store 的临时
+**尚未在全量数据上复测**：该规模仅浏览器能够承载（Node 里拿磁盘当 store 的临时
 脚本会 OOM）。要复测就是同一批档案两边各导一次，然后
 `diff <(unzip -p A neodb-ndjson-import.zip) <(unzip -p B ...)`。
 
@@ -381,7 +381,7 @@ Firefox 上「导入档案…」走 `<input type="file" webkitdirectory multiple
 文件根本不会进列表。突变验出来：把「找到就不往下」和深度上限整条删掉，全绿。
 改成两边各自从语料生成之后，两条突变各红一条。**判据不能来自被测的那条路。**
 
-在真 Firefox 上验过（跑的仍然是打好的那个包）：`input.webkitdirectory` 设得上、
+在真实 Firefox 环境中验证通过（运行的同样是打包产物）：`input.webkitdirectory` 设得上、
 `cancel` 事件在（用来认「用户按了取消」，否则界面停在「正在查看…」上不动）、
 `scanFileList` 在**真的 `File` 对象**上找出 1 份档案并认出旁边那个 zip、
 `file.slice(8, 12)` 切片读回 4 字节、`readBundleMeta` 认出档案编号，
@@ -395,6 +395,6 @@ Firefox 上「导入档案…」走 `<input type="file" webkitdirectory multiple
 ## 怎么复现
 
 探针不在仓库里（它要一条 `http://127.0.0.1:8731/*` 的临时权限来回报结果，不该进
-manifest）。做法：把仓库拷进一个构建目录，`manifest.json` 换成 Firefox 形状
+manifest）。具体做法：将仓库复制到一个构建目录中，`manifest.json` 换成 Firefox 形状
 （`background.scripts` + 去掉 `offscreen` 权限 + `browser_specific_settings.gecko`），
 后台脚本换成探针，`npx web-ext run --arg=--headless`，探针把 JSON POST 回一个本地端口。
