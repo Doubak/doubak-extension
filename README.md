@@ -239,7 +239,7 @@ node tools/package.mjs --firefox  # dist/doubak-<版本>-firefox.zip
 
 各权限项的声明依据与审计说明参见 [`docs/store-listing.md`](docs/store-listing.md)。隐私政策 URL 统一使用 <https://doubak.com/privacy/>。
 
-应用商店的展示名称与简要说明由 `manifest.json` 中的 `__MSG_extName__` 与 `__MSG_extDescription__` 国际化占位符提供，实际文案统一维护于 [`_locales/<语言>/messages.json`](_locales)（当前支持 `zh_CN`、`zh_TW` 与 `en`）。应用商店仅对配置了对应 `_locales/<语言>` 的地区开放本地化页面。扩展界面交互本身为统一的中文呈现，`_locales` 仅负责应用商店详情页的本地化展示。
+应用商店的展示名称与简要说明由 `manifest.json` 中的 `__MSG_extName__` 与 `__MSG_extDescription__` 国际化占位符提供，实际文案统一维护于 [`_locales/<语言>/messages.json`](_locales)（当前支持 `zh_CN`、`zh_TW` 与 `en`）。应用商店仅对配置了对应 `_locales/<语言>` 的地区开放本地化页面。扩展管理面板本身仍仅提供简体中文；`_locales` 负责本地化扩展名称和说明等清单元数据，不覆盖面板界面。
 
 ## 抓完之后
 
