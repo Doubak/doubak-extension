@@ -210,8 +210,8 @@ export const FORMATS = {
         ];
       })() : []),
     ].filter(Boolean),
-    next: '把 neodb-ndjson-import.zip 传到 NeoDB 的「设置 → 数据 → 导入 NeoDB 备份」。'
-      + '旁边那几个文件是给你看的，不用上传。',
+    next: '将 neodb-ndjson-import.zip 上传至 NeoDB 的「设置 → 数据 → 导入 NeoDB 备份」。'
+      + '附带的其他文件仅供查阅，无需上传。',
   },
   canonical: {
     button: 'export-canonical',
@@ -223,7 +223,7 @@ export const FORMATS = {
       `作品 ${r.subjects} · 广播 ${r.broadcasts}`,
       `日记与评论 ${r.longform} · 豆列 ${r.doulists}`,
     ],
-    next: '这五个 ndjson 就是下游工具的输入。用 jq 直接读，或者交给导出适配器 / 站点生成器。',
+    next: '这五个 NDJSON 文件可作为下游工具的输入，支持直接用 jq 读取，或供导出适配器与站点生成器使用。',
   },
   markdown: {
     button: 'export-markdown',
@@ -243,8 +243,8 @@ export const FORMATS = {
       r.remote.length ? `⚠ ${r.remote.length} 张图没导出成本地，页面上仍然指向豆瓣` : null,
       r.missing.length ? `⚠ ${r.missing.length} 张图档案里没有` : null,
     ].filter(Boolean),
-    next: '把这个文件夹交给 Hugo / Astro / Eleventy / Jekyll。'
-      + '站点生成器仓库里有一个五个文件的 Hugo 骨架，拷进去就能跑。',
+    next: '可将此文件夹提供给 Hugo、Astro、Eleventy 或 Jekyll 使用。'
+      + '站点生成器仓库中已提供简易的 Hugo 模板，复制进去即可直接运行。',
   },
 };
 

@@ -35,7 +35,7 @@ export async function loadCoverage() {
       $('coverage-view').replaceChildren();
       $('chain').replaceChildren();
       el.className = 'muted';
-      el.textContent = '还没有档案。开始一次抓取之后这里会显示对账结果。';
+      el.textContent = '暂无档案。发起一次抓取后此处将显示对账结果。';
       return;
     }
 
@@ -50,7 +50,7 @@ export async function loadCoverage() {
     $('chain').replaceChildren();
     if (!cur.summary.hasManifest) {
       el.className = 'muted';
-      el.textContent = '这次抓取还没收尾——覆盖率证据是收尾时才攒的，现在还没有。';
+      el.textContent = '本次抓取尚未收尾——覆盖率证据在收尾时生成，目前尚不可用。';
       return;
     }
     renderCoverage(cur.summary.coverage, cur.summary.crawlState, cur.id);
@@ -102,7 +102,7 @@ async function renderChain() {
 
   if (!routes.length) {
     el.className = 'muted';
-    el.textContent = '还没有收尾的档案。';
+    el.textContent = '暂无已收尾的档案。';
     return;
   }
 

@@ -64,7 +64,7 @@ function renderStorage() {
 
   if (usage.length === 0) {
     el.className = 'muted small';
-    el.textContent = '扩展里还没有档案。抓一次，或者从文件夹导入以前导出过的。';
+    el.textContent = '扩展中暂无档案。请先发起一次抓取，或从本地文件夹导入此前导出的档案。';
     all.disabled = true;
     all.textContent = '清空全部';
     return;
