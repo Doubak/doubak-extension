@@ -135,7 +135,7 @@ book.douban.com/subject/4820710/      → m.douban.com/book/subject/4820710/
 - **最小修改原则，绝不伪造系统指纹**：Android Chromium 在移除 `Mobile` 标识后，其 User-Agent 正好等同于该浏览器在 **Android 平板设备**上的默认 UA —— 保持了操作系统、浏览器内核及 TLS 网络指纹的完全一致。数据规范明确禁止虚构客户端指纹（伪造的 UA 与真实网络指纹不符极易触发风控），随意拼凑如 `(X11; Linux x86_64)` 会直接破坏指纹一致性。对于无法安全拆解的格式（例如 iOS 包含具体版本号的 `Mobile/15E148` 字符串），系统保持不作修改，宁缺毋滥。
 - **暂不支持 Android 版 Firefox 的技术原因**：Android 版 Firefox 的移动标识（`Mobile;` 与 `Tablet;`）均会被豆瓣服务端重定向至移动版，若要获取桌面版页面必须完全伪装成桌面系统 UA，这直接违反了指纹一致性安全原则。因此该方案在 Firefox Android 端不成立，保留由 [#11](https://github.com/Doubak/doubak-extension/issues/11) 在后续真机环境中继续探索。
 - **仅拦截修改扩展自身发起的请求**（指定 `tabIds: [-1]`）：用户在常规标签页中正常浏览豆瓣时依然维持移动版体验。这也是浏览器自带的“请求桌面版网站”功能无法奏效的原因（该开关按特定标签页生效，而后台抓取任务运行于独立的离屏文档中）。
-- **桌面端浏览器完全不注册该规则**：发送的请求 Headers 与原始浏览器请求保持逐字节一致。
+- **桌面端浏览器完全不注册该 User-Agent 规则**：发出的 User-Agent 与原始浏览器值逐字节一致。
 
 生成的归档会在 `manifest.notes` 中如实记录此项适配；`producer.user_agent` 中记录的依然是浏览器真实的 User-Agent。在调试页面的「环境自检」面板中会完整列出这两项 UA 以供比对核验。
 
