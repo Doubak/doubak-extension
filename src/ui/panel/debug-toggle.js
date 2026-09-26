@@ -34,9 +34,9 @@ function renderDebugState() {
   $('debug-state').textContent = on
     // 说清「哪里看」与「什么时候生效」：另外两个上下文要等下次启动，而 service
     // worker 约 30 秒就重启一次。不说的话用户会以为开关没生效。
-    ? '已打开。在扩展的 service worker 与 offscreen 控制台里能看到 [doubak] 开头的输出；'
-      + '正在跑的抓取要等下一轮心跳（约半分钟）才开始输出。'
-    : '已关闭。发布版默认就是这样——控制台保持干净。';
+    ? '已开启。可在扩展的 Service Worker 与 Offscreen 控制台中查看带有 [doubak] 前缀的输出；'
+      + '正在进行的抓取将在下一轮心跳（约半分钟内）后开始输出。'
+    : '已关闭。此为默认状态，控制台保持清爽。';
 }
 
 

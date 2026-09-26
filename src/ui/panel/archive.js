@@ -133,10 +133,10 @@ export async function loadArchive() {
   if (ids.length === 0) {
     currentBundleId = null;
     $('archive-summary').className = 'muted';
-    $('archive-summary').textContent = '还没有档案。开始一次抓取之后这里会显示内容。';
+    $('archive-summary').textContent = '暂无档案。发起一次抓取后此处将显示详细内容。';
     setArchiveButtons(false);
     $('captures').className = 'muted';
-    $('captures').textContent = '选一个档案后显示';
+    $('captures').textContent = '请选择一份档案以查看详情';
     return;
   }
 

@@ -48,21 +48,20 @@ export async function loadDebug() {
   sc.replaceChildren();
   const opts = [
     ['最近 7 天的广播', { days: 7 },
-      '到达下界后干净终止 → 水位线推进。这也是每次增量抓取的正常形态'],
-    ['最近 30 天的广播', { days: 30 }, '同上，范围大一点'],
+      '到达下界后正常终止并推进水位线，与常规增量抓取流程一致'],
+    ['最近 30 天的广播', { days: 30 }, '逻辑同上，测试更大时间跨度'],
     ['舞台剧 · 看过（整条路线）', { routes: ['interest.drama.collect'] },
-      '天然就很小的一条路线，能完整走完整个生命周期而不必截断'],
+      '数据量较小的路线，可完整走完生命周期无需截断'],
     ['最多 10 条（安全阀）', { maxCaptures: 10 },
-      '人为截断 → 不算完成，水位线不推进，产出的是不完整的档案'],
+      '人为中断：不标记为完成且不推进水位线，生成未收尾档案'],
     ['作品详情页与封面图（约 20 次请求）',
       {
         routes: ['interest.drama.collect', 'interest.item', 'asset.subject_cover'],
         maxCaptures: 20,
         bypassGates: true,
       },
-      '先抓一页舞台剧列表，再抓它上面的作品详情页，最后抓这些作品的封面图 —— ' +
-      '这两条路线占真实档案九成体积，但在全量抓取里排在最后，几小时之后才轮到。' +
-      '这里几十次请求就能验完，包括「图片到底存进去了没有」'],
+      '抓取单页舞台剧列表、对应作品详情及封面图——这两条路线占实际档案的大部分体积，' +
+      '在全量抓取中排在最后；此处仅需约 20 次请求即可完整验证存储链路'],
   ];
   for (const [label, cfg, why] of opts) sc.append(actionRow(label, why, () => startScoped(cfg)));
 
@@ -70,11 +69,10 @@ export async function loadDebug() {
   const gateNote = document.createElement('div');
   gateNote.className = 'card tone-idle';
   const gb = document.createElement('b');
-  gb.textContent = '作品详情页那一项会绕过抓取顺序';
+  gb.textContent = '作品详情页选项将跳过默认抓取优先级';
   gateNote.append(gb, document.createTextNode(
-    '正常抓取里，作品详情页要等广播抓完才开始——广播可以被静默删除，删了就再也拿不' +
-    '回来；而作品详情页随时能重抓。不能拿最不可替代的东西去换最可替代的。' +
-    '这一项为了几十次请求就能验完那条路线，显式跳过了这个顺序，所以它只适合调试。',
+    '在标准抓取流程中，作品详情页在动态抓取完成后才开始——动态可能被静默删除且无法恢复，' +
+    '而作品详情页可随时重新获取。此调试项跳过默认优先级以便快速验证完整链路，仅建议在调试时使用。',
   ));
   sc.append(gateNote);
 

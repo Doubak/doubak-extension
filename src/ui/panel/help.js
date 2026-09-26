@@ -40,9 +40,9 @@ export function renderAbout() {
 
   const what = document.createElement('p');
   what.className = 'small';
-  what.textContent = '在你自己的浏览器里备份豆瓣。这是第三方工具，与豆瓣官方无关。'
-    + '不上传任何数据，没有服务器，也没有遥测——所有抓取都发生在你自己的浏览器里，'
-    + '用的是你自己的登录状态和网络。许可 Apache-2.0。';
+  what.textContent = '在本地浏览器中备份豆瓣数据。这是第三方工具，与豆瓣官方无关。'
+    + '不上传任何数据，没有服务器，也没有遥测——所有抓取均在本地浏览器中进行，'
+    + '直接使用你本地的登录状态与网络连接。许可证为 Apache-2.0。';
   box.append(what);
 
   // ── 反馈。**跟着身份一起放在页首。**
@@ -50,14 +50,14 @@ export function renderAbout() {
   // 与 doubak.com 页脚同一套去处。
   const fbTitle = document.createElement('p');
   const fbB = document.createElement('b');
-  fbB.textContent = '出了问题，或者有想法？';
+  fbB.textContent = '遇到问题或有反馈建议？';
   fbTitle.append(fbB);
   box.append(fbTitle);
 
   const fb = document.createElement('ul');
   const FEEDBACK = [
     ['提 issue', 'https://github.com/Doubak/doubak-extension/issues',
-      '最好带上上面这个版本号、「日志」页里的最后几行，以及你点了哪个按钮'],
+      '建议附带上述版本号、「日志」页末尾相关记录，以及具体操作步骤'],
     ['发邮件', 'mailto:admin@doubak.com', 'admin@doubak.com'],
     ['帮忙测试', 'https://doubak.com/#contribute', '目前只有一个账号跑过，很多分支从没被真实数据碰过'],
   ];
@@ -72,8 +72,8 @@ export function renderAbout() {
   priv.className = 'muted small';
   // **报错前先说清楚会带出去什么。** 不说的话，一个在意隐私的人不敢提 issue，
   // 而他恰恰是最该被听见的那类用户。
-  priv.textContent = '提 issue 前请留意：「日志」页里可能含有你的用户名与作品链接。'
-    + '需要的话删掉那几行再贴 —— 定位问题靠的是错误信息和你点了什么，不是你的数据。';
+  priv.textContent = '提交 issue 前请注意：「日志」页可能包含你的用户名与作品链接。'
+    + '如有需要可删除相关信息后再张贴——排查问题依赖的是错误信息与操作路径，而非个人数据。';
   box.append(priv);
 
   el.replaceChildren(box);
@@ -93,8 +93,8 @@ export function renderLinks() {
 
   const GROUPS = [
     ['了解这个项目', [
-      ['官网', 'https://doubak.com', '它是什么、能做什么'],
-      ['样张', 'https://sample.doubak.com', '用作者自己的数据生成的示例站点'],
+      ['官网', 'https://doubak.com', '项目介绍与使用说明'],
+      ['样张', 'https://sample.doubak.com', '由真实数据生成的示例站点'],
       ['隐私政策', 'https://doubak.com/privacy/', '不收集、不上传、没有服务器'],
     ]],
     ['源码（Apache-2.0）', [
@@ -137,9 +137,9 @@ export function renderLinks() {
 
   const credits = document.createElement('p');
   credits.className = 'muted small';
-  credits.textContent = '致谢：前代命令行工具 its-my-data/doubak 抓下的那批档案，'
-    + '是这个项目几乎所有实测结论的来源；现在「导入适配器」还能把它们直接转成档案接进来。'
-    + 'WARC 格式与 pywb / ReplayWeb.page 生态，让这些档案不依赖本工具也能打开。';
+  credits.textContent = '致谢：前代命令行工具 its-my-data/doubak 沉淀的历史档案，'
+    + '为本项目提供了宝贵的实测数据支持；当前「导入适配器」可将其直接转换为标准档案接入。'
+    + '感谢 WARC 规范及 pywb、ReplayWeb.page 等生态工具，使得导出的档案无需依赖本项目即可独立查阅与复现。';
   box.append(credits);
 
   el.replaceChildren(box);

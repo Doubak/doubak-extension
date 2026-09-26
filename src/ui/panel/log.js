@@ -33,7 +33,7 @@ export function renderLog() {
 
   if (logRows.length === 0) {
     el.className = 'muted';
-    el.textContent = '还没有事件。这里记抓过的 URL（最近 200 条）以及重试、停机、错误这类事件（最近 1000 条）——完整的抓取记录在档案的 index.ndjson 里。';
+    el.textContent = '暂无事件记录。此处记录已抓取的 URL（保留最近 200 条）以及重试、停机、错误等诊断事件（保留最近 1000 条）；完整的抓取记录保存在档案的 index.ndjson 中。';
   } else {
     for (const r of logRows) {
       const d = document.createElement('div');
@@ -83,7 +83,7 @@ export function renderLog() {
   clear.textContent = '清空';
   clear.disabled = logRows.length === 0;
   clear.onclick = async () => {
-    if (!confirm('清空日志？诊断记录会丢掉，但不影响任何已抓到的数据。')) return;
+    if (!confirm('确定清空日志？这会清除诊断记录，但不影响任何已抓取的数据。')) return;
     await send({ type: 'clearLog' });
     loadLog();
   };
