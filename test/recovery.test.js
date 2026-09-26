@@ -213,7 +213,7 @@ describe('开段后立即崩溃 —— 段里没有任何被索引的记录', ()
 });
 
 describe('真正的损坏必须响亮地失败', () => {
-  test('索引指向段外区域 —— 抛错而不是悄悄继续', async () => {
+  test('索引指向段外区域 —— 抛出错误而非静默继续', async () => {
     const { store, bundleId, locs } = await writtenBundle(2);
     // 把段砍掉一半，让索引指向不存在的区域
     await store.truncate(locs[1].segment, locs[1].offset);

@@ -74,14 +74,14 @@ describe('状态词跟着媒介走', () => {
 });
 
 describe('认不出来的原样返回', () => {
-  test('不编一个「未知路线」出来', () => {
+  test('避免虚构「未知路线」文本', () => {
     // 丑是能被看见的 bug，「未知路线」则彻底断了线索——而这一行本来是给人
     // 排查用的。
     assert.equal(routeName('something.new'), 'something.new');
     assert.equal(hasRouteName('something.new'), false);
   });
 
-  test('媒介认识但状态不认识 → 不硬拼', () => {
+  test('媒介已知但状态未知时保持原样，不进行生硬拼接', () => {
     assert.equal(routeName('interest.movie.borrowed'), 'interest.movie.borrowed');
   });
 });

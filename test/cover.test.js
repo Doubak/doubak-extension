@@ -120,7 +120,7 @@ describe('抽不到的时候要分清是哪一种抽不到', () => {
     assert.equal(extractCoverImage(html).url, null);
   });
 
-  test('非字符串输入不炸', () => {
+  test('非字符串输入时不抛出异常', () => {
     assert.equal(extractCoverImage(null).url, null);
     assert.equal(extractCoverImage(undefined).reason, 'not_found');
   });

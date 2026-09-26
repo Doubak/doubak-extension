@@ -81,7 +81,7 @@ describe('喂进流水线的顺序，与命令行逐字一致', () => {
     assert.deepEqual(given.map((e) => e.bundleId), before, '把调用方的数组原地排了');
   });
 
-  test('**判据与命令行那句逐字一致**，不是各写各的', async () => {
+  test('**判据规则与命令行实现逐字一致**，避免重复定义产生偏差', async () => {
     // 两边各写一个比较器，迟早有一天一个按 bundleId、一个按目录名，
     // 而症状是「同一批档案，两边产出的行序不一样」——正是这条测试要防的东西。
     const mine = await readFile(new URL('../src/pipeline/run.js', import.meta.url), 'utf8');

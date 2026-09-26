@@ -136,7 +136,7 @@ describe('从已存的广播页算出欠账', () => {
     assert.equal(items.length, 1);
   });
 
-  test('**读不出来就跳过，不许把整场抓取带崩**', async () => {
+  test('**读取失败时跳过处理，严禁中断整场抓取流程**', async () => {
     // 失败方向是安全的：漏认只会让这次少补几张，而这一步每次抓取都跑，下次还会再算。
     const rows = [bcRow(1), bcRow(2)];
     const warns = [];

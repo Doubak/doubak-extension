@@ -483,7 +483,7 @@ describe('暂停 → 继续', () => {
       '收尾时把上游丢了 —— 这份档案从此是一条链的起点，而且改不回来');
   });
 
-  test('暂停再继续，不许跳过当前这条路线的后续页', async () => {
+  test('暂停后继续执行，禁止跳过当前路线的后续页面', async () => {
     // 报上来的日志：
     //   04:46:16 paused
     //   04:46:18 capture interest.game.collect start=120  ← 在飞的那一页抓完了
@@ -685,7 +685,7 @@ describe('不允许并发两次抓取', () => {
  *
  * 于是 `writer.finalize()`（封段、算 sha256、写 manifest）会与一批抓取重叠。
  */
-describe('收尾期间不许还有一批在跑', () => {
+describe('收尾阶段严禁并发执行新的抓取批次', () => {
   /** 把第一个广播页的请求按在半空中，直到测试放手。 */
   function heldHarness() {
     let release = () => {};
@@ -935,7 +935,7 @@ describe('恢复要能自足 —— 指针里带够信息', () => {
     );
   });
 
-  test('**首次全量恢复之后仍然是全量** —— 不许凭空造一个下界', async () => {
+  test('**首次全量恢复之后仍保持全量** —— 禁止无依据创建时间下界', async () => {
     // 反面判据。把 bounded 当安全默认值一律套上，会让真正的全量失去
     // 「可以推断删除」这个唯一比增量多出来的能力。
     const { runner, runStore } = harness(broadcastOnly([bcPage(20, 0), bcPage(0)]), { batchSize: 2 });
@@ -1120,7 +1120,7 @@ describe('身份确认对着真实页面', () => {
     assert.ok(calls[0].includes('/people/mewcatcher/'));
   });
 
-  test('全局导航被抹掉 → 明确失败，不去别处猜', async () => {
+  test('全局导航元素缺失 → 明确判定失败，不进行猜测处理', async () => {
     // 取错比取不到糟糕得多：取不到是开不了工，取错是把档案挂在别人名下。
     // 把四个取证点全部抹掉：两段脚本 + 导航项的埋点属性。
     const stripped = real
@@ -1136,7 +1136,7 @@ describe('身份确认对着真实页面', () => {
   });
 });
 
-describe('开工失败不许留下半开的状态', () => {
+describe('启动失败不得残留半开状态', () => {
   test('落盘失败 → active 退回 false，还能再试', async () => {
     // 不退的话 `active` 永远是 true，此后每次「开始抓取」都被自己挡掉，报的是
     // 「已有抓取在进行中」——而真实原因是上一次根本没开成。用户面对的是一个
@@ -1558,7 +1558,7 @@ describe('规范 §7.1：恢复之后的 manifest 必须与「一次跑完」的
   });
 });
 
-describe('恢复之后不许倒着翻页 —— 那会伪造出一次「跑完了」', () => {
+describe('恢复执行后严禁倒序翻页 —— 避免误判为路线抓取完成', () => {
   /**
    * 报上来的日志（广播）：
    *
@@ -1668,7 +1668,7 @@ describe('恢复之后不许倒着翻页 —— 那会伪造出一次「跑完�
     }
   });
 
-  test('广播没走完就不许放开作品详情页的门控', async () => {
+  test('广播路线未抓取完毕前禁止放开作品详情页门控', async () => {
     // 假停滞的连锁后果：广播被标成完成 → 门控放开 → 去抓最可替代的东西，
     // 而最不可替代的那条线还剩一大半。
     const { runner, runStore } = await crawlThenCrash(8);
@@ -1765,7 +1765,7 @@ describe('单页路线也要能「走完」', () => {
     }
   });
 
-  test('分页路线的队列悄悄空掉 → 说得出原因的缺口，不是笼统的 aborted', async () => {
+  test('分页路线队列异常清空 → 记录具体原因缺口而非笼统 aborted', async () => {
     // 「aborted」看起来像被风控打断，会把排查引向完全错误的方向。真实成因通常是
     // 算出来的下一页早就抓过、被去重挡掉了。
     //
@@ -2019,7 +2019,7 @@ describe('增量：下界真的省下了重抓', () => {
     assert.deepEqual(seen, [], '这张图档案里已经有了，不该再抓');
   });
 
-  test('不传跳过名单就照抓 —— 反面判据，免得上一条永远绿', async () => {
+  test('未传入跳过名单时正常抓取 —— 反面校验确保过滤规则生效', async () => {
     // 上一条只断言「没抓」。抽取器要是根本没认出这张图，它也会绿——而那时真正的
     // 结论是「测试没测到东西」。所以同一页、同一个 harness，再跑一次不带名单的。
     const seen = [];
@@ -2037,7 +2037,7 @@ describe('增量：下界真的省下了重抓', () => {
     assert.deepEqual(seen, [PHOTO], '不给名单就该老老实实抓一遍');
   });
 
-  test('**跳过名单不许把存量补抓也一起挡掉**', async () => {
+  test('**跳过名单严禁误拦截存量补抓任务**', async () => {
     // 补抓算的正是「档案里欠着的那些图」，所以它给出的 URL 按定义就不在名单里。
     // 但两者都走 frontier，顺序也挨着——把名单写宽一点（比如连失败的行也收进去、
     // 或者干脆按路线名整条挡掉），补抓就会一声不吭地停摆。而补抓停摆是这套设计里
@@ -2228,7 +2228,7 @@ describe('增量：下界真的省下了重抓', () => {
     assert.equal(called, false, '调试用的下界被增量覆盖了');
   });
 
-  test('挑下界失败 → 退回全量，不让一次抓取因此开不了工', async () => {
+  test('获取时间下界失败 → 回退为全量抓取，避免启动阻塞', async () => {
     const seen = [];
     const { runner, events } = harness((url) => {
       if (url.endsWith('/people/example/')) return PROFILE;
@@ -2439,7 +2439,7 @@ describe('「重抓作品详情页」排进来的条目没有 parent', () => {
    * 因而可被第三方独立验证」（规范 §6.2）——**一条伪造的边比没有边更糟**：没有边只是
    * 缺信息，伪造的边会让重建出来的图是错的。
    */
-  test('parent 必须是 null，不许串成链', async () => {
+  test('parent 必须为 null，禁止错误串联成链', async () => {
     const src = readFileSync(new URL('../src/crawl/runner.js', import.meta.url), 'utf-8');
     const block = src.slice(src.indexOf('if (refreshSubjectUrls?.length)'));
     assert.match(block.slice(0, 1400), /enqueuedBy: null/);

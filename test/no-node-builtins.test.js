@@ -83,8 +83,8 @@ async function closureFrom(entries) {
   return [...seen];
 }
 
-describe('浏览器加载的代码里不许有 node: 内置模块', () => {
-  test('src/ 全部干净', async () => {
+describe('浏览器端加载代码中严禁引入 node: 内置模块', () => {
+  test('src/ 下所有源码均无 node: 依赖', async () => {
     // 扩展代码只跑在浏览器里。这里出现 `node:` 一定是错的。
     for (const f of await walk('src/', 'src/')) {
       for (const spec of importsOf(await read(f))) {
@@ -97,7 +97,7 @@ describe('浏览器加载的代码里不许有 node: 内置模块', () => {
     }
   });
 
-  test('selftest/ 及其传递依赖全部干净', async () => {
+  test('selftest/ 及其传递依赖均无 node: 依赖', async () => {
     // **传递闭包**是关键：出问题的那次，违规文件在 test/helpers/ 下，
     // 只扫 selftest/ 目录根本扫不到。
     const entries = await walk('selftest/', 'selftest/');

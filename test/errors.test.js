@@ -140,7 +140,7 @@ describe('超时：没有它，一个挂住的连接会永远卡住队列', () =
     assert.equal(body, bytes);
   });
 
-  test('请求完成后清掉定时器 —— 否则 worker 会被无谓地续命', async () => {
+  test('请求完成后清理定时器 —— 避免 Worker 进程被无谓保活', async () => {
     // MV3 里挂着的定时器会影响 service worker 的存活判断。
     let cleared = false;
     const realClear = globalThis.clearTimeout;

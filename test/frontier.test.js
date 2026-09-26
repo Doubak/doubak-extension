@@ -489,14 +489,14 @@ describe('路线推进与水位线', () => {
     assert.equal(p.canAdvance, true);
   });
 
-  test('有缺口 → 不许推进', () => {
+  test('存在缺口 → 禁止推进水位线', () => {
     const p = progress();
     p.recordGap('fetch_failed', '第 3 页连续失败');
     p.markFinished();
     assert.equal(p.canAdvance, false);
   });
 
-  test('被打断 → 不许推进', () => {
+  test('抓取中断 → 禁止推进水位线', () => {
     // 重复是免费的，空洞是永久且不可检测的。
     const p = progress();
     p.markStopped('blocked');
@@ -504,7 +504,7 @@ describe('路线推进与水位线', () => {
     assert.equal(p.gaps.length, 1);
   });
 
-  test('没走完就不许推进', () => {
+  test('未完成抓取时禁止推进水位线', () => {
     const p = progress();
     assert.equal(p.canAdvance, false, '既没 markFinished 也没缺口，一样不许推进');
   });

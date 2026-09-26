@@ -112,7 +112,7 @@ describe('持有者永远不返回 —— 合上电脑睡一觉就会这样', ()
   /** 一个永远不结算的临界区。 */
   const wedged = () => new Promise(() => {});
 
-  test('久不吭声的持有者会被抢占', async () => {
+  test('超时无响应的持有者会被正常抢占', async () => {
     let t = 0;
     const lock = new Exclusive({ staleAfterMs: 60_000, now: () => t });
     lock.run('抓取', wedged); // 永不返回
@@ -122,7 +122,7 @@ describe('持有者永远不返回 —— 合上电脑睡一觉就会这样', ()
     assert.equal(await lock.run('恢复抓取', async () => 'ok'), 'ok');
   });
 
-  test('**还在吭声的持有者不许被抢占**', async () => {
+  test('**仍保持活跃心跳的持有者严禁被抢占**', async () => {
     // 判早了会真的造成两条请求流叠加，那比多等几分钟严重得多。
     let t = 0;
     const lock = new Exclusive({ staleAfterMs: 60_000, now: () => t });
@@ -137,7 +137,7 @@ describe('持有者永远不返回 —— 合上电脑睡一觉就会这样', ()
     await assert.rejects(() => lock.run('恢复抓取', async () => {}), /已经有/);
   });
 
-  test('抢占必须报出来，不能悄悄夺锁', async () => {
+  test('抢占发生时必须触发通知，禁止静默夺取锁', async () => {
     // 静默地夺锁等于把一次异常变成看不见的事。而它意味着「上一段抓取卡死了」
     // ——那是要查的，不是要藏的。
     let t = 0;
@@ -152,7 +152,7 @@ describe('持有者永远不返回 —— 合上电脑睡一觉就会这样', ()
     assert.equal(seen[0].silentMs, 200_000);
   });
 
-  test('**老持有者醒过来，不许放掉新持有者的锁**', async () => {
+  test('**原持有者恢复执行后不得释放新持有者的锁**', async () => {
     // 这是抢占最危险的一步。老的那段若在 finally 里无条件清掉持有者，放掉的
     // 是新持有者的锁 —— 于是真的出现两条并行的流，正好是这个类存在的理由。
     let t = 0;
@@ -212,7 +212,7 @@ describe('「被占用」是状况，不是错误', () => {
   });
 });
 
-describe('判死之后，别人替它吭一声不算数', () => {
+describe('判定超时后其他非锁操作的事件不得重置心跳', () => {
   /**
    * 报上来的那次：8494 秒。
    *
@@ -222,7 +222,7 @@ describe('判死之后，别人替它吭一声不算数', () => {
    * 「已经有『抓取』在进行中（8494 秒前开始）」——一个刚刚才被别人证明还活着的
    * 死持有者。**用户按下的那个按钮，正是让他按不动下一个按钮的原因。**
    */
-  test('已经判死的持有者，touch 不能把它救回来', async () => {
+  test('已判定超时的持有者不能通过后续 touch 恢复有效状态', async () => {
     let t = 0;
     const lock = new Exclusive({ staleAfterMs: 100, now: () => t });
 
@@ -243,7 +243,7 @@ describe('判死之后，别人替它吭一声不算数', () => {
     await wedged;
   });
 
-  test('还没判死的时候，touch 照常续命 —— 一段跑得久的抓取不许被误杀', async () => {
+  test('未超时前定期 touch 正常续期 —— 避免长任务被误判超时', async () => {
     let t = 0;
     const lock = new Exclusive({ staleAfterMs: 100, now: () => t });
     let release = () => {};
@@ -264,7 +264,7 @@ describe('判死之后，别人替它吭一声不算数', () => {
 });
 
 describe('活着的证据必须由持有者自己出具', () => {
-  test('不持锁的那四个 op 发的事件，不算「还活着」', async () => {
+  test('不持锁的操作所发送的事件不作为存活心跳证明', async () => {
     const { EVENTS_WITHOUT_LOCK, provesLiveness } = await import('../src/crawl/driver.js');
     for (const t of ['paused', 'aborted', 'finished', 'retry_requested']) {
       assert.equal(provesLiveness(t), false, `${t} 不该被当成「抓取还在动」`);
@@ -272,7 +272,7 @@ describe('活着的证据必须由持有者自己出具', () => {
     }
   });
 
-  test('用排除法：没见过的事件一律**算**活着 —— 漏判一种会误杀活着的抓取', async () => {
+  test('采用保守策略：未知事件默认判定为活跃 —— 避免误判终止运行中的抓取任务', async () => {
     const { provesLiveness } = await import('../src/crawl/driver.js');
     // 「又抓到一页」的形态不止一种，而且还会加。白名单漏一种 = 把一段活着的抓取
     // 判死并抢占；黑名单漏一种 = 一具尸体多活 5 分钟。后者便宜得多。
@@ -294,7 +294,7 @@ describe('活着的证据必须由持有者自己出具', () => {
 });
 
 describe('「继续」被锁挡住时，调度镜像照样要改回哨兵', () => {
-  test('busy 不算「继续失败」', async () => {
+  test('busy 状态不计为继续失败', async () => {
     const { readFileSync } = await import('node:fs');
     // **先剥注释。** 这一段的注释里就写着 `resumeRun()` 三个字（在讲它当初为什么
     // 没跑到），带着注释找位置只会找到那一处，于是判据恒假。

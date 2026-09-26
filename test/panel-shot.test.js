@@ -67,7 +67,7 @@ describe('截图量具的假后台', () => {
     assert.deepEqual(stale, [], `量具还管着面板已经不发的消息：${stale.join('、')}`);
   });
 
-  test('**路线 key 用真的**，不许编', async () => {
+  test('**路线 key 必须使用真实值**，禁止虚构', async () => {
     // 编出来的 key 在界面上会退化成内部标识（`routeName()` 认不出就原样返回），
     // 而那恰好是 `route-names.js` 真出过的一个 bug 的样子。
     const { routeName } = await import('../src/ui/route-names.js');

@@ -140,7 +140,7 @@ describe('打包工作流', () => {
     assert.match(s, /^\s*run: node tools\/package\.mjs --firefox$/m, 'AMO 那个包没打');
   });
 
-  test('两个目标都摊成可直接加载的目录，而且**各上传各的**', async () => {
+  test('两个目标均展开为可直接加载目录，且**分别独立上传**', async () => {
     // 一个目录传两次、或者两个目标摊到同一个目录，症状是「下下来的是另一个浏览器
     // 的包」——装上去会直接加载失败，而失败信息不会提到是拿错了包。
     const s = await yml();
@@ -155,7 +155,7 @@ describe('打包工作流', () => {
     assert.equal(new Set(names).size, names.length, `两个产物重名了：${names}`);
   });
 
-  test('**release 上两个包都挂**', async () => {
+  test('**Release 产物必须同时发布双平台安装包**', async () => {
     // 只挂一个的话，另一半用户在 release 页上什么都找不到，而 release 正是我们给
     // 出去的那个入口。
     const s = await yml();
@@ -164,7 +164,7 @@ describe('打包工作流', () => {
     assert.match(created, /doubak-\$\{\{ steps\.v\.outputs\.version \}\}-firefox\.zip/, 'Firefox 那个没挂');
   });
 
-  test('release 说明把两种装法分开写，并且先说「别装错」', async () => {
+  test('Release 说明分别列出两类安装方式，并提示「注意区分平台」', async () => {
     // 两个包放在一起，第一个要回答的问题是「我该下哪个」。装错的症状是直接加载
     // 失败，而失败信息里不会提到是拿错了包。
     const s = await yml();

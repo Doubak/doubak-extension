@@ -41,7 +41,7 @@ describe('parseLcov', () => {
     assert.deepEqual([...files.get('src/a.js').lines], [[1, 5], [2, 1]]);
   });
 
-  test('合并后「有人覆盖过」不会被后一段抹掉', () => {
+  test('合并后覆盖记录不会被后续未覆盖片段清除', () => {
     // 取最后一份的话，第 1 行会变成 0——本来是覆盖过的。
     const text = lcov('src/a.js', [[1, 7]]) + lcov('src/a.js', [[1, 0]]);
     assert.equal(parseLcov(text).get('src/a.js').lines.get(1), 7);

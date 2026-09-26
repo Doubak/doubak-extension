@@ -90,7 +90,7 @@ describe('解析豆瓣的裸时间', () => {
     assert.equal(parseDoubanTimestamp('2024-05-12 14:43:19', 0).iso, '2024-05-12T14:43:19Z');
   });
 
-  test('拒绝不存在的日期，而不是悄悄滚到下个月', () => {
+  test('非法日期直接拒绝，禁止静默溢出顺延至下月', () => {
     // Date.UTC 会把 2026-02-31 变成 3 月 3 日。静默滚动正是要避免的行为。
     assert.throws(() => parseDoubanTimestamp('2026-02-31 00:00:00'), /日期不存在/);
     assert.throws(() => parseDoubanTimestamp('2026-13-01 00:00:00'), /日期不存在|无法解析/);

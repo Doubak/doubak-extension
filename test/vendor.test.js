@@ -83,7 +83,7 @@ describe('vendor 与上游的一致性', () => {
   });
 });
 
-describe('搬过来的东西真的跑得动', () => {
+describe('引入的上游代码在扩展环境中正常运行', () => {
   test('HTML 实体：单趟解码，不认识的原样留着', () => {
     // 只比对文本挡不住「语法没问题但用了 node 内建」——那种文件文本比对全绿，
     // 扩展装上才报错，而那时离这儿很远。所以这里真的调一次。
@@ -95,7 +95,7 @@ describe('搬过来的东西真的跑得动', () => {
     assert.equal(decodeEntities('&copyright;'), '&copyright;', '不认识的实体原样留着，不许猜');
   });
 
-  test('摘要：浏览器这边算出来的必须跟命令行一样', async () => {
+  test('摘要：扩展端计算结果必须与命令行工具严格一致', async () => {
     // **这条是整条链上最要命的一致性。** 摘要一旦两边不同，同一份档案解析两次
     // 会得出不同的修订，而 canonical 只比较同一 parser_version 的修订——
     // 结果是所有记录同时看起来被编辑过，且不报任何错。
@@ -111,7 +111,7 @@ describe('搬过来的东西真的跑得动', () => {
     assert.equal(fieldDigest(null), null, 'null 与「空字符串」是两回事');
   });
 
-  test('抽取器在扩展这边也能出结果', () => {
+  test('抽取器在扩展环境中正常产出解析结果', () => {
     // 一个最小的豆列条目：容器上 id 在 class 前面（真实页面就是这样）。
     const html = '<div id="770340559" class="doulist-item" >'
       + '<a data-id="30237482" data-cate="3114" data-url="https://www.douban.com/subject/30237482/"'
@@ -127,7 +127,7 @@ describe('搬过来的东西真的跑得动', () => {
     assert.doesNotThrow(() => extractBroadcasts('<div class="stream-items"></div>', '1'));
   });
 
-  test('拼页的规则也是搬过来的，不是这边另写的', () => {
+  test('分页合并规则统一复用上游实现，避免重复逻辑', () => {
     // 一份豆列每页 25 条，「一份豆列」因此跨着好几次捕获。**谁来拼、按什么次序拼
     // 是一条规则**，而这条规则一度有两份实现：解析器 `parse.js` 里一份，面板的
     // 内容预览里一份。两份对同一份豆列可以给出不同的条目次序，而次序错了看起来
@@ -139,14 +139,14 @@ describe('搬过来的东西真的跑得动', () => {
     assert.equal(mergeDoulistPages([]), null, '一页都没有要返回 null，不是一份空豆列');
   });
 
-  test('parse() 搬过来还是 async，空输入不炸', async () => {
+  test('parse() 保持 async 签名，空输入时不抛异常', async () => {
     const out = await parse([]);
     assert.deepEqual(out.marks, []);
     assert.deepEqual(out.broadcasts, []);
     assert.ok(Array.isArray(out.warnings));
   });
 
-  test('NeoDB 的 NDJSON 生成器在这边也出得来', () => {
+  test('NeoDB 的 NDJSON 生成器在扩展环境中正常生成文件', () => {
     const r = buildNeodbNdjson({
       marks: [], subjects: [], longform: [], doulists: [], broadcasts: [],
       subjectOf: () => null, account: null, multiRevisionMarks: 0,
@@ -157,7 +157,7 @@ describe('搬过来的东西真的跑得动', () => {
     assert.deepEqual(names, ['catalog.ndjson', 'journal.ndjson']);
   });
 
-  test('Markdown 转义规则是站点生成器那一份', () => {
+  test('Markdown 转义规则与站点生成器实现保持一致', () => {
     // 用户写的字要当正文转义。这条曾经吃掉过内容：`From <May December>` 里的
     // 片名整个消失，页面上一点痕迹都不留。
     assert.equal(plainText('_(:з」∠)_'), '\\_(:з」∠)\\_', '下划线要转义，否则被当成斜体');

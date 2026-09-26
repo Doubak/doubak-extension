@@ -850,7 +850,7 @@ describe('重试成功之后，那处缺口必须收回', () => {
    * content_sha256 齐全的捕获。而 manifest 里那处缺口原样留着，于是
    * `contiguous: false` 被封进了档案，永远改不了。**档案是全的，声明是错的。**
    */
-  test('同一个 URL 抓成功了，先前那处缺口就地抹掉', async () => {
+  test('相同 URL 重试抓取成功后，清除先前记录的缺口', async () => {
     let fail = true;
     const h = await harness([{ body: broadcastPage(0) }]);
     h.loop._transport = {
@@ -887,7 +887,7 @@ describe('重试成功之后，那处缺口必须收回', () => {
     assert.ok(h.events.some((e) => e.type === 'gap_resolved'), '收回缺口这件事要说出来');
   });
 
-  test('只认完全相同的 URL —— 抹掉缺口是在放宽完整性声明', () => {
+  test('仅匹配完全一致的 URL —— 清除缺口对应放宽完整性声明', () => {
     const st = new RouteState({ routeKey: 'broadcast.timeline', enumeration: 'bounded' });
     st.recordGap('fetch_failed', 'x', 'https://douban.com/a');
     assert.equal(st.resolveGap('https://douban.com/a?x=1'), 0, '前缀不算');

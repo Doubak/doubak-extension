@@ -375,7 +375,7 @@ describe('从 manifest 摘出来', () => {
     assert.equal(e.crawlState.length, 1);
   });
 
-  test('字段缺了也不炸', () => {
+  test('字段缺失时正常处理，不抛出异常', () => {
     const e = chainEntryFromManifest({ bundle_id: 'B1' });
     assert.equal(e.accountUserId, null);
     assert.deepEqual(e.crawlState, []);

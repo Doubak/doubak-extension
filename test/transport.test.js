@@ -291,7 +291,7 @@ describe('跳转模式', () => {
     assert.equal(inits[1].redirect, 'follow');
   });
 
-  test('拿到 opaqueredirect 要响亮地抛，不许静默当成最终 URL', async () => {
+  test('收到 opaqueredirect 时必须显式抛出错误，禁止静默作为最终 URL', async () => {
     // 静默的后果是：把跳转前的 /mine/ 当成落地页，解析不出用户名，然后报出
     // 「请先登录豆瓣」——一个把人指向完全错误方向的提示。
     const t = new Transport({

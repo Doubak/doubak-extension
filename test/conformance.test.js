@@ -309,7 +309,7 @@ describe('写入器根本不产出违规的 bundle', () => {
   // 上面那组测的是「产出之后被破坏能否发现」。这一组测的是更强的性质：
   // 有些违规状态，写入器压根就拒绝构造——问题在更早的地方就被挡住了。
 
-  test('水位线不变量：连续性不成立就不许推进', async () => {
+  test('水位线不变量：连续性不满足时禁止推进', async () => {
     assert.throws(
       () =>
         crawlStateEntry({
@@ -361,7 +361,7 @@ describe('写入器根本不产出违规的 bundle', () => {
     assert.ok(loc.captureId);
   });
 
-  test('claimed_count 没有出处就不许记', async () => {
+  test('claimed_count 缺少来源依据时禁止记录', async () => {
     assert.throws(
       () => coverageEntry({ routeKey: 'x', intent: 'x', claimedCount: 100, capturedCount: 100 }),
       /claimed_source/,

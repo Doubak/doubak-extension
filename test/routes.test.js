@@ -269,7 +269,7 @@ describe('做不了的路线要写清「为什么做不了」', () => {
     assert.match(reason, /广播本身照抓/, '别让人以为那 17 条广播也不要了');
   });
 
-  test('两张「不做」的表不许收同一个键 —— 混了就分不开了', () => {
+  test('两张「暂不支持」配置表禁止包含重复键 —— 避免职责分类混淆', () => {
     const dup = Object.keys(UNSUPPORTED_ROUTES).filter((k) => k in UNSUPPORTED_CATEGORIES);
     assert.deepEqual(dup, []);
   });

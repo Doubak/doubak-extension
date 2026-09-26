@@ -228,7 +228,7 @@ describe('zip 那条路真的交得出东西', () => {
   });
 });
 
-describe('那句「请用 Chrome 或 Edge」不许在导出路径上长回来', () => {
+describe('导出路径严禁回退「请使用 Chrome 或 Edge」提示', () => {
   test('三个写入点都不自己判 showDirectoryPicker', async () => {
     // 判据只认**自己判一次**这件事：`canPickDirectory()` 是唯一的入口，
     // 而它只在 destination.js 里读那个属性。
@@ -321,7 +321,7 @@ describe('那句「请用 Chrome 或 Edge」不许在导出路径上长回来', 
     assert.match(panel, /^applyDestinationCopy\(\);$/m, '面板开机时没调它 —— 那几句永远不出现');
   });
 
-  test('界面上一个字都不许说它是「Firefox 专用格式」', async () => {
+  test('界面文案严禁称其为「Firefox 专用格式」', async () => {
     // 那句话是假的（解开就是同一个目录），而且正好把「你的数据在你自己手里」说反了。
     //
     // **只查会显示出来的字符串，不查注释**——注释里正需要写下这条禁令，把注释

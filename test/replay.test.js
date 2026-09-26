@@ -95,7 +95,7 @@ describe('哪些捕获值得重抓', () => {
     assert.ok(!keys.has('k0'), '最旧的那条应当被截掉');
   });
 
-  test('空输入不炸', () => {
+  test('空输入时不抛出异常', () => {
     assert.deepEqual(replayableCaptures({ captures: [], sinceSeq: 0, routeOf }).items, []);
     assert.deepEqual(replayableCaptures({ captures: undefined, sinceSeq: 0, routeOf }).items, []);
   });
@@ -291,7 +291,7 @@ describe('一批中途被杀，派生出来的封面图不能就此消失', () =
     );
   });
 
-  test('**checkpoint 里连影子都没有的那些，也要救回来**', async () => {
+  test('**checkpoint 中未包含记录的条目亦须完整恢复**', async () => {
     // 上一条里，那些页面其实是由 checkpoint 自己的待抓条目带回来的——`markCaptured`
     // 不再把它们挡掉，它们就自己回来了。
     //

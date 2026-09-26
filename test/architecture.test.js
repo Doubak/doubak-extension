@@ -47,7 +47,7 @@ describe('依赖方向', () => {
   /** 不可逆那一侧。它们出的错没法靠重跑修好。 */
   const CORE = ['crawl', 'bundle', 'core', 'storage', 'offscreen'];
 
-  test('**抓取那几层一个字都不许提界面**', () => {
+  test('**抓取等核心层严禁依赖界面层**', () => {
     const offenders = [];
     for (const rel of allSources()) {
       const layer = rel.split('/')[0];
@@ -61,7 +61,7 @@ describe('依赖方向', () => {
       + '方向反了之后，改一次界面就可能弄坏不可逆的那一步。');
   });
 
-  test('界面用抓取层时，只能用不发请求的那些', () => {
+  test('界面层使用抓取层模块时，仅限使用无网络请求的模块', () => {
     // 面板确实 import 了 crawl 里的两个模块（演练场景、事件日志的文案）。
     // 那是可以的——**只要它们是纯的**。一旦界面能顺着 import 摸到会发请求的
     // 东西，「打开面板」就可能变成「发起一次请求」。
@@ -77,7 +77,7 @@ describe('依赖方向', () => {
       `面板顺着这些 import 摸到了会发请求的代码：\n${impure.join('\n')}`);
   });
 
-  test('公共层不许反过来依赖上层', () => {
+  test('公共底层严禁反向依赖上层业务模块', () => {
     // core / storage 是最底下两层。它们去 import crawl 的话，
     // 「这一层能不能单独测」就没了，而它们恰恰是被所有人用的。
     const offenders = [];
@@ -91,7 +91,7 @@ describe('依赖方向', () => {
     assert.deepEqual(offenders, [], `底层反过来依赖了上层：\n${offenders.join('\n')}`);
   });
 
-  test('**这个检查本身不许是空的**', () => {
+  test('**架构检查规则本身不可为空**', () => {
     // 目录改了名、或者正则写错了，上面三条会全部「通过」而其实一个文件都没看。
     const files = allSources();
     assert.ok(files.length > 40, `只扫到 ${files.length} 个源文件，像是路径不对`);
