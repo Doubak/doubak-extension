@@ -2228,7 +2228,7 @@ describe('增量：下界真的省下了重抓', () => {
     assert.equal(called, false, '调试用的下界被增量覆盖了');
   });
 
-  test('获取时间下界失败 → 回退为全量抓取，避免启动阻塞', async () => {
+  test('获取时间下界失败 → 回退为全量抓取，避免抓取启动失败', async () => {
     const seen = [];
     const { runner, events } = harness((url) => {
       if (url.endsWith('/people/example/')) return PROFILE;
