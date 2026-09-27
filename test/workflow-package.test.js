@@ -155,7 +155,7 @@ describe('打包工作流', () => {
     assert.equal(new Set(names).size, names.length, `两个产物重名了：${names}`);
   });
 
-  test('**Release 产物必须同时发布双平台安装包**', async () => {
+  test('**Release 产物必须同时发布两个平台的安装包**', async () => {
     // 只挂一个的话，另一半用户在 release 页上什么都找不到，而 release 正是我们给
     // 出去的那个入口。
     const s = await yml();
