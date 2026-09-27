@@ -228,7 +228,7 @@ describe('zip 那条路真的交得出东西', () => {
   });
 });
 
-describe('导出路径严禁回退「请使用 Chrome 或 Edge」提示', () => {
+describe('导出路径中严禁重新出现「请使用 Chrome 或 Edge」提示', () => {
   test('三个写入点都不自己判 showDirectoryPicker', async () => {
     // 判据只认**自己判一次**这件事：`canPickDirectory()` 是唯一的入口，
     // 而它只在 destination.js 里读那个属性。
