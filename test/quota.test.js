@@ -171,7 +171,7 @@ describe('写失败让整场抓取停下', () => {
     assert.match(stopped.message, /写入档案失败/);
   });
 
-  test('写失败的路线不许推进水位线', async () => {
+  test('写入失败的路线禁止推进水位线', async () => {
     // 写没成功，就不知道那一页到底进档案了没有。这种情况下推进水位线，
     // 等于宣布「这条线上面全都抓到了」——而那可能是假的。
     const writer = writerThatFailsAt(2, new Error('boom'));

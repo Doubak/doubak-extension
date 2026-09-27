@@ -152,7 +152,7 @@ describe('一条日志留什么', () => {
    *
    * 所以判据放在这里而不是补一个字段就算：**实时事件与存过之后念出来的必须一致**。
    */
-  test('存进日志再念出来，不许出现 undefined，也不许换个说法', () => {
+  test('日志持久化前后内容必须一致，严禁出现 undefined 或歧义变体', () => {
     /** 每种会被 eventNote 翻译的事件，各给一条**字段齐全**的实例。 */
     const samples = [
       { type: 'incremental_rebased', reason: 'renamed', was: 'old', now: 'new', count: 1 },

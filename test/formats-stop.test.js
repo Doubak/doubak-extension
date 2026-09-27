@@ -86,7 +86,7 @@ describe('导出停得下来', () => {
     assert.match(body, /stop\.textContent = '停下'/, '按钮上还写着「正在停…」');
   });
 
-  test('按下之后进度不许把「正在停下来」盖回去', async () => {
+  test('点击停下后后续进度严禁覆盖「正在停下来」状态提示', async () => {
     // 盖回去的话界面又变成「正在解析 12345 / 18838」，看起来就像那一下没按上，
     // 而人会接着再按几下。
     const f = await src('ui/panel/formats.js');

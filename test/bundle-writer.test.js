@@ -370,7 +370,7 @@ describe('created_at 说的是「什么时候开始的」', () => {
     assert.equal(Date.parse(m.created_at), Date.parse('2026-08-05T03:04:05Z'));
   });
 
-  test('bundle_id 认不出来时退回「现在」，不炸也不猜', async () => {
+  test('无法识别 bundle_id 时退回当前时间，不抛出异常亦不随意猜测', async () => {
     const { bundleIdTime } = await import('../src/core/ids.js');
     assert.equal(bundleIdTime('乱七八糟'), null);
     assert.equal(bundleIdTime(''), null);

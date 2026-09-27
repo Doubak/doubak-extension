@@ -266,7 +266,7 @@ describe('三种产出', () => {
     assert.ok(packed.length < enc.encode(text).length, '压完反而更大了');
   });
 
-  test('zip 不给压缩函数要报错，不许悄悄退回「存储」', async () => {
+  test('zip 未提供压缩函数时抛出错误，禁止静默回退为未压缩存储', async () => {
     await assert.rejects(() => zip([{ name: 'x', text: 'y' }], {}), /deflateRaw/);
   });
 
@@ -350,7 +350,7 @@ describe('canonical 的形状：两个宿主，一份实现', () => {
   });
   const raw = (marks) => ({ marks, subjects: [], broadcasts: [], longform: [], doulists: [] });
 
-  test('**这一侧不许自己算** —— 它必须就是 vendor 里那个函数', async () => {
+  test('**本侧严禁自行实现计算逻辑** —— 必须复用 vendor 统一函数', async () => {
     // 只要还是同一个函数，`vendor.test.js` 的逐字节比对就替这件事把着关；
     // 哪天有人把逻辑抄回 run.js，这条会红。
     const src = await readFile(new URL('../src/pipeline/run.js', import.meta.url), 'utf-8');
@@ -378,7 +378,7 @@ describe('canonical 的形状：两个宿主，一份实现', () => {
     assert.equal(out.subjectOf({ medium: 'game', subject: { id: '34965089' } }), null);
   });
 
-  test('multiRevisionMarks 数的是**并完之后**的 —— 被顶掉的那条已经不在导出里了', () => {
+  test('multiRevisionMarks 统计合并后条目 —— 被覆盖的历史记录不再计入导出', () => {
     const two = mark('movie', '1', 'old', '2026-01-01T00:00:00+08:00');
     two.revisions.push({ last_observed_at: '2026-01-02T00:00:00+08:00', fields: {} });
     const out = withCanonicalShape(raw([two, mark('movie', '1', 'new', '2026-09-04T00:00:00+08:00')]));

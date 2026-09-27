@@ -95,7 +95,7 @@ describe('读取', () => {
     assert.equal(dec.decode(await store.read('a', 7)), '789');
   });
 
-  test('越界读取要抛，不能悄悄返回短数据', async () => {
+  test('越界读取必须抛出异常，禁止静默截断返回', async () => {
     // 悄悄截短会让崩溃恢复读到一段「看起来完整」的字节。
     await assert.rejects(() => store.read('a', 5, 10), /越界/);
     await assert.rejects(() => store.read('a', 11, 1), /越界/);

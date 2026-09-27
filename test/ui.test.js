@@ -224,7 +224,7 @@ describe('面板脚本', () => {
     }
   });
 
-  test('空闲时的「上一次结果」不能被两秒后的轮询抹掉', async () => {
+  test('空闲状态下的「上一次结果」不能被后续轮询覆盖清除', async () => {
     // 报上来的：打开插件先看到完整的上次结果，几秒之后整块空了。
     //
     // 成因是空闲分支末尾无条件 `renderRoutes([])`。第一次进空闲时它先清空、
@@ -288,7 +288,7 @@ describe('面板脚本', () => {
     }
   });
 
-  test('确认账号那几秒不许显示成「没有进行中的抓取」', async () => {
+  test('确认账号期间禁止回退显示为「没有进行中的抓取」', async () => {
     // 报上来的：点开始 → 「正在确认账号」→ 退回「没有进行中的抓取」→ 很久之后
     // 才变成「正在抓取」。中间那一跳是两秒一次的轮询读到真实状态之后盖掉了界面
     // 自己编的乐观状态。
@@ -356,7 +356,7 @@ describe('面板脚本', () => {
     }
   });
 
-  test('认不出来的忙碌状态也不许退回「没有进行中的抓取」', async () => {
+  test('未识别的忙碌状态禁止回退显示为「没有进行中的抓取」', async () => {
     const dom = await loadUi({
       which: 'panel',
       onMessage: (msg) => {
@@ -374,7 +374,7 @@ describe('面板脚本', () => {
     }
   });
 
-  test('点下去到后端报出忙碌之间的那一小段也不许跳', async () => {
+  test('点击操作至后端上报忙碌状态的过渡期状态保持稳定', async () => {
     // 这是完整的时间线：点开始 → offscreen 还没建起来、锁还没被占（busyWith 是
     // null）→ 轮询来了一次 → 之后后端才开始报忙。
     //
@@ -479,7 +479,7 @@ describe('面板脚本', () => {
     }
   });
 
-  test('每一种停机都要给得出下一步 —— 没有按钮就是死路', async () => {
+  test('每种停机状态均须提供下一步操作指引 —— 避免无可用操作按钮', async () => {
     // `account_switched` 与 `quota` 原来一个按钮都不给：用户按提示做完了该做的事
     // （切回账号 / 清出空间），却没有任何地方能告诉豆备「我弄好了」，只能重装扩展。
     //
@@ -520,7 +520,7 @@ describe('面板脚本', () => {
     }
   });
 
-  test('#vanished 与 #captures 都在，且渲染时不互相顶掉', async () => {
+  test('#vanished 与 #captures 同时存在，且渲染时互不覆盖', async () => {
     // 「已经没有了」的那几条要有自己的地方：捕获列表只画前 500 行，而真实档案有
     // 3347 条——那 8 条 gone 排在后面，在列表里根本画不出来。
     const html = await readRepoFile('src/ui/panel.html');
@@ -977,7 +977,7 @@ describe('面板脚本', () => {
     }
   });
 
-  test('拿不到版本号时明说「版本未知」，不是悄悄不显示', async () => {
+  test('无法获取版本号时明确提示「版本未知」，而非静默不显示', async () => {
     // 少一个数字，与从来没打算显示它，在页面上长得一模一样 —— 而这一页存在的
     // 理由就是让人有话可说，第一句话就是版本号。
     const dom = await installFakeDom({ html: await readRepoFile('src/ui/panel.html') });
@@ -1095,7 +1095,7 @@ describe('面板脚本', () => {
     assert.match(css, /\.fold > summary/, '折叠块没有样式');
   });
 
-  test('**JS 里不许出现行内样式**', async () => {
+  test('**JS 脚本中严禁设置行内样式**', async () => {
     // 原来有 17 处 `el.style.fontSize = '12px'` 之类，散在各处。样式一旦能在
     // JS 里随手写，就没有任何力量阻止下一块界面再发明一套——**统一不了的根源
     // 是没有唯一的地方，不是没人愿意统一**。
@@ -1104,12 +1104,12 @@ describe('面板脚本', () => {
     assert.deepEqual(hits, [], `这些地方在 JS 里写样式：\n${hits.join('\n')}`);
   });
 
-  test('**HTML 里也不许**', async () => {
+  test('**HTML 标记中严禁包含行内样式**', async () => {
     const html = await readRepoFile('src/ui/panel.html');
     assert.ok(!/ style="/.test(html), 'panel.html 里还有 style= 属性');
   });
 
-  test('**颜色只能来自 token**，不许在规则里写死十六进制', async () => {
+  test('**颜色必须使用 Design Token**，禁止在样式规则中硬编码十六进制色值', async () => {
     // 写死的话，改一次配色要全文搜一遍，而深色模式必然漏掉几处。
     const css = await readRepoFile('src/ui/panel.css');
     const body = css.slice(css.indexOf('* { box-sizing'));
@@ -1119,7 +1119,7 @@ describe('面板脚本', () => {
     assert.deepEqual(bad, [], `这些颜色没走 token：${bad.join(' ')}`);
   });
 
-  test('**不许往兄弟节点里插** —— 没人负责清，切一次档案就多留一张', async () => {
+  test('**禁止向兄弟节点动态插入元素** —— 避免切换档案时残留孤儿节点', async () => {
     // 真实现象：打开一份 05:13 的全量档案，上面挂着**两张一模一样**的卡片，都写着
     // 「接在 11:21 那份后面」。一份 05:13 的档案不可能接在 11:21 后面——那两张是
     // 看别的档案时留下的，`.after()` 插进去之后没人管。
@@ -1140,7 +1140,7 @@ describe('面板脚本', () => {
     assert.match(js, /incEl\.replaceChildren\(\)/);
   });
 
-  test('界面上不许出现 Markdown 记号 —— 那不会被渲染，只会原样显示', async () => {
+  test('界面文案严禁包含未渲染的 Markdown 语法记号', async () => {
     // 真实现象：卡片上出现「同一个网址的多次捕获**不是重复数据，是版本**」，
     // 星号原封不动地印在屏幕上。这里的文字是 `textContent`，不是 Markdown。
     // 要强调就用 <b>。
@@ -1549,7 +1549,7 @@ describe('openPanel：点图标和点通知共同的落点', () => {
   });
 });
 
-describe('停下来之后，顶端不能是死路', () => {
+describe('停止运行后，顶部操作栏必须提供明确操作指引', () => {
   const js = readPanelSourceSync();
 
   test('failures_pending 刻意不给「继续」—— 但必须给别的', () => {
@@ -1582,7 +1582,7 @@ describe('停下来之后，顶端不能是死路', () => {
   });
 });
 
-describe('只剩 checkpoint 时也不能是死路', () => {
+describe('仅剩 checkpoint 时顶部操作栏仍须提供有效操作', () => {
   const js = readPanelSourceSync();
   const bg = readFileSync(new URL('../src/background.js', import.meta.url), 'utf-8');
 
@@ -1937,7 +1937,7 @@ describe('导出之后该做什么 —— 面板要说得出来', () => {
     assert.match(html, /<h2 id="downstream">导出之后/);
   });
 
-  test('**命令旁边必须给出「说了算的地方」**', () => {
+  test('**执行命令旁必须提供权威配置来源链接**', () => {
     // 命令会过期，而这个页面不会跟着更新。真正的出路是把权威指向 README，
     // 而不是指望这里的命令一直对——所以两条命令各自都要有一个 README 链接。
     const sec = html.slice(html.indexOf('id="downstream"'), html.indexOf('每个标签页是干什么的'));
@@ -1962,7 +1962,7 @@ describe('导出之后该做什么 —— 面板要说得出来', () => {
     assert.doesNotMatch(exp, /node bin\/parse\.js/, '命令不该在档案页出现第二份');
   });
 
-  test('**整个帮助页不许用口语**（docs/ui.md 8.5）', () => {
+  test('**帮助页面文案严禁使用口语化表达**（docs/ui.md 8.5）', () => {
     // 这是一个关于「档案能不能被信任」的工具，口语化的措辞会削弱它本来要传达的
     // 确定性。帮助页是用户读得最久的一页，所以整页都按这条来。
     //
@@ -1978,7 +1978,7 @@ describe('导出之后该做什么 —— 面板要说得出来', () => {
     assert.deepEqual(hit, [], `帮助页里出现了口语词：${hit.join(' ')}`);
   });
 
-  test('书面化不许把信息改没了', () => {
+  test('书面化规范改写不得丢失原有技术信息', () => {
     // docs/ui.md 8.5：「书面化改的是语气，不是内容。」这些是改写时最容易被顺手
     // 删掉的「为什么」——每一条都是用户做决定时真正需要的那句。
     const help = html.slice(html.indexOf('id="tab-help"'), html.indexOf('</section>', html.indexOf('id="tab-help"')));
@@ -2294,7 +2294,7 @@ describe('主按钮', () => {
     } finally { dom.restore(); }
   });
 
-  test('**真正的二选一里不许有主按钮**', async () => {
+  test('**对等抉择对话框中严禁设置单一主操作按钮**', async () => {
     // 抓不下来几个页面时，「继续并重试」与「就这样收尾」是一个**用户才有权做的
     // 决定**（后者会把缺口如实写进 manifest，且那条路线不推进水位线）。把其中一个
     // 染成主按钮，就是替他拿主意——而这一档的默认值本来就不该由我们给。

@@ -271,7 +271,7 @@ describe('进行中的档案（还没有 manifest）', () => {
     assert.ok(without.totalBytes <= withManifest.totalBytes, '估值不该超过真值');
   });
 
-  test('manifest() 本身仍然严格 —— 不完整的目录不许冒充 bundle', async () => {
+  test('manifest() 保持严格校验 —— 结构不完整的目录禁止作为 bundle 读取', async () => {
     const { store, writer } = await roundTrip();
     const bundleId = writer.bundleId;
     await store.remove('manifest.json');

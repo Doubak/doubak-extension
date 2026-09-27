@@ -80,7 +80,7 @@ describe('那三处差异各自说得出理由', () => {
     assert.equal(GECKO_ID, 'doubak@doubak.com');
   });
 
-  test('它不许再变成一个可覆盖的配置', () => {
+  test('严禁将其实现为可覆盖的环境变量配置', () => {
     // 一度做成 `DOUBAK_GECKO_ID` 环境变量——**一个永远不该变的值，配一个随手就能
     // 改的入口**。那是个陷阱，不是灵活性。
     const src = readFileSync(join(ROOT, 'tools/make-manifest.mjs'), 'utf-8');

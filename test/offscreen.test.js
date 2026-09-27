@@ -188,7 +188,7 @@ describe('通知文案', () => {
     assert.ok(tables.includes('请') || tables.includes('需要'), '文案里没有一句可执行的下一步');
   });
 
-  test('需要处理的通知不许自己消失', async () => {
+  test('待人工处理的系统通知禁止自动关闭', async () => {
     // 用户没看见 = 抓取继续停着。
     const src = await readFile(new URL('../src/ui/notify.js', import.meta.url), 'utf-8');
     assert.match(src, /requireInteraction: true/);
@@ -471,7 +471,7 @@ describe('增量：offscreen 这一侧的接线', () => {
     assert.match(src, /hasManifest\(\)/);
   });
 
-  test('**下界挑出来之后，就不许再被丢掉**', async () => {
+  test('**增量下界选定后严禁意外丢弃**', async () => {
     // 实测代价：这段代码原来整个包在一个 try 里，下界挑好了但后面
     // knownCaptures / backlogAssets 任何一处抛了，就一起退回全量——
     // 一次本该几分钟的增量变成 4 小时、5880 条捕获的全量。

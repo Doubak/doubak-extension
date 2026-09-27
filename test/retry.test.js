@@ -184,7 +184,7 @@ describe('重试之间的固定退避', () => {
   });
 });
 
-describe('叶子失败不许连带其它条目', () => {
+describe('叶子节点请求失败不得影响其他条目', () => {
   test('一个作品页抓不下来，其余的照样抓完', async () => {
     // 原来一个失败会把整条路线拉黑：三个条目里第三个**永远停在 pending**。
     // 而作品详情页占真实档案 90.3% 的体积——一页失败葬送九成档案。
@@ -209,7 +209,7 @@ describe('叶子失败不许连带其它条目', () => {
   });
 });
 
-describe('有未解决的失败就不许标 complete', () => {
+describe('存在未解决失败项时禁止标记为 complete', () => {
   test('run() 把未解决的失败报出来，并区分有序与叶子', async () => {
     // 失败不调用 stop()，所以 stoppedBy 是 null——上层不能只看那个。
     const h = await harness({ ordered: false, failIf: (u) => u.includes('/2/') });
@@ -282,7 +282,7 @@ describe('人工处置', () => {
 });
 
 describe('恢复时失败状态要原样还原', () => {
-  test('checkpoint 写下的 failed 不许在恢复时被抹掉', async () => {
+  test('checkpoint 记录的 failed 状态在恢复时不得丢失', async () => {
     // 早先恢复一律按「新条目」重建（pending、attempts 归零），于是 checkpoint 里的
     // failed 被静默丢弃——持久化了却不读，等于每次恢复都偷偷给一次新的重试预算。
     // 而崩溃恢复每 30 秒就可能发生一次。

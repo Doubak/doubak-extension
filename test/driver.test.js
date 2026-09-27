@@ -93,7 +93,7 @@ describe('createDrive：一段的身份认代号，不认「有没有 promise」
     h.settleAll();
   });
 
-  test('被顶掉的那一段，`stillMine()` 从此为假', async () => {
+  test('被抢占替代的批次任务，`stillMine()` 判定为 false', async () => {
     // 修好卡死**之后**才出现的形态：以前是一段都跑不起来，现在是一活一僵。
     /** @type {(() => boolean)[]} */
     const probes = [];
@@ -199,7 +199,7 @@ describe('预算内持续推进', () => {
     assert.equal(r.stoppedBy, 'blocked');
   });
 
-  test('被顶掉之后在批次边界退出，不再开下一批', async () => {
+  test('被抢占后在批次边界正常退出，不再启动下一批次', async () => {
     const { runner, nowRef, batchCount } = fakeRunner({ totalBatches: 100, batchCostMs: 10 });
     const events = [];
     const r = await driveWithinBudget({
@@ -336,7 +336,7 @@ describe('service worker 那边要认这条缝', () => {
     assert.match(body.slice(early, doneBranch), /return/, '认出来之后要什么都不做地返回');
   });
 
-  test('`no_run` 不算收尾失败', async () => {
+  test('`no_run` 不计为收尾失败', async () => {
     // 「已经收完了」与「收尾这一步坏了」是两回事：后者要停下整场抓取并弹通知
     // （心跳据此不再自动重试），前者什么都不用做。混在一起的话，一次成功的抓取
     // 最后一屏是红的。
@@ -362,7 +362,7 @@ describe('service worker 那边要认这条缝', () => {
     assert.match(off, /reason: typeof e\?\.reason === 'string'/, 'offscreen 要把错误码送过界');
   });
 
-  test('甩出去的推进要有人接 —— 否则只剩一条没人认领的红字', async () => {
+  test('异步触发的推进任务必须捕获异常 —— 避免产生未处理的 Promise 拒绝', async () => {
     // `void drive()` 一旦 reject，浏览器把它记成 Uncaught (in promise)，显示在扩展
     // 详情页上，指着 `drive()` 的最后一行——那行什么错都没有，它只是这个 async
     // 函数的栈帧。用户看到「扩展报错了」，而没有任何线索指向真正发生的事。

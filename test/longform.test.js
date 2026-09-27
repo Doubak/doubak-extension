@@ -66,7 +66,7 @@ describe('日记列表', () => {
     assert.equal(cls.itemCount, 2);
   });
 
-  test('**侧栏里别人的日记一篇都不许抽**', () => {
+  test('**侧栏中他人日记严禁提取**', () => {
     // 真实页面的「最近回应过的日记」列着 6 篇他人的，今天全被包在
     // `link2/?url=…%2Fnote%2FN%2F` 里做了百分号编码，所以整页扫 `/note/(\d+)/`
     // 恰好碰不到——那是**运气**，不是设计。
@@ -298,7 +298,7 @@ describe('从列表页派生正文页', () => {
     ]);
   });
 
-  test('侧栏里别人的日记同样不许派生', () => {
+  test('侧栏中他人日记同样禁止派生详情抓取', () => {
     const urls = extractDetailLinks(NOTES(), profileForRoute('note.list'));
     assert.ok(!urls.some((u) => /70000000\d/.test(u)), `抽到了别人的日记：${urls.join(' ')}`);
   });

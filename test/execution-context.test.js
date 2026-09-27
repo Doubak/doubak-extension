@@ -39,7 +39,7 @@ function stripComments(src) {
 }
 
 describe('执行上下文约束', () => {
-  test('窗口侧代码不许直接 import OpfsFileStore', async () => {
+  test('窗口侧代码严禁直接引入 OpfsFileStore', async () => {
     // 窗口里 createSyncAccessHandle 不可用。窗口要读 OPFS 只能经由
     // WorkerFileStore 转发给专用 Worker。
     const files = (await readdir(new URL('src/ui/', root))).filter((f) => f.endsWith('.js'));
@@ -55,7 +55,7 @@ describe('执行上下文约束', () => {
     }
   });
 
-  test('WorkerFileStore 不许出现在 Worker 侧', async () => {
+  test('Worker 线程内部严禁引入 WorkerFileStore', async () => {
     // 反方向也得挡：Worker 里直接用 OpfsFileStore 就好，再绕一层 RPC 是把
     // 消息发给自己。
     const src = await read('src/storage/opfs-worker.js');
@@ -174,7 +174,7 @@ describe('执行上下文约束', () => {
     assert.match(src, /IdbKvStore/);
   });
 
-  test('抓取状态不许借道 service worker —— 那会形成请求/响应环', async () => {
+  test('抓取状态严禁经由 service worker 中转 —— 避免形成死锁请求环', async () => {
     // service worker 正 await offscreen 的「开始抓取」响应，offscreen 又 await
     // service worker 帮它写 checkpoint。它在浏览器里的表现是 `setCurrentRun()`
     // 看起来成功了、紧接着的 `getCurrentRun()` 却拿不到东西，报出「还没有
@@ -188,7 +188,7 @@ describe('执行上下文约束', () => {
     }
   });
 
-  test('service worker 与 offscreen 用同一个库，否则各写各的', async () => {
+  test('service worker 与 offscreen 必须统一数据库配置以确保状态同步', async () => {
     // 两边必须看到同一份 checkpoint：offscreen 写、service worker 读（决定该不该
     // 恢复）。库名或 store 名不一致的话，恢复永远找不到东西，而且**不会报错**。
     const idb = await read('src/storage/idb-kv-store.js');

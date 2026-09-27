@@ -172,7 +172,7 @@ describe('manifest 权限', () => {
     assert.equal(manifest.background.type, 'module');
   });
 
-  test('storage.sync 一个字都不许出现在实现里', () => {
+  test('实现代码中严禁调用 storage.sync', () => {
     // 约 100 KB 硬上限，还会跨设备同步。拿它放档案数据是灾难。
     // 只允许出现在解释「为什么不能用」的注释里。
     const uses = source.split('\n').filter((l) => l.includes('storage.sync') && !/^\s*(\*|\/\/)/.test(l));
@@ -180,7 +180,7 @@ describe('manifest 权限', () => {
   });
 });
 
-describe('权限文档与 manifest 不许对不上', () => {
+describe('权限文档必须与 manifest 保持严格一致', () => {
   /**
    * `docs/permissions.md` 是**给人看的那份权限清单**，而 manifest 是机器读的那份。
    * 两份说的必须是同一件事。

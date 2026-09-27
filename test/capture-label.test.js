@@ -68,7 +68,7 @@ describe('标题：哪条线的第几页', () => {
     );
   });
 
-  test('认不出来的 URL 就只写路线名，不硬编', () => {
+  test('无法识别的 URL 仅保留路线名称，不强行构造', () => {
     assert.equal(captureTitle({ route_key: 'interest.item' }, rn), '作品详情页');
     assert.equal(captureTitle({ route_key: 'interest.item', cursor: null }, rn), '作品详情页');
     assert.equal(subjectLabel('https://www.douban.com/something/else/'), null);

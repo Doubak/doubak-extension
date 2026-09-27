@@ -129,7 +129,7 @@ describe('通知在两种浏览器上都真的发得出去', () => {
     assert.equal(f.created.length, 0);
   });
 
-  test('没有 notifications 接口时不炸 —— 角标顶上', async () => {
+  test('缺少 notifications API 时不抛出异常 —— 降级使用角标提示', async () => {
     globalThis.chrome = { action: fakeChrome({ strict: false }).api.action, runtime: {} };
     await notifyNeedsAction('challenge', { kv: kv() });
     await clearAttention({ kv: kv() });

@@ -114,7 +114,7 @@ describe('短评正文里的作品链接不算条目', () => {
     assert.deepEqual(extractSubjectLinks(html), ['https://movie.douban.com/subject/1292052/']);
   });
 
-  test('**不许把 `item comment-item` 当成短评抹掉**', () => {
+  test('**严禁将 `item comment-item` 误作为短评过滤丢弃**', () => {
     // 这是这个改动唯一危险的失败方向。电影与音乐列表上，`comment-item` 是**条目外壳
     // 本身**（`class="item comment-item"`）——按 `comment-item` 抹会把整个条目连同它的
     // 作品链接一起抹掉。那是静默漏抓，比多抽一条严重得多：多抽会在 coverage 上留下

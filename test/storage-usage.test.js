@@ -46,7 +46,7 @@ describe('汇总', () => {
   });
 });
 
-describe('正在抓的那份绝不许删', () => {
+describe('正在抓取的活动档案严禁删除', () => {
   test('active 的不可删，并说出原因', () => {
     // 删了它，写入器下一次落盘就会往一个不存在的目录里写——而抓取正跑在几小时的
     // 中途。
@@ -81,7 +81,7 @@ describe('正在抓的那份绝不许删', () => {
     assert.match(r.error, /没有这份档案/);
   });
 
-  test('可删时把目标带出来，省得调用方再找一遍', () => {
+  test('可删除时附带目标信息，避免调用方二次查询', () => {
     const us = summarizeBundles({ dirs: [dir(A, [['index.ndjson', 7]])] });
     const r = checkDeletable(us, A);
     assert.equal(r.ok, true);
@@ -104,7 +104,7 @@ describe('导出状态：不知道就说不知道', () => {
     assert.equal(u.exportState, 'not_exported');
   });
 
-  test('记录机制不可信 → unknown，**不许**显示成未导出', () => {
+  test('导出记录不可靠时标记为 unknown，**严禁**直接显示为未导出', () => {
     // 导出记录只在这台浏览器里。换过机器、清过数据、或者用别的方式导出过，我们都
     // 看不见。这种情况显示「未导出」是在替用户下一个我们没资格下的判断。
     const [u] = summarizeBundles({ dirs: [dir(A, [])], exportRecordsUsable: false });

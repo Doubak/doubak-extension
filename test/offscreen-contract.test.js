@@ -107,7 +107,7 @@ describe('offscreen document 的能力契约', () => {
     assert.ok(modules.includes(normalize('src/core/version.js')));
   });
 
-  test('**offscreen 可达的代码里，不许出现白名单以外的 `chrome.*`**', () => {
+  test('**offscreen 可达代码中严禁调用白名单外的 `chrome.*` API**', () => {
     /** @type {string[]} */
     const offenders = [];
     for (const file of modules) {
@@ -180,7 +180,7 @@ describe('两个宿主，一道缝', () => {
     for (const fn of ['ensureHost', 'hasHost', 'callHost']) assert.ok(a.includes(fn), `缺 ${fn}`);
   });
 
-  test('**service worker 的静态图里不许有 offscreen.js**', () => {
+  test('**service worker 静态依赖图中严禁引入 offscreen.js**', () => {
     // 这是那个动态 import 唯一要保住的东西。写成静态 import 的话，Chrome 的
     // service worker 会在加载 background.js 时把整条抓取链一起拉进来——而
     // `offscreen.js` 一加载就注册消息监听器、起 Worker，那些副作用在 service

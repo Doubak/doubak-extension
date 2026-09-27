@@ -78,7 +78,7 @@ describe('来自未来的档案：扩展这一侧也读得动', () => {
     assert.equal(row.future_line_field, 42);
   });
 
-  test('**开放词表里的未知取值原样保留，不许猜**', { skip }, async () => {
+  test('**开放词表中的未知取值原样保留，禁止推测赋值**', { skip }, async () => {
     const store = await loadIntoStore();
     const idxName = readdirSync(FUTURE).find((f) => f.startsWith('index-'));
     const bundleId = idxName.slice('index-'.length, -'.ndjson'.length);

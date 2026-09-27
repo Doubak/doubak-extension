@@ -230,7 +230,7 @@ super this import export from as static get set extends null true false with deb
 `.trim().split(/\s+/));
 
 describe('面板模块', () => {
-  test('模块是有的 —— 空目录不该悄悄算通过', () => {
+  test('校验目标模块存在 —— 目录为空时禁止静默判定通过', () => {
     // 目录改名或路径写错时，下面的循环一个文件都不跑，而报告仍然全绿。
     assert.ok(FILES.length >= 8, `只找到 ${FILES.length} 个模块`);
     assert.ok(FILES.includes('shared.js'));
@@ -252,7 +252,7 @@ describe('面板模块', () => {
     });
   }
 
-  test('**依赖方向是单向的** —— shared 谁也不 import，不许有环', () => {
+  test('**模块依赖保持单向** —— shared 不引入其他面板模块，严禁循环依赖', () => {
     /** @type {Map<string, string[]>} */
     const deps = new Map();
     for (const f of FILES) {

@@ -48,7 +48,7 @@ describe('版本号', () => {
     assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   });
 
-  test('**src/ 的代码里不许出现任何形如 x.y.z 的版本字面量**', () => {
+  test('**src/ 代码中严禁出现任何形如 x.y.z 的版本号字面量**', () => {
     // 上面那条只挡得住「写死了当前版本」。而真正发生过的是**写死了一个过期版本**：
     // manifest 涨到 0.9.0 之后，`'0.0.1'` 那三份副本与它不再相等——按上面那条判据
     // 反而全都合规。所以这里不比对具体数值，只问「代码里还有没有版本字面量」。
@@ -104,13 +104,13 @@ describe('版本号', () => {
     }
   }
 
-  test('读不到 manifest.json 时抛错，而不是编一个', async () => {
+  test('无法读取 manifest.json 时抛出错误，而非使用默认虚构值', async () => {
     await withFetch(() => new Response('', { status: 404 }), async () => {
       await assert.rejects(() => extensionVersion(), /manifest\.json/);
     });
   });
 
-  test('manifest.json 里没有 version 时也抛 —— 空字符串不算', async () => {
+  test('manifest.json 缺少 version 时同样抛错 —— 空字符串判定为无效', async () => {
     await withFetch(() => Response.json({ name: '豆备' }), async () => {
       await assert.rejects(() => extensionVersion(), /版本号/);
     });
@@ -127,7 +127,7 @@ describe('版本号', () => {
     assert.equal(asked, 'chrome-extension://fake/manifest.json', '要读的就是那一个文件');
   });
 
-  test('BundleWriter 缺 producer 就抛 —— 不许有默认值兜底', () => {
+  test('BundleWriter 缺少 producer 时抛出异常 —— 禁止使用默认值兜底', () => {
     assert.throws(
       () => new BundleWriter({ store: new MemoryFileStore(), account: { user_id: '1' } }),
       /producer/,
@@ -178,7 +178,7 @@ describe('打包', () => {
     'test/helpers/kv-store-contract.js',
   ];
 
-  test('**测试与开发用的东西不许进包**', () => {
+  test('**测试与开发文件严禁打入安装包**', () => {
     // test/ 里有真实账号的用户名与数字 uid（刻意保留的，见 CLAUDE.md），
     // 没必要连同扩展分发给每一个装它的人；而审核那边每多一个文件就多一分被问。
     const leaked = listFiles()
@@ -187,7 +187,7 @@ describe('打包', () => {
     assert.deepEqual(leaked, [], `这些不该出现在包里：\n${leaked.join('\n')}`);
   });
 
-  test('**那两个契约文件必须真的在包里** —— 少了自检页的 Worker 加载就死', () => {
+  test('**共享契约文件必须完整包含于包内** —— 缺失将导致自检页 Worker 加载失败', () => {
     // 与上一条方向相反：上一条挡「多了」，这一条挡「少了」。只写上一条的话，
     // 把它们从名单里删掉是全绿的——而那正是 2026-09-09 之前发出去的每一个包。
     const listed = listFiles();
@@ -196,7 +196,7 @@ describe('打包', () => {
     }
   });
 
-  test('**manifest 引用到的文件必须都在包里**', () => {
+  test('**manifest 所引用的文件必须全部包含于包内**', () => {
     // 少一个的话，扩展装上才发现——而那时已经过了一轮审核。
     const refs = [
       manifest.background?.service_worker,
@@ -207,13 +207,13 @@ describe('打包', () => {
     for (const r of refs) assert.ok(listed.includes(r), `manifest 引用了 ${r}，但它不在包里`);
   });
 
-  test('**自检页要带上** —— 调试页那个按钮真的会打开它', () => {
+  test('**自检页面必须随包分发** —— 确保调试页跳转入口有效', () => {
     // 不带上，那个按钮就是个死链。这一条是差点漏掉的：selftest 没有被
     // manifest 引用，只被 panel.js 用 getURL 打开。
     assert.ok(listFiles().includes('selftest/index.html'));
   });
 
-  test('包里的入口就在根部，没有顶层目录', () => {
+  test('安装包入口位于根目录，无多余顶层目录', () => {
     // Chrome 要求 manifest.json 在压缩包根部。
     const listed = listFiles();
     assert.ok(listed.includes('manifest.json'));

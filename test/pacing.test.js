@@ -109,7 +109,7 @@ describe('降速跨会话保留', () => {
     assert.deepEqual(p.serialize(), { interval_ms: 3000, backoff_level: 2 });
   });
 
-  test('恢复后不会偷偷回到原速', () => {
+  test('恢复执行后禁止静默重置为原始速率', () => {
     // 这正是把 backoff_level 写进 checkpoint 的意义：关掉浏览器再回来，
     // 也不该重新按原速去撞。
     const p = new Pacer({ intervalMs: 1000, jitterRatio: 0 });

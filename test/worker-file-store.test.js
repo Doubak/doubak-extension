@@ -89,7 +89,7 @@ describe('WorkerFileStore', () => {
     assert.equal(req.length, 3);
   });
 
-  test('两个实例共用一个 Worker，答复不会串门', async () => {
+  test('两个实例共用同一个 Worker 时，消息响应相互隔离', async () => {
     // 编号要是每个实例各数各的，两边会发出同号请求，而答复只按号找人——
     // 于是 A 拿到 B 的字节。这种错不抛异常，只会让你看到别的档案的内容。
     const a = new MemoryFileStore();
@@ -109,7 +109,7 @@ describe('WorkerFileStore', () => {
     assert.equal(new Set(ids).size, ids.length, '两个实例发出了同号请求');
   });
 
-  test('后建的实例不会把先建的处理器顶掉', async () => {
+  test('后创建的实例不会覆盖先前的事件处理器', async () => {
     // 用 onmessage（独占）而不是 addEventListener 的话，先建的那个 store
     // 从此永远收不到答复，界面停在「正在读取…」。
     const worker = fakeWorker({ 'doubak-bundle-A': await bundleDir() });
@@ -125,7 +125,7 @@ describe('WorkerFileStore', () => {
     await assert.rejects(() => s.read('不存在的文件'), /文件不存在/);
   });
 
-  test('Worker 挂掉：在飞的请求全部拒绝，不许永远悬着', async () => {
+  test('Worker 异常崩溃时拒绝所有处理中请求，避免无限挂起', async () => {
     // 不主动拒绝的话界面会永远停在「正在读取…」，比报错难查得多。
     const worker = fakeWorker({ 'doubak-bundle-A': await bundleDir() }, { delay: 50 });
     const s = new WorkerFileStore({ worker, dir: 'doubak-bundle-A' });

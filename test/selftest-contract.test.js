@@ -76,7 +76,7 @@ describe('自检页：写档案必须给 producer', () => {
     assert.ok(seen >= 2, `只找到 ${seen} 处 new BundleWriter，判据多半是坏的`);
   });
 
-  test('**不许用测试里那个假版本号**，要走真实的 extensionVersion', () => {
+  test('**禁止使用测试专用伪造版本号**，必须读取真实的 extensionVersion', () => {
     // 自检页存在的理由是「在真实浏览器里走真实路径」。塞一个常量进去，
     // 这一段就成了假路径——而 `extensionVersion()` 自己就出过事（第一版用
     // `chrome.runtime.getManifest()`，面板里好好的，装上之后每次抓取第一下就失败）。
