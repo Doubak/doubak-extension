@@ -95,7 +95,9 @@ works.
 | Images you uploaded | Supported — broadcast attachments and journal inline images, originals only |
 | Work covers | Supported |
 | Doulists (豆列) | Your own lists, including the per-item comments you wrote |
-| Photo albums | Not yet — no sample available to validate against |
+| Photo albums (Personal) | Planned — awaiting real page samples to calibrate extractors |
+| Photo albums (Works) | **Not in scope.** Photos contributed to public subject albums belong to catalog data, not personal archives |
+| Douban Groups | **Partially planned.** Own created topics and joined groups are planned; others' replies and community threads are out of scope |
 | Mobile-app pages | **Not supported.** Upstream removed them; work detail pages return 404 |
 
 Broadcasts are the least replaceable route: they freeze at the moment you post, cannot be
