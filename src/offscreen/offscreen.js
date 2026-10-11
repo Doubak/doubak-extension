@@ -381,6 +381,35 @@ async function incrementalOptions(account, mode = 'incremental') {
   };
 }
 
+/**
+ * 读出既有档案里抓过的条目名单（作品详情、长文正文、图片），用于 resume 时恢复跳过名单。
+ *
+ * @param {{userId?: string|null, username?: string|null}} account
+ * @param {string} [mode]
+ * @returns {Promise<{knownSubjectUrlKeys?: string[], knownLongformUrlKeys?: string[], knownAssetUrlKeys?: string[]}>}
+ */
+async function resolveKnownCaptures(account, mode = 'incremental') {
+  if (mode === CRAWL_MODES.FULL) return {};
+  try {
+    const entries = await readChainEntries();
+    const me = {
+      accountUserId: account?.userId ?? null,
+      accountUsername: account?.username ?? null,
+    };
+    const mine = bundlesForAccount(entries, me);
+    const known = await knownCaptures(mine);
+    const refresh = mode === CRAWL_MODES.REFRESH;
+    return {
+      knownSubjectUrlKeys: refresh ? [] : known.subjects,
+      knownLongformUrlKeys: refresh ? [] : known.longform.map((x) => x.url),
+      knownAssetUrlKeys: known.assets,
+    };
+  } catch (err) {
+    debugLog('读取已知捕获名单失败', err);
+    return {};
+  }
+}
+
 /** @param {string} dir */
 function openBundle(dir) {
   // readOnly:false —— 这是**唯一**一处写 OPFS 的地方。
@@ -581,13 +610,14 @@ export async function handleOp(msg) {
           const who = opts.username ? { username: opts.username } : await r.discoverUsername();
           // 全量是**用户明说的**，那就一个下界都不挑——当作从来没抓过。
           if (msg.mode === CRAWL_MODES.FULL) {
-            return r.start({ ...opts, username: who.username });
+            return r.start({ ...opts, username: who.username, mode: CRAWL_MODES.FULL });
           }
           // 增量：从既有档案里挑下界。**在身份确认之后**才挑（判据是数字 uid），
           // 所以交给 runner 在正确的时刻回调。小范围试跑自带 floors，那时不会调用。
           return r.start({
             ...opts,
             username: who.username,
+            mode: msg.mode,
             resolveFloors: (account) => incrementalOptions(account, msg.mode),
           });
         });
@@ -609,7 +639,11 @@ export async function handleOp(msg) {
           // 只有一份三个字段的调度摘要——拿那个去 resume 会丢掉游标与 frontier。
           const cp = await getRunStore().loadCheckpoint();
           if (!cp) throw new Error('档案里没有 checkpoint，无从恢复');
-          await r.resume(cp);
+          const pointer = await getRunStore().getCurrentRun();
+          const mode = pointer?.mode ?? (pointer?.floors?.length || pointer?.previousBundleId ? CRAWL_MODES.INCREMENTAL : CRAWL_MODES.FULL);
+          await r.resume(cp, {
+            resolveKnown: (account) => resolveKnownCaptures(account, mode),
+          });
         });
         return { ok: true };
       }

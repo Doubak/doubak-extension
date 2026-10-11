@@ -384,6 +384,11 @@ describe('增量：offscreen 这一侧的接线', () => {
     assert.match(src, /resolveFloors:\s*\(account\)\s*=>\s*incrementalOptions/);
   });
 
+  test('恢复时把读取跳过名单的回调交给 runner', async () => {
+    const src = await readRepoFile('src/offscreen/offscreen.js');
+    assert.match(src, /resolveKnown:\s*\(account\)\s*=>\s*resolveKnownCaptures/);
+  });
+
   test('用户选了全量就一个下界都不挑', async () => {
     const src = await readRepoFile('src/offscreen/offscreen.js');
     assert.match(src, /msg\.mode === CRAWL_MODES\.FULL/);

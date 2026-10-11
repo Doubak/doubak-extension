@@ -37,6 +37,7 @@ import { urlKey } from '../core/urlkey.js';
 import { extensionVersion } from '../core/version.js';
 import { CRASH_SENTINEL_REASON } from './resume-policy.js';
 import { replayableCaptures } from './replay.js';
+import { CRAWL_MODES } from './crawl-modes.js';
 
 /** 一批抓多少条。见文件开头的权衡说明。 */
 export const DEFAULT_BATCH_SIZE = 25;
@@ -260,6 +261,7 @@ export class CrawlRunner {
     onlyRoutes = null, maxCaptures = null, bypassGates = false, resolveFloors = null,
     knownSubjectUrlKeys = null, refreshSubjectUrls = null, backlogAssets = null,
     knownLongformUrlKeys = null, refreshLongform = null, knownAssetUrlKeys = null,
+    mode = null,
   }) {
     if (this._run) throw new Error('已有抓取在进行中');
 
@@ -519,6 +521,8 @@ export class CrawlRunner {
         // 小范围试跑的上限也要跟着走。少了它，一次「最多抓 10 条」的调试跑在
         // 心跳恢复之后会变成一场全量抓取——而用户点的是「试一下」。
         maxCaptures,
+        // 抓取模式：恢复抓取时据此决定是否恢复已知条目跳过名单
+        mode: mode ?? (floors?.size || previousBundleId ? CRAWL_MODES.INCREMENTAL : CRAWL_MODES.FULL),
         // **下界也要跟着走，而且必须存在这里。**
         //
         // 它此前只活在 `RouteState` 里，跟着 checkpoint 走（见 route-state.js
@@ -571,8 +575,20 @@ export class CrawlRunner {
    * @param {object} cp  checkpoint 内容
    * @param {object} [opts]
    * @param {string} [opts.username] 不给则用指针里记下的
+   * @param {(account: object) => Promise<{knownSubjectUrlKeys?: string[], knownLongformUrlKeys?: string[], knownAssetUrlKeys?: string[]}>} [opts.resolveKnown]
+   * @param {(account: object) => Promise<any>} [opts.resolveFloors]
+   * @param {string[]} [opts.knownSubjectUrlKeys]
+   * @param {string[]} [opts.knownLongformUrlKeys]
+   * @param {string[]} [opts.knownAssetUrlKeys]
    */
-  async resume(cp, { username: overrideUser } = {}) {
+  async resume(cp, {
+    username: overrideUser,
+    resolveKnown = null,
+    resolveFloors = null,
+    knownSubjectUrlKeys = null,
+    knownLongformUrlKeys = null,
+    knownAssetUrlKeys = null,
+  } = {}) {
     // **已经在内存里、只是停着** —— 这是「用户点了暂停又点继续」的情形。
     //
     // 早先这里直接抛（或被调用方以 `if (active) return` 跳过），于是「继续」什么也
@@ -612,6 +628,24 @@ export class CrawlRunner {
     const probe = await transport.fetch(profileUrl);
     session.preflight(probe.bodyText, { probe });
     this._uaNote = desktopUaNote(probe.finalUrl);
+
+    // ── 恢复增量跳过名单（作品详情、长文正文、图片）
+    //
+    // checkpoint 只存未完成条目，已抓取名单此前只在 start() 里标记进 frontier 的去重集合。
+    // 进程一旦重启或扩展重载，内存中的去重集合便丢失；若不重新把历史捕获名单注入
+    // frontier，后续处理列表页时所有历史条目都会被当作「新条目」重新入队并全量抓取。
+    const resolver = resolveKnown ?? resolveFloors;
+    if (resolver && (!knownSubjectUrlKeys || !knownLongformUrlKeys || !knownAssetUrlKeys)) {
+      try {
+        const inc = (await resolver(session.account)) ?? {};
+        knownSubjectUrlKeys = knownSubjectUrlKeys ?? inc.knownSubjectUrlKeys;
+        knownLongformUrlKeys = knownLongformUrlKeys ?? inc.knownLongformUrlKeys;
+        knownAssetUrlKeys = knownAssetUrlKeys ?? inc.knownAssetUrlKeys;
+      } catch (err) {
+        this._emit({ type: 'incremental_degraded', part: 'known_captures', message: String(err?.message ?? err) });
+      }
+    }
+
     const producerVersion = this._producerVersion ?? await extensionVersion();
 
     const writer = new BundleWriter({
@@ -668,6 +702,18 @@ export class CrawlRunner {
     // 要重抓的那几条**不能**进去重集合——进去了它们就再也入不了队，这个修法整个
     // 失效（而且失效得悄无声息，因为 `enqueue` 返回 false 没人看）。
     frontier.markCaptured((repair.capturedUrlKeys ?? []).filter((k) => !replayKeys.has(k)));
+    if (knownSubjectUrlKeys?.length) {
+      frontier.markCaptured(knownSubjectUrlKeys);
+      this._emit({ type: 'subjects_skipped', count: knownSubjectUrlKeys.length });
+    }
+    if (knownLongformUrlKeys?.length) {
+      frontier.markCaptured(knownLongformUrlKeys);
+      this._emit({ type: 'longform_skipped', count: knownLongformUrlKeys.length });
+    }
+    if (knownAssetUrlKeys?.length) {
+      frontier.markCaptured(knownAssetUrlKeys);
+      this._emit({ type: 'assets_skipped', count: knownAssetUrlKeys.length });
+    }
     for (const it of cp.frontier ?? []) {
       const def = routes.get(it.route_key);
       frontier.enqueue({

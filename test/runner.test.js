@@ -931,6 +931,56 @@ describe('恢复要能自足 —— 指针里带够信息', () => {
     assert.equal(s.floorFromBundleId, '20260809T220553Z-157e63', '下界的出处也要跟着走');
   });
 
+  test('**重载扩展之后，已抓取条目跳过名单也要活过恢复** —— 不然增量会重抓所有作品与图片', async () => {
+    const seen = [];
+    const listPage = `<html><head><title>我看过的影视(2)</title></head><body>${NAV}
+<div id="db-usr-profile"></div><h1>我看过的影视(2)</h1><div class="grid-view">
+  <div class="item">
+    <div class="pic"><a href="https://movie.douban.com/subject/1001/"><img src="https://img3.doubanio.com/s1001.jpg"></a></div>
+    <div class="title"><a href="https://movie.douban.com/subject/1001/">已存电影</a></div>
+    <span class="date">2026-08-01</span>
+  </div>
+  <div class="item">
+    <div class="pic"><a href="https://movie.douban.com/subject/1002/"><img src="https://img3.doubanio.com/s1002.jpg"></a></div>
+    <div class="title"><a href="https://movie.douban.com/subject/1002/">新加电影</a></div>
+    <span class="date">2026-08-02</span>
+  </div>
+</div></body></html>`;
+
+    const { runner, runStore } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('statuses')) return bcPage(0);
+      if (url.includes('/subject/')) {
+        seen.push(url);
+        return `<html><body>${NAV}<div id="mainpic"></div><div id="info"></div></body></html>`;
+      }
+      return listPage;
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: ['movie'], includeCatalog: true, bypassGates: true,
+      floors: new Map([['interest.movie.collect', '2026-07-01T00:00:00+08:00']]),
+      knownSubjectUrlKeys: ['https://movie.douban.com/subject/1001/'],
+      knownAssetUrlKeys: ['https://img3.doubanio.com/s1001.jpg'],
+    });
+
+    const cp = await runStore.loadCheckpoint();
+    runner._run = null; // 模拟开抓时（进度为 0）重载扩展
+
+    // 恢复时传 resolveKnown 回调
+    await runner.resume(cp, {
+      resolveKnown: async () => ({
+        knownSubjectUrlKeys: ['https://movie.douban.com/subject/1001/'],
+        knownAssetUrlKeys: ['https://img3.doubanio.com/s1001.jpg'],
+      }),
+    });
+
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.equal(seen.some((u) => u.includes('/1001/')), false, '历史抓过的作品在恢复后不该被重抓');
+    assert.ok(seen.some((u) => u.includes('/1002/')), '新增作品必须被抓取');
+  });
+
   test('**下界丢了不只是慢，是假的完整性声明**', async () => {
     // 标记列表的 `enumeration` 写死 'full'，只有下界在时才降成 'bounded'。
     // 丢了下界，manifest 会写着「完整枚举了这份列表」而实际只读了一页——
