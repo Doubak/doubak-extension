@@ -20,6 +20,7 @@ import {
   extractPagination,
   extractDetailLinks,
   extractEmbeddedImages,
+  extractGroupIcons,
 } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { SessionGuard } from '../src/crawl/session.js';
@@ -49,23 +50,29 @@ describe('小组：路线定义', () => {
   const joinsRoute = routes.find((r) => r.key === 'group.joins');
   const publishRoute = routes.find((r) => r.key === 'group.publish');
   const itemRoute = routes.find((r) => r.key === 'group.item');
+  const iconRoute = routes.find((r) => r.key === 'asset.group_icon');
 
-  test('四条路线均已注册且优先级符合设计', () => {
+  test('五条路线均已注册且优先级符合设计', () => {
     assert.ok(homeRoute, '缺少 group.overview');
     assert.ok(joinsRoute, '缺少 group.joins');
     assert.ok(publishRoute, '缺少 group.publish');
     assert.ok(itemRoute, '缺少 group.item');
+    assert.ok(iconRoute, '缺少 asset.group_icon');
 
     assert.equal(homeRoute.intent, 'group.overview');
     assert.equal(joinsRoute.intent, 'group.joins');
     assert.equal(publishRoute.intent, 'group.publish');
     assert.equal(itemRoute.intent, 'group.item');
+    assert.equal(iconRoute.intent, 'asset.image.catalog_thumbnail');
+    assert.equal(iconRoute.surface, 'asset');
 
     assert.ok(homeRoute.priority > PRIORITY.LONGFORM);
     assert.ok(joinsRoute.priority > PRIORITY.LONGFORM);
     assert.ok(publishRoute.priority > PRIORITY.LONGFORM);
     assert.ok(itemRoute.priority > PRIORITY.LONGFORM);
+    assert.ok(iconRoute.priority > PRIORITY.CATALOG);
     assert.equal(itemRoute.entryUrl, undefined, '话题正文由 publish 派生，不设 entryUrl');
+    assert.equal(iconRoute.entryUrl, undefined, '小组图标由 joins 派生，不设 entryUrl');
   });
 
   test('入口 URL 构造正确', () => {
@@ -83,6 +90,8 @@ describe('小组：路线定义', () => {
     assert.equal(routeName('group.overview'), '小组主页');
     assert.equal(routeName('group.joins'), '加入的小组');
     assert.equal(routeName('group.publish'), '发起的讨论');
+    assert.equal(routeName('group.item'), '讨论正文');
+    assert.equal(routeName('asset.group_icon'), '小组图标');
   });
 });
 
@@ -127,6 +136,18 @@ describe('加入的小组（真实页面 Echo-of-Death & furrypaw）', () => {
   test('小组卡片不带时间，时间均为 null', () => {
     const pairs = extractItemPairs(GROUP_JOINS, profile);
     assert.ok(pairs.times.every((t) => t === null));
+  });
+
+  test('普通用户：成功提取全部 114 个小组图标 URL', () => {
+    const { urls } = extractGroupIcons(GROUP_JOINS);
+    assert.equal(urls.length, 114);
+    assert.ok(urls.every((u) => u.includes('doubanio.com')));
+  });
+
+  test('含管理权限用户：成功提取管理与加入小组的图标 URL', () => {
+    const { urls } = extractGroupIcons(GROUP_JOINS_MANAGER);
+    assert.equal(urls.length, 43);
+    assert.ok(urls.every((u) => u.includes('doubanio.com')));
   });
 });
 

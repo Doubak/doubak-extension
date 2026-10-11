@@ -475,6 +475,20 @@ export function buildRoutes({
     note: '用户发布的小组话题正文；由 group.publish 派生',
   });
 
+  // 加入的小组图标：由 group.joins 派生。
+  routes.push({
+    key: 'asset.group_icon',
+    intent: 'asset.image.catalog_thumbnail',
+    kind: 'catalog',
+    surface: 'asset',
+    priority: PRIORITY.CATALOG + 2,
+    source: 'archive',
+    enumeration: 'bounded',
+    safetyNet: 'contiguity',
+    ordered: false,
+    note: '加入的小组图标；由 group.joins 派生',
+  });
+
   // ── 标记列表
   for (const medium of mediums) {
     const build = INTEREST_URLS[medium];

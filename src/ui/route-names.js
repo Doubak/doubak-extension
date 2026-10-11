@@ -73,6 +73,7 @@ const FIXED = {
   'group.joins': '加入的小组',
   'group.publish': '发起的讨论',
   'group.item': '讨论正文',
+  'asset.group_icon': '小组图标',
   // 「我编的豆列」而不是光写「豆列」：界面上还会有「我关注的」那一半（暂时不抓），
   // 两者不能长得一样。
   'doulist.list': '我编的豆列',

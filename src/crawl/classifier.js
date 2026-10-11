@@ -1197,6 +1197,29 @@ export function extractAlbumPhotos(html) {
 }
 
 /**
+ * 从加入的小组列表页中提取小组头像/图标 URL。
+ *
+ * @param {string} html
+ * @returns {{ urls: string[] }}
+ */
+export function extractGroupIcons(html) {
+  if (typeof html !== 'string') return { urls: [] };
+  /** @type {Set<string>} */
+  const urls = new Set();
+  const cardRe = /<li[^>]*>([\s\S]*?)<\/li>/g;
+  for (const m of html.matchAll(cardRe)) {
+    const li = m[1];
+    if (!/<div\b[^>]*class="[^"]*(?:info|pic)[^"]*"/.test(li)) continue;
+    const imgMatch = /<img[^>]+src="([^"]+)"/i.exec(li);
+    const src = imgMatch?.[1];
+    if (src && isDoubanioImage(src)) {
+      urls.add(src);
+    }
+  }
+  return { urls: [...urls] };
+}
+
+/**
  * 广播里**用户自己上传**的图片。
  *
  * ## 为什么这一条和封面完全不是一回事

@@ -35,6 +35,7 @@ import {
   extractStatusPhotos,
   extractEmbeddedImages,
   extractAlbumPhotos,
+  extractGroupIcons,
   extractDetailLinks,
   extractPagination,
 } from './classifier.js';
@@ -709,6 +710,7 @@ export class CrawlLoop {
       this._enqueueCover(item, res, written.captureId);
       this._enqueueStatusPhotos(item, res, written.captureId);
       this._enqueueAlbumPhotos(item, res, written.captureId);
+      this._enqueueGroupIcons(item, res, written.captureId);
 
       // **单页路线抓到那一页就是走完了，当场标掉。**
       //
@@ -1168,6 +1170,39 @@ export class CrawlLoop {
     }
     if (enqueued > 0) {
       this._emit({ type: 'photos_enqueued', count: enqueued, from: item.url });
+    }
+  }
+
+  /**
+   * 从小组加入列表页（group.joins）派生小组图标。
+   *
+   * @param {object} item
+   * @param {object} res
+   * @param {string} captureId
+   */
+  _enqueueGroupIcons(item, res, captureId) {
+    if (item.routeKey !== 'group.joins') return;
+    const target = this._routes.get('asset.group_icon');
+    if (!target) return;
+
+    const { urls } = extractGroupIcons(res.bodyText);
+    let enqueued = 0;
+    for (const url of urls) {
+      const ok = this._frontier.enqueue({
+        url,
+        urlKey: urlKey(url),
+        routeKey: 'asset.group_icon',
+        intent: target.intent,
+        enqueuedBy: captureId,
+        ordered: false,
+        priority: target.priority,
+        gatedBy: null,
+        referer: item.url,
+      });
+      if (ok) enqueued += 1;
+    }
+    if (enqueued > 0) {
+      this._emit({ type: 'group_icons_enqueued', count: enqueued, from: item.url });
     }
   }
 
