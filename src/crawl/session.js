@@ -87,10 +87,10 @@ const PEOPLE_LINK = /douban\.com\/people\/([A-Za-z0-9_-]+)\//g;
  * 校准于 2026-07-30 的真实页面（`test/fixtures/profile-2026-07.html`）。
  */
 const UID_PATTERNS = [
-  /USER_ID"?\s*:\s*"(\d+)"/,
-  /UPLOAD_AUTH_TOKEN"?\s*:\s*"(\d+):/,
-  /setUserId'\s*,\s*'(\d+)'/,
-  /&quot;uid&quot;\s*:\s*&quot;(\d+)&quot;/,
+  /USER_ID"?\s*:\s*"([1-9]\d*)"/,
+  /UPLOAD_AUTH_TOKEN"?\s*:\s*"([1-9]\d*):/,
+  /setUserId'\s*,\s*'([1-9]\d*)'/,
+  /&quot;uid&quot;\s*:\s*&quot;([1-9]\d*)&quot;/,
 ];
 
 /** @typedef {'logged_in' | 'logged_out' | 'unknown'} LoginState */
@@ -127,7 +127,8 @@ export function extractAccountHints(html) {
   let userId = null;
   for (const re of UID_PATTERNS) {
     const m = re.exec(html);
-    if (m) {
+    // '0' 是豆瓣导航埋点的哨兵值（未登录或部分子域名的占位符），不能作为真实用户 ID。
+    if (m && m[1] !== '0') {
       userId = m[1];
       break;
     }

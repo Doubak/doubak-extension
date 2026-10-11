@@ -1163,7 +1163,8 @@ export function cursorFromUrl(url, def) {
   let raw = null;
   try {
     const u = new URL(url);
-    raw = u.searchParams.get(pg.kind === 'page' ? 'p' : 'start');
+    const param = pg.param ?? (pg.kind === 'page' ? 'p' : 'start');
+    raw = u.searchParams.get(param);
   } catch {
     return null;
   }
