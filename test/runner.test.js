@@ -76,7 +76,7 @@ const GROUP_JOINS_EMPTY = `<html><head><title>我的豆瓣小组</title></head><
 <h1><div class="head-nav">我的豆瓣小组</div></h1><div class="group-list group-cards"><ul></ul></div></body></html>`;
 
 const GROUP_PUBLISH_EMPTY = `<html><head><title>我的豆瓣小组</title></head><body>${NAV}
-<h1><div class="head-nav">我的豆瓣小组</div></h1><table class="olt"></table></body></html>`;
+<h1><div class="head-nav">我的豆瓣小组</div></h1><div class="profile-nav"></div><table class="olt"></table></body></html>`;
 
 function longformEmpty(url) {
   if (url.includes('/notes?')) return NOTES_EMPTY;

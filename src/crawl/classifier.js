@@ -898,16 +898,20 @@ export const ROUTE_PROFILES = {
   /**
    * 用户发布的小组话题列表（`/group/people/<user>/publish`）。
    *
-   * 框架标志：`class="olt"` 表格。
+   * 框架标志：`class="olt"` 表格与个人导航 `class="profile-nav"`。
    * 条目：`<td class="title">`。
    * 翻页步长 50，翻页器与豆列格式相同。
+   *
+   * 注意：表格中的 `td-time` 是「最后回应」时间而非发布时间（他人回帖会置顶该话题），
+   * 且当年话题只显示简略的 `MM-DD`（无年份）。因此不设 timeAnchor，
+   * 避免年份推测或最后回应变动导致增量水位线误判。路线收尾依赖翻页器 paginator。
    */
   'group.publish': {
     urlAnchor: /\/group\/people\/[^/]+\/publish/,
-    frameAnchors: [/class="olt"/],
+    frameAnchors: [/class="profile-nav"/, /class="olt"/],
     itemAnchor: /<td class="title">/,
     idAnchor: /\/group\/topic\/(\d+)/g,
-    timeAnchor: /<td[^>]*class="td-time"[^>]*>\s*(\d{4}-\d{2}-\d{2})/g,
+    timeAnchor: null,
     claimedCount: null,
     paginator: /<span class="thispage"[^>]*data-total-page="(\d+)"[^>]*>\s*(\d+)\s*</,
   },

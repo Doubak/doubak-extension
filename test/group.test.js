@@ -6,7 +6,7 @@
  * - `group-joins.html`: 加入的小组列表 (Echo-of-Death, 114 个小组)
  * - `group-joins-manager.html`: 含管理员权限的小组列表 (furrypaw, 52 个小组)
  * - `group-publish.html`: 发起的讨论列表 (mewcatcher, 3 个话题)
- * - `group-recommendation.html`: 分页讨论列表结构参照 (BlocksTower, 44 个话题, 共 3 页)
+ * - `group-publish-paginated.html`: 多页发起的讨论列表结构 (44 个话题, 共 3 页)
  */
 
 import { test, describe } from 'node:test';
@@ -28,7 +28,7 @@ const GROUP_HOME = fixture('group-home.html');
 const GROUP_JOINS = fixture('group-joins.html');
 const GROUP_JOINS_MANAGER = fixture('group-joins-manager.html');
 const GROUP_PUBLISH = fixture('group-publish.html');
-const GROUP_RECOMMENDATION = fixture('group-recommendation.html');
+const GROUP_PUBLISH_PAGINATED = fixture('group-publish-paginated.html');
 
 const classify = (key, html, url) =>
   classifyResponse({
@@ -131,21 +131,21 @@ describe('发起的讨论（真实页面 mewcatcher & BlocksTower）', () => {
     assert.equal(cls.itemCount, 3);
   });
 
-  test('单页用户：成对抽出 3 个话题 ID 与完整日期', () => {
+  test('单页用户：抽出 3 个话题 ID', () => {
     const pairs = extractItemPairs(GROUP_PUBLISH, profile);
     assert.deepEqual(pairs.ids, ['258053730', '254900406', '110871731']);
-    assert.deepEqual(pairs.times, ['2022-01-16', '2021-12-05', '2017-12-21']);
+    assert.deepEqual(pairs.times, [null, null, null]);
     assert.equal(pairs.idless, 0);
   });
 
-  test('多页讨论 (BlocksTower)：判定通过，条目数为 44', () => {
-    const cls = classify('group.publish', GROUP_RECOMMENDATION, 'https://www.douban.com/group/people/BlocksTower/publish?start=0');
+  test('多页讨论：判定通过，条目数为 44', () => {
+    const cls = classify('group.publish', GROUP_PUBLISH_PAGINATED, URL_);
     assert.equal(cls.verdict, 'ok');
     assert.equal(cls.itemCount, 44);
   });
 
   test('多页讨论：成功抽取第 1 页共 3 页的分页信息', () => {
-    const pg = extractPagination(GROUP_RECOMMENDATION, profile);
+    const pg = extractPagination(GROUP_PUBLISH_PAGINATED, profile);
     assert.deepEqual(pg, { page: 1, totalPages: 3 });
   });
 
