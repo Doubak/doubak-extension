@@ -407,6 +407,137 @@ export function longformPath(r) {
   return `${r.kind}/${r.id}.md`;
 }
 
+/** @param {{id: string}} a */
+export function albumPath(a) {
+  return `album/${a.id}.md`;
+}
+
+/**
+ * 个人相册页。
+ * @param {object} a 投影后的相册
+ * @param {{images?: Record<string, string>}} [opts]
+ */
+export function albumPage(a, { images = {} } = {}) {
+  const locked = a.privacy !== 'public';
+  const coverPhoto = (a.photos.find((p) => p.id === a.coverPhotoId) || a.photos[0]);
+  const coverUrl = coverPhoto?.imageUrl ?? coverPhoto?.thumbnailUrl;
+  const coverPath = coverUrl ? (images[coverUrl] ?? null) : null;
+
+  const fm = {
+    title: a.title ?? '(无标题)',
+    date: a.createdAt ?? null,
+    douban_kind: 'album',
+    douban_id: a.id,
+    douban_url: a.url,
+    douban_cover: coverPath,
+    douban_created_at_raw: a.createdAtRaw,
+    douban_updated_at_raw: a.updatedAtRaw,
+    douban_photo_count: a.photos.length,
+    douban_privacy: a.privacy,
+    douban_private: locked,
+    douban_revisions: a.revisionCount,
+    douban_last_seen: a.lastSeenAt,
+  };
+
+  const out = [];
+  if (locked) {
+    out.push('🔒 **这是一个私密相册** —— 在豆瓣上只有你自己看得见。', '');
+  }
+  if (a.desc) {
+    out.push(plainText(a.desc), '');
+  }
+  for (const ph of a.photos) {
+    const src = images[ph.imageUrl] ?? images[ph.thumbnailUrl] ?? ph.imageUrl ?? ph.thumbnailUrl;
+    const full = images[ph.imageUrl] ?? ph.imageUrl ?? src;
+    const cap = ph.caption ? plainText(ph.caption) : '';
+    if (src) {
+      out.push(`[![${cap}](${src})](${full})`);
+    }
+    if (cap) {
+      out.push(`*${cap}*`);
+    }
+    out.push('');
+  }
+  return frontMatter(fm) + '\n' + out.join('\n');
+}
+
+/** @param {{id: string}} t */
+export function groupTopicPath(t) {
+  return `group/${t.id}.md`;
+}
+
+/**
+ * 小组发表的话题页。
+ * @param {object} t 投影后的话题
+ * @param {{images?: Record<string, string>}} [opts]
+ */
+export function groupTopicPage(t, { images = {} } = {}) {
+  const fm = {
+    title: t.title ?? '(无标题)',
+    date: t.publishedAt ?? null,
+    douban_kind: 'group_topic',
+    douban_id: t.id,
+    douban_url: t.url,
+    douban_group_id: t.groupId,
+    douban_group_name: t.groupName,
+    douban_group_url: t.groupUrl,
+    douban_published_at_raw: t.publishedAtRaw,
+    douban_revisions: t.revisionCount,
+    douban_last_seen: t.lastSeenAt,
+  };
+
+  let body = t.body ?? '';
+  for (const [url, path] of Object.entries(images)) {
+    if (body.includes(url)) body = body.split(url).join(path);
+  }
+  body = body
+    .split(/(!\[\]\([^)]*\))/)
+    .map((seg, i) => (i % 2 === 1 ? seg : plainText(seg, { preserveListMarkers: true })))
+    .join('');
+  return frontMatter(fm) + (body ? `\n${body}\n` : '');
+}
+
+export function groupJoinsPath() {
+  return 'group/joins.md';
+}
+
+/**
+ * 用户加入的小组总览页。
+ * @param {object[]} joins 投影后的加入小组列表
+ * @param {{images?: Record<string, string>}} [opts]
+ */
+export function groupJoinsPage(joins, { images = {} } = {}) {
+  const fm = {
+    title: '加入的小组',
+    douban_kind: 'group_joins',
+    douban_item_count: joins.length,
+  };
+
+  const managers = joins.filter((j) => j.role === 'manager');
+  const members = joins.filter((j) => j.role !== 'manager');
+  const out = [];
+
+  const renderJoin = (j) => {
+    const icon = j.iconUrl ? (images[j.iconUrl] ?? j.iconUrl) : null;
+    const img = icon ? `[![${plainText(j.name)}](${icon})](${j.url || '#'}) ` : '';
+    const name = j.url ? `[${plainText(j.name)}](${j.url})` : plainText(j.name);
+    const count = j.memberCount != null ? ` · ${j.memberCount.toLocaleString()} 成员` : '';
+    return `- ${img}**${name}**${count}`;
+  };
+
+  if (managers.length) {
+    out.push(`## 管理的小组 (${managers.length})`, '');
+    for (const j of managers) out.push(renderJoin(j));
+    out.push('');
+  }
+  if (members.length) {
+    out.push(`## 加入的小组 (${members.length})`, '');
+    for (const j of members) out.push(renderJoin(j));
+    out.push('');
+  }
+  return frontMatter(fm) + '\n' + out.join('\n');
+}
+
 /**
  * 一条广播渲染成一段 Markdown：时间、`[封面] 动作 作品名 ★★★★☆`、正文、附图。
  *

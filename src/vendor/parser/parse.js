@@ -20,6 +20,8 @@ import { topology, assertSingleAccount } from './topology.js';
 import { extractSubjectDetail } from './extract-subject.js';
 import { extractLongform } from './extract-longform.js';
 import { extractDoulist, mergeDoulistPages } from './extract-doulist.js';
+import { extractAlbumList, extractAlbumDetail, mergeAlbumPages } from './extract-album.js';
+import { extractGroupJoins, extractGroupPublish, extractGroupTopic } from './extract-group.js';
 import { digestAll, sameRevision } from './digest.js';
 import { coverUrlKey } from './cover-url-key.js';
 import {
@@ -64,8 +66,10 @@ import {
 //        完全没有动作（传照片到相册、喜欢、分享讨论…）。改判据为结构（切到
 //        `<blockquote>` 或 `.text` 的 `</div>`），实测 33 → 2，而那 2 条豆瓣本来就
 //        没写动作词。12 个标记动作词一个都没变形：3265 条有状态的广播保住 3265、丢 0。
-export const PARSER_VERSION = 'doubak-data-parser/0.14.0';
-export const CANONICAL_VERSION = 'canonical/1.1';
+// 0.14.0：扩展与 parser 保持一致。
+// 0.15.0：支持个人相册（albums.ndjson）与豆瓣小组（group_topics.ndjson、group_joins.ndjson）。
+export const PARSER_VERSION = 'doubak-data-parser/0.15.0';
+export const CANONICAL_VERSION = 'canonical/1.2';
 
 /** 路线状态词 → canonical 的封闭词表。 */
 const STATUS = { collect: 'done', do: 'doing', wish: 'wish' };
@@ -197,6 +201,18 @@ export async function parse(sources, opts = {}) {
    * @type {Map<string, {src: object, id: string, pages: Map<number, object>}>}
    */
   const doulistPages = new Map();
+  /** @type {Map<string, object>} 相册 ID → 相册记录 */
+  const albums = new Map();
+  /** @type {Map<string, {src: object, id: string, pages: Map<number, object>}>} */
+  const albumPages = new Map();
+  /** @type {Map<string, object>} 相册 ID → 概览元数据 */
+  const albumSummaries = new Map();
+  /** @type {Map<string, object>} 话题 ID → 小组话题记录 */
+  const groupTopics = new Map();
+  /** @type {Map<string, {topic: object, src: object, observation: object}>} */
+  const groupPublishTopics = new Map();
+  /** @type {Map<string, object>} 小组 ID → 用户加入的小组记录 */
+  const groupJoins = new Map();
   /**
    * `medium:id` → 从详情页补来的字段。
    *
@@ -301,8 +317,84 @@ export async function parse(sources, opts = {}) {
       const lfKind = row.intent === 'note.item' ? 'note' : row.intent === 'review.item' ? 'review' : null;
       const isDetail = row.intent === 'interest.item';
       const isDoulist = row.intent === 'doulist.item';
+      const isAlbumList = row.intent === 'photo.album_list';
+      const isAlbum = row.intent === 'photo.album';
+      const isGroupJoins = row.intent === 'group.joins';
+      const isGroupPublish = row.intent === 'group.publish';
+      const isGroupTopic = row.intent === 'group.item';
       if (!isBroadcast && !lfKind && !isDetail && !isDoulist
+          && !isAlbumList && !isAlbum && !isGroupJoins && !isGroupPublish && !isGroupTopic
           && !row.intent?.startsWith('interest.list.')) continue;
+
+      if (isAlbumList) {
+        if (hasUnknownVerdict(row)) {
+          warnings.push({ type: 'unknown_verdict', verdict: row.verdict, capture: row.capture_id });
+          bump(stats.skipped, `未知 verdict:${row.verdict}`); continue;
+        }
+        if (!isContent(row)) {
+          bump(stats.skipped, `verdict:${row.verdict}`);
+          if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
+          continue;
+        }
+        work.push({ src, row, kind: 'album_list', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        continue;
+      }
+
+      if (isAlbum) {
+        if (hasUnknownVerdict(row)) {
+          warnings.push({ type: 'unknown_verdict', verdict: row.verdict, capture: row.capture_id });
+          bump(stats.skipped, `未知 verdict:${row.verdict}`); continue;
+        }
+        if (!isContent(row)) {
+          bump(stats.skipped, `verdict:${row.verdict}`);
+          if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
+          continue;
+        }
+        work.push({ src, row, kind: 'album', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        continue;
+      }
+
+      if (isGroupJoins) {
+        if (hasUnknownVerdict(row)) {
+          warnings.push({ type: 'unknown_verdict', verdict: row.verdict, capture: row.capture_id });
+          bump(stats.skipped, `未知 verdict:${row.verdict}`); continue;
+        }
+        if (!isContent(row)) {
+          bump(stats.skipped, `verdict:${row.verdict}`);
+          if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
+          continue;
+        }
+        work.push({ src, row, kind: 'group_joins', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        continue;
+      }
+
+      if (isGroupPublish) {
+        if (hasUnknownVerdict(row)) {
+          warnings.push({ type: 'unknown_verdict', verdict: row.verdict, capture: row.capture_id });
+          bump(stats.skipped, `未知 verdict:${row.verdict}`); continue;
+        }
+        if (!isContent(row)) {
+          bump(stats.skipped, `verdict:${row.verdict}`);
+          if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
+          continue;
+        }
+        work.push({ src, row, kind: 'group_publish', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        continue;
+      }
+
+      if (isGroupTopic) {
+        if (hasUnknownVerdict(row)) {
+          warnings.push({ type: 'unknown_verdict', verdict: row.verdict, capture: row.capture_id });
+          bump(stats.skipped, `未知 verdict:${row.verdict}`); continue;
+        }
+        if (!isContent(row)) {
+          bump(stats.skipped, `verdict:${row.verdict}`);
+          if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
+          continue;
+        }
+        work.push({ src, row, kind: 'group_topic', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        continue;
+      }
 
       if (isDoulist) {
         // 索引页（`doulist.list.*`）不产生记录：它只说「有哪几份」，而那几份的
@@ -487,6 +579,60 @@ export async function parse(sources, opts = {}) {
       continue;
     }
 
+    if (kind === 'album_list') {
+      const list = extractAlbumList(html);
+      for (const a of list) {
+        albumSummaries.set(a.id, a);
+      }
+      stats.observations += 1;
+      continue;
+    }
+
+    if (kind === 'album') {
+      const a = extractAlbumDetail(html, row.url);
+      if (!a) {
+        warnings.push({ type: 'extractor_stale', capture: row.capture_id, kind: 'album' });
+        continue;
+      }
+      const start = Number(/[?&](?:m_start|start)=(\d+)/.exec(row.url ?? '')?.[1] ?? 0);
+      const key = `${src.bundleId}:${a.id}`;
+      if (!albumPages.has(key)) albumPages.set(key, { src, id: a.id, pages: new Map() });
+      albumPages.get(key).pages.set(start, { album: a, observation: { ...observationBase } });
+      stats.observations += 1;
+      continue;
+    }
+
+    if (kind === 'group_joins') {
+      const joins = extractGroupJoins(html);
+      for (const j of joins) {
+        stats.observations += 1;
+        upsertGroupJoin(groupJoins, { join: j, account: accountOf(src), observation: { ...observationBase }, parserVersion });
+      }
+      continue;
+    }
+
+    if (kind === 'group_publish') {
+      const topics = extractGroupPublish(html);
+      for (const t of topics) {
+        if (!groupPublishTopics.has(t.id)) {
+          groupPublishTopics.set(t.id, { topic: t, src, observation: { ...observationBase } });
+        }
+      }
+      stats.observations += 1;
+      continue;
+    }
+
+    if (kind === 'group_topic') {
+      const t = extractGroupTopic(html, row.url);
+      if (!t) {
+        warnings.push({ type: 'extractor_stale', capture: row.capture_id, kind: 'group_topic' });
+        continue;
+      }
+      stats.observations += 1;
+      upsertGroupTopic(groupTopics, { topic: t, account: accountOf(src), observation: { ...observationBase }, parserVersion, tz });
+      continue;
+    }
+
     if (kind === 'longform') {
       const lf = extractLongform(html, lfKind);
       if (!lf) {
@@ -618,6 +764,76 @@ export async function parse(sources, opts = {}) {
     });
   }
 
+  // 一份档案里的一份相册 = 一次观测，页面按 start 升序拼起来。
+  for (const { src, id, pages } of albumPages.values()) {
+    const merged = mergeAlbumPages([...pages].map(([start, v]) => ({
+      start, album: v.album, observation: v.observation,
+    })));
+    if (!merged) continue;
+    const summary = albumSummaries.get(id);
+    if (summary) {
+      if (!merged.album.coverPhotoId && summary.coverPhotoId) merged.album.coverPhotoId = summary.coverPhotoId;
+      if (!merged.album.desc && summary.desc) merged.album.desc = summary.desc;
+      if (!merged.album.updatedAt && summary.updatedAt) merged.album.updatedAt = summary.updatedAt;
+    }
+    upsertAlbum(albums, {
+      album: merged.album,
+      account: accountOf(src),
+      observation: merged.pages[0].observation,
+      captureIds: merged.pages.flatMap((p) => p.observation.capture_ids ?? []),
+      parserVersion,
+      tz,
+    });
+  }
+
+  // 补入仅在 album_list 出现但未单独抓取相册详情页的相册
+  for (const [id, summary] of albumSummaries) {
+    if (!albums.has(id)) {
+      upsertAlbum(albums, {
+        album: {
+          id: summary.id,
+          url: summary.url,
+          title: summary.title,
+          desc: summary.desc,
+          claimedCount: summary.claimedCount,
+          createdAt: null,
+          updatedAt: summary.updatedAt,
+          coverPhotoId: summary.coverPhotoId,
+          privacy: 'public',
+          photos: [],
+        },
+        account: soleAccount,
+        observation: { bundle_id: sources[0]?.bundleId ?? 'unknown', capture_ids: [], observed_at: new Date().toISOString(), absence_authority: 'none', surface: 'html' },
+        captureIds: [],
+        parserVersion,
+        tz,
+      });
+    }
+  }
+
+  // 补入仅在 group_publish 出现但未抓取正文页的话题
+  for (const [id, entry] of groupPublishTopics) {
+    if (!groupTopics.has(id)) {
+      upsertGroupTopic(groupTopics, {
+        topic: {
+          id: entry.topic.id,
+          url: entry.topic.url,
+          title: entry.topic.title,
+          published_at: entry.topic.published_at,
+          group_id: entry.topic.group_id,
+          group_name: entry.topic.group_name,
+          group_url: entry.topic.group_url,
+          body: null,
+          images: [],
+        },
+        account: accountOf(entry.src),
+        observation: entry.observation,
+        parserVersion,
+        tz,
+      });
+    }
+  }
+
   return {
     topology: topo,
     doulists: [...doulists.values()],
@@ -625,6 +841,9 @@ export async function parse(sources, opts = {}) {
     subjects: [...subjects.values()],
     broadcasts: [...broadcasts.values()],
     longform: [...longform.values()],
+    albums: [...albums.values()],
+    groupTopics: [...groupTopics.values()],
+    groupJoins: [...groupJoins.values()],
     warnings,
     stats,
   };
@@ -989,6 +1208,138 @@ function upsertDoulist(store, { d, account, observation, captureIds, parserVersi
   rec.catalog = Object.fromEntries(d.items.map((i) => [i.entryId, {
     abstract: i.abstract, rating: i.rating, cover_url: i.coverUrl, source: i.source,
   }]));
+}
+
+function toPartialDate(raw, tz = 'Asia/Shanghai') {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/.test(s)) {
+    return {
+      raw: s,
+      iso: s.replace(' ', 'T') + '+08:00',
+      precision: 'second',
+      timezone_assumption: tz,
+    };
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return {
+      raw: s,
+      iso: `${s}T00:00:00+08:00`,
+      precision: 'day',
+      timezone_assumption: tz,
+    };
+  }
+  return {
+    raw: s,
+    iso: null,
+    precision: 'unknown',
+    timezone_assumption: null,
+  };
+}
+
+function upsertAlbum(store, { album, account, observation, captureIds, parserVersion, tz }) {
+  const fields = {
+    title: album.title ?? null,
+    desc: album.desc ?? null,
+    created_at: toPartialDate(album.createdAt, tz),
+    updated_at: toPartialDate(album.updatedAt, tz),
+    claimed_count: typeof album.claimedCount === 'number' ? album.claimedCount : null,
+    cover_photo_id: album.coverPhotoId ?? null,
+    privacy: album.privacy ?? null,
+    photos: (album.photos ?? []).map((p, idx) => ({
+      id: p.id,
+      url: p.url ?? null,
+      image_url: p.image_url ?? null,
+      thumbnail_url: p.thumbnail_url ?? null,
+      caption: p.caption ?? null,
+      seq: typeof p.seq === 'number' ? p.seq : idx,
+    })),
+  };
+  const digests = digestAll(fields);
+
+  let rec = store.get(album.id);
+  if (!rec) {
+    rec = {
+      canonical_version: CANONICAL_VERSION,
+      identity_layer: 'upstream_id',
+      upstream_id: album.id,
+      account: { user_id: account?.user_id ?? 'unknown', username: account?.username ?? null },
+      url: album.url ?? null,
+      revisions: [],
+    };
+    store.set(album.id, rec);
+  }
+  appendRevision(rec.revisions, {
+    fields,
+    digests,
+    observation: { ...observation, capture_ids: captureIds ?? observation.capture_ids },
+    parserVersion,
+  });
+}
+
+function upsertGroupTopic(store, { topic, account, observation, parserVersion, tz }) {
+  const fields = {
+    title: topic.title ?? null,
+    body: topic.body ?? null,
+    published_at: toPartialDate(topic.published_at, tz),
+    group_id: topic.group_id ?? null,
+    group_name: topic.group_name ?? null,
+    group_url: topic.group_url ?? null,
+    images: (topic.images ?? []).map((im) => ({
+      url: im.url,
+      caption: im.caption ?? null,
+    })),
+  };
+  const digests = digestAll(fields);
+
+  let rec = store.get(topic.id);
+  if (!rec) {
+    rec = {
+      canonical_version: CANONICAL_VERSION,
+      identity_layer: 'upstream_id',
+      upstream_id: topic.id,
+      account: { user_id: account?.user_id ?? 'unknown', username: account?.username ?? null },
+      url: topic.url ?? null,
+      revisions: [],
+    };
+    store.set(topic.id, rec);
+  }
+  appendRevision(rec.revisions, {
+    fields,
+    digests,
+    observation,
+    parserVersion,
+  });
+}
+
+function upsertGroupJoin(store, { join, account, observation, parserVersion }) {
+  const fields = {
+    name: join.name ?? null,
+    role: join.role ?? null,
+    member_count: typeof join.member_count === 'number' ? join.member_count : null,
+    icon_url: join.icon_url ?? null,
+  };
+  const digests = digestAll(fields);
+
+  let rec = store.get(join.id);
+  if (!rec) {
+    rec = {
+      canonical_version: CANONICAL_VERSION,
+      identity_layer: 'upstream_id',
+      upstream_id: join.id,
+      account: { user_id: account?.user_id ?? 'unknown', username: account?.username ?? null },
+      url: join.url ?? null,
+      revisions: [],
+    };
+    store.set(join.id, rec);
+  }
+  appendRevision(rec.revisions, {
+    fields,
+    digests,
+    observation,
+    parserVersion,
+  });
 }
 
 function bump(obj, key) { obj[key] = (obj[key] ?? 0) + 1; }

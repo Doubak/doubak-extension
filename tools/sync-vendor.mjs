@@ -93,6 +93,8 @@ export const SOURCES = [
       'extract-broadcast.js',
       'extract-longform.js',
       'extract-doulist.js',
+      'extract-album.js',
+      'extract-group.js',
       'extract-subject.js',
       'sha256.js',
       'digest.js',

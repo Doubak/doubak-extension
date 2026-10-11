@@ -91,7 +91,7 @@ function noteBody(seg) {
 }
 
 /** 剥标签，保留文字与换行。正文里的 `<br>` 是内容的一部分。 */
-function bodyText(html) {
+export function bodyText(html) {
   // 实体在**剥完标签之后**才解。反过来的话 `&lt;script&gt;` 会先变成
   // `<script>`，然后被上面那条规则当作标签删掉——用户写的一段字就此消失。
   return decodeEntities(html
