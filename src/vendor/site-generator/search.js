@@ -35,7 +35,7 @@
  * 一条可搜的记录。**键名都很短**——4000 条乘以几个字符，省下来的是实打实的传输量。
  *
  * @typedef {object} SearchRow
- * @property {'m'|'b'|'l'|'d'} t  类型：标记 / 广播 / 长文 / 豆列
+ * @property {'m'|'b'|'l'|'d'|'a'|'g'} t  类型：标记 / 广播 / 长文 / 豆列 / 相册 / 小组
  * @property {string} u       站内路径，**不带扩展名**（`movie/1292052`）。
  *                            扩展名由消费者补——它取决于 SSG 的固定链接方案，
  *                            而索引不该替 SSG 做这个决定。
@@ -146,16 +146,21 @@ export function buildSearchIndex(p) {
     });
   }
 
-  // 小组话题：标题与正文
+  // 小组话题：标题、正文、所属小组名称、以及图片说明
   for (const t of p.groupTopics ?? []) {
-    rows.push({
+    const textParts = [t.body ?? '', ...(t.images ?? []).map((img) => img.caption ?? '')]
+      .filter(Boolean).join('\n');
+    /** @type {SearchRow} */
+    const row = {
       t: 'g',
       u: `group/${t.id}`,
       n: t.title,
-      c: t.body ?? '',
+      c: textParts,
       d: t.publishedAtRaw ?? '',
-      k: 'group',
-    });
+      k: t.groupName ?? 'group',
+    };
+    if (t.groupName) row.w = t.groupName;
+    rows.push(row);
   }
 
   // 时间倒序：同分时新的在前，而排序在生成时做一次就够，不必每次查询都做。
