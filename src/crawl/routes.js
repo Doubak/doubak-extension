@@ -401,6 +401,52 @@ export function buildRoutes({
     note: '单个相册照片列表页，翻页参数为 m_start，每页18张',
   });
 
+  // ── 豆瓣小组 ──────────────────────────────────────────────────────────────
+  //
+  // 小组主页包含加入小组与发起讨论的声明数量，是结构性总览页。
+  routes.push({
+    key: 'group.overview',
+    intent: 'group.overview',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.LONGFORM + 4,
+    source: 'archive',
+    enumeration: 'full',
+    safetyNet: 'contiguity',
+    entryUrl: () => `https://www.douban.com/group/people/${enc(username)}/`,
+    note: '小组个人主页；包含加入小组数与发起讨论数的声明数量',
+  });
+
+  // 加入的小组列表：豆瓣将其全部平铺于单张页面（实测 147 个小组一页展示完整）。
+  routes.push({
+    key: 'group.joins',
+    intent: 'group.joins',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.LONGFORM + 5,
+    source: 'archive',
+    enumeration: 'full',
+    safetyNet: 'contiguity',
+    entryUrl: () => `https://www.douban.com/group/people/${enc(username)}/joins`,
+    note: '用户加入与管理的小组列表',
+  });
+
+  // 用户发布的小组话题列表：每页 50 条，翻页使用 ?start=50。
+  routes.push({
+    key: 'group.publish',
+    intent: 'group.publish',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.LONGFORM + 6,
+    source: 'archive',
+    enumeration: 'full',
+    safetyNet: 'contiguity',
+    pagination: { kind: 'start', step: 50, first: 0 },
+    entryUrl: ({ offset }) =>
+      `https://www.douban.com/group/people/${enc(username)}/publish?start=${offset}`,
+    note: '用户发布的小组话题列表；每页50条',
+  });
+
   // ── 标记列表
   for (const medium of mediums) {
     const build = INTEREST_URLS[medium];

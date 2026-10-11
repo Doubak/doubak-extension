@@ -866,6 +866,51 @@ export const ROUTE_PROFILES = {
     claimedCount: /<div class="[^"]*photitle[^"]*">\s*(<span>共)(\d+)张照片<\/span>/,
     paginator: /<span class="thispage"[^>]*data-total-page="(\d+)"[^>]*>\s*(\d+)\s*</,
   },
+
+  /**
+   * 豆瓣小组个人主页（`/group/people/<user>/`）。
+   *
+   * 框架标志：`class="profile-nav"` 与 `head-nav`。
+   */
+  'group.overview': {
+    urlAnchor: /\/group\/people\/[^/]+\/?(\?|$)/,
+    frameAnchors: [/class="profile-nav"/, /head-nav/],
+    itemAnchor: undefined,
+    claimedCount: null,
+  },
+
+  /**
+   * 用户加入与管理的小组（`/group/people/<user>/joins`）。
+   *
+   * 框架标志：`class="group-list group-cards"`。
+   * 条目：`<div class="info">\s*<div class="title">`。
+   * 豆瓣将其全部平铺于单页展示，无翻页器。
+   */
+  'group.joins': {
+    urlAnchor: /\/group\/people\/[^/]+\/joins/,
+    frameAnchors: [/class="[^"]*group-cards[^"]*"/],
+    itemAnchor: /<div class="info">\s*<div class="title">/,
+    idAnchor: /\/group\/([^/"]+)\//g,
+    timeAnchor: null,
+    claimedCount: null,
+  },
+
+  /**
+   * 用户发布的小组话题列表（`/group/people/<user>/publish`）。
+   *
+   * 框架标志：`class="olt"` 表格。
+   * 条目：`<td class="title">`。
+   * 翻页步长 50，翻页器与豆列格式相同。
+   */
+  'group.publish': {
+    urlAnchor: /\/group\/people\/[^/]+\/publish/,
+    frameAnchors: [/class="olt"/],
+    itemAnchor: /<td class="title">/,
+    idAnchor: /\/group\/topic\/(\d+)/g,
+    timeAnchor: /<td[^>]*class="td-time"[^>]*>\s*(\d{4}-\d{2}-\d{2})/g,
+    claimedCount: null,
+    paginator: /<span class="thispage"[^>]*data-total-page="(\d+)"[^>]*>\s*(\d+)\s*</,
+  },
 };
 
 /**

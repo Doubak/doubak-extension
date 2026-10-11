@@ -61,6 +61,7 @@ describe('每条分页路线都说得出自己靠什么收尾', () => {
       [...byFamily.keys()].sort(),
       [
         'broadcast.timeline', 'doulist.item', 'doulist.list',
+        'group.publish',
         'interest.*', 'note.list',
         'photo.album', 'photo.album_list',
         'review.list',
@@ -97,7 +98,7 @@ describe('翻页器只给量准了的那条路线 —— 它不是一个统一�
     //
     // 所以「读翻页器」不能做成全局开关。
     const withPaginator = routes.filter((r) => profileForRoute(r.key)?.paginator).map((r) => r.key).sort();
-    assert.deepEqual(withPaginator, ['doulist.item', 'photo.album', 'photo.album_list']);
+    assert.deepEqual(withPaginator, ['doulist.item', 'group.publish', 'photo.album', 'photo.album_list']);
   });
 
   test('**标记列表刻意不用它：那个数是豆瓣的声称数除以每页条数**', () => {

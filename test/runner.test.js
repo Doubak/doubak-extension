@@ -69,11 +69,23 @@ const DOULISTS_EMPTY = `<html><head><title>我创建的豆列</title></head><bod
 const PHOTOS_EMPTY = `<html><head><title>相册</title></head><body>${NAV}
 <div id="db-usr-profile"></div><h1>示例的相册</h1><div class="article"></div></body></html>`;
 
+const GROUP_HOME_EMPTY = `<html><head><title>我的豆瓣小组</title></head><body>${NAV}
+<h1><div class="head-nav">我的豆瓣小组</div></h1><div class="profile-nav"></div></body></html>`;
+
+const GROUP_JOINS_EMPTY = `<html><head><title>我的豆瓣小组</title></head><body>${NAV}
+<h1><div class="head-nav">我的豆瓣小组</div></h1><div class="group-list group-cards"><ul></ul></div></body></html>`;
+
+const GROUP_PUBLISH_EMPTY = `<html><head><title>我的豆瓣小组</title></head><body>${NAV}
+<h1><div class="head-nav">我的豆瓣小组</div></h1><table class="olt"></table></body></html>`;
+
 function longformEmpty(url) {
   if (url.includes('/notes?')) return NOTES_EMPTY;
   if (url.includes('/reviews?')) return REVIEWS_EMPTY;
   if (url.includes('/doulists/')) return DOULISTS_EMPTY;
   if (url.includes('/photos?')) return PHOTOS_EMPTY;
+  if (url.endsWith('/group/people/example/')) return GROUP_HOME_EMPTY;
+  if (url.includes('/group/people/example/joins')) return GROUP_JOINS_EMPTY;
+  if (url.includes('/group/people/example/publish?')) return GROUP_PUBLISH_EMPTY;
   return null;
 }
 
@@ -1749,6 +1761,7 @@ describe('单页路线也要能「走完」', () => {
     const single = defs.filter((d) => d.entryUrl && !d.pagination).map((d) => d.key).sort();
 
     assert.deepEqual(single, [
+      'group.joins', 'group.overview',
       'profile.category_entry.book', 'profile.category_entry.drama',
       'profile.category_entry.game', 'profile.category_entry.movie',
       'profile.category_entry.music', 'profile.overview',
