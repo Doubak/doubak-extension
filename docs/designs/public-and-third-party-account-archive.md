@@ -561,24 +561,68 @@ export class SessionGuard {
 
 **关键安全保护**：即使在公开模式下，若豆瓣返回真正的认证重定向（URL 漂移至 `passport/login`、正文包含 `<title>登录豆瓣</title>` 或风控拦截码），分类器依然在第 1、第 2 步就会将其精确判定为 `login` 或 `blocked`，不会错误放行。
 
+#### 4.4.2 广播隐私截断检测与死循环翻页熔断（`people-truncation-hint` 与 `data-total-page` 熔断契约）
+
+实测真实第三方广播页面（取证样本 `broadcast example with privacy settings example.html`）揭示了一个极端隐蔽而致命的陷阱：
+当目标用户开启了防骚扰或动态仅部分人可见时，上游豆瓣页面呈现出反直觉的结构：
+1. **页面特征**：
+   `.stream-items` 容器内无任何条目，直接渲染：
+   ```html
+   <div class="people-truncation-hint">
+     - <i class="ic-lock"></i>由于用户的设置，无法查看更多内容 -
+   </div>
+   ```
+2. **上游死循环陷阱（Infinite Pagination Trap）**：
+   豆瓣服务端在此类隐私截断页面下，分页组件会离奇地渲染：
+   ```html
+   <span class="thispage" data-total-page="9223372036854775807">1</span>
+   <a href="?p=2">2</a> ... <a href="?p=10">10</a> <a href="?p=2" class="next">后页&gt;</a>
+   ```
+   属性 `data-total-page="9223372036854775807"` 恰好是 64 位有符号整型的极限值（`2^63 - 1`，约 900 亿亿页）。如果爬虫遵循 `data-total-page` 或机械点击 `后页>`，将会陷入请求空页面的死循环，直到 IP 被封禁。
+
+3. **分类器（`classifier.js`）防护契约**：
+   ```javascript
+   const PRIVACY_TRUNCATION_RE = /由于用户的设置，无法查看更多内容|people-truncation-hint/;
+
+   // 在广播路线中检测隐私截断提示
+   if (route.key === 'broadcast.timeline' && PRIVACY_TRUNCATION_RE.test(bodyText)) {
+     reasons.push('检测到目标用户设置了广播隐私保护（无法查看更多内容）');
+     return {
+       verdict: 'ok',
+       verdict_reason: 'truncated_by_privacy',
+       reasons,
+       itemCount: 0,
+       hasMore: false, // 强制阻断翻页
+     };
+   }
+   ```
+4. **引擎处理**：
+   - Frontier 收到 `hasMore: false` 与 `truncated_by_privacy` 后，**立即标记广播路线抓取完毕**，绝对不生成 `?p=2` 等后续请求；
+   - `crawl_state` 记录 `contiguous: true, enumeration: "truncated", reason: "user_privacy_settings"`；
+   - 彻底扑灭死循环风暴。
+
 ---
 
 ### 4.5 路线注册与抓取范围边界（Routes & Scope）
 
 #### 4.5.1 路线支持矩阵
 
-| 路线类别 | 路由 Key | 公开归档是否支持 | 差异与边界约束 |
+| 路线类别 | 路由 Key | 公开数据备份是否支持 | 差异与边界约束 |
 |---|---|:---:|---|
 | **个人概览** | `profile.overview` | ✅ | 归档昵称、头像、简介、常居地、加入时间等公开信息。 |
 | **分类入口** | `profile.category_entry.*` | ✅ | 读取各分类公开统计数字作为 coverage 证据。 |
 | **标记列表** | `interest.*` (5类×3态) | ✅ | 仅包含公开标记。私密标记（仅自己可见）由豆瓣直接过滤。 |
-| **用户广播** | `broadcast.timeline` | ✅ | 仅包含公开广播；`extractBroadcasts` 依靠目标 `user_id` 过滤他人转发。 |
+| **用户广播** | `broadcast.timeline` | ✅ (受限) | 仅包含公开广播；遇 `.people-truncation-hint` 隐私截断时熔断终止；过滤他人转发。 |
 | **长文日记** | `note.list` / `note.item` | ✅ | 仅包含作者设为公开的日记正文。 |
 | **长文书影评** | `review.list` / `review.item` | ✅ | 仅包含公开发布的评论。 |
 | **自建豆列** | `doulist.list` (`doulists/all`) | ✅ | 仅包含公开豆列及其评语。 |
 | **自传图片** | `asset.status_photo`, `asset.longform_embed` | ✅ | 抓取广播与日记中由作者上传的原图。 |
 | **作品封面** | `asset.subject_cover` | ✅ (可选) | 抓取作品封面，确保离线渲染可用。 |
 | **作品详情页** | `interest.item` (`catalog`) | ⚙️ **默认关闭/可选** | **关键优化**：详见 4.5.2 节。 |
+| **小组：加入的小组** | `group.joins` | ✅ | 公开可见。抓取用户加入的公开小组名单（取证自 `group joins`）。 |
+| **小组：推荐的讨论** | `group.recommendations` | ✅ | 公开可见。抓取用户推荐的小组讨论。 |
+| **小组：发起的话题** | `group.publish` | ❌ | **所有者专属**。豆瓣仅对本人展示发起的主题帖，他人访问无此 Tab 且无数据。 |
+| **小组：回复与喜欢** | `group.reply` / `group.likes` | ❌ | **所有者专属**。豆瓣仅对本人展示跟帖回复，他人视角完全隐藏。 |
 | **私密条目** | 私密标记/私密广播/私密日记 | ❌ | 上游完全不可见，如实记录在范围说明中。 |
 | **社交外围** | 关注/粉丝/他人回应/豆邮 | ❌ | 依据 DESIGN.md 既有原则：**永不抓取**。 |
 
@@ -591,6 +635,41 @@ export class SessionGuard {
   - **设计策略**：在公开抓取模式下，新增开关 **「仅归档用户原创内容与标记列表（推荐）」**（默认开启）：
     - 开启时：抓取全部标记列表、广播、日记、豆列与封面图，**跳过作品详情页**。抓取请求数直接从 4000+ 次暴降至 300 次左右，极大提升备份成功率并保护网络环境。
     - 关闭时：完整抓取作品详情页，维持与完整备份同等完整度。
+
+#### 4.5.3 真实页面实测取证与边界深度剖析
+
+基于真实 HTML 取证文件（`broadcast example with privacy settings example.html`、`group home (mine).html`、`group publish (mine).html` 与 `group joins (Echo-of-Death).html`），系统确立了以下两项重要的路线边界认知：
+
+##### 4.5.3.1 广播隐私截断与死循环陷阱取证
+- **实测现象**：第三方访客（小号 MewX 查看目标账号 云叔叔 66133087）访问其广播页面时，页面不仅不展示任何状态条目，还在 `.people-truncation-hint` 中提示 `由于用户的设置，无法查看更多内容`，且附带了虚假的 `data-total-page="9223372036854775807"`。
+- **系统处置**：分类器精准截获 `.people-truncation-hint` 信号，立即向 Frontier 发出终止指令，并如实记入 `manifest.notes` 与 `crawl_state`。在覆盖率页面中向用户如实呈报：“该用户已开启动态防骚扰/隐私保护，广播已安全收尾并熔断翻页”。
+
+##### 4.5.3.2 豆瓣小组权限边界：本人视角（7 项完整导航） vs 他人视角（仅 3 项公开导航）
+通过比对用户本人小组主页与第三方访问他人小组主页的 DOM 结构，确立了小组帖子的权限硬边界：
+
+```
+                【豆瓣个人小组主页导航条（.profile-nav）对比】
+
+  【本人登录查看自己 (mine)】            【第三方访客查看他人 (Echo-of-Death / furrypaw)】
+  ┌─────────────────────────────────┐   ┌─────────────────────────────────┐
+  │ • 小组主页                      │   │ • 小组主页                      │
+  │ • 加入的小组 (/joins)           │   │ • 加入的小组 (/joins)           │
+  │ • 关注的小组 (/subscribes)      │   │ • 推荐 (/recommendations)       │
+  │ • 发起 (/publish)   ───【主题帖】│   └─────────────────────────────────┘
+  │ • 回复 (/reply)     ───【跟帖】  │   ❌ 发起、回复、关注、喜欢 完全对访客隐藏！
+  │ • 喜欢 (/likes)                 │      （即使用户拥有管理员权限也无法跨账号查看）
+  │ • 推荐 (/recommendations)       │
+  └─────────────────────────────────┘
+```
+
+1. **上游权限事实**：
+   - 在本人登录态下，用户可以通过 `/group/people/<me>/publish` 访问自己多年来在各个小组内发起的全部讨论主帖（包含标题、回复数、发帖日期与所属小组链接），通过 `/reply` 访问全部跟帖回复；
+   - 然而，当任何第三方用户（无论未登录访客、普通已登录用户，甚至是具有管理权限的用户 `furrypaw`）访问他人小组主页时，导航栏中的 `publish`（发起）、`reply`（回复）、`subscribes`（关注）和 `likes`（喜欢）**被豆瓣服务端硬编码彻底抹除**，直接访问子路由亦被 403 拒绝或重定向；
+   - 外部访客**唯一公开可见的小组数据仅有**：加入的小组（`/joins`）与推荐的讨论（`/recommendations`）。
+2. **系统边界裁决**：
+   - **小组发帖（`group.publish`）与回帖（`group.reply`）被正式定义为【所有者专属私有路线（Owner-Only Private Routes）】**；
+   - **在「备份他人公开账号」模式下，系统严禁注册并请求 `group.publish` 和 `group.reply` 路由**，防止无谓的网络消耗与封禁风险；
+   - 这一特性正式纳入 [Issue #18](https://github.com/Doubak/doubak-extension/issues/18) 小组功能演进规划中：小组发帖与回帖归档明确归入“备份我的账号”特权能力集，他人公开备份仅支持小组加入列表与推荐列表。
 
 ---
 
