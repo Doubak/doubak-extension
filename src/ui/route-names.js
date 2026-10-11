@@ -67,6 +67,7 @@ const FIXED = {
   'note.item': '日记正文',
   'review.item': '评论正文',
   'photo.album_list': '相册',
+  'photo.album': '相册内容',
   // 「我编的豆列」而不是光写「豆列」：界面上还会有「我关注的」那一半（暂时不抓），
   // 两者不能长得一样。
   'doulist.list': '我编的豆列',

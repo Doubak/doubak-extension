@@ -955,11 +955,12 @@ export class CrawlLoop {
    * @param {string} captureId
    */
   _enqueueLongformItems(item, res, captureId) {
-    // 豆列走同一条路：索引页 → 详情页，URL 从页面上原样取。
+    // 豆列与相册走同一条路：索引页 → 详情页，URL 从页面上原样取。
     const targetKey = {
       'note.list': 'note.item',
       'review.list': 'review.item',
       'doulist.list': 'doulist.item',
+      'photo.album_list': 'photo.album',
     }[item.routeKey];
     if (!targetKey) return;
     const target = this._routes.get(targetKey);
@@ -980,9 +981,13 @@ export class CrawlLoop {
       if (ok) enqueued += 1;
     }
     if (enqueued > 0) {
-      // 事件类型跟着目标走：把豆列报成 `longform_enqueued`，日志里那句人话就会说错
+      // 事件类型跟着目标走：把豆列/相册报成 `longform_enqueued`，日志里那句人话就会说错
       // 是什么东西——而日志是用户回答「它到底在抓什么」的唯一地方。
-      const type = targetKey === 'doulist.item' ? 'doulist_enqueued' : 'longform_enqueued';
+      const type = targetKey === 'doulist.item'
+        ? 'doulist_enqueued'
+        : targetKey === 'photo.album'
+        ? 'album_enqueued'
+        : 'longform_enqueued';
       this._emit({ type, routeKey: targetKey, count: enqueued, from: item.url });
     }
   }

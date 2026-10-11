@@ -829,6 +829,43 @@ export const ROUTE_PROFILES = {
     // 从而发现抓取过程中总数发生了变化
     claimedCount: /<h1>\s*([^<]*?)\((\d+)\)\s*<\/h1>/,
   },
+
+  /**
+   * 个人相册列表（`/people/<user>/photos`）。
+   *
+   * 框架标志：个人页头 `id="db-usr-profile"` 与 `<h1>...相册...</h1>`。
+   * 条目：`<div class="albumlst">`。
+   * 翻页步长 18，翻页器在末尾包含声称总数 `(共N个)`。
+   */
+  'photo.album_list': {
+    urlAnchor: /\/people\/[^/]+\/photos(\?|$)/,
+    frameAnchors: [/id="db-usr-profile"/, /<h1>\s*[^<]*相册\s*<\/h1>/],
+    itemAnchor: /<div class="albumlst">/,
+    idAnchor: /\/photos\/album\/(\d+)/g,
+    timeAnchor: /(\d{4}-\d{2}-\d{2})(?:更新|创建)/g,
+    claimedCount: /<span class="count">\s*(\(共)(\d+)个\)/,
+    paginator: /<span class="thispage"[^>]*data-total-page="(\d+)"[^>]*>\s*(\d+)\s*</,
+    detailLink: /<div class="pl2">\s*<a href="(https:\/\/www\.douban\.com\/photos\/album\/\d+\/?)"/g,
+  },
+
+  /**
+   * 单个相册的照片列表页（`/photos/album/<id>/`）。
+   *
+   * 框架标志：`class="photolst` 与 `photitle`。
+   * 条目：`<div class="photo_wrap">`。
+   * 声明数量：`<span>共N张照片</span>`。
+   * 翻页器：`<span class="thispage" data-total-page="N">K</span>`，使用 ?m_start= 翻页。
+   * 照片条目自身在相册视图中没有单个时间。
+   */
+  'photo.album': {
+    urlAnchor: /\/photos\/album\/\d+/,
+    frameAnchors: [/class="photolst/, /photitle/],
+    itemAnchor: /<div class="photo_wrap">/,
+    idAnchor: /\/photos\/photo\/(\d+)/g,
+    timeAnchor: null,
+    claimedCount: /<div class="[^"]*photitle[^"]*">\s*(<span>共)(\d+)张照片<\/span>/,
+    paginator: /<span class="thispage"[^>]*data-total-page="(\d+)"[^>]*>\s*(\d+)\s*</,
+  },
 };
 
 /**

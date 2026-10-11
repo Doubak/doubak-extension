@@ -59,7 +59,12 @@ describe('每条分页路线都说得出自己靠什么收尾', () => {
     }
     assert.deepEqual(
       [...byFamily.keys()].sort(),
-      ['broadcast.timeline', 'doulist.item', 'doulist.list', 'interest.*', 'note.list', 'review.list'],
+      [
+        'broadcast.timeline', 'doulist.item', 'doulist.list',
+        'interest.*', 'note.list',
+        'photo.album', 'photo.album_list',
+        'review.list',
+      ],
       '分页路线的名单变了 —— 新加的那条靠什么收尾？见 DESIGN.md §3.3c',
     );
     for (const [fam, t] of byFamily) {
@@ -80,17 +85,19 @@ describe('每条分页路线都说得出自己靠什么收尾', () => {
 });
 
 describe('翻页器只给量准了的那条路线 —— 它不是一个统一的信号', () => {
-  test('只有豆列详情页配了 paginator 锚点', () => {
-    // 实测（真实档案，8 条分页路线）：
+  test('翻页器锚点仅配给核对过真实页面的路线', () => {
+    // 实测（真实档案，核对过真实翻页器的路线）：
     //   广播          184/184 页有翻页器，值恒为 9223372036854775807（Long.MAX，哨兵）
     //   标记·影视      183/183，值 89/90/50/51/2
     //   标记·书        53/53 有翻页器，**却一次都没有这个属性**
     //   标记·舞台剧    0/30，连翻页器都没有
     //   豆列详情页     多页的那几份每页都有，值 2/3，与实际内容页数逐份吻合
+    //   相册列表与相册  真实样本明确包含 data-total-page 属性
+    //   小组发帖列表    真实样本明确包含 data-total-page 属性
     //
     // 所以「读翻页器」不能做成全局开关。
-    const withPaginator = routes.filter((r) => profileForRoute(r.key)?.paginator).map((r) => r.key);
-    assert.deepEqual(withPaginator, ['doulist.item']);
+    const withPaginator = routes.filter((r) => profileForRoute(r.key)?.paginator).map((r) => r.key).sort();
+    assert.deepEqual(withPaginator, ['doulist.item', 'photo.album', 'photo.album_list']);
   });
 
   test('**标记列表刻意不用它：那个数是豆瓣的声称数除以每页条数**', () => {
@@ -149,9 +156,9 @@ describe('一条路线底下装着好几串分页时，各串互不影响', () =
     assert.match(nextPageFn, /route\.nextPageUrl && items\.ids\.length === 0/);
   });
 
-  test('只有豆列详情页是这一类 —— 其余路线照旧靠停滞兜底', () => {
+  test('带 nextPageUrl 的路线独立收尾 —— 其余路线照旧靠停滞兜底', () => {
     // 广播与标记列表一条路线就是一串，路线级计数器对它们是对的判据。
-    const perItem = routes.filter((r) => r.nextPageUrl).map((r) => r.key);
-    assert.deepEqual(perItem, ['doulist.item']);
+    const perItem = routes.filter((r) => r.nextPageUrl).map((r) => r.key).sort();
+    assert.deepEqual(perItem, ['doulist.item', 'photo.album']);
   });
 });
