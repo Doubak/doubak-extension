@@ -35,6 +35,7 @@ const GROUP_JOINS_MANAGER = fixture('group-joins-manager.html');
 const GROUP_PUBLISH = fixture('group-publish.html');
 const GROUP_PUBLISH_PAGINATED = fixture('group-publish-paginated.html');
 const GROUP_TOPIC = fixture('group-topic.html');
+const GROUP_TOPIC_WITH_IMAGE = fixture('group-topic-with-image.html');
 
 const classify = (key, html, url) =>
   classifyResponse({
@@ -245,6 +246,21 @@ describe('讨论正文页（真实页面 258053730）', () => {
     const { urls, captions } = extractEmbeddedImages(GROUP_TOPIC);
     assert.deepEqual(urls, ['https://img3.doubanio.com/view/group_topic/l/public/p742323977.jpg']);
     assert.equal(captions['https://img3.doubanio.com/view/group_topic/l/public/p742323977.jpg'], '番外剧照');
+  });
+});
+
+describe('讨论正文页（真实页面 206243320，带无图注插图）', () => {
+  const URL_ = 'https://www.douban.com/group/topic/206243320/';
+
+  test('判定通过，结构性标志完备', () => {
+    const cls = classify('group.item', GROUP_TOPIC_WITH_IMAGE, URL_);
+    assert.equal(cls.verdict, 'ok');
+  });
+
+  test('正文内嵌附图：成功抽取用户上传的附图（无图注时 captions 为空）', () => {
+    const { urls, captions } = extractEmbeddedImages(GROUP_TOPIC_WITH_IMAGE);
+    assert.deepEqual(urls, ['https://img9.doubanio.com/view/group_topic/l/public/p379527796.jpg']);
+    assert.equal(captions['https://img9.doubanio.com/view/group_topic/l/public/p379527796.jpg'], undefined);
   });
 });
 
