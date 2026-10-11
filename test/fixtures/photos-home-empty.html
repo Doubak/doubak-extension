@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="ua-webkit">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="renderer" content="webkit">
+    <meta name="referrer" content="always">
+    <meta name="google-site-verification" content="ok0wCgT20tBBgo9_zat2iAcimtN4Ftf5ccsh092Xeyw" />
+    <title>我的相册</title>
+    
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="Sun, 6 Mar 2005 01:00:00 GMT">
+    
+    <script >var _head_start = new Date();</script>
+    <script src="https://asset.doubanio.com/cuphead/vendors/js/jquery-1.10.2.min.c3a7b608ebfa.js"></script>    <script src="https://asset.doubanio.com/cuphead/vendors/js/douban.751471eacdfd.js"></script>
+    <link href="https://asset.doubanio.com/cuphead/vendors/css/douban.d574f4d637c8.css" rel="stylesheet" type="text/css">
+    <style type="text/css">
+      
+
+    </style>
+    
+  <link rel="stylesheet" href="None">
+
+    <style type="text/css">
+    #db-usr-profile {
+        height: auto;
+    }
+    #db-usr-profile .info ul li.sub-menu {
+        margin-right: 0;
+    }
+    #db-usr-profile .info ul li.sub-menu+.sub-menu {
+        margin-right: 1em;
+    }
+    #db-usr-profile .info ul li.sub-menu+.sub-menu:before {
+        content: '|';
+        display: inline-block;
+        vertical-align: middle;
+        width: 1px;
+        height: 14px;
+        margin: -3px 3px 0 0;
+        background: #bbb;
+        font-size: 0;
+    }
+    
+    .btn-pic-upload { display:block;margin-bottom:20px; }
+    .donate_apply{ font-size: 14px; margin-bottom: 20px; line-height: 1; }
+    .donate_apply a{ color: #3377AA; }
+    .donate_apply a:hover{ color: #fff; }
+
+  </style>
+    <script></script>
+
+    <link rel="shortcut icon" href="https://img3.doubanio.com/f/shire/de01f10f57b2ae751224c6d1a193bafd2f02dd89/pics/favicon.ico" type="image/x-icon">
+</head>
+
+<body>
+  
+  <link rel="stylesheet" href="https://asset.doubanio.com/cuphead/sns-static/common/base/init.4f2f3.css">
+  
+    <script type="text/javascript">var _body_start = new Date();</script>
+    
+  
+
+
+
+    <link href="//asset.doubanio.com/cuphead/nav/2.0.0/shire/bundle.css" rel="stylesheet" type="text/css">
+
+
+
+<div id="db-global-nav" class="global-nav">
+  <div class="bd">
+    
+<div class="top-nav-info">
+  <ul>
+    <li>
+    <a id="top-nav-doumail-link" href="https://www.douban.com/doumail/">豆邮</a>
+    </li>
+    <li class="nav-user-account">
+      <a target="_blank" href="https://accounts.douban.com/passport/setting/" class="bn-more">
+        <span>MewX的账号</span><span class="arrow"></span>
+      </a>
+      <div class="more-items">
+        <table cellpadding="0" cellspacing="0">
+          <tbody>
+            <tr>
+              <td>
+                <a href="https://www.douban.com/mine/">个人主页</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a target="_blank" href="https://www.douban.com/mine/orders/">我的订单</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a target="_blank" href="https://www.douban.com/mine/wallet/">我的钱包</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a target="_blank" href="https://accounts.douban.com/passport/setting/">账号管理</a>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <a href="https://www.douban.com/accounts/logout?source=main&ck=XXXX">退出</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+  </ul>
+</div>
+
+  <div class="top-nav-reminder">
+    <a href="https://www.douban.com/notification/" class="lnk-remind">提醒</a>
+    <div id="top-nav-notimenu" class="more-items">
+      <div class="bd">
+        <p>加载中...</p>
+      </div>
+    </div>
+  </div>
+
+    <div class="top-nav-doubanapp">
+  <a href="https://www.douban.com/doubanapp/app?channel=top-nav" class="lnk-doubanapp">下载豆瓣客户端</a>
+  <div id="doubanapp-tip">
+    <a href="https://www.douban.com/doubanapp/app?channel=qipao" class="tip-link">豆瓣 <span class="version">6.0</span> 全新发布</a>
+    <a href="javascript: void 0;" class="tip-close">×</a>
+  </div>
+  <div id="top-nav-appintro" class="more-items">
+    <p class="appintro-title">豆瓣</p>
+    <p class="qrcode">扫码直接下载</p>
+    <div class="download">
+      <a href="https://www.douban.com/doubanapp/redirect?channel=top-nav&direct_dl=1&download=iOS">iPhone</a>
+      <span>·</span>
+      <a href="https://www.douban.com/doubanapp/redirect?channel=top-nav&direct_dl=1&download=Android" class="download-android">Android</a>
+    </div>
+  </div>
+</div>
+
+    
+
+
+<div class="global-nav-items">
+  <ul>
+    <li class="on">
+      <a href="https://www.douban.com"  data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-main&quot;,&quot;uid&quot;:&quot;82160871&quot;}">豆瓣</a>
+    </li>
+    <li class="">
+      <a href="https://book.douban.com" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-book&quot;,&quot;uid&quot;:&quot;82160871&quot;}">读书</a>
+    </li>
+    <li class="">
+      <a href="https://movie.douban.com" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-movie&quot;,&quot;uid&quot;:&quot;82160871&quot;}">电影</a>
+    </li>
+    <li class="">
+      <a href="https://music.douban.com" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-music&quot;,&quot;uid&quot;:&quot;82160871&quot;}">音乐</a>
+    </li>
+    <li class="">
+      <a href="https://www.douban.com/podcast/" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-podcast&quot;,&quot;uid&quot;:&quot;82160871&quot;}">播客</a>
+    </li>
+    <li class="">
+      <a href="https://www.douban.com/location" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-location&quot;,&quot;uid&quot;:&quot;82160871&quot;}">同城</a>
+    </li>
+    <li class="">
+      <a href="https://www.douban.com/group" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-group&quot;,&quot;uid&quot;:&quot;82160871&quot;}">小组</a>
+    </li>
+    <li class="">
+      <a href="https://read.douban.com&#47;?dcs=top-nav&amp;dcm=douban" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-read&quot;,&quot;uid&quot;:&quot;82160871&quot;}">阅读</a>
+    </li>
+    <li class="">
+      <a href="https://fm.douban.com&#47;?from_=shire_top_nav" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-fm&quot;,&quot;uid&quot;:&quot;82160871&quot;}">FM</a>
+    </li>
+    <li class="">
+      <a href="https://time.douban.com&#47;?dt_time_source=douban-web_top_nav" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-time&quot;,&quot;uid&quot;:&quot;82160871&quot;}">时间</a>
+    </li>
+    <li class="">
+      <a href="https://market.douban.com&#47;?utm_campaign=douban_top_nav&amp;utm_source=douban&amp;utm_medium=pc_web" target="_blank" data-moreurl-dict="{&quot;from&quot;:&quot;top-nav-click-market&quot;,&quot;uid&quot;:&quot;82160871&quot;}">豆品</a>
+    </li>
+  </ul>
+</div>
+
+  </div>
+</div>
+<script>
+  ;window._GLOBAL_NAV = {
+    USER_ID: "82160871",
+    UPLOAD_AUTH_TOKEN: "82160871:0000000000000000000000000000000000000000",
+    SSE_TOKEN: "0000000000000000000000000000000000000000",
+    SSE_TIMESTAMP: "0",
+    DOUBAN_URL: "https://www.douban.com",
+    N_NEW_NOTIS: 0,
+    N_NEW_DOUMAIL: 0
+  };
+</script>
+
+
+
+    <script src="//asset.doubanio.com/cuphead/nav/2.0.0/shire/bundle.js" defer="defer"></script>
+
+
+
+
+  
+
+
+
+    <link href="//asset.doubanio.com/cuphead/nav/2.0.0/sns/bundle.css" rel="stylesheet" type="text/css">
+
+
+
+<div id="db-nav-sns" class="nav">
+  <div class="nav-wrap">
+    <div class="nav-primary">
+     
+      <div class="nav-logo">
+        <a href="https://www.douban.com">豆瓣社区</a>
+      </div>
+
+      <div class="nav-search">
+  <form action="https://www.douban.com/search" method="get">
+	<fieldset>
+      <legend>搜索：</legend>
+	  <label for="inp-query">搜索你感兴趣的内容和人...</label>
+	  <div class="inp">
+	    <input type="hidden" name="source" value="suggest">
+		<input id="inp-query" name="q" size="22" maxlength="60" autocomplete="off" value="">
+	  </div>
+	  <div class="inp-btn"><input type="submit" value="搜索"></div>
+	</fieldset>
+  </form>
+</div>
+
+      
+
+<div class="nav-items">
+  <ul>
+    <li><a href="https://www.douban.com">首页</a></li>
+	<li><a href="https://www.douban.com/mine/">我的豆瓣</a></li>
+      <li>
+        <a href="https://www.douban.com/explore">
+          浏览发现
+        </a>
+      </li>
+      <li>
+        <a href="https://www.douban.com/gallery">
+          话题广场
+          <img src="//asset.doubanio.com/cuphead/nav/2.0.0/sns/assets/new_menu.gif" alt="new" style="position: absolute; top: -7px; right: -13px;" />
+        </a>
+      </li>
+  </ul>
+</div>
+
+    </div>
+  </div>
+</div>
+
+
+
+    <script src="//asset.doubanio.com/cuphead/nav/2.0.0/sns/bundle.js" defer="defer"></script>
+
+
+
+
+
+    <div id="wrapper">
+        
+
+        
+<div id="content">
+    
+
+    
+    
+    <div id="db-usr-profile" class="clearfix">
+        <div class="pic">
+            <a href="https://www.douban.com/people/mewcatcher/">
+                <img width="48" height="48" src="https://img3.doubanio.com/icon/up82160871-12.jpg" alt="MewX"/>
+            </a>
+        </div>
+        <div class="info">
+            <h1>
+                我的相册
+            </h1>
+            <ul>
+                    <li class=""><a href="https://www.douban.com/people/mewcatcher/">我的主页</a></li>
+                    <li class="content-menu-item"><a href="https://www.douban.com/people/mewcatcher/statuses">广播</a></li>
+                    <li class="content-menu-item"><a href="https://www.douban.com/people/mewcatcher/photos">相册</a></li>
+                    <li class="content-menu-item"><a href="https://www.douban.com/people/mewcatcher/notes">日记</a></li>
+                    <li class="content-menu-item"><a href="https://www.douban.com/people/mewcatcher/doulists/all">豆列</a></li>
+                    <li class="content-menu-item sub-menu"><a href="https://www.douban.com/people/mewcatcher/subject_doulists/movie">片单</a></li>
+                    <li class="content-menu-item sub-menu"><a href="https://www.douban.com/people/mewcatcher/subject_doulists/book">书单</a></li>
+            </ul>
+        </div>
+    </div>
+
+
+    <div class="grid-16-8 clearfix">
+        
+        
+        <div class="article">
+               
+
+        可以有自己的相册来存放照片了，你可以从<a href="/photos/album/upload#new_album">创建一个相册</a>开始。
+
+        </div>
+        <div class="aside">
+                
+  
+
+
+
+<link rel="stylesheet" href="https://asset.doubanio.com/cuphead/vendors/css/core/button_cta.2ddd390612d7.css">
+<span class="btn-pic-upload"><a class="lnk-create " href="https://www.douban.com/photos/album/upload"><i>+</i>发照片</a></span>
+<span class="btn-pic-upload"><a class="lnk-create lnk-create-album " href="https://www.douban.com/photos/album/upload#new_album"><i>+</i>新建相册</a></span>
+
+
+
+
+<br/><br/>
+
+
+
+<script>
+$(document).ready(function(){
+    var tag_box = $('.author-tags.album-tag-container'),
+        a_more_tag = tag_box.parent().find('h2 .pl'),
+        people_tags = tag_box.find('.people_tags'),
+        people_tags_more = tag_box.find('.people_tags_more');
+
+    a_more_tag.hide();
+
+    people_tags_more.find('span').each(function(i, tag) {
+        tag = $(tag);
+        tag.appendTo(people_tags);
+        if (people_tags.height() > 152) {
+            people_tags_more.prepend(tag);
+            a_more_tag.show();
+            return false;
+        }
+    });
+    tag_box.addClass('visible');
+    a_more_tag.click(function(e) {
+        e.preventDefault();
+        people_tags_more.show();
+        a_more_tag.hide();
+    });
+});
+</script>
+
+
+
+
+
+
+<script>
+$(document).ready(function(){
+    var tag_box = $('.author-tags.photo-tag-container'),
+        a_more_tag = tag_box.parent().find('h2 .pl'),
+        people_tags = tag_box.find('.people_tags'),
+        people_tags_more = tag_box.find('.people_tags_more');
+
+    a_more_tag.hide();
+
+    people_tags_more.find('span').each(function(i, tag) {
+        tag = $(tag);
+        tag.appendTo(people_tags);
+        if (people_tags.height() > 152) {
+            people_tags_more.prepend(tag);
+            a_more_tag.show();
+            return false;
+        }
+    });
+    tag_box.addClass('visible');
+    a_more_tag.click(function(e) {
+        e.preventDefault();
+        people_tags_more.show();
+        a_more_tag.hide();
+    });
+});
+</script>
+
+
+
+
+
+        </div>
+        <div class="extra">
+            
+        </div>
+    </div>
+</div>
+
+        
+  <div id="footer">
+    
+
+<span id="icp" class="fleft gray-link">
+    &copy; 2005-2026 douban.com, all rights reserved 北京豆网科技有限公司
+</span>
+
+<a href="https://www.douban.com/hnypt/variformcyst.py" style="display: none;"></a>
+
+<span class="fright">
+    <a href="https://www.douban.com/about">关于豆瓣</a>
+    · <a href="https://www.douban.com/jobs">在豆瓣工作</a>
+    · <a href="https://www.douban.com/about?topic=contactus">联系我们</a>
+    · <a href="https://www.douban.com/about/legal">法律声明</a>
+    · <a href="https://help.douban.com/" target="_blank">帮助中心</a>
+    · <a href="https://www.douban.com/doubanapp/">移动应用</a>
+</span>
+
+  </div>
+
+    </div>
+    
+    
+
+    <!-- COLLECTED JS -->
+    
+
+    
+  
+
+
+
+
+
+
+
+
+
+<script type="text/javascript">
+var _paq = window._paq || [];
+  _paq.push(['setUserId', '82160871']);
+_paq.push(['trackPageView']);
+_paq.push(['enableLinkTracking']);
+(function() {
+    var p=(('https:' == document.location.protocol) ? 'https' : 'http'), u=p+'://fundin.douban.com/';
+    _paq.push(['setTrackerUrl', u+'piwik']);
+    _paq.push(['setSiteId', '100001']);
+    var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+    g.type='text/javascript';
+    g.defer=true;
+    g.async=true;
+    g.src=p+'://img3.doubanio.com/dae/fundin/piwik.js?s=3';
+    s.parentNode.insertBefore(g,s);
+})();
+</script>
+
+<script type="text/javascript">
+var _gaq = _gaq || [];
+_gaq.push(['_setAccount', 'UA-7019765-1']);
+_gaq.push(['_setCampNameKey', 'dcn']);
+_gaq.push(['_setCampSourceKey', 'dcs']);
+_gaq.push(['_setCampMediumKey', 'dcm']);
+_gaq.push(['_setCampTermKey', 'dct']);
+_gaq.push(['_setCampContentKey', 'dcc']);
+_gaq.push(['_addOrganic', 'baidu', 'word']);
+_gaq.push(['_addOrganic', 'soso', 'w']);
+_gaq.push(['_addOrganic', '3721', 'name']);
+_gaq.push(['_addOrganic', 'youdao', 'q']);
+_gaq.push(['_addOrganic', 'so.360.cn', 'q']);
+_gaq.push(['_addOrganic', 'vnet', 'kw']);
+_gaq.push(['_addOrganic', 'sogou', 'query']);
+_gaq.push(['_addIgnoredOrganic', '豆瓣']);
+_gaq.push(['_addIgnoredOrganic', 'douban']);
+_gaq.push(['_addIgnoredOrganic', '豆瓣网']);
+_gaq.push(['_addIgnoredOrganic', 'www.douban.com']);
+_gaq.push(['_setDomainName', '.douban.com']);
+
+
+    _gaq.push(['_setCustomVar', 1, 'responsive_view_mode', 'desktop', 3]);
+
+_gaq.push(['_trackPageview']);
+_gaq.push(['_trackPageLoadTime']);
+    _gaq.push(['_setVar', '8216']);
+
+window._ga_init = function() {
+    var ga = document.createElement('script');
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    ga.setAttribute('async', 'true');
+    document.documentElement.firstChild.appendChild(ga);
+};
+if (window.addEventListener) {
+    window.addEventListener('load', _ga_init, false);
+} else {
+    window.attachEvent('onload', _ga_init);
+}
+</script>
+
+
+
+
+
+
+
+
+  <script>_SPLITTEST=''</script>
+</body>
+
+</html>
+
+

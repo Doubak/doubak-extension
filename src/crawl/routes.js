@@ -358,7 +358,121 @@ export function buildRoutes({
     enumeration: 'bounded',
     safetyNet: 'contiguity',
     ordered: false,
-    note: '日记/评论正文里内嵌的图；与广播附图同一档，删了就没有第二份',
+    note: '日记/评论/小组讨论正文里内嵌的图；与广播附图同一档，删了就没有第二份',
+  });
+
+  // ── 个人相册 ──────────────────────────────────────────────────────────────
+  //
+  // 个人自建相册属于有界的个人资产（与公共作品相册严格区分）。
+  // 索引页每页 18 个相册，翻页使用 ?start=18。
+  routes.push({
+    key: 'photo.album_list',
+    intent: 'photo.album_list',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.IMAGES + 2,
+    source: 'archive',
+    enumeration: 'full',
+    safetyNet: 'contiguity',
+    pagination: { kind: 'start', step: 18, first: 0 },
+    entryUrl: ({ offset }) =>
+      `https://www.douban.com/people/${enc(username)}/photos?start=${offset}`,
+    note: '个人相册列表；每页18个相册',
+  });
+
+  // 单个相册照片列表页：URL 来自相册列表页。
+  // 每页 18 张照片，翻页使用 ?m_start=18（注意不是 ?start=）。
+  routes.push({
+    key: 'photo.album',
+    intent: 'photo.album',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.IMAGES + 3,
+    source: 'archive',
+    enumeration: 'full',
+    safetyNet: 'contiguity',
+    ordered: false,
+    pagination: { kind: 'start', step: 18, first: 0, param: 'm_start' },
+    nextPageUrl: (item, offset) => {
+      const base = String(item?.url ?? '').split('?')[0].replace(/\/+$/, '');
+      if (!/\/photos\/album\/\d+$/.test(base)) return null;
+      return `${base}/?m_start=${offset}`;
+    },
+    note: '单个相册照片列表页，翻页参数为 m_start，每页18张',
+  });
+
+  // 个人相册中用户上传的照片原件/大图：由 photo.album 派生。
+  routes.push({
+    key: 'asset.photo_image',
+    intent: 'asset.image.user_upload',
+    kind: 'assets',
+    surface: 'asset',
+    priority: PRIORITY.IMAGES + 1,
+    source: 'archive',
+    enumeration: 'bounded',
+    safetyNet: 'contiguity',
+    ordered: false,
+    note: '个人相册中用户上传的照片原件/大图；由 photo.album 派生',
+  });
+
+  // ── 豆瓣小组 ──────────────────────────────────────────────────────────────
+  //
+  // 小组主页包含加入小组与发起讨论的声明数量，是结构性总览页。
+  routes.push({
+    key: 'group.overview',
+    intent: 'group.overview',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.LONGFORM + 4,
+    source: 'archive',
+    enumeration: 'full',
+    safetyNet: 'contiguity',
+    entryUrl: () => `https://www.douban.com/group/people/${enc(username)}/`,
+    note: '小组个人主页；包含加入小组数与发起讨论数的声明数量',
+  });
+
+  // 加入的小组列表：豆瓣将其全部平铺于单张页面（实测 147 个小组一页展示完整）。
+  routes.push({
+    key: 'group.joins',
+    intent: 'group.joins',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.LONGFORM + 5,
+    source: 'archive',
+    enumeration: 'full',
+    safetyNet: 'contiguity',
+    entryUrl: () => `https://www.douban.com/group/people/${enc(username)}/joins`,
+    note: '用户加入与管理的小组列表',
+  });
+
+  // 用户发布的小组话题列表：每页 50 条，翻页使用 ?start=50。
+  routes.push({
+    key: 'group.publish',
+    intent: 'group.publish',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.LONGFORM + 6,
+    source: 'archive',
+    enumeration: 'full',
+    safetyNet: 'contiguity',
+    pagination: { kind: 'start', step: 50, first: 0 },
+    entryUrl: ({ offset }) =>
+      `https://www.douban.com/group/people/${enc(username)}/publish?start=${offset}`,
+    note: '用户发布的小组话题列表；每页50条',
+  });
+
+  // 用户发布的小组话题正文：由 group.publish 派生。
+  routes.push({
+    key: 'group.item',
+    intent: 'group.item',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.LONGFORM + 7,
+    source: 'archive',
+    enumeration: 'bounded',
+    safetyNet: 'contiguity',
+    ordered: false,
+    note: '用户发布的小组话题正文；由 group.publish 派生',
   });
 
   // ── 标记列表
@@ -505,7 +619,7 @@ export const UNSUPPORTED_ROUTES = {
       + '——正是「用户创作内容与目录数据永远不放在一张表里」那条规矩，所以它归目录那一侧。\n\n'
       + '那 17 条广播本身照抓：你写的那句话、日期、指向哪个相册，都是你的。'
       + '不进档案的是那 51 张照片本身。真要留是 enricher 之后的事，甚至不是 enricher。\n\n'
-      + '个人相册另说：属于个人资产，在规划中，待收集真实账号样本后排期实现。',
+      + '个人相册另说：属于个人资产，相册页面与照片大图已通过 photo.album 与 asset.photo_image 路线支持。',
   },
 };
 

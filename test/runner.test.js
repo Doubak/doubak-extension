@@ -66,10 +66,30 @@ const REVIEWS_EMPTY = `<html><head><title>我的评论(0)</title></head><body>${
 const DOULISTS_EMPTY = `<html><head><title>我创建的豆列</title></head><body>${NAV}
 <ul class="doulist-list"></ul></body></html>`;
 
+const PHOTOS_EMPTY = `<html><head><title>相册</title></head><body>${NAV}
+<div id="db-usr-profile"></div><h1>示例的相册</h1><div class="article"></div></body></html>`;
+
+const GROUP_HOME_EMPTY = `<html><head><title>我的豆瓣小组</title></head><body>${NAV}
+<h1><div class="head-nav">我的豆瓣小组</div></h1><div class="profile-nav"></div></body></html>`;
+
+const GROUP_JOINS_EMPTY = `<html><head><title>我的豆瓣小组</title></head><body>${NAV}
+<h1><div class="head-nav">我的豆瓣小组</div></h1><div class="group-list group-cards"><ul></ul></div></body></html>`;
+
+const GROUP_PUBLISH_EMPTY = `<html><head><title>我的豆瓣小组</title></head><body>${NAV}
+<h1><div class="head-nav">我的豆瓣小组</div></h1><div class="profile-nav"></div><table class="olt"></table></body></html>`;
+
+const GROUP_TOPIC_EMPTY = `<html><head><title>话题</title></head><body>${NAV}
+<div id="topic-content"><div class="topic-doc"></div></div></body></html>`;
+
 function longformEmpty(url) {
   if (url.includes('/notes?')) return NOTES_EMPTY;
   if (url.includes('/reviews?')) return REVIEWS_EMPTY;
   if (url.includes('/doulists/')) return DOULISTS_EMPTY;
+  if (url.includes('/photos?')) return PHOTOS_EMPTY;
+  if (url.endsWith('/group/people/example/')) return GROUP_HOME_EMPTY;
+  if (url.includes('/group/people/example/joins')) return GROUP_JOINS_EMPTY;
+  if (url.includes('/group/people/example/publish?')) return GROUP_PUBLISH_EMPTY;
+  if (url.includes('/group/topic/')) return GROUP_TOPIC_EMPTY;
   return null;
 }
 
@@ -140,11 +160,11 @@ function harness(respond, { batchSize = 5, pacerOptions, onFetch } = {}) {
  */
 function broadcastOnly(pages) {
   return (url) => {
-    if (url.endsWith('/people/example/')) return PROFILE;
-    // 长文那两条路线的框架标志与广播页不一样，给广播页会被判成「框架不全」——
+    // 长文、相册、小组路线的框架标志与广播页不一样，给广播页会被判成「框架不全」——
     // 那是判定在正确工作，不是它该测的东西。
     const lf = longformEmpty(url);
     if (lf) return lf;
+    if (url.endsWith('/people/example/')) return PROFILE;
     if (!url.includes('statuses')) return bcPage(0); // 其他路线直接给空页
     const m = /[?&]p=(\d+)/.exec(url);
     const page = m ? Number(m[1]) : 1;
@@ -1745,6 +1765,7 @@ describe('单页路线也要能「走完」', () => {
     const single = defs.filter((d) => d.entryUrl && !d.pagination).map((d) => d.key).sort();
 
     assert.deepEqual(single, [
+      'group.joins', 'group.overview',
       'profile.category_entry.book', 'profile.category_entry.drama',
       'profile.category_entry.game', 'profile.category_entry.movie',
       'profile.category_entry.music', 'profile.overview',
