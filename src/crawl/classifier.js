@@ -1183,7 +1183,7 @@ export function extractAlbumPhotos(html) {
   for (const m of html.matchAll(/<div class="photo_wrap">[\s\S]*?<img[^>]+src="(https:\/\/[^"]*doubanio\.com\/view\/photo\/[^"]+)"/g)) {
     const src = m[1];
     if (!isDoubanioImage(src)) continue;
-    const large = src.replace(/\/view\/photo\/m\//, '/view/photo/photo/');
+    const large = src.replace(/\/view\/photo\/m\//, '/view/photo/large/');
     urls.add(large);
   }
   return { urls: [...urls] };

@@ -147,7 +147,7 @@ describe('相册照片页（真实页面 100276481）', () => {
   test('成功抽取 18 张照片大图 URL', () => {
     const { urls } = extractAlbumPhotos(PHOTOS_ALBUM);
     assert.equal(urls.length, 18);
-    assert.ok(urls.every((u) => u.startsWith('https://img') && u.includes('/view/photo/photo/')));
-    assert.equal(urls[0], 'https://img9.doubanio.com/view/photo/photo/public/p2918226736.webp');
+    assert.ok(urls.every((u) => u.startsWith('https://img') && u.includes('/view/photo/large/')));
+    assert.equal(urls[0], 'https://img9.doubanio.com/view/photo/large/public/p2918226736.webp');
   });
 });
