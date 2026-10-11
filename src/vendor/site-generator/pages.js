@@ -361,32 +361,20 @@ function homePage(p, { covers = {}, previewImages = {} } = {}) {
     return out;
   };
 
-  /** 豆列预览。 */
-  const doulistSection = () => {
-    const list = p.doulists ?? [];
-    const recent = list.slice(0, PREVIEW);
-    const out = [`## ${MEDIUM_NAMES.doulist} ${list.length}`, ''];
-    for (const d of recent) {
-      out.push(`### [${plainText(d.title ?? '(无标题)')}](${doulistPath(d)})`, '');
-      if (d.description) {
-        const flat = d.description.replace(/\s+/g, ' ').trim();
-        const chars = [...flat];
-        if (chars.length) {
-          out.push(plainText(chars.slice(0, EXCERPT).join('')) + (chars.length > EXCERPT ? '……' : ''), '');
-        }
-      }
-    }
-    out.push(`[看全部 ${list.length} 个 →](${sectionIndexPath('doulist')})`, '');
-    return out;
-  };
-
-  /** 相册预览。 */
+  /** 相册预览：带缩略图、元数据与描述。 */
   const albumSection = () => {
     const list = p.albums ?? [];
     const recent = list.slice(0, PREVIEW);
     const out = [`## ${MEDIUM_NAMES.album} ${list.length}`, ''];
     for (const a of recent) {
-      out.push(`### [${plainText(a.title ?? '(无标题)')}](${albumPath(a)})`, '');
+      const lock = a.privacy !== 'public' ? '🔒 ' : '';
+      out.push(`### [${lock}${plainText(a.title ?? '(无标题)')}](${albumPath(a)})`, '');
+      const coverPhoto = a.photos.find((ph) => ph.id === a.coverPhotoId) || a.photos[0];
+      const coverUrl = coverPhoto?.thumbnailUrl ?? coverPhoto?.imageUrl;
+      const coverSrc = coverUrl ? (previewImages[coverUrl] ?? previewImages[coverPhoto?.imageUrl] ?? coverUrl) : null;
+      if (coverSrc) {
+        out.push(`[![${plainText(a.title ?? '')}](${coverSrc})](${albumPath(a)})`, '');
+      }
       const when = a.createdAtRaw ?? (a.createdAt ?? '').slice(0, 10);
       const meta = [when, `${a.photos.length} 张照片`].filter(Boolean).join(' · ');
       if (meta) out.push(`*${meta}*`, '');
@@ -402,26 +390,34 @@ function homePage(p, { covers = {}, previewImages = {} } = {}) {
     return out;
   };
 
-  /** 小组预览。 */
+  /** 小组话题预览：与日记/评论样式类似。 */
   const groupSection = () => {
     const topics = p.groupTopics ?? [];
     const joins = p.groupJoins ?? [];
-    const out = [`## ${MEDIUM_NAMES.group} ${topics.length} 篇话题${joins.length ? ` · 加入 ${joins.length} 个小组` : ''}`, ''];
-    const recent = topics.slice(0, PREVIEW);
+    if (!topics.length && !joins.length) return [];
+    if (!topics.length) {
+      return [
+        `## ${MEDIUM_NAMES.group}`, '',
+        `加入 ${joins.length} 个小组。`, '',
+        `[看全部加入的小组 →](${sectionIndexPath('group')})`, '',
+      ];
+    }
+    const recent = [...topics]
+      .sort((a, b) => ((a.publishedAt ?? '') < (b.publishedAt ?? '') ? 1 : -1))
+      .slice(0, PREVIEW);
+    const out = [`## ${MEDIUM_NAMES.group} ${topics.length}`, ''];
     for (const t of recent) {
       out.push(`### [${plainText(t.title ?? '(无标题)')}](${groupTopicPath(t)})`, '');
       const when = t.publishedAtRaw ?? (t.publishedAt ?? '').slice(0, 10);
-      const meta = [when, t.groupName].filter(Boolean).join(' · ');
+      const meta = [when, t.groupName ? plainText(t.groupName) : null].filter(Boolean).join(' · ');
       if (meta) out.push(`*${meta}*`, '');
-      if (t.body) {
-        const flat = t.body.replace(/!\[\]\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
-        const chars = [...flat];
-        if (chars.length) {
-          out.push(plainText(chars.slice(0, EXCERPT).join('')) + (chars.length > EXCERPT ? '……' : ''), '');
-        }
+      const flat = (t.body ?? '').replace(/!\[\]\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+      const chars = [...flat];
+      if (chars.length) {
+        out.push(plainText(chars.slice(0, EXCERPT).join('')) + (chars.length > EXCERPT ? '……' : ''), '');
       }
     }
-    out.push(`[看全部 →](${sectionIndexPath('group')})`, '');
+    out.push(`[看全部 ${topics.length} 篇 →](${sectionIndexPath('group')})`, '');
     return out;
   };
 
@@ -433,14 +429,12 @@ function homePage(p, { covers = {}, previewImages = {} } = {}) {
     ...groups.keys(),
     ...(p.longform.some((r) => r.kind === 'note') ? ['note'] : []),
     ...(p.longform.some((r) => r.kind === 'review') ? ['review'] : []),
-    ...((p.doulists ?? []).length ? ['doulist'] : []),
     ...((p.albums ?? []).length ? ['album'] : []),
     ...(((p.groupTopics ?? []).length || (p.groupJoins ?? []).length) ? ['group'] : []),
   ];
   for (const section of order(present, SECTION_ORDER)) {
     if (section === 'broadcast') lines.push(...broadcastSection());
     else if (section === 'note' || section === 'review') lines.push(...longformSection(section));
-    else if (section === 'doulist') lines.push(...doulistSection());
     else if (section === 'album') lines.push(...albumSection());
     else if (section === 'group') lines.push(...groupSection());
     else lines.push(...mediumSection(section));

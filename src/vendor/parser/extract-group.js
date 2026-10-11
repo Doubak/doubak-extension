@@ -187,12 +187,15 @@ export function extractGroupTopic(html, url = '') {
   const groupUrl = groupId ? `https://www.douban.com/group/${groupId}/` : null;
 
   // 正文与插图
-  // 正文容器通常为 #link-report 或 .rich-content topic-richtext
-  const contentMatch = /<div id="link-report"[^>]*>([\s\S]*?)(?=<div class="sns-bar"|<div id="sep"|<\/div>\s*<\/div>\s*<\/div>\s*<!--)/i.exec(html)
-    ?? /<div class="rich-content topic-richtext"[^>]*>([\s\S]*?)<\/div>\s*(?=<div class="sns-bar"|<\/div>)/i.exec(html);
+  // 正文容器通常为 #link-report 或 .rich-content，需排除作者操作按钮（修改、删除）所在的 .topic-opts-bar
+  const contentMatch = /<div id="link-report"[^>]*>([\s\S]*?)(?=<div class="topic-opts-bar"|<div class="sns-bar"|<div id="sep"|<\/div>\s*<\/div>\s*<\/div>\s*<!--)/i.exec(html)
+    ?? /<div class="rich-content topic-richtext"[^>]*>([\s\S]*?)<\/div>\s*(?=<div class="topic-opts-bar"|<div class="sns-bar"|<\/div>)/i.exec(html);
 
   const bodyRaw = contentMatch?.[1] ?? '';
-  const body = bodyRaw ? bodyText(bodyRaw) : null;
+  let body = bodyRaw ? bodyText(bodyRaw) : null;
+  if (body) {
+    body = body.replace(/\s*(?:修改\s*删除|修改|删除)\s*$/, '').trim() || null;
+  }
 
   // 提取正文中的内嵌图片
   const images = [];
