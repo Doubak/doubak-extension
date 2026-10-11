@@ -19,6 +19,7 @@ import {
   extractItemPairs,
   extractPagination,
   extractDetailLinks,
+  extractEmbeddedImages,
 } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { routeName } from '../src/ui/route-names.js';
@@ -146,14 +147,22 @@ describe('发起的讨论（真实页面 mewcatcher & BlocksTower）', () => {
   });
 
   test('多页讨论：判定通过，条目数为 44', () => {
-    const cls = classify('group.publish', GROUP_PUBLISH_PAGINATED, URL_);
+    const blockstowerUrl = 'https://www.douban.com/group/people/BlocksTower/publish?start=0';
+    const cls = classify('group.publish', GROUP_PUBLISH_PAGINATED, blockstowerUrl);
     assert.equal(cls.verdict, 'ok');
     assert.equal(cls.itemCount, 44);
   });
 
-  test('多页讨论：成功抽取第 1 页共 3 页的分页信息', () => {
+  test('多页讨论：成功抽取第 1 页共 3 页的分页信息及翻页链接', () => {
     const pg = extractPagination(GROUP_PUBLISH_PAGINATED, profile);
     assert.deepEqual(pg, { page: 1, totalPages: 3 });
+
+    const links = [...GROUP_PUBLISH_PAGINATED.matchAll(/<a href="([^"]*\/group\/people\/BlocksTower\/publish\?start=\d+)"/g)].map((m) => m[1]);
+    assert.deepEqual(links, [
+      '/group/people/BlocksTower/publish?start=50',
+      '/group/people/BlocksTower/publish?start=100',
+      '/group/people/BlocksTower/publish?start=50',
+    ]);
   });
 
   test('导航栏中的 tr 不会被误判为讨论容器', () => {
@@ -178,5 +187,11 @@ describe('讨论正文页（真实页面 258053730）', () => {
   test('判定通过，结构性标志完备', () => {
     const cls = classify('group.item', GROUP_TOPIC, URL_);
     assert.equal(cls.verdict, 'ok');
+  });
+
+  test('正文内嵌附图：成功抽取用户上传的附图与图注', () => {
+    const { urls, captions } = extractEmbeddedImages(GROUP_TOPIC);
+    assert.deepEqual(urls, ['https://img3.doubanio.com/view/group_topic/l/public/p742323977.jpg']);
+    assert.equal(captions['https://img3.doubanio.com/view/group_topic/l/public/p742323977.jpg'], '番外剧照');
   });
 });

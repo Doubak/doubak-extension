@@ -358,7 +358,7 @@ export function buildRoutes({
     enumeration: 'bounded',
     safetyNet: 'contiguity',
     ordered: false,
-    note: '日记/评论正文里内嵌的图；与广播附图同一档，删了就没有第二份',
+    note: '日记/评论/小组讨论正文里内嵌的图；与广播附图同一档，删了就没有第二份',
   });
 
   // ── 个人相册 ──────────────────────────────────────────────────────────────

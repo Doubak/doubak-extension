@@ -1007,7 +1007,7 @@ export class CrawlLoop {
    * @param {object} item @param {object} res @param {string} captureId
    */
   _enqueueEmbeddedImages(item, res, captureId) {
-    if (item.routeKey !== 'note.item' && item.routeKey !== 'review.item') return;
+    if (item.routeKey !== 'note.item' && item.routeKey !== 'review.item' && item.routeKey !== 'group.item') return;
     const target = this._routes.get('asset.longform_embed');
     if (!target) return;
 

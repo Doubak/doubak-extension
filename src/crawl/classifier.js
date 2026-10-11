@@ -1164,6 +1164,11 @@ export function extractEmbeddedImages(html) {
     const cap = /class="image-caption"[^>]*>\s*([^<]+)/.exec(block)?.[1]?.trim();
     if (cap) captions[src] = cap;
   }
+  for (const m of html.matchAll(/<div class="image-wrapper[^"]*">[\s\S]*?<img[^>]+src="(https:\/\/[^"]+)"/g)) {
+    const src = m[1];
+    if (!isDoubanioImage(src)) continue;
+    urls.add(src);
+  }
   return { urls: [...urls], captions };
 }
 
