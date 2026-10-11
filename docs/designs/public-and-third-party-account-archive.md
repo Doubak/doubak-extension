@@ -34,9 +34,12 @@
 
 任何新特性的引入，绝不能破坏豆备在过去数月测量与验证中确立的硬性不变量。设计必须正面回答以下六项核心约束：
 
-### 约束 1：单 bundle 归属单一账号（`manifest.account.user_id`）
+### 约束 1：单 bundle 归属单一账号与身份完整持久化（`manifest.account`）
 - **不变量**：每个 bundle 必须明确且唯一归属于一个豆瓣账号，数字 `user_id` 是稳定主键。
 - **约束推论**：即便用户使用小号（账号 B）登录浏览器去抓取目标用户 A，产出的 bundle 归属主键**必须是 A，绝对不能记成 B**。否则解析器与导出适配器（如 NeoDB）会把 A 的几千条标记说成是 B 的记录，产生灾难性的数据污染。
+- **用户昵称（`nickname`）持久化断层修复**：
+  - **现状缺陷审查**：经代码审查，当前扩展在会话探测阶段（`SessionGuard.extractAccountHints`）虽然能够通过正则匹配到全局导航栏中的 `displayName`，但在调用 `runner.js` 实例化 `BundleWriter` 时，仅传递了 `user_id` 与 `username`，`displayName` 在写入 bundle 前被直接丢弃。导致不论是 `manifest.account` 还是下游 Canonical 记录，**目前均未持久化存储用户的中文/展示昵称**。
+  - **规范要求**：`manifest.account` 必须扩展加入 `nickname` 字段（例如 `"nickname": "MewX"`），并在采集、落盘、解析、展示全链路中严格贯穿存储，为静态站点生成（`<昵称>的豆瓣存档`）与多账号面板展示提供底层真实数据支撑。
 
 ### 约束 2：公开视图与完整视图的严格区隔（防假编辑与假删除）
 - **规范要求**（`canonical/INGESTION.md` §2.2）：未登录看到的是公开视图，私密条目不在其中，且标签（tags）在匿名访问下可能被豆瓣整批剥离。
@@ -465,6 +468,32 @@ Preflight 只是用户在管理面板中交互时的“前置预检”。从用�
        - 备份他人公开账号时：若操作者使用的小号中途登出，立即触发 `operator_session_lost` 安全停机；
    - 任何异常停机均保证**已抓取数据的原子持久化与断点保留**，绝不回滚破坏已有健康数据。
 
+#### 4.2.4 目标账号昵称（`nickname`）提取与全链路持久化规范
+
+为确保下游静态网站能够正确生成形如 `<昵称>的豆瓣存档`（如 `MewX的豆瓣存档`），以及在扩展管理面板中能够直观展现账号身份，抓取引擎必须在 Preflight 及现场握手阶段精准提取目标账号的用户昵称，并全程持久化：
+
+1. **多模式昵称提取算法（严格按优先级提取，不猜测）**：
+   - **模式 A：备份我的账号（已登录模式）**：
+     - **优先级 1（全局导航栏）**：使用 `DISPLAY_NAME` 正则提取全局导航栏右侧的 `<span>([^<]{1,64}?)的账号</span>`（此字段在登录态下全站共享，可靠性最高）；
+     - **优先级 2（个人主页头部）**：若导航栏改版未命中，解析个人主页 DOM 的 `<div id="db-usr-profile"><div class="info"><h1>([^<]+)</h1></div></div>` 提取主页标题文字。
+   - **模式 B：公开/第三方抓取模式（纯未登录或小号登录）**：
+     - **防串号铁律**：严禁读取全局导航栏（未登录时导航栏无昵称，小号登录时导航栏显示的是操作者小号的昵称）；
+     - **优先级 1（目标主页 Profile 头）**：从目标个人主页（`https://www.douban.com/people/<id>/`）的 `#db-usr-profile .info h1` 中提取纯文本昵称；
+     - **优先级 2（头像 Alt 属性）**：从 `#db-usr-profile .basic-info .user-face img[alt]` 属性中提取用户昵称；
+     - **优先级 3（页面 Title 前缀）**：从主页 `<title>`（通常为 `<昵称>的主页` 或 `豆瓣 - <昵称>`）中解析出昵称前缀。
+2. **Bundle 落盘规范（`manifest.account.nickname`）**：
+   - `runner.js` 在构建 `BundleWriter` 的 `account` 配置时，必须将提取到的 `nickname`（或 `displayName`）完整传入；
+   - `BundleWriter` 将其持久化写入 `manifest.json`：
+     ```json
+     "account": {
+       "user_id": "82160871",
+       "username": "mewcatcher",
+       "nickname": "MewX",
+       "profile_url": "https://www.douban.com/people/mewcatcher/"
+     }
+     ```
+   - 若因目标账号注销（墓碑页）等特殊原因无法获取任何昵称，`nickname` 显式写入 `null`，下游按级联规则自动回退至 `username` 或 `user_id`。
+
 ---
 
 ### 4.3 会话守卫（`SessionGuard`）重构
@@ -699,6 +728,7 @@ export class SessionGuard {
   "account": {
     "user_id": "82160871",
     "username": "target_user",
+    "nickname": "MewX",
     "profile_url": "https://www.douban.com/people/target_user/"
   },
   "crawl_scope": {
@@ -710,6 +740,11 @@ export class SessionGuard {
   "notes": "这份档案是在公开数据模式下抓取的（未登录或操作者视角）。仅包含目标账号在豆瓣公开发布的标记、广播、长文与自建豆列，不包含任何私密条目。"
 }
 ```
+
+- **`account.nickname` 字段规范**：
+  - 目标账号的展示昵称（例如 `"MewX"`、`"阿甘"`）。
+  - **断层弥合**：在现有 `bundle/1.4` 下，依托 `manifest.schema.json` 中 `account` 对象的 `"additionalProperties": true`，直接前向兼容合法写入；并在 `bundle/1.5` 中正式确立为 schema 可选标准字段。
+  - **下游消费**：为多账号管理面板、导出器以及静态站点生成器（`<昵称>的豆瓣存档`）提供原生作者身份标识。若历史档案缺失该字段或账号已注销，保留为 `null`。
 
 #### 4.6.2 摄取规则与连续性权限约束（`INGESTION.md` 映射）
 在 `crawl_state` 中，各路线的枚举模式处理如下：
@@ -839,6 +874,15 @@ export class SessionGuard {
        "additionalProperties": true
      }
      ```
+   - **`account.nickname` 属性演进**：
+     - 在 `bundle/1.4` 规范中，`account` 对象包含 `user_id`、`username`、`profile_url`，并带有 `"additionalProperties": true`。新版将提取到的 `nickname` 写入 `manifest.account.nickname` 属于完全合法的向前兼容扩展，不需要修改现有 schema 即可通过 `validate.py`；
+     - 在推进至 `bundle/1.5` 时，正式在 `account.properties` 中补充显式声明：
+       ```json
+       "nickname": {
+         "type": ["string", "null"],
+         "description": "目标用户的展示昵称（如「MewX」）。用于离线建站命名与面板呈现。"
+       }
+       ```
 2. **方案 B（平行外挂爬虫）**：
    - 若外挂爬虫试图拼凑 bundle，常因缺少前端精准状态而无法生成完备的 `segments`、`coverage` 或 `crawl_state`，将面临 schema 必填项缺失。
    - 若输出非 bundle 格式（如 custom jsonl/zip），则彻底脱离 `manifest.schema.json`，需在 specs 另立门户建立新 schema。
@@ -1548,7 +1592,24 @@ target_user [公开]
   # 默认在目标账号专属目录下输出 Canonical
   node bin/parse.js input_bundles/ --account 1234567 --out canonical/1234567/
   ```
-- 每一条输出记录的顶层对象均带上 `account: { user_id, username }`，确保多账号数据无论在分目录存放还是在单一目录下按行存储时，都具备唯一自解释性。
+- 每一条输出记录的顶层对象均带上 `account: { user_id, username, nickname }`，确保多账号数据无论在分目录存放还是在单一目录下按行存储时，都具备唯一自解释性与用户可读性。
+
+#### 7.1.6 账号资料与个人主页结构化解析（`profile.ndjson`）
+- **现状审查**：目前 `doubak-data-parser` 虽在 bundle 中捕获了 `profile.overview` 页面，但未对其进行任何解析，既无 `extract-profile.js` 也无对应的 Canonical 输出表。
+- **解析契约**：新增 `extract-profile.js`，摄取 `profile.overview` 捕获页，解析产出 `profile.ndjson`：
+  ```json
+  {
+    "user_id": "82160871",
+    "username": "mewcatcher",
+    "nickname": "MewX",
+    "avatar_url": "https://img9.doubanio.com/icon/up82160871-1.jpg",
+    "intro": "...",
+    "location": "北京",
+    "joined_at": "2014-03-01",
+    "signature": "..."
+  }
+  ```
+  该文件使下游静态站点生成器无需反查原始 HTML，即可直接读取作者昵称、头像与简介。
 
 ---
 
@@ -1655,8 +1716,9 @@ targets/neodb-ndjson.js  targets/*.js           instructions.js
     `homePage(p, { siteTitle })` 在生成首页 Markdown 的 FrontMatter 时，输出 `title: siteTitle`（替代硬编码的 `'我的豆瓣存档'`），保证 Markdown 静态文件本身元数据与静态站点完全一致。
   - **扩展端 Markdown / 静态站导出联动 (`src/pipeline/targets.js`)**：
     在浏览器扩展导出静态页面时，`buildMarkdown()` 从 Canonical / 解析后数据中读取当前被导出账号的 `account` 信息，根据级联规则解析出 `siteTitle` 并传入 `buildPages(p, { images, coverBySubject, siteTitle })`，确保扩展内直接导出产物与 Node.js CLI 产物具备完全一致的动态站名体验。
-- **档案作者身份严格呈现与隔离（Profile Attribution）**：
-  - 站点元数据生成器从输入 Canonical 的 profile 记录或 `manifest.account` 中提取 `nickname`、`avatar`、`bio` 与 `join_date`；
+- **档案作者身份严格呈现与数据断层弥合（Profile Attribution & Storage Gap Closure）**：
+  - **现状痛点审查**：此前由于 `runner.js` 写入 bundle 时遗漏了 `displayName`，导致生成的 bundle 与 Canonical 缺乏持久化的 `nickname`。这使得静态站点若单纯依赖旧档案，常常不得不退化为 `mewcatcher的豆瓣存档` 或 `82160871的豆瓣存档`。
+  - **全链路贯穿要求**：本规范确立后，新版抓取将 `nickname` 固化进 `manifest.account`，解析器将产出 `profile.ndjson`。站点元数据生成器优先从 Canonical 的 `profile.ndjson` 或 `manifest.account` 中提取 `nickname`、`avatar`、`bio` 与 `join_date`；
   - 严禁将扩展当前操作者（小号或大号）的个人信息渲染在第三方账号的站点上。
 
 #### 7.3.3 私密数据旁路保护（`private.js` 铁律）
