@@ -1330,8 +1330,8 @@ export class CrawlLoop {
       intent: route.intent ?? item.intent,
       enqueuedBy: captureId,
       cursor: { kind: route.pagination.kind, value: nextValue },
-      // 走到这儿说明这条路线有分页，也就必然是有序的。
-      ordered: true,
+      // 沿用路线定义的 ordered 设置（如 photo.album 为 false，单个相册失败不阻断其他相册）。
+      ordered: route.ordered !== false,
       // **优先级必须继承。**
       //
       // `Frontier.enqueue` 的默认值是 50，而广播是 10、标记列表是 40。种子是

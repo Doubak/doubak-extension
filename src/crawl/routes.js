@@ -392,7 +392,7 @@ export function buildRoutes({
     enumeration: 'full',
     safetyNet: 'contiguity',
     ordered: false,
-    pagination: { kind: 'start', step: 18, first: 0 },
+    pagination: { kind: 'start', step: 18, first: 0, param: 'm_start' },
     nextPageUrl: (item, offset) => {
       const base = String(item?.url ?? '').split('?')[0].replace(/\/+$/, '');
       if (!/\/photos\/album\/\d+$/.test(base)) return null;

@@ -20,11 +20,13 @@ import {
   extractAlbumPhotos,
 } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
+import { cursorFromUrl } from '../src/crawl/runner.js';
 import { routeName } from '../src/ui/route-names.js';
 
 const fixture = (n) => readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf-8');
 
 const PHOTOS_HOME = fixture('photos-home.html');
+const PHOTOS_HOME_EMPTY = fixture('photos-home-empty.html');
 const PHOTOS_ALBUM = fixture('photos-album.html');
 
 const classify = (key, html, url) =>
@@ -58,10 +60,17 @@ describe('相册：路线定义', () => {
   test('单个相册路线没有 entryUrl，通过 nextPageUrl 翻页', () => {
     assert.equal(itemRoute.entryUrl, undefined);
     assert.equal(itemRoute.ordered, false, '相册集合不应被判为有序');
-    assert.deepEqual(itemRoute.pagination, { kind: 'start', step: 18, first: 0 });
+    assert.deepEqual(itemRoute.pagination, { kind: 'start', step: 18, first: 0, param: 'm_start' });
 
     const next = itemRoute.nextPageUrl({ url: 'https://www.douban.com/photos/album/100276481/' }, 18);
     assert.equal(next, 'https://www.douban.com/photos/album/100276481/?m_start=18');
+  });
+
+  test('cursorFromUrl 能按 m_start 参数解析相册游标', () => {
+    const cursor = cursorFromUrl('https://www.douban.com/photos/album/100276481/?m_start=18', itemRoute);
+    assert.deepEqual(cursor, { kind: 'start', value: 18 });
+    const firstPage = cursorFromUrl('https://www.douban.com/photos/album/100276481/', itemRoute);
+    assert.deepEqual(firstPage, { kind: 'start', value: 0 });
   });
 
   test('nextPageUrl 遇到非相册 URL 返回 null', () => {
@@ -124,10 +133,9 @@ describe('相册照片页（真实页面 100276481）', () => {
     assert.equal(cls.itemCount, 18);
   });
 
-  test('声称照片总数读出为 1055', () => {
+  test('路线级声明数量为 null（避免单个相册声明数量与多相册累计冲突）', () => {
     const claimed = extractClaimedCount(PHOTOS_ALBUM, profile);
-    assert.ok(claimed);
-    assert.equal(claimed.count, 1055);
+    assert.equal(claimed, null);
   });
 
   test('分页器读出为第 1 页，共 59 页', () => {
@@ -149,5 +157,36 @@ describe('相册照片页（真实页面 100276481）', () => {
     assert.equal(urls.length, 18);
     assert.ok(urls.every((u) => u.startsWith('https://img') && u.includes('/view/photo/large/')));
     assert.equal(urls[0], 'https://img9.doubanio.com/view/photo/large/public/p2918226736.webp');
+  });
+});
+
+describe('相册列表页（无相册用户 mewcatcher）', () => {
+  const URL_ = 'https://www.douban.com/people/mewcatcher/photos';
+  const profile = profileForRoute('photo.album_list');
+
+  test('判定通过，条目数为 0', () => {
+    const cls = classify('photo.album_list', PHOTOS_HOME_EMPTY, URL_);
+    assert.equal(cls.verdict, 'ok');
+    assert.equal(cls.itemCount, 0);
+  });
+
+  test('声称相册总数为 null（页面无相册计数标签）', () => {
+    const claimed = extractClaimedCount(PHOTOS_HOME_EMPTY, profile);
+    assert.equal(claimed, null);
+  });
+
+  test('无分页器', () => {
+    const pg = extractPagination(PHOTOS_HOME_EMPTY, profile);
+    assert.equal(pg, null);
+  });
+
+  test('相册详情链接与条目 ID 均为空', () => {
+    const links = extractDetailLinks(PHOTOS_HOME_EMPTY, profile);
+    assert.deepEqual(links, []);
+    const pairs = extractItemPairs(PHOTOS_HOME_EMPTY, profile);
+    assert.deepEqual(pairs.ids, []);
+    assert.deepEqual(pairs.times, []);
+    assert.equal(pairs.idless, 0);
+    assert.equal(pairs.containers, 0);
   });
 });

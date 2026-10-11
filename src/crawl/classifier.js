@@ -863,7 +863,9 @@ export const ROUTE_PROFILES = {
     itemAnchor: /<div class="photo_wrap">/,
     idAnchor: /\/photos\/photo\/(\d+)/g,
     timeAnchor: null,
-    claimedCount: /<div class="[^"]*photitle[^"]*">\s*(<span>共)(\d+)张照片<\/span>/,
+    // 单个相册的声明数量（<span>共N张照片</span>）属于该相册自身，
+    // 不能作为路线级（所有相册照片总和）的 claimedCount，否则会与跨相册累计条目冲突（同 doulist.item）。
+    claimedCount: null,
     paginator: /<span class="thispage"[^>]*data-total-page="(\d+)"[^>]*>\s*(\d+)\s*</,
   },
 

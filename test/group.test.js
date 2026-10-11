@@ -22,6 +22,7 @@ import {
   extractEmbeddedImages,
 } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
+import { SessionGuard } from '../src/crawl/session.js';
 import { routeName } from '../src/ui/route-names.js';
 
 const fixture = (n) => readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf-8');
@@ -193,5 +194,16 @@ describe('讨论正文页（真实页面 258053730）', () => {
     const { urls, captions } = extractEmbeddedImages(GROUP_TOPIC);
     assert.deepEqual(urls, ['https://img3.doubanio.com/view/group_topic/l/public/p742323977.jpg']);
     assert.equal(captions['https://img3.doubanio.com/view/group_topic/l/public/p742323977.jpg'], '番外剧照');
+  });
+});
+
+describe('小组会话稳定性验证', () => {
+  test('话题页含有哨兵 uid 0 不会导致 SessionGuard 误判为切换账号', () => {
+    const guard = new SessionGuard();
+    guard.preflight(GROUP_HOME);
+    assert.equal(guard.account.userId, '82160871');
+    assert.doesNotThrow(() => {
+      guard.verify(GROUP_TOPIC);
+    });
   });
 });
