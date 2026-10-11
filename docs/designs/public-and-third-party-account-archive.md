@@ -1633,9 +1633,29 @@ targets/neodb-ndjson.js  targets/*.js           instructions.js
 - **多账号索引门户（Hub Portal，显式声明）**：
   当用户显式传递 `--all-accounts` 时，站点生成器支持在顶层生成多账号索引 Portal，各账号作为子路径独立存放（如 `/users/1234567/`），保持各账号之间相互隔离。
 
-#### 7.3.2 档案作者身份正确呈现（Profile Attribution）
-- **现状机制**：站点生成器的首页大标题、个人头像、个人简介原本默认读取操作者的信息。
-- **改进规范**：
+#### 7.3.2 档案作者身份与动态站点命名（Profile Attribution & Dynamic Site Titling）
+- **核心诉求与命名规范**：
+  - 产出的静态网站全站标题与主标题统一采用命名规范：`<昵称>的豆瓣存档`（例如：`MewX的豆瓣存档`、`叔叔的豆瓣存档`）。
+  - 彻底淘汰原先静态骨架中写死的无主泛指标题（`我的豆瓣存档`），使生成的归档站点无论对于操作者本人还是第三方归档目标，都具备明确清晰的作者身份归属。
+- **名称级联回退算法（Fallback Cascade）**：
+  若归档数据源中昵称缺损或不可得，按如下严格顺序逐级回退，保证站名绝对不为空：
+  1. **首选 `nickname` / `displayName`**：豆瓣展示昵称（如 `MewX` $\rightarrow$ `MewX的豆瓣存档`）；
+  2. **次选 `username`**：个性域名短名/字母账号（如 `mewcatcher` $\rightarrow$ `mewcatcher的豆瓣存档`）；
+  3. **三选 `user_id`**：稳定数字 UID（如 `82160871` $\rightarrow$ `82160871的豆瓣存档`）；
+  4. **终极兜底**：若数据极其古老且完全无身份字段，回退保留通用名 `我的豆瓣存档`。
+  - **显式覆盖机制**：CLI `bin/generate.js` 与 `bin/site.js` 统一支持 `--site-title <title>` 参数，允许用户在需要时完全自主指定站点标题。
+- **配置与模板动态注入机制（Injection Mechanics）**：
+  - **Hugo 全局配置 (`hugo.toml`)**：
+    在复制最小 Hugo 骨架至输出目录后，由 `generate.js` 自动将 `hugo.toml` 中的 `title = '我的豆瓣存档'` 替换为动态计算的 `title = JSON.stringify(siteTitle)`。模板中 `{{ .Site.Title }}` 即可在全站生效：
+    - 首页浏览器 `<title>`：`{{ .Site.Title }}`（即 `MewX的豆瓣存档`）；
+    - 子页面浏览器 `<title>`：`{{ $name }} · {{ .Site.Title }}`（例如：`我看过的影视 · MewX的豆瓣存档`）；
+    - 首页大标题：`<h1 class="home"><a href="...">{{ .Site.Title }}</a></h1>`；
+    - 全局导航页眉：子页面导航栏中的回主页链接保持 `<a class="home" ...>{{ .Site.Title }}</a>`。
+  - **首页内容元数据 (`content/_index.md`)**：
+    `homePage(p, { siteTitle })` 在生成首页 Markdown 的 FrontMatter 时，输出 `title: siteTitle`（替代硬编码的 `'我的豆瓣存档'`），保证 Markdown 静态文件本身元数据与静态站点完全一致。
+  - **扩展端 Markdown / 静态站导出联动 (`src/pipeline/targets.js`)**：
+    在浏览器扩展导出静态页面时，`buildMarkdown()` 从 Canonical / 解析后数据中读取当前被导出账号的 `account` 信息，根据级联规则解析出 `siteTitle` 并传入 `buildPages(p, { images, coverBySubject, siteTitle })`，确保扩展内直接导出产物与 Node.js CLI 产物具备完全一致的动态站名体验。
+- **档案作者身份严格呈现与隔离（Profile Attribution）**：
   - 站点元数据生成器从输入 Canonical 的 profile 记录或 `manifest.account` 中提取 `nickname`、`avatar`、`bio` 与 `join_date`；
   - 严禁将扩展当前操作者（小号或大号）的个人信息渲染在第三方账号的站点上。
 
