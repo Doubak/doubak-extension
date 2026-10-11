@@ -78,6 +78,9 @@ const GROUP_JOINS_EMPTY = `<html><head><title>我的豆瓣小组</title></head><
 const GROUP_PUBLISH_EMPTY = `<html><head><title>我的豆瓣小组</title></head><body>${NAV}
 <h1><div class="head-nav">我的豆瓣小组</div></h1><div class="profile-nav"></div><table class="olt"></table></body></html>`;
 
+const GROUP_TOPIC_EMPTY = `<html><head><title>话题</title></head><body>${NAV}
+<div id="topic-content"><div class="topic-doc"></div></div></body></html>`;
+
 function longformEmpty(url) {
   if (url.includes('/notes?')) return NOTES_EMPTY;
   if (url.includes('/reviews?')) return REVIEWS_EMPTY;
@@ -86,6 +89,7 @@ function longformEmpty(url) {
   if (url.endsWith('/group/people/example/')) return GROUP_HOME_EMPTY;
   if (url.includes('/group/people/example/joins')) return GROUP_JOINS_EMPTY;
   if (url.includes('/group/people/example/publish?')) return GROUP_PUBLISH_EMPTY;
+  if (url.includes('/group/topic/')) return GROUP_TOPIC_EMPTY;
   return null;
 }
 

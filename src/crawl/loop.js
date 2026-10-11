@@ -34,6 +34,7 @@ import {
   extractCoverImage,
   extractStatusPhotos,
   extractEmbeddedImages,
+  extractAlbumPhotos,
   extractDetailLinks,
   extractPagination,
 } from './classifier.js';
@@ -707,6 +708,7 @@ export class CrawlLoop {
       this._enqueueEmbeddedImages(item, res, written.captureId);
       this._enqueueCover(item, res, written.captureId);
       this._enqueueStatusPhotos(item, res, written.captureId);
+      this._enqueueAlbumPhotos(item, res, written.captureId);
 
       // **单页路线抓到那一页就是走完了，当场标掉。**
       //
@@ -955,12 +957,13 @@ export class CrawlLoop {
    * @param {string} captureId
    */
   _enqueueLongformItems(item, res, captureId) {
-    // 豆列与相册走同一条路：索引页 → 详情页，URL 从页面上原样取。
+    // 豆列、相册与小组话题走同一条路：索引/列表页 → 详情/正文页，URL 从页面上原样取。
     const targetKey = {
       'note.list': 'note.item',
       'review.list': 'review.item',
       'doulist.list': 'doulist.item',
       'photo.album_list': 'photo.album',
+      'group.publish': 'group.item',
     }[item.routeKey];
     if (!targetKey) return;
     const target = this._routes.get(targetKey);
@@ -981,12 +984,14 @@ export class CrawlLoop {
       if (ok) enqueued += 1;
     }
     if (enqueued > 0) {
-      // 事件类型跟着目标走：把豆列/相册报成 `longform_enqueued`，日志里那句人话就会说错
+      // 事件类型跟着目标走：把豆列/相册/小组话题报成 `longform_enqueued`，日志里那句人话就会说错
       // 是什么东西——而日志是用户回答「它到底在抓什么」的唯一地方。
       const type = targetKey === 'doulist.item'
         ? 'doulist_enqueued'
         : targetKey === 'photo.album'
         ? 'album_enqueued'
+        : targetKey === 'group.item'
+        ? 'topic_enqueued'
         : 'longform_enqueued';
       this._emit({ type, routeKey: targetKey, count: enqueued, from: item.url });
     }
@@ -1123,6 +1128,39 @@ export class CrawlLoop {
         ordered: false,
         priority: target.priority,
         // 与封面同理：它的门就是它的来源——这张图只可能从一页已经抓到的广播里抽出来。
+        gatedBy: null,
+        referer: item.url,
+      });
+      if (ok) enqueued += 1;
+    }
+    if (enqueued > 0) {
+      this._emit({ type: 'photos_enqueued', count: enqueued, from: item.url });
+    }
+  }
+
+  /**
+   * 从相册详情页（photo.album）派生用户上传的照片大图。
+   *
+   * @param {object} item
+   * @param {object} res
+   * @param {string} captureId
+   */
+  _enqueueAlbumPhotos(item, res, captureId) {
+    if (item.routeKey !== 'photo.album') return;
+    const target = this._routes.get('asset.photo_image');
+    if (!target) return;
+
+    const { urls } = extractAlbumPhotos(res.bodyText);
+    let enqueued = 0;
+    for (const url of urls) {
+      const ok = this._frontier.enqueue({
+        url,
+        urlKey: urlKey(url),
+        routeKey: 'asset.photo_image',
+        intent: target.intent,
+        enqueuedBy: captureId,
+        ordered: false,
+        priority: target.priority,
         gatedBy: null,
         referer: item.url,
       });

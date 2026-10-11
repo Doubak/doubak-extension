@@ -401,6 +401,20 @@ export function buildRoutes({
     note: '单个相册照片列表页，翻页参数为 m_start，每页18张',
   });
 
+  // 个人相册中用户上传的照片原件/大图：由 photo.album 派生。
+  routes.push({
+    key: 'asset.photo_image',
+    intent: 'asset.image.user_upload',
+    kind: 'assets',
+    surface: 'asset',
+    priority: PRIORITY.IMAGES + 1,
+    source: 'archive',
+    enumeration: 'bounded',
+    safetyNet: 'contiguity',
+    ordered: false,
+    note: '个人相册中用户上传的照片原件/大图；由 photo.album 派生',
+  });
+
   // ── 豆瓣小组 ──────────────────────────────────────────────────────────────
   //
   // 小组主页包含加入小组与发起讨论的声明数量，是结构性总览页。
@@ -445,6 +459,20 @@ export function buildRoutes({
     entryUrl: ({ offset }) =>
       `https://www.douban.com/group/people/${enc(username)}/publish?start=${offset}`,
     note: '用户发布的小组话题列表；每页50条',
+  });
+
+  // 用户发布的小组话题正文：由 group.publish 派生。
+  routes.push({
+    key: 'group.item',
+    intent: 'group.item',
+    kind: 'data',
+    surface: 'html',
+    priority: PRIORITY.LONGFORM + 7,
+    source: 'archive',
+    enumeration: 'bounded',
+    safetyNet: 'contiguity',
+    ordered: false,
+    note: '用户发布的小组话题正文；由 group.publish 派生',
   });
 
   // ── 标记列表
@@ -591,7 +619,7 @@ export const UNSUPPORTED_ROUTES = {
       + '——正是「用户创作内容与目录数据永远不放在一张表里」那条规矩，所以它归目录那一侧。\n\n'
       + '那 17 条广播本身照抓：你写的那句话、日期、指向哪个相册，都是你的。'
       + '不进档案的是那 51 张照片本身。真要留是 enricher 之后的事，甚至不是 enricher。\n\n'
-      + '个人相册另说：属于个人资产，已通过 photo.album_list 与 photo.album 路线支持。',
+      + '个人相册另说：属于个人资产，相册页面与照片大图已通过 photo.album 与 asset.photo_image 路线支持。',
   },
 };
 

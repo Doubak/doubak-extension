@@ -18,6 +18,7 @@ import {
   classifyResponse,
   extractItemPairs,
   extractPagination,
+  extractDetailLinks,
 } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { routeName } from '../src/ui/route-names.js';
@@ -29,6 +30,7 @@ const GROUP_JOINS = fixture('group-joins.html');
 const GROUP_JOINS_MANAGER = fixture('group-joins-manager.html');
 const GROUP_PUBLISH = fixture('group-publish.html');
 const GROUP_PUBLISH_PAGINATED = fixture('group-publish-paginated.html');
+const GROUP_TOPIC = fixture('group-topic.html');
 
 const classify = (key, html, url) =>
   classifyResponse({
@@ -44,19 +46,24 @@ describe('小组：路线定义', () => {
   const homeRoute = routes.find((r) => r.key === 'group.overview');
   const joinsRoute = routes.find((r) => r.key === 'group.joins');
   const publishRoute = routes.find((r) => r.key === 'group.publish');
+  const itemRoute = routes.find((r) => r.key === 'group.item');
 
-  test('三条路线均已注册且优先级符合设计', () => {
+  test('四条路线均已注册且优先级符合设计', () => {
     assert.ok(homeRoute, '缺少 group.overview');
     assert.ok(joinsRoute, '缺少 group.joins');
     assert.ok(publishRoute, '缺少 group.publish');
+    assert.ok(itemRoute, '缺少 group.item');
 
     assert.equal(homeRoute.intent, 'group.overview');
     assert.equal(joinsRoute.intent, 'group.joins');
     assert.equal(publishRoute.intent, 'group.publish');
+    assert.equal(itemRoute.intent, 'group.item');
 
     assert.ok(homeRoute.priority > PRIORITY.LONGFORM);
     assert.ok(joinsRoute.priority > PRIORITY.LONGFORM);
     assert.ok(publishRoute.priority > PRIORITY.LONGFORM);
+    assert.ok(itemRoute.priority > PRIORITY.LONGFORM);
+    assert.equal(itemRoute.entryUrl, undefined, '话题正文由 publish 派生，不设 entryUrl');
   });
 
   test('入口 URL 构造正确', () => {
@@ -153,5 +160,23 @@ describe('发起的讨论（真实页面 mewcatcher & BlocksTower）', () => {
     // 页面顶栏菜单中含有 5 个 tr（个人主页、订单、钱包等），itemAnchor 严格限定为 td.title
     const pairs = extractItemPairs(GROUP_PUBLISH, profile);
     assert.equal(pairs.containers, 3);
+  });
+
+  test('单页用户：成功抽取 3 个讨论详情页链接', () => {
+    const links = extractDetailLinks(GROUP_PUBLISH, profile);
+    assert.deepEqual(links, [
+      'https://www.douban.com/group/topic/258053730/',
+      'https://www.douban.com/group/topic/254900406/',
+      'https://www.douban.com/group/topic/110871731/',
+    ]);
+  });
+});
+
+describe('讨论正文页（真实页面 258053730）', () => {
+  const URL_ = 'https://www.douban.com/group/topic/258053730/';
+
+  test('判定通过，结构性标志完备', () => {
+    const cls = classify('group.item', GROUP_TOPIC, URL_);
+    assert.equal(cls.verdict, 'ok');
   });
 });

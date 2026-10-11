@@ -17,6 +17,7 @@ import {
   extractItemPairs,
   extractClaimedCount,
   extractPagination,
+  extractAlbumPhotos,
 } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { routeName } from '../src/ui/route-names.js';
@@ -141,5 +142,12 @@ describe('相册照片页（真实页面 100276481）', () => {
     assert.equal(pairs.idless, 0);
     assert.ok(pairs.times.every((t) => t === null));
     assert.equal(pairs.ids[0], '2918226736');
+  });
+
+  test('成功抽取 18 张照片大图 URL', () => {
+    const { urls } = extractAlbumPhotos(PHOTOS_ALBUM);
+    assert.equal(urls.length, 18);
+    assert.ok(urls.every((u) => u.startsWith('https://img') && u.includes('/view/photo/photo/')));
+    assert.equal(urls[0], 'https://img9.doubanio.com/view/photo/photo/public/p2918226736.webp');
   });
 });

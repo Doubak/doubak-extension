@@ -68,9 +68,11 @@ const FIXED = {
   'review.item': '评论正文',
   'photo.album_list': '相册',
   'photo.album': '相册内容',
+  'asset.photo_image': '相册照片',
   'group.overview': '小组主页',
   'group.joins': '加入的小组',
   'group.publish': '发起的讨论',
+  'group.item': '讨论正文',
   // 「我编的豆列」而不是光写「豆列」：界面上还会有「我关注的」那一半（暂时不抓），
   // 两者不能长得一样。
   'doulist.list': '我编的豆列',

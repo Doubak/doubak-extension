@@ -914,6 +914,19 @@ export const ROUTE_PROFILES = {
     timeAnchor: null,
     claimedCount: null,
     paginator: /<span class="thispage"[^>]*data-total-page="(\d+)"[^>]*>\s*(\d+)\s*</,
+    detailLink: /<td class="title">\s*<a href="(https:\/\/www\.douban\.com\/group\/topic\/\d+\/?)/g,
+  },
+
+  /**
+   * 用户发布的小组话题正文页（`/group/topic/<id>/`）。
+   *
+   * 框架标志：`id="topic-content"` 与 `class="topic-doc"`。
+   */
+  'group.item': {
+    urlAnchor: /\/group\/topic\/\d+/,
+    anyFrameAnchors: [/id="topic-content"/, /class="topic-doc"/],
+    itemAnchor: undefined,
+    claimedCount: null,
   },
 };
 
@@ -1152,6 +1165,28 @@ export function extractEmbeddedImages(html) {
     if (cap) captions[src] = cap;
   }
   return { urls: [...urls], captions };
+}
+
+/**
+ * 个人相册页面中提取用户上传的照片大图 URL。
+ *
+ * 每张照片包含在 `<div class="photo_wrap">` 中，包含 `<img src="...">`。
+ * 将 `/view/photo/m/` 替换为 `/view/photo/photo/` 取大图（CDN 测试返回 200）。
+ *
+ * @param {string} html
+ * @returns {{ urls: string[] }}
+ */
+export function extractAlbumPhotos(html) {
+  if (typeof html !== 'string') return { urls: [] };
+  /** @type {Set<string>} */
+  const urls = new Set();
+  for (const m of html.matchAll(/<div class="photo_wrap">[\s\S]*?<img[^>]+src="(https:\/\/[^"]*doubanio\.com\/view\/photo\/[^"]+)"/g)) {
+    const src = m[1];
+    if (!isDoubanioImage(src)) continue;
+    const large = src.replace(/\/view\/photo\/m\//, '/view/photo/photo/');
+    urls.add(large);
+  }
+  return { urls: [...urls] };
 }
 
 /**
