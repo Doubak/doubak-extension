@@ -10,7 +10,7 @@
 
 Doubak (豆备) is a browser extension that backs up your [Douban](https://www.douban.com)
 account — marks, ratings, short reviews, tags, broadcasts (广播), journals, reviews, your
-own doulists, and the images you uploaded — by **archiving the pages themselves as
+own doulists, personal photo albums (with full-size original images), joined groups and authored group topics, and the images you uploaded — by **archiving the pages themselves as
 standard [WARC](https://iipc.github.io/warc-specifications/) files**, in your own browser,
 from your own IP, at your own pace.
 
