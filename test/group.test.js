@@ -23,6 +23,7 @@ import {
   extractGroupIcons,
 } from '../src/crawl/classifier.js';
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
+import { CrawlLoop } from '../src/crawl/loop.js';
 import { SessionGuard } from '../src/crawl/session.js';
 import { routeName } from '../src/ui/route-names.js';
 
@@ -148,6 +149,35 @@ describe('加入的小组（真实页面 Echo-of-Death & furrypaw）', () => {
     const { urls } = extractGroupIcons(GROUP_JOINS_MANAGER);
     assert.equal(urls.length, 43);
     assert.ok(urls.every((u) => u.includes('doubanio.com')));
+  });
+
+  test('group.joins 触发 _enqueueGroupIcons 时正确向 frontier 注入 asset.group_icon 路线条目', () => {
+    const enqueued = [];
+    const frontier = {
+      enqueue: (item) => {
+        enqueued.push(item);
+        return true;
+      },
+    };
+    const routes = new Map([
+      ['asset.group_icon', { priority: 20, intent: 'asset.image.catalog_thumbnail' }],
+    ]);
+    const loop = {
+      _frontier: frontier,
+      _routes: routes,
+      _emit: () => {},
+      _enqueueGroupIcons: CrawlLoop.prototype._enqueueGroupIcons,
+    };
+    loop._enqueueGroupIcons(
+      { routeKey: 'group.joins', url: 'https://www.douban.com/group/people/Echo-of-Death/joins' },
+      { bodyText: GROUP_JOINS },
+      'cap-joins-1',
+    );
+    assert.equal(enqueued.length, 114);
+    assert.equal(enqueued[0].routeKey, 'asset.group_icon');
+    assert.equal(enqueued[0].intent, 'asset.image.catalog_thumbnail');
+    assert.equal(enqueued[0].referer, 'https://www.douban.com/group/people/Echo-of-Death/joins');
+    assert.equal(enqueued[0].enqueuedBy, 'cap-joins-1');
   });
 });
 
