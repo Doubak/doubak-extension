@@ -421,7 +421,7 @@ export function albumPage(a, { images = {} } = {}) {
   const locked = a.privacy !== 'public';
   const coverPhoto = (a.photos.find((p) => p.id === a.coverPhotoId) || a.photos[0]);
   const coverUrl = coverPhoto?.imageUrl ?? coverPhoto?.thumbnailUrl;
-  const coverPath = coverUrl ? (images[coverUrl] ?? null) : null;
+  const coverPath = coverUrl ? (images[coverUrl] ?? coverUrl) : null;
 
   const fm = {
     title: a.title ?? '(无标题)',
@@ -451,12 +451,11 @@ export function albumPage(a, { images = {} } = {}) {
     const full = images[ph.imageUrl] ?? ph.imageUrl ?? src;
     const cap = ph.caption ? plainText(ph.caption) : '';
     if (src) {
-      out.push(`[![${cap}](${src})](${full})`);
+      out.push(`- [![${cap}](${src})](${full})`);
+      if (cap) {
+        out.push(`  *${cap}*`);
+      }
     }
-    if (cap) {
-      out.push(`*${cap}*`);
-    }
-    out.push('');
   }
   return frontMatter(fm) + '\n' + out.join('\n');
 }

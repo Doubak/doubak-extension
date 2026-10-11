@@ -698,11 +698,16 @@ function projectAlbum(rec) {
 
 function projectGroupTopic(rec) {
   const r = latest(rec);
+  let body = r.fields.body ?? null;
+  if (body) {
+    // 剔除页面尾部提取到的作者操作按钮（修改、删除）
+    body = body.replace(/\s*(?:修改\s*删除|修改|删除)\s*$/, '').trim() || null;
+  }
   return {
     id: rec.upstream_id,
     url: rec.url ?? null,
     title: r.fields.title ?? null,
-    body: r.fields.body ?? null,
+    body,
     publishedAt: r.fields.published_at?.iso ?? null,
     publishedAtRaw: r.fields.published_at?.raw ?? null,
     groupId: r.fields.group_id ?? null,
