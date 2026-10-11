@@ -91,12 +91,21 @@ export const broadcastIsPrivate = (rec) => last(rec).visibility !== 'public';
 export const doulistIsPrivate = (rec) => last(rec).visibility !== 'public';
 
 /**
+ * 相册隐私设置：'public' 为公开，'author' 为仅自己可见。
+ * @param {object} rec @returns {boolean}
+ */
+export const albumIsPrivate = (rec) => last(rec).privacy !== 'public' && last(rec).privacy != null;
+
+/** @param {object[]} recs @returns {boolean} */
+export const albumPrivacyKnown = (recs) => (recs ?? []).some((r) => last(r).privacy != null);
+
+/**
  * 这份 canonical 里不公开的东西，按记录类型点名。
  *
  * **只点名，不筛选**——筛选是 `withoutPrivate()` 的事，而部署预演要能把两边都印
  * 出来：铺进仓库是不可逆的，而预演是它前面唯一一道。
  *
- * @param {{longform?: object[], broadcasts?: object[], doulists?: object[]}} canonical
+ * @param {{longform?: object[], broadcasts?: object[], doulists?: object[], albums?: object[]}} canonical
  */
 export function privateContent(canonical) {
   /** @type {{author: object[], platform: object[], unsure: object[]}} */
@@ -111,6 +120,7 @@ export function privateContent(canonical) {
   // 那种情况下报的应当是「这份 canonical 没有这个信息」，不是「这 3429 条是私密的」。
   const bcKnown = privacyKnown(canonical.broadcasts);
   const dlKnown = privacyKnown(canonical.doulists);
+  const albKnown = albumPrivacyKnown(canonical.albums);
   return {
     notes,
     doulists: dlKnown
@@ -121,10 +131,15 @@ export function privateContent(canonical) {
       ? (canonical.broadcasts ?? []).filter(broadcastIsPrivate)
         .map((r) => ({ id: r.upstream_id, text: last(r).text ?? null }))
       : [],
+    albums: albKnown
+      ? (canonical.albums ?? []).filter(albumIsPrivate)
+        .map((r) => ({ title: last(r).title ?? '(无标题)', id: r.upstream_id }))
+      : [],
     // 上层要照实说「这一份根本没有这个信息，重跑一次解析器」，而不是说「都没有私密的」。
     unknownPrivacy: [
       ...(bcKnown || !(canonical.broadcasts ?? []).length ? [] : ['broadcasts']),
       ...(dlKnown || !(canonical.doulists ?? []).length ? [] : ['doulists']),
+      ...(albKnown || !(canonical.albums ?? []).length ? [] : ['albums']),
     ],
   };
 }
@@ -156,6 +171,9 @@ export function withoutPrivate(canonical, { includePrivate = false, dropNotes = 
     }
     if (privacyKnown(canonical.doulists)) {
       out.doulists = (canonical.doulists ?? []).filter((r) => !doulistIsPrivate(r));
+    }
+    if (albumPrivacyKnown(canonical.albums)) {
+      out.albums = (canonical.albums ?? []).filter((r) => !albumIsPrivate(r));
     }
   }
   return out;

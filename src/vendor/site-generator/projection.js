@@ -26,8 +26,14 @@
  * @param {object[]} longform    canonical 的 longform.ndjson
  * @param {object[]} broadcasts  canonical 的 broadcasts.ndjson
  * @param {object[]} doulists    canonical 的 doulists.ndjson
+ * @param {object[]} [albums]    canonical 的 albums.ndjson
+ * @param {object[]} [group_topics] canonical 的 group_topics.ndjson
+ * @param {object[]} [group_joins]  canonical 的 group_joins.ndjson
  */
-export function project({ marks = [], subjects = [], longform = [], broadcasts = [], doulists = [] }) {
+export function project({
+  marks = [], subjects = [], longform = [], broadcasts = [], doulists = [],
+  albums = [], group_topics = [], group_joins = [],
+}) {
   const bySubject = new Map();
   for (const s of subjects) bySubject.set(`${s.medium}:${s.id}`, s);
 
@@ -41,15 +47,22 @@ export function project({ marks = [], subjects = [], longform = [], broadcasts =
     ),
   );
 
+  const have = {
+    subjects: new Set(subjects.map((s) => `${s.medium}:${s.id}`)),
+    doulists: new Set(doulists.map((d) => d.upstream_id)),
+    longform: new Set(longform.map((l) => l.upstream_id)),
+    albums: new Set(albums.map((a) => a.upstream_id)),
+    groupTopics: new Set(group_topics.map((t) => t.upstream_id)),
+  };
+
   return {
     marks: projectedMarks,
     longform: longform.map(projectLongform),
     doulists: doulists.map(projectDoulist),
-    broadcasts: broadcasts.map((b) => projectBroadcast(b, targetIndex(projectedMarks), {
-      subjects: new Set(subjects.map((s) => `${s.medium}:${s.id}`)),
-      doulists: new Set(doulists.map((d) => d.upstream_id)),
-      longform: new Set(longform.map((l) => l.upstream_id)),
-    })),
+    albums: albums.map(projectAlbum),
+    groupTopics: group_topics.map(projectGroupTopic),
+    groupJoins: group_joins.map(projectGroupJoin),
+    broadcasts: broadcasts.map((b) => projectBroadcast(b, targetIndex(projectedMarks), have)),
   };
 }
 
@@ -376,6 +389,7 @@ function projectBroadcast(b, targets, have = { subjects: new Set(), doulists: ne
  * @param {string} url
  */
 function localLongform(url) {
+  if (/\/group\/topic\//.test(url)) return null;
   const m = /\/(note|topic|review)\/(\d+)/.exec(url);
   if (!m) return null;
   // /topic/ 与 /note/ 是同一种东西的两种 URL 形状，都落在 note/ 目录下。
@@ -447,7 +461,17 @@ function resolveActionParts(parts, have) {
         : { text: p.text };
     }
 
-    // 剩下的都是我们不收的东西：相册、小组、榜单、影人、短链。指出去。
+    const alb = /\/photos\/album\/(\d+)\/?(?:[?#]|$)/.exec(p.url);
+    if (alb && have.albums?.has(alb[1])) {
+      return { text: p.text, href: `album/${alb[1]}.md` };
+    }
+
+    const topic = /\/group\/topic\/(\d+)\/?(?:[?#]|$)/.exec(p.url);
+    if (topic && have.groupTopics?.has(topic[1])) {
+      return { text: p.text, href: `group/${topic[1]}.md` };
+    }
+
+    // 剩下的都是我们不收（或未备份）的东西：榜单、影人、短链、他人相册/话题。指出去。
     return { text: p.text, href: p.url, external: true };
   });
 }
@@ -644,3 +668,67 @@ function realCover(url) {
   if (!url) return null;
   return /\/(cuphead|f)\//.test(url) ? null : url;
 }
+
+function projectAlbum(rec) {
+  const r = latest(rec);
+  return {
+    id: rec.upstream_id,
+    url: rec.url ?? null,
+    title: r.fields.title ?? null,
+    desc: r.fields.desc ?? null,
+    createdAt: r.fields.created_at?.iso ?? null,
+    createdAtRaw: r.fields.created_at?.raw ?? null,
+    updatedAt: r.fields.updated_at?.iso ?? null,
+    updatedAtRaw: r.fields.updated_at?.raw ?? null,
+    claimedCount: r.fields.claimed_count ?? null,
+    coverPhotoId: r.fields.cover_photo_id ?? null,
+    privacy: r.fields.privacy ?? 'public',
+    revisionCount: rec.revisions.length,
+    lastSeenAt: r.last_observed_at,
+    photos: (r.fields.photos ?? []).map((p) => ({
+      id: p.id,
+      url: p.url ?? null,
+      imageUrl: p.image_url ?? null,
+      thumbnailUrl: p.thumbnail_url ?? null,
+      caption: p.caption ?? null,
+      seq: p.seq ?? 0,
+    })),
+  };
+}
+
+function projectGroupTopic(rec) {
+  const r = latest(rec);
+  return {
+    id: rec.upstream_id,
+    url: rec.url ?? null,
+    title: r.fields.title ?? null,
+    body: r.fields.body ?? null,
+    publishedAt: r.fields.published_at?.iso ?? null,
+    publishedAtRaw: r.fields.published_at?.raw ?? null,
+    groupId: r.fields.group_id ?? null,
+    groupName: r.fields.group_name ?? null,
+    groupUrl: r.fields.group_url ?? null,
+    images: (r.fields.images ?? []).map((img) => ({
+      url: img.url ?? null,
+      src: img.src ?? null,
+      caption: img.caption ?? null,
+    })),
+    revisionCount: rec.revisions.length,
+    lastSeenAt: r.last_observed_at,
+  };
+}
+
+function projectGroupJoin(rec) {
+  const r = latest(rec);
+  return {
+    id: rec.upstream_id,
+    url: rec.url ?? null,
+    name: r.fields.name ?? null,
+    role: r.fields.role ?? 'member',
+    memberCount: r.fields.member_count ?? null,
+    iconUrl: r.fields.icon_url ?? null,
+    revisionCount: rec.revisions.length,
+    lastSeenAt: r.last_observed_at,
+  };
+}
+

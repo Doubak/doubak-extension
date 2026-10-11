@@ -133,6 +133,31 @@ export function buildSearchIndex(p) {
     });
   }
 
+  // 相册：标题、相册描述以及照片的配字说明
+  for (const a of p.albums ?? []) {
+    const own = [a.desc ?? '', ...a.photos.map((ph) => ph.caption ?? '')].filter(Boolean).join('\n');
+    rows.push({
+      t: 'a',
+      u: `album/${a.id}`,
+      n: a.title,
+      c: own,
+      d: a.createdAtRaw ?? '',
+      k: 'album',
+    });
+  }
+
+  // 小组话题：标题与正文
+  for (const t of p.groupTopics ?? []) {
+    rows.push({
+      t: 'g',
+      u: `group/${t.id}`,
+      n: t.title,
+      c: t.body ?? '',
+      d: t.publishedAtRaw ?? '',
+      k: 'group',
+    });
+  }
+
   // 时间倒序：同分时新的在前，而排序在生成时做一次就够，不必每次查询都做。
   rows.sort((a, b) => (a.d < b.d ? 1 : -1));
 

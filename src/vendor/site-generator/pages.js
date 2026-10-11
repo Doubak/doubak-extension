@@ -22,6 +22,7 @@
 import { groupMarks } from './projection.js';
 import {
   markPage, longformPage, markPath, longformPath, doulistPage, doulistPath, verb,
+  albumPage, albumPath, groupTopicPage, groupTopicPath, groupJoinsPage, groupJoinsPath,
   broadcastMonthPage, broadcastMonthPath, monthOf,
   markFilterPath, markFilterPage, broadcastBlock, plainText, coverStripItem,
   sectionIndexPath, sectionIndexPage,
@@ -37,9 +38,10 @@ const content = (rel) => `content/${rel}`;
 /** 媒介的中文名。**唯一的一份**，与扩展那边同源。 */
 const MEDIUM_NAMES = {
   movie: '影视', book: '书', music: '音乐', game: '游戏', drama: '舞台剧',
-  // 首页把广播与长文也当成小节来排，所以这三个名字也在这儿。
+  // 首页把广播、长文、豆列、相册与小组也当成小节来排，所以这几个名字也在这儿。
   // 主题那边 `hugo.toml` 的 `[params.mediumNames]` 是同一份，测试钉着两处相等。
   broadcast: '广播', note: '日记', review: '评论', doulist: '豆列',
+  album: '相册', group: '小组',
 };
 
 
@@ -136,11 +138,39 @@ export function buildPages(p, { images = {}, coverBySubject = {} } = {}) {
     files.push([content(doulistPath(r)), doulistPage(r)]);
   }
 
+  // 相册。私密的照常渲染，带锁。
+  for (const a of p.albums ?? []) {
+    for (const ph of a.photos) {
+      stillRemote(ph.imageUrl);
+      stillRemote(ph.thumbnailUrl);
+    }
+    files.push([content(albumPath(a)), albumPage(a, { images: paths })]);
+  }
+
+  // 小组话题与加入的小组。
+  for (const t of p.groupTopics ?? []) {
+    for (const m of (t.body ?? '').matchAll(/https:\/\/[a-z0-9.]*doubanio\.com\/[^\s"'<>)）]+/g)) {
+      stillRemote(m[0]);
+    }
+    for (const img of t.images) {
+      if (img.src) stillRemote(img.src);
+    }
+    files.push([content(groupTopicPath(t)), groupTopicPage(t, { images: paths })]);
+  }
+  if ((p.groupJoins ?? []).length > 0) {
+    for (const j of p.groupJoins) {
+      stillRemote(j.iconUrl);
+    }
+    files.push([content(groupJoinsPath()), groupJoinsPage(p.groupJoins, { images: paths })]);
+  }
+
   for (const [section, has] of [
     ['broadcast', p.broadcasts.length > 0],
     ['note', p.longform.some((r) => r.kind === 'note')],
     ['review', p.longform.some((r) => r.kind === 'review')],
     ['doulist', (p.doulists ?? []).length > 0],
+    ['album', (p.albums ?? []).length > 0],
+    ['group', (p.groupTopics ?? []).length > 0 || (p.groupJoins ?? []).length > 0],
   ]) {
     if (has) {
       files.push([content(sectionIndexPath(section)),
@@ -168,6 +198,9 @@ export function buildPages(p, { images = {}, coverBySubject = {} } = {}) {
       marks: p.marks.length,
       longform: p.longform.length,
       doulists: (p.doulists ?? []).length,
+      albums: (p.albums ?? []).length,
+      groupTopics: (p.groupTopics ?? []).length,
+      groupJoins: (p.groupJoins ?? []).length,
       broadcasts: p.broadcasts.length,
       broadcastMonths: byMonth.size,
       searchRows: search.rows.length,
@@ -191,7 +224,7 @@ export function buildPages(p, { images = {}, coverBySubject = {} } = {}) {
  * 不按字母序：广播是这份存档里最不可替代的一条（发布即冻结、可被静默删除），排第一；
  * 日记与评论只有个位数，排后面。
  */
-const SECTION_ORDER = ['broadcast', 'book', 'movie', 'game', 'music', 'drama', 'note', 'review', 'doulist'];
+const SECTION_ORDER = ['broadcast', 'book', 'movie', 'game', 'music', 'drama', 'note', 'review', 'doulist', 'album', 'group'];
 
 /**
  * 标记状态在页面上的先后。
@@ -328,17 +361,88 @@ function homePage(p, { covers = {}, previewImages = {} } = {}) {
     return out;
   };
 
+  /** 豆列预览。 */
+  const doulistSection = () => {
+    const list = p.doulists ?? [];
+    const recent = list.slice(0, PREVIEW);
+    const out = [`## ${MEDIUM_NAMES.doulist} ${list.length}`, ''];
+    for (const d of recent) {
+      out.push(`### [${plainText(d.title ?? '(无标题)')}](${doulistPath(d)})`, '');
+      if (d.description) {
+        const flat = d.description.replace(/\s+/g, ' ').trim();
+        const chars = [...flat];
+        if (chars.length) {
+          out.push(plainText(chars.slice(0, EXCERPT).join('')) + (chars.length > EXCERPT ? '……' : ''), '');
+        }
+      }
+    }
+    out.push(`[看全部 ${list.length} 个 →](${sectionIndexPath('doulist')})`, '');
+    return out;
+  };
+
+  /** 相册预览。 */
+  const albumSection = () => {
+    const list = p.albums ?? [];
+    const recent = list.slice(0, PREVIEW);
+    const out = [`## ${MEDIUM_NAMES.album} ${list.length}`, ''];
+    for (const a of recent) {
+      out.push(`### [${plainText(a.title ?? '(无标题)')}](${albumPath(a)})`, '');
+      const when = a.createdAtRaw ?? (a.createdAt ?? '').slice(0, 10);
+      const meta = [when, `${a.photos.length} 张照片`].filter(Boolean).join(' · ');
+      if (meta) out.push(`*${meta}*`, '');
+      if (a.desc) {
+        const flat = a.desc.replace(/\s+/g, ' ').trim();
+        const chars = [...flat];
+        if (chars.length) {
+          out.push(plainText(chars.slice(0, EXCERPT).join('')) + (chars.length > EXCERPT ? '……' : ''), '');
+        }
+      }
+    }
+    out.push(`[看全部 ${list.length} 个 →](${sectionIndexPath('album')})`, '');
+    return out;
+  };
+
+  /** 小组预览。 */
+  const groupSection = () => {
+    const topics = p.groupTopics ?? [];
+    const joins = p.groupJoins ?? [];
+    const out = [`## ${MEDIUM_NAMES.group} ${topics.length} 篇话题${joins.length ? ` · 加入 ${joins.length} 个小组` : ''}`, ''];
+    const recent = topics.slice(0, PREVIEW);
+    for (const t of recent) {
+      out.push(`### [${plainText(t.title ?? '(无标题)')}](${groupTopicPath(t)})`, '');
+      const when = t.publishedAtRaw ?? (t.publishedAt ?? '').slice(0, 10);
+      const meta = [when, t.groupName].filter(Boolean).join(' · ');
+      if (meta) out.push(`*${meta}*`, '');
+      if (t.body) {
+        const flat = t.body.replace(/!\[\]\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+        const chars = [...flat];
+        if (chars.length) {
+          out.push(plainText(chars.slice(0, EXCERPT).join('')) + (chars.length > EXCERPT ? '……' : ''), '');
+        }
+      }
+    }
+    out.push(`[看全部 →](${sectionIndexPath('group')})`, '');
+    return out;
+  };
+
   // **所有小节排在同一个顺序里**，不是「先媒介、再把广播长文接在后面」——
   // 那样广播永远垫底，而它恰恰是这份档案里最不可替代的一条。
+  // **0 个条目的类别不出现**：只列真正有内容的小节。
   const present = [
     ...(p.broadcasts.length ? ['broadcast'] : []),
     ...groups.keys(),
     ...(p.longform.some((r) => r.kind === 'note') ? ['note'] : []),
     ...(p.longform.some((r) => r.kind === 'review') ? ['review'] : []),
+    ...((p.doulists ?? []).length ? ['doulist'] : []),
+    ...((p.albums ?? []).length ? ['album'] : []),
+    ...(((p.groupTopics ?? []).length || (p.groupJoins ?? []).length) ? ['group'] : []),
   ];
   for (const section of order(present, SECTION_ORDER)) {
     if (section === 'broadcast') lines.push(...broadcastSection());
     else if (section === 'note' || section === 'review') lines.push(...longformSection(section));
+    else if (section === 'doulist') lines.push(...doulistSection());
+    else if (section === 'album') lines.push(...albumSection());
+    else if (section === 'group') lines.push(...groupSection());
     else lines.push(...mediumSection(section));
   }
 
