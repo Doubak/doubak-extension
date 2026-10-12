@@ -13,7 +13,7 @@
  * | 档 | route_key | 重抓能拿到什么 | 默认 |
  * |---|---|---|---|
  * | 作品详情页 | `interest.item` | 评分、短评数、又名都会变 | 跳过，可选重抓 |
- * | 长文正文 | `note.item` / `review.item` | 日记与影评**可编辑** | 跳过，可选重抓 |
+ * | 长文正文 | `note.item` / `review.item` / `group.item` | 日记、影评与发起的讨论正文**可编辑** | 跳过，可选重抓 |
  * | 图 | `asset.*` | **什么都拿不到** | 永远跳过 |
  *
  * 第三档不是一个选项。图片地址是内容地址：换了图会得到一个新的 `p…jpg`，而不是
@@ -35,12 +35,14 @@
  */
 
 /**
- * 长文正文这一档。**route_key 从索引行里原样取，不靠 URL 形状猜**——日记的网址
+ * 长文正文这一档。包含日记、影评与用户在小组发起的话题正文（可编辑）。
+ *
+ * **route_key 从索引行里原样取，不靠 URL 形状猜**——日记的网址
  * 有 `/note/` 和 `/topic/` 两种形状（实测一个真实账号 3 篇日记里就有一篇是
- * `www.douban.com/topic/…`），按形状猜会把它排进影评那条路线，而两条路线的判定
- * 描述、优先级、门控都不一样，并且不会报错。
+ * `www.douban.com/topic/…`），按形状猜会把它排进影评或小组话题路线，
+ * 而路线之间的判定描述、优先级、门控都不一样，并且不会报错。
  */
-export const LONGFORM_ROUTES = new Set(['note.item', 'review.item']);
+export const LONGFORM_ROUTES = new Set(['note.item', 'review.item', 'group.item']);
 
 /** 作品详情页这一档。 */
 export const SUBJECT_ROUTE = 'interest.item';

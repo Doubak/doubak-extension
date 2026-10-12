@@ -34,10 +34,11 @@ describe('三档分开', () => {
       row(SUBJECT_ROUTE, 'https://movie.douban.com/subject/1001/'),
       row('note.item', 'https://www.douban.com/note/872015292/'),
       row('review.item', 'https://www.douban.com/review/8381069/'),
+      row('group.item', 'https://www.douban.com/group/topic/110871731/'),
       row('asset.status_photo', PHOTO),
     ]);
     assert.deepEqual(r.subjects, ['https://movie.douban.com/subject/1001/']);
-    assert.deepEqual(r.longform.map((x) => x.routeKey).sort(), ['note.item', 'review.item']);
+    assert.deepEqual(r.longform.map((x) => x.routeKey).sort(), ['group.item', 'note.item', 'review.item']);
     assert.deepEqual(r.assets, [PHOTO]);
   });
 
@@ -140,8 +141,8 @@ describe('长文的路线跟着 URL 一起走', () => {
     assert.equal(byUrl['https://www.douban.com/review/8381069/'], 'review.item');
   });
 
-  test('两条长文路线都认', () => {
-    assert.deepEqual([...LONGFORM_ROUTES].sort(), ['note.item', 'review.item']);
+  test('三条长文路线都认（日记、影评、发起的讨论正文）', () => {
+    assert.deepEqual([...LONGFORM_ROUTES].sort(), ['group.item', 'note.item', 'review.item']);
   });
 });
 

@@ -227,12 +227,12 @@ export class CrawlRunner {
    * @param {string[]} [opts.knownSubjectUrlKeys]  链上已经抓过的作品详情页。传了就
    *   不再抓一遍——那条路线占档案九成体积，而「增量」对它不成立（没有时间序）。
    *   **只能传作品详情页的 key**：列表页的 URL 每次都一样，喂进去会让这次一页都抓不成。
-   * @param {string[]} [opts.knownLongformUrlKeys]  已经抓过的日记/影评正文。与上一项
-   *   同理，区别只在于它默认**是**跳过的：日记可编辑，所以重抓有意义，但那是用户
+   * @param {string[]} [opts.knownLongformUrlKeys]  已经抓过的长文正文（日记/影评/发起的讨论）。与上一项
+   *   同理，区别只在于它默认**是**跳过的：长文可编辑，所以重抓有意义，但那是用户
    *   明选「重抓可变内容」时才做的事，不是每趟都做。
    * @param {Array<{url: string, routeKey: string}>} [opts.refreshLongform]  要重抓的长文
    *   正文。带着 `routeKey` 一起传，**不在这里按 URL 形状猜**：日记的网址有
-   *   `/note/` 与 `/topic/` 两种形状，猜错会把它排进影评那条路线。
+   *   `/note/` 与 `/topic/` 两种形状，猜错会把它排进影评或小组话题路线。
    * @param {string[]} [opts.knownAssetUrlKeys]  已经抓到的图（用户上传的、封面）。
    *   **这一项与「重抓」那个选项无关，两种增量下都该传。** 图片地址是内容地址：
    *   同一个地址下的字节不会变，改了图会得到一个新地址。所以重抓一张已有的图
@@ -363,7 +363,7 @@ export class CrawlRunner {
       this._emit({ type: 'subjects_skipped', count: knownSubjectUrlKeys.length });
     }
 
-    // **长文正文同理，但理由不同。** 作品详情页是「增量对它不成立」，日记与影评是
+    // **长文正文同理，但理由不同。** 作品详情页是「增量对它不成立」，日记、影评与发起的讨论正文是
     // 「它可编辑，所以重抓有意义——但那是用户明选的事，不是每趟都做」。
     // 默认跳过是这次改的：原来每趟都重抓，4 篇时无所谓，200 篇就是每趟 200 个请求。
     if (knownLongformUrlKeys?.length) {
@@ -425,13 +425,14 @@ export class CrawlRunner {
 
     // 「重抓长文正文」：与作品详情页同一个理由，**必须直接排队**。
     //
-    // 日记正文由 `note.list` 派生，而增量模式下列表只抓到下界为止——能派生出来的
-    // 只有下界以上那几篇。只做「不跳过已有的」，这个选项就只重抓了最近写的几篇，
+    // 日记正文由 `note.list` 派生，小组话题正文由 `group.publish` 派生，
+    // 而增量模式下列表只抓到下界为止——能派生出来的只有最新写的几篇。
+    // 只做「不跳过已有的」，这个选项就只重抓了最近写的几篇，
     // 而它承诺的是全部。**说到做不到比没有这个选项更糟。**
     //
     // `routeKey` 是**跟着 URL 一起传进来的**（取自旧档案的索引行），不在这里按
     // URL 形状猜：日记的网址有 `/note/` 和 `/topic/` 两种形状，猜错会把一篇日记
-    // 排进影评那条路线——判定描述、优先级、门控全不一样，而且不会报错。
+    // 排进影评或小组话题路线——判定描述、优先级、门控全不一样，而且不会报错。
     if (refreshLongform?.length) {
       let queued = 0;
       for (const { url, routeKey } of refreshLongform) {

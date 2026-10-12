@@ -28,6 +28,14 @@ import { SessionGuard } from '../src/crawl/session.js';
 import { routeName } from '../src/ui/route-names.js';
 import { cursorFromUrl } from '../src/crawl/runner.js';
 import { RouteState } from '../src/crawl/route-state.js';
+import {
+  emptyKnownCaptures,
+  addKnownCaptures,
+  knownCaptureLists,
+  LONGFORM_ROUTES,
+} from '../src/crawl/known-captures.js';
+import { Frontier } from '../src/crawl/frontier.js';
+import { urlKey } from '../src/core/urlkey.js';
 
 const fixture = (n) => readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf-8');
 
@@ -390,6 +398,87 @@ describe('发起的讨论多页翻页与生命周期（group.publish）', () => 
     assert.ok(topicEvent);
     assert.equal(topicEvent.count, 44);
     assert.equal(topicEvent.routeKey, 'group.item');
+  });
+});
+
+describe('小组话题正文（group.item）跳过与重抓生命周期', () => {
+  const routes = buildRoutes({ username: 'BlocksTower' });
+  const publishRoute = routes.find((r) => r.key === 'group.publish');
+  const itemRoute = routes.find((r) => r.key === 'group.item');
+
+  test('group.item 被 LONGFORM_ROUTES 识别为可编辑长文', () => {
+    assert.ok(LONGFORM_ROUTES.has('group.item'));
+  });
+
+  test('addKnownCaptures 从索引行识别 group.item 并归入 longform 名单', () => {
+    const acc = emptyKnownCaptures();
+    addKnownCaptures(acc, [
+      { route_key: 'group.item', url_key: 'https://www.douban.com/group/topic/475801232/', verdict: 'ok' },
+      { route_key: 'group.item', url_key: 'https://www.douban.com/group/topic/110871731/', verdict: 'ok' },
+    ]);
+    const lists = knownCaptureLists(acc);
+    assert.equal(lists.longform.length, 2);
+    assert.deepEqual(lists.longform.map((x) => x.routeKey), ['group.item', 'group.item']);
+    assert.deepEqual(lists.longform.map((x) => x.url), [
+      'https://www.douban.com/group/topic/475801232/',
+      'https://www.douban.com/group/topic/110871731/',
+    ]);
+  });
+
+  test('普通增量模式：历史 group.item 进 knownLongformUrlKeys 后在派生时被跳过', () => {
+    const frontier = new Frontier();
+    // 模拟上一份档案中已抓过其中 2 个话题（其中 475801232 在夹具第一页中）
+    const knownKeys = [
+      urlKey('https://www.douban.com/group/topic/475801232/'),
+      urlKey('https://www.douban.com/group/topic/475801233/'),
+    ];
+    frontier.markCaptured(knownKeys);
+
+    const enqueued = [];
+    const loop = {
+      _frontier: {
+        enqueue: (item) => {
+          const ok = frontier.enqueue(item);
+          if (ok) enqueued.push(item);
+          return ok;
+        },
+      },
+      _routes: new Map([[publishRoute.key, publishRoute], [itemRoute.key, itemRoute]]),
+      _emit: () => {},
+      _enqueueLongformItems: CrawlLoop.prototype._enqueueLongformItems,
+    };
+
+    loop._enqueueLongformItems(
+      { routeKey: 'group.publish', url: 'https://www.douban.com/group/people/BlocksTower/publish?start=0' },
+      { bodyText: GROUP_PUBLISH_PAGINATED },
+      'cap-pub-1',
+    );
+
+    // 夹具中总共有 44 个话题，其中 475801232 已在跳过名单中，因此实际入队数量为 43
+    assert.equal(enqueued.length, 43);
+    assert.ok(!enqueued.some((e) => e.url === 'https://www.douban.com/group/topic/475801232/'));
+  });
+
+  test('重抓模式：通过 refreshLongform 将已存 group.item 预先入队重新抓取', () => {
+    const frontier = new Frontier();
+    const refreshList = [
+      { url: 'https://www.douban.com/group/topic/475801232/', routeKey: 'group.item' },
+    ];
+    for (const { url, routeKey } of refreshList) {
+      frontier.enqueue({
+        url,
+        urlKey: urlKey(url),
+        routeKey,
+        intent: itemRoute.intent,
+        enqueuedBy: null,
+        ordered: false,
+        priority: itemRoute.priority,
+        gatedBy: null,
+      });
+    }
+    assert.equal(frontier._items.length, 1);
+    assert.equal(frontier._items[0].url, 'https://www.douban.com/group/topic/475801232/');
+    assert.equal(frontier._items[0].routeKey, 'group.item');
   });
 });
 

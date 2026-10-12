@@ -90,12 +90,12 @@ export function eventNote(e) {
     return `已将 ${e.count} 个作品详情页加入队列，将重新抓取。`;
   }
   if (e.type === 'longform_skipped') {
-    return `已跳过 ${e.count} 篇此前抓取过的日记与影评正文。`
+    return `已跳过 ${e.count} 篇此前抓取过的日记、影评与发起的讨论正文。`
       + '如需获取最新修改，请在开抓前选择'
       + '「增量抓取，并重新抓取可以编辑的内容」。';
   }
   if (e.type === 'longform_refresh') {
-    return `已将 ${e.count} 篇日记与影评正文加入队列，将重新抓取。`;
+    return `已将 ${e.count} 篇日记、影评与发起的讨论正文加入队列，将重新抓取。`;
   }
   if (e.type === 'assets_skipped') {
     // **要说明它为什么不是一个选项**，否则下一个问题必然是「那我怎么重抓图」。
