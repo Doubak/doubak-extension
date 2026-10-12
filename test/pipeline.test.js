@@ -202,19 +202,26 @@ describe('解析整个库', () => {
 });
 
 describe('三种产出', () => {
-  test('canonical：五个 ndjson，名字与命令行那边认的一致', async () => {
+  test('canonical：八个 ndjson，名字与命令行那边认的一致', async () => {
     const { data } = await run([await writeBundle()]);
     const { files, report } = await buildCanonical(data);
     const names = files.map((f) => f.name);
-    // 名字对不上就白导了 —— 下游 `loadCanonical` 按这五个名字找。
-    for (const n of ['marks', 'subjects', 'broadcasts', 'longform', 'doulists']) {
+    // 名字对不上就白导了 —— 下游 `loadCanonical` 按这八个名字找。
+    for (const n of ['marks', 'subjects', 'broadcasts', 'longform', 'doulists', 'albums', 'group_topics', 'group_joins']) {
       assert.ok(names.includes(`${n}.ndjson`), `少了 ${n}.ndjson`);
     }
     assert.equal(report.marks, 2);
 
-    // 空的那几类也要有文件：「没有豆列」与「这个版本不解析豆列」是两件事。
-    const doulists = files.find((f) => f.name === 'doulists.ndjson');
-    assert.ok(doulists, 'doulists.ndjson 不能因为是空的就不写');
+    // 空的那几类也要有文件：「没有豆列/相册/小组」与「这个版本不解析它们」是两件事。
+    for (const n of ['doulists', 'albums', 'group_topics', 'group_joins']) {
+      const f = files.find((item) => item.name === `${n}.ndjson`);
+      assert.ok(f, `${n}.ndjson 不能因为是空的就不写`);
+    }
+
+    const readme = dec.decode(files.find((f) => f.name === 'README.txt').bytes);
+    assert.match(readme, /albums\.ndjson/);
+    assert.match(readme, /group_topics\.ndjson/);
+    assert.match(readme, /group_joins\.ndjson/);
   });
 
   test('canonical 的每一行都是能读回来的 JSON', async () => {
@@ -300,6 +307,71 @@ describe('三种产出', () => {
     assert.match(text, /希望是好事/, '短评没进页面');
     // 转义之后的引号仍然可读，不能被吃掉。
     assert.match(text, /人间至善/);
+  });
+
+  test('Markdown：相册与小组页面正常产出，且相册照片、话题图片被收集到 wanted', async () => {
+    const { data: baseData, sources } = await run([await writeBundle()]);
+    const data = withCanonicalShape({
+      ...baseData,
+      albums: [{
+        upstream_id: 'a100',
+        account: ACCOUNT,
+        revisions: [{
+          fields: {
+            title: '我的相册',
+            desc: '相册描述',
+            privacy: 'public',
+            photos: [{
+              id: 'p1',
+              image_url: 'https://img3.doubanio.com/view/photo/large/public/p100.jpg',
+              thumbnail_url: 'https://img3.doubanio.com/view/photo/m/public/p100.jpg',
+            }],
+          },
+        }],
+      }],
+      groupTopics: [{
+        upstream_id: 't200',
+        account: ACCOUNT,
+        revisions: [{
+          fields: {
+            title: '讨论话题',
+            group_id: 'g300',
+            group_name: '测试小组',
+            published_at: '2026-08-01 12:00:00',
+            body: '话题正文内嵌图片 https://img9.doubanio.com/view/group_topic/l/public/p200.jpg',
+            images: [{ src: 'https://img9.doubanio.com/view/group_topic/l/public/p201.jpg' }],
+          },
+        }],
+      }],
+      groupJoins: [{
+        upstream_id: 'g300',
+        account: ACCOUNT,
+        revisions: [{
+          fields: {
+            name: '测试小组',
+            icon_url: 'https://img1.doubanio.com/view/group/sqxs/public/g300.jpg',
+          },
+        }],
+      }],
+    });
+
+    const { files, report } = await buildMarkdown(data, { sources, write: async () => {} });
+    const names = files.map((f) => f.name);
+
+    assert.ok(names.includes('content/album/_index.md'), '相册索引页应该存在');
+    assert.ok(names.some((n) => n.startsWith('content/album/')), '相册详情页应该存在');
+    assert.ok(names.includes('content/group/t200.md'), '小组话题页应该存在');
+    assert.ok(names.includes('content/group/joins.md'), '加入的小组页面应该存在');
+
+    assert.equal(report.albums, 1);
+    assert.equal(report.groupTopics, 1);
+    assert.equal(report.groupJoins, 1);
+
+    // 未在 sources 里捕获的图片应进入 remote
+    assert.ok(report.remote.includes('https://img3.doubanio.com/view/photo/large/public/p100.jpg'));
+    assert.ok(report.remote.includes('https://img9.doubanio.com/view/group_topic/l/public/p200.jpg'));
+    assert.ok(report.remote.includes('https://img9.doubanio.com/view/group_topic/l/public/p201.jpg'));
+    assert.ok(report.remote.includes('https://img1.doubanio.com/view/group/sqxs/public/g300.jpg'));
   });
 
   test('三种产出可以从同一次解析出，不用重解析', async () => {
@@ -390,5 +462,17 @@ describe('canonical 的形状：两个宿主，一份实现', () => {
       ...raw([]), doulists: [{ account: { user_id: '1', username: 'x' } }],
     });
     assert.equal(out.account.username, 'x');
+  });
+
+  test('没有标记与豆列时 account 退到相册或小组上 —— 只有相册或小组的档案也是档案', () => {
+    const fromAlbum = withCanonicalShape({
+      ...raw([]), albums: [{ account: { user_id: '1', username: 'album-user' } }],
+    });
+    assert.equal(fromAlbum.account.username, 'album-user');
+
+    const fromGroup = withCanonicalShape({
+      ...raw([]), group_topics: [{ account: { user_id: '2', username: 'group-user' } }],
+    });
+    assert.equal(fromGroup.account.username, 'group-user');
   });
 });

@@ -6,7 +6,7 @@
  *
  * ## 三种产出的关系
  *
- *     canonical   —— 上游的那份结构化数据，五个 ndjson。喂给命令行的下游工具。
+ *     canonical   —— 上游的那份结构化数据，八个 ndjson。喂给命令行的下游工具。
  *     neodb       —— canonical → NeoDB 的 NDJSON 归档 zip，直接上传。
  *     markdown    —— canonical → 投影 → 一棵 Markdown 树 + 图片，交给任何 SSG。
  *
@@ -59,7 +59,7 @@ export async function deflateRaw(bytes) {
 }
 
 /**
- * canonical 五件套，外加一份说明。
+ * canonical 八件套，外加一份说明。
  *
  * @param {object} data
  * @returns {Promise<{files: {name: string, bytes: Uint8Array}[], report: object}>}
@@ -75,6 +75,9 @@ export async function buildCanonical(data) {
       broadcasts: data.broadcasts.length,
       longform: data.longform.length,
       doulists: data.doulists.length,
+      albums: (data.albums ?? []).length,
+      groupTopics: (data.groupTopics ?? []).length,
+      groupJoins: (data.groupJoins ?? []).length,
       revisions: data.marks.reduce((n, m) => n + (m.revisions?.length ?? 0), 0),
     },
   };
@@ -124,8 +127,8 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
   // 一起写进导出的 Markdown 树，而那正是「一条规则只在一个宿主上生效」的老毛病。
   const p = project(withoutPrivate(data, { includePrivate }));
 
-  // 想要哪些图：封面、正文内嵌的、广播附图。**广播附图是用户自己上传的**，
-  // 比封面更不可替代——封面豆瓣还有一份，这些没有第二处。
+  // 想要哪些图：封面、正文内嵌的、广播附图、相册照片、小组话题插图与图标。
+  // **广播附图与相册照片是用户自己上传的**，比封面更不可替代——封面豆瓣还有一份，这些没有第二处。
   const wanted = new Set();
   for (const m of p.marks) if (m.coverUrl) wanted.add(m.coverUrl);
   for (const r of p.longform) {
@@ -134,6 +137,24 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
     }
   }
   for (const b of p.broadcasts) for (const u of b.images) wanted.add(u);
+  for (const a of p.albums ?? []) {
+    for (const ph of a.photos ?? []) {
+      if (ph.imageUrl) wanted.add(ph.imageUrl);
+      if (ph.thumbnailUrl) wanted.add(ph.thumbnailUrl);
+    }
+  }
+  for (const t of p.groupTopics ?? []) {
+    for (const m of (t.body ?? '').matchAll(/https:\/\/[a-z0-9.]*doubanio\.com\/[^\s"'<>)）]+/g)) {
+      wanted.add(m[0]);
+    }
+    for (const img of t.images ?? []) {
+      if (img.src) wanted.add(img.src);
+      if (img.url) wanted.add(img.url);
+    }
+  }
+  for (const j of p.groupJoins ?? []) {
+    if (j.iconUrl) wanted.add(j.iconUrl);
+  }
 
   const img = await exportImages({
     index: indexImages(sources),
@@ -166,7 +187,7 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
 
 /** canonical 目录里那份说明。写给几年后打开这个文件夹的人。 */
 function canonicalReadme(data) {
-  const n = (a) => String(a.length);
+  const n = (a) => String((a ?? []).length);
   return [
     '豆备（Doubak）canonical 数据',
     '',
@@ -174,11 +195,14 @@ function canonicalReadme(data) {
     '它是**派生数据**：删掉也没关系，拿档案重新解析一遍就有。真正不可替代的是',
     '那些 WARC 档案本身。',
     '',
-    `  marks.ndjson       ${n(data.marks)} 条标记（看过/在看/想看，含评分、短评、标签）`,
-    `  subjects.ndjson    ${n(data.subjects)} 个作品`,
-    `  broadcasts.ndjson  ${n(data.broadcasts)} 条广播`,
-    `  longform.ndjson    ${n(data.longform)} 篇日记与评论`,
-    `  doulists.ndjson    ${n(data.doulists)} 份豆列`,
+    `  marks.ndjson         ${n(data.marks)} 条标记（看过/在看/想看，含评分、短评、标签）`,
+    `  subjects.ndjson      ${n(data.subjects)} 个作品`,
+    `  broadcasts.ndjson    ${n(data.broadcasts)} 条广播`,
+    `  longform.ndjson      ${n(data.longform)} 篇日记与评论`,
+    `  doulists.ndjson      ${n(data.doulists)} 份豆列`,
+    `  albums.ndjson        ${n(data.albums)} 个相册`,
+    `  group_topics.ndjson  ${n(data.groupTopics ?? data.group_topics)} 篇小组讨论`,
+    `  group_joins.ndjson   ${n(data.groupJoins ?? data.group_joins)} 个加入的小组`,
     '',
     '每条记录带着 revisions —— 同一件事被观测到几次就有几条，各自带摘要与',
     '指回 WARC 的 capture_ids。**只比较同一个 parser_version 的修订**，',

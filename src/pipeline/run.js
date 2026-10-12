@@ -123,9 +123,9 @@ export function withCanonicalShape(out) {
 }
 
 /**
- * canonical 的五个 ndjson 文件。
+ * canonical 的八个 ndjson 文件。
  *
- * 名字与 `loadCanonical` 认的那五个一致——导出的这一份要能直接喂给命令行的解析器
+ * 名字与 `loadCanonical` 认的那八个一致——导出的这一份要能直接喂给命令行的解析器
  * 下游（导出适配器、站点生成器），名字对不上就白导了。
  *
  * **空的那几类也写文件。** 「没有豆列」与「这个版本还不解析豆列」是两件事，
@@ -135,12 +135,15 @@ export function withCanonicalShape(out) {
  * @returns {{name: string, text: string}[]}
  */
 export function canonicalFiles(data) {
-  const nd = (rows) => `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`;
+  const nd = (rows) => `${(rows ?? []).map((r) => JSON.stringify(r)).join('\n')}\n`;
   return [
     { name: 'marks.ndjson', text: nd(data.marks) },
     { name: 'subjects.ndjson', text: nd(data.subjects) },
     { name: 'broadcasts.ndjson', text: nd(data.broadcasts) },
     { name: 'longform.ndjson', text: nd(data.longform) },
     { name: 'doulists.ndjson', text: nd(data.doulists) },
+    { name: 'albums.ndjson', text: nd(data.albums) },
+    { name: 'group_topics.ndjson', text: nd(data.groupTopics ?? data.group_topics) },
+    { name: 'group_joins.ndjson', text: nd(data.groupJoins ?? data.group_joins) },
   ];
 }

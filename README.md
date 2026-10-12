@@ -251,7 +251,7 @@ node tools/package.mjs --firefox  # dist/doubak-<版本>-firefox.zip
 
 | 产出 | 格式说明 | 主要用途 |
 |---|---|---|
-| 结构化数据（canonical） | 五个 NDJSON 文件，每行单条 JSON | 使用 `jq` 等工具直接查询；同时作为后续转换流程的标准输入 |
+| 结构化数据（canonical） | 八个 NDJSON 文件，每行单条 JSON | 使用 `jq` 等工具直接查询；同时作为后续转换流程的标准输入 |
 | NeoDB 导入包 | 标准 ZIP 压缩包 | 上传至 NeoDB「设置 → 数据 → 导入 NeoDB 备份」 |
 | Markdown 静态站点 | 包含 Front Matter 的 Markdown 目录树 + 本地图片资源 + 客户端搜索索引 | 交由 Hugo / Astro / Eleventy / Jekyll 等静态站点生成器渲染发布 |
 

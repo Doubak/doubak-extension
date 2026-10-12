@@ -307,15 +307,18 @@
         <div class="format-card" id="format-canonical" role="tabpanel"
              aria-labelledby="subtab-canonical" hidden>
           <p class="muted small">
-            五个 NDJSON 文件（这套格式叫 <b>canonical</b>），每行一条 JSON，<code>jq</code> 直接能读。
+            八个 NDJSON 文件（这套格式叫 <b>canonical</b>），每行一条 JSON，<code>jq</code> 直接能读。
             这是所有下游工具的输入，也是十年后拿着这个文件夹的人最容易读懂的那一份。
           </p>
           <pre class="tree">doubak-canonical/
-├─ marks.ndjson       标记（看过/在看/想看，含评分短评标签）
-├─ subjects.ndjson    作品
-├─ broadcasts.ndjson  广播
-├─ longform.ndjson    日记与影评书评
-├─ doulists.ndjson    豆列
+├─ marks.ndjson        标记（看过/在看/想看，含评分短评标签）
+├─ subjects.ndjson     作品
+├─ broadcasts.ndjson   广播
+├─ longform.ndjson     日记与影评书评
+├─ doulists.ndjson     豆列
+├─ albums.ndjson       相册
+├─ group_topics.ndjson 小组话题
+├─ group_joins.ndjson  加入的小组
 └─ README.txt</pre>
           <div class="btn-row">
             <button class="act" id="export-canonical">导出…</button>
@@ -470,7 +473,7 @@
       <ol class="steps" id="downstream-steps">
         <li>
           <b>解析：档案 → 结构化数据。</b>
-          产出五个 NDJSON 文件（标记、作品、广播、长文、豆列），可直接用
+          产出八个 NDJSON 文件（标记、作品、广播、长文、豆列、相册、小组话题、加入小组），可直接用
           <code>jq</code> 查询。该步骤是纯函数且不联网，如结果有误，重新运行即可。
         </li>
         <li>
@@ -576,7 +579,7 @@
           <tr><td><b>导出 · 导到 NeoDB</b></td><td>产出 <code>doubak-neodb/</code>：一个可直接上传的 zip，
             外加几份说明用的旁注（旁注<b>不要</b>上传）。含标记、评分、短评、标签、长文、豆列，
             以及由广播还原的<b>状态变化史</b>——那段历史豆瓣自己已经不显示了。</td></tr>
-          <tr><td><b>导出 · 结构化数据</b></td><td>产出 <code>doubak-canonical/</code>：五个 NDJSON，
+          <tr><td><b>导出 · 结构化数据</b></td><td>产出 <code>doubak-canonical/</code>：八个 NDJSON，
             每行一条 JSON。这是所有下游工具的输入，用 <code>jq</code> 可直接查询。</td></tr>
           <tr><td><b>导出 · Markdown 站点</b></td><td>产出 <code>doubak-markdown/</code>：
             <code>content/</code> 是带 YAML 头的 Markdown，<code>static/</code> 是图片与搜索索引。
