@@ -171,13 +171,17 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
       const acc = s.manifest?.account;
       if (acc?.nickname || acc?.username || acc?.user_id) return acc;
     }
-    for (const key of ['marks', 'longform', 'broadcasts', 'albums', 'groupTopics', 'group_topics', 'groupJoins', 'group_joins', 'doulists']) {
+    if (data?.account) return data.account;
+    for (const key of ['account', 'profile', 'marks', 'longform', 'broadcasts', 'albums', 'groupTopics', 'group_topics', 'groupJoins', 'group_joins', 'doulists']) {
       const target = data?.[key] ?? p?.[key];
       if (Array.isArray(target)) {
         for (const item of target) {
           const acc = item?.account;
           if (acc?.nickname || acc?.username || (acc?.user_id && acc.user_id !== 'unknown')) return acc;
         }
+      } else if (target && typeof target === 'object') {
+        const acc = target?.account ?? target;
+        if (acc?.nickname || acc?.username || (acc?.user_id && acc.user_id !== 'unknown')) return acc;
       }
     }
     return null;
