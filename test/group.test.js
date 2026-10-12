@@ -480,5 +480,64 @@ describe('小组话题正文（group.item）跳过与重抓生命周期', () => 
     assert.equal(frontier._items[0].url, 'https://www.douban.com/group/topic/475801232/');
     assert.equal(frontier._items[0].routeKey, 'group.item');
   });
+
+  test('重抓模式下重新抓取 group.item 时，正文中已抓取的内嵌图片被去重跳过', () => {
+    const frontier = new Frontier();
+    const imageUrl = 'https://img3.doubanio.com/view/group_topic/l/public/p742323977.jpg';
+    frontier.markCaptured([urlKey(imageUrl)]);
+
+    const enqueued = [];
+    const loop = {
+      _frontier: {
+        enqueue: (item) => {
+          const ok = frontier.enqueue(item);
+          if (ok) enqueued.push(item);
+          return ok;
+        },
+      },
+      _routes: new Map([
+        ['asset.longform_embed', { priority: 20, intent: 'asset.image.content' }],
+      ]),
+      _emit: () => {},
+      _enqueueEmbeddedImages: CrawlLoop.prototype._enqueueEmbeddedImages,
+    };
+
+    loop._enqueueEmbeddedImages(
+      { routeKey: 'group.item', url: 'https://www.douban.com/group/topic/258053730/' },
+      { bodyText: GROUP_TOPIC },
+      'cap-topic-1',
+    );
+
+    assert.equal(enqueued.length, 0, '已抓取过的正文插图不应重复入队');
+  });
+
+  test('重抓模式下若话题包含新配图，新配图正常入队', () => {
+    const frontier = new Frontier();
+    const enqueued = [];
+    const loop = {
+      _frontier: {
+        enqueue: (item) => {
+          const ok = frontier.enqueue(item);
+          if (ok) enqueued.push(item);
+          return ok;
+        },
+      },
+      _routes: new Map([
+        ['asset.longform_embed', { priority: 20, intent: 'asset.image.content' }],
+      ]),
+      _emit: () => {},
+      _enqueueEmbeddedImages: CrawlLoop.prototype._enqueueEmbeddedImages,
+    };
+
+    loop._enqueueEmbeddedImages(
+      { routeKey: 'group.item', url: 'https://www.douban.com/group/topic/258053730/' },
+      { bodyText: GROUP_TOPIC },
+      'cap-topic-1',
+    );
+
+    assert.equal(enqueued.length, 1, '新配图应正常排入队列');
+    assert.equal(enqueued[0].routeKey, 'asset.longform_embed');
+    assert.equal(enqueued[0].url, 'https://img3.doubanio.com/view/group_topic/l/public/p742323977.jpg');
+  });
 });
 

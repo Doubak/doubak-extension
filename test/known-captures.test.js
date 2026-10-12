@@ -74,6 +74,7 @@ describe('失败的必须还能重试', () => {
       const r = lists([
         row(SUBJECT_ROUTE, 'https://movie.douban.com/subject/1001/', { verdict }),
         row('note.item', 'https://www.douban.com/note/1/', { verdict }),
+        row('group.item', 'https://www.douban.com/group/topic/1/', { verdict }),
         row('asset.status_photo', PHOTO, { verdict }),
       ]);
       assert.deepEqual(r, { subjects: [], longform: [], assets: [] });

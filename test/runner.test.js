@@ -2157,6 +2157,37 @@ describe('增量：下界真的省下了重抓', () => {
     assert.deepEqual(seen, [], '这一篇抓过了，增量下不该再抓');
   });
 
+  test('增量模式下，已抓过的小组讨论正文（group.item）在列表派生时被跳过', async () => {
+    const seen = [];
+    const TOPIC = 'https://www.douban.com/group/topic/258053730/';
+    const groupPublishWith = (topicUrl) => `<html><body>${NAV}
+<div class="profile-nav"></div>
+<table class="olt">
+  <tr><td class="title"><a href="${topicUrl}">测试话题</a></td></tr>
+</table>
+<span class="thispage" data-total-page="1">1</span>
+</body></html>`;
+
+    const { runner } = harness((url) => {
+      if (url.endsWith('/people/example/')) return PROFILE;
+      if (url.includes('/group/topic/')) {
+        seen.push(url);
+        return `<html><body>${NAV}<div id="topic-content"><div class="topic-doc">内容</div></div></body></html>`;
+      }
+      if (url.includes('/publish')) return groupPublishWith(TOPIC);
+      return bcPage(0);
+    }, { batchSize: 50 });
+
+    await runner.start({
+      username: 'example', mediums: [], includeCatalog: false, bypassGates: true,
+      onlyRoutes: ['group.publish', 'group.item'],
+      knownLongformUrlKeys: [TOPIC],
+    });
+    for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
+
+    assert.deepEqual(seen, [], '该话题已抓过，增量下不该再抓');
+  });
+
   test('不传就照旧抓 —— 反面判据，证明这一篇本来是派生得出来的', async () => {
     // 没有这一条，上面那条在「列表页压根没派生出正文页」时也会绿——而那正是它的
     // 第一版发生的事。
@@ -2178,7 +2209,7 @@ describe('增量：下界真的省下了重抓', () => {
   });
 
   test('「重抓可以编辑的内容」要把长文**直接排进队** —— 列表只抓到下界为止', async () => {
-    // 与作品详情页同一个理由：日记正文由列表派生，而增量下列表只抓到下界为止，
+    // 与作品详情页同一个理由：日记与话题正文由列表派生，而增量下列表只抓到下界为止，
     // 能派生出来的只有最近写的那几篇。只做「不跳过已有的」，这个选项就只重抓了
     // 几篇，而界面上写的是全部。**说到做不到比没有这个选项更糟。**
     const seen = [];
@@ -2186,7 +2217,7 @@ describe('增量：下界真的省下了重抓', () => {
       if (url.endsWith('/people/example/')) return PROFILE;
       if (url.includes('/note/') || url.includes('/topic/') || url.includes('/review/')) {
         seen.push(url);
-        return `<html><body>${NAV}<div id="link-report"></div></body></html>`;
+        return `<html><body>${NAV}<div id="link-report"><div id="topic-content"><div class="topic-doc"></div></div></div></body></html>`;
       }
       return bcPage(0);
     }, { batchSize: 50 });
@@ -2198,11 +2229,12 @@ describe('增量：下界真的省下了重抓', () => {
         // **`/topic/` 形状的也是日记。** 实测一个真实账号 3 篇日记里就有一篇是它。
         { url: 'https://www.douban.com/topic/496284296/', routeKey: 'note.item' },
         { url: 'https://www.douban.com/review/8381069/', routeKey: 'review.item' },
+        { url: 'https://www.douban.com/group/topic/258053730/', routeKey: 'group.item' },
       ],
     });
     for (let i = 0; i < 20; i++) if ((await runner.runBatch()).done) break;
 
-    assert.equal(seen.length, 3, '三篇都该重抓，一篇都不许靠列表派生');
+    assert.equal(seen.length, 4, '四篇都该重抓（日记、影评与小组话题），一篇都不许靠列表派生');
   });
 
   test('重抓的长文排回**索引行里写的**那条路线，不按 URL 形状猜', async () => {
@@ -2217,12 +2249,14 @@ describe('增量：下界真的省下了重抓', () => {
       refreshLongform: [
         { url: 'https://www.douban.com/topic/496284296/', routeKey: 'note.item' },
         { url: 'https://www.douban.com/review/8381069/', routeKey: 'review.item' },
+        { url: 'https://www.douban.com/group/topic/258053730/', routeKey: 'group.item' },
       ],
     });
     const q = runner._run.frontier.snapshot();
     const byUrl = Object.fromEntries(q.map((x) => [x.url, x.routeKey]));
     assert.equal(byUrl['https://www.douban.com/topic/496284296/'], 'note.item');
     assert.equal(byUrl['https://www.douban.com/review/8381069/'], 'review.item');
+    assert.equal(byUrl['https://www.douban.com/group/topic/258053730/'], 'group.item');
   });
 
   test('这次不抓的路线，重抓名单里的也不排 —— 排了也没有判定描述', async () => {
