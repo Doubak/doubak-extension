@@ -102,7 +102,7 @@ let account = null;
  *   `groups` 按档案数从多到少排；`unattributed` 是认不出账号的那些。
  */
 export function groupByAccount(entries) {
-  /** @type {Map<string, {userId: string, username: string|null, entries: object[]}>} */
+  /** @type {Map<string, {userId: string, username: string|null, nickname: string|null, entries: object[]}>} */
   const by = new Map();
   const unattributed = [];
   for (const e of entries) {
@@ -112,7 +112,20 @@ export function groupByAccount(entries) {
     if (!id) { unattributed.push(e); continue; }
     const key = String(id);
     if (!by.has(key)) {
-      by.set(key, { userId: key, username: e.manifest?.account?.username ?? null, entries: [] });
+      by.set(key, {
+        userId: key,
+        username: e.manifest?.account?.username ?? null,
+        nickname: e.manifest?.account?.nickname ?? null,
+        entries: [],
+      });
+    } else {
+      const g = by.get(key);
+      if (!g.nickname && e.manifest?.account?.nickname) {
+        g.nickname = e.manifest.account.nickname;
+      }
+      if (!g.username && e.manifest?.account?.username) {
+        g.username = e.manifest.account.username;
+      }
     }
     by.get(key).entries.push(e);
   }
@@ -622,7 +635,10 @@ export async function loadFormats() {
   for (const g of groups) {
     const b = document.createElement('button');
     b.className = 'act';
-    b.textContent = `${g.username ?? g.userId}（${g.entries.length} 份）`;
+    const name = g.nickname
+      ? `${g.nickname} (${g.username ?? g.userId})`
+      : (g.username ?? g.userId);
+    b.textContent = `${name}（${g.entries.length} 份）`;
     b.setAttribute('aria-selected', String(g.userId === account));
     b.addEventListener('click', () => {
       if (running) return;

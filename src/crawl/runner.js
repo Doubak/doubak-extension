@@ -328,6 +328,7 @@ export class CrawlRunner {
       account: {
         user_id: account.userId,
         username: account.username ?? username,
+        nickname: account.displayName ?? null,
         profile_url: profileUrl,
       },
       producer: {
@@ -652,7 +653,11 @@ export class CrawlRunner {
     const writer = new BundleWriter({
       store,
       bundleId: pointer.bundleId,
-      account: { user_id: session.account.userId, username: session.account.username ?? username },
+      account: {
+        user_id: session.account.userId,
+        username: session.account.username ?? username,
+        nickname: session.account.displayName ?? null,
+      },
       // 恢复路径以前一个字都没传 producer，全靠 BundleWriter 的默认值——也就是说
       // **崩溃恢复之后写下的每个段，`software:` 头都来自那个写死的 '0.0.1'**。
       // 一场几小时的抓取必然跨越多次 worker 死亡，所以这条路径才是常态，不是例外。

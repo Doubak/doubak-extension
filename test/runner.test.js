@@ -315,6 +315,9 @@ describe('收尾', () => {
     assert.ok(manifest.crawl_state.length > 0, '必须有连续性证明');
     assert.ok(manifest.coverage.length > 0, '必须有覆盖率观测');
     assert.equal(manifest.status, 'complete');
+    assert.equal(manifest.account.nickname, '示例');
+    assert.equal(manifest.account.user_id, '82160871');
+    assert.equal(manifest.account.username, 'example');
     assert.ok(await dirs.get(dir).exists('manifest.json'));
   });
 

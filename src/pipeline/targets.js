@@ -166,7 +166,28 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
     onProgress: (done, total) => onImageProgress?.({ done, total }),
   });
 
-  const built = buildPages(p, { images: img.paths, coverBySubject: img.bySubject });
+  const resolveAccount = () => {
+    for (const s of sources ?? []) {
+      const acc = s.manifest?.account;
+      if (acc?.nickname || acc?.username || acc?.user_id) return acc;
+    }
+    for (const key of ['marks', 'longform', 'broadcasts', 'albums', 'groupTopics', 'group_topics', 'groupJoins', 'group_joins', 'doulists']) {
+      const target = data?.[key] ?? p?.[key];
+      if (Array.isArray(target)) {
+        for (const item of target) {
+          const acc = item?.account;
+          if (acc?.nickname || acc?.username || (acc?.user_id && acc.user_id !== 'unknown')) return acc;
+        }
+      }
+    }
+    return null;
+  };
+
+  const account = resolveAccount();
+  const titleName = account?.nickname ?? account?.username ?? (account?.user_id && account.user_id !== 'unknown' ? account.user_id : null);
+  const siteTitle = titleName ? `${titleName}的豆瓣存档` : '我的豆瓣存档';
+
+  const built = buildPages(p, { images: img.paths, coverBySubject: img.bySubject, siteTitle });
 
   // 按作品 id 找到的不算缺，占位图也不算缺。判定在 image-index.js 里，与站点
   // 生成器同一份——一条永远存在的假告警会让真的那条也被忽略。

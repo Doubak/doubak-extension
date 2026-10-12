@@ -52,10 +52,11 @@ const MEDIUM_NAMES = {
  * @param {object} [opts]
  * @param {Record<string, string>} [opts.images]  图片 URL → 站内路径
  * @param {Record<string, string>} [opts.coverBySubject] 作品 id → 站内封面路径
+ * @param {string|null} [opts.siteTitle] 自定义或派生的站点标题（默认「我的豆瓣存档」）
  * @returns {{files: [string, string][], stats: object, remote: string[]}}
  *   `files` 是 [相对路径, 文本]；`remote` 是最后仍然指向 doubanio 的图。
  */
-export function buildPages(p, { images = {}, coverBySubject = {} } = {}) {
+export function buildPages(p, { images = {}, coverBySubject = {}, siteTitle = null } = {}) {
   const paths = images;
 
   const files = [];
@@ -178,7 +179,7 @@ export function buildPages(p, { images = {}, coverBySubject = {} } = {}) {
     }
   }
 
-  files.push(['content/_index.md', homePage(p, { covers, previewImages: paths })]);
+  files.push(['content/_index.md', homePage(p, { covers, previewImages: paths, siteTitle })]);
 
   // ── 搜索索引
   //
@@ -277,9 +278,9 @@ const EXCERPT = 80;
  * 有时之后。投影这一层没有资格复述一个可能已经过期的结论。
  *
  * @param {object} p 投影
- * @param {{covers?: Record<string, string>}} [opts] 作品 id → 本地封面路径
+ * @param {{covers?: Record<string, string>, previewImages?: Record<string, string>, siteTitle?: string|null}} [opts]
  */
-function homePage(p, { covers = {}, previewImages = {} } = {}) {
+function homePage(p, { covers = {}, previewImages = {}, siteTitle = null } = {}) {
   const groups = groupMarks(p.marks);
   const lines = [];
 
@@ -449,7 +450,7 @@ function homePage(p, { covers = {}, previewImages = {} } = {}) {
     );
   }
 
-  return frontMatter({ title: '我的豆瓣存档', douban_kind: 'index' }) + '\n' + lines.join('\n');
+  return frontMatter({ title: siteTitle || '我的豆瓣存档', douban_kind: 'index' }) + '\n' + lines.join('\n');
 }
 
 /**

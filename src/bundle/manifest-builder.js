@@ -184,7 +184,7 @@ export class ManifestBuilder {
    * @param {object} opts
    * @param {string} opts.bundleId
    * @param {string | null} opts.previousBundleId
-   * @param {{user_id: string, username?: string | null, profile_url?: string}} opts.account
+   * @param {{user_id: string, username?: string | null, nickname?: string | null, profile_url?: string}} opts.account
    * @param {{name: string, version: string, user_agent?: string, platform?: string}} opts.producer
    * @param {string} opts.timezoneAssumption
    * @param {string} opts.createdAt

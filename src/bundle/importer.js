@@ -64,6 +64,7 @@ const INDEX_RE = /^index-(\d{8}T\d{6}Z-[0-9a-f]{6})\.ndjson$/;
  * @property {boolean} hasManifest
  * @property {string | null} accountUserId
  * @property {string | null} accountUsername
+ * @property {string | null} accountNickname
  * @property {string | null} previousBundleId
  * @property {string | null} completedAt
  * @property {Array<Record<string, any>>} crawlState
@@ -93,6 +94,7 @@ export async function readBundleMeta(source, label) {
     hasManifest: false,
     accountUserId: null,
     accountUsername: null,
+    accountNickname: null,
     previousBundleId: null,
     completedAt: null,
     crawlState: [],
@@ -207,6 +209,7 @@ export async function readBundleMeta(source, label) {
   if (manifest) {
     meta.accountUserId = manifest.account?.user_id ?? null;
     meta.accountUsername = manifest.account?.username ?? null;
+    meta.accountNickname = manifest.account?.nickname ?? null;
     meta.previousBundleId = manifest.previous_bundle_id ?? null;
     meta.completedAt = manifest.completed_at ?? null;
     meta.crawlState = manifest.crawl_state ?? [];
@@ -391,9 +394,15 @@ export function planImport({
 
     // ── 账号。数字 ID 不同就是**别人的档案**。
     if (!allowOtherAccounts && isOtherAccount(meta, homeAccount)) {
+      const thisAcc = meta.accountNickname
+        ? `${meta.accountNickname} (${meta.accountUsername ?? meta.accountUserId})`
+        : (meta.accountUsername ?? meta.accountUserId);
+      const homeAcc = homeAccount.nickname
+        ? `${homeAccount.nickname} (${homeAccount.username ?? homeAccount.userId})`
+        : (homeAccount.username ?? homeAccount.userId);
       say(ACTIONS.OTHER_ACCOUNT,
-        `这一份是账号 ${meta.accountUsername ?? meta.accountUserId} 的，`
-        + `而这里已有的档案属于 ${homeAccount.username ?? homeAccount.userId}。`
+        `这一份是账号 ${thisAcc} 的，`
+        + `而这里已有的档案属于 ${homeAcc}。`
         + '两个账号的档案混在一起，解析器会拒绝整个目录（合过之后拆不开）。');
       continue;
     }
@@ -444,12 +453,19 @@ export function planImport({
  */
 function pickHomeAccount(existing, candidates) {
   const count = (rows) => {
-    /** @type {Map<string, {userId: string, username: string|null, n: number}>} */
+    /** @type {Map<string, {userId: string, username: string|null, nickname: string|null, n: number}>} */
     const m = new Map();
     for (const r of rows) {
       const id = r.accountUserId;
       if (!id) continue;
-      const cur = m.get(id) ?? { userId: id, username: r.accountUsername ?? null, n: 0 };
+      const cur = m.get(id) ?? {
+        userId: id,
+        username: r.accountUsername ?? null,
+        nickname: r.accountNickname ?? null,
+        n: 0,
+      };
+      if (!cur.nickname && r.accountNickname) cur.nickname = r.accountNickname;
+      if (!cur.username && r.accountUsername) cur.username = r.accountUsername;
       cur.n += 1;
       m.set(id, cur);
     }

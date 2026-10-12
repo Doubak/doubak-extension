@@ -85,6 +85,7 @@ async function readExisting() {
     files: d.files,
     accountUserId: d.manifest?.account?.user_id ?? null,
     accountUsername: d.manifest?.account?.username ?? null,
+    accountNickname: d.manifest?.account?.nickname ?? null,
   }));
 }
 

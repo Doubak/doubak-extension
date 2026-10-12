@@ -298,6 +298,18 @@ describe('三种产出', () => {
     assert.ok(Array.isArray(report.remote));
   });
 
+  test('Markdown：首页标题随账号昵称动态生成（<昵称>的豆瓣存档）', async () => {
+    const bundleWithNickname = await writeBundle({
+      account: { user_id: '82160871', username: 'mewcatcher', nickname: 'MewX' },
+    });
+    const { data, sources } = await run([bundleWithNickname]);
+    const { files } = await buildMarkdown(data, { sources, write: async () => {} });
+    const home = files.find((f) => f.name === 'content/_index.md');
+    assert.ok(home, '必须生成 content/_index.md');
+    const text = dec.decode(home.bytes);
+    assert.match(text, /title:\s*"?MewX的豆瓣存档"?/, '首页 front matter 必须是 <昵称>的豆瓣存档');
+  });
+
   test('Markdown：用户写的字被转义了，片名不会整个消失', async () => {
     // `From <May December>` 曾经在页面上只剩 `From` —— 而页面上一点痕迹都不留。
     const { data, sources } = await run([await writeBundle()]);

@@ -97,6 +97,24 @@ describe('账号身份抽取', () => {
     const empty = extractAccountHints('<html></html>');
     assert.deepEqual(empty, { userId: null, username: null, displayName: null });
   });
+
+  test('导航栏没有「...的账号」时，从个人主页的 #db-usr-profile 提取昵称', () => {
+    const html = `
+      <div id="db-global-nav"><a href="https://www.douban.com/people/mewcatcher/">我的主页</a></div>
+      <script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>
+      <div id="db-usr-profile" class="clearfix">
+        <div class="info">
+          <h1>
+            MewX
+          </h1>
+        </div>
+      </div>
+    `;
+    const h = extractAccountHints(html);
+    assert.equal(h.userId, '82160871');
+    assert.equal(h.username, 'mewcatcher');
+    assert.equal(h.displayName, 'MewX');
+  });
 });
 
 describe('preflight：开抓前的身份确认', () => {

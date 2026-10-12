@@ -42,6 +42,9 @@ const LOGGED_OUT = /"nav-login"|class="nav-login"/;
 /** 导航栏里的「<昵称>的账号」。 */
 const DISPLAY_NAME = /<span>([^<]{1,64}?)的账号<\/span>/;
 
+/** 个人主页顶部个人资料里的昵称（备选，当导航栏中没有「...的账号」或改版时）。 */
+const PROFILE_NAME = /id="db-usr-profile"[\s\S]*?<div class="info"[^>]*>[\s\S]*?<h1>\s*([^<\r\n]{1,64}?)\s*<\/h1>/;
+
 /** 导航栏/页面里指向个人主页的链接。`mine` 是 /mine/ 跳转位，不是用户名。 */
 const PEOPLE_LINK = /douban\.com\/people\/([A-Za-z0-9_-]+)\//g;
 
@@ -134,7 +137,16 @@ export function extractAccountHints(html) {
     }
   }
 
+  let displayName = null;
   const name = DISPLAY_NAME.exec(html);
+  if (name && name[1]?.trim()) {
+    displayName = name[1].trim();
+  } else {
+    const profile = PROFILE_NAME.exec(html);
+    if (profile && profile[1]?.trim()) {
+      displayName = profile[1].trim();
+    }
+  }
 
   /** @type {string | null} */
   let username = null;
@@ -150,7 +162,7 @@ export function extractAccountHints(html) {
   return {
     userId,
     username,
-    displayName: name ? name[1] : null,
+    displayName,
   };
 }
 
