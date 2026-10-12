@@ -26,6 +26,8 @@ import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { CrawlLoop } from '../src/crawl/loop.js';
 import { SessionGuard } from '../src/crawl/session.js';
 import { routeName } from '../src/ui/route-names.js';
+import { cursorFromUrl } from '../src/crawl/runner.js';
+import { RouteState } from '../src/crawl/route-state.js';
 
 const fixture = (n) => readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf-8');
 
@@ -274,3 +276,120 @@ describe('小组会话稳定性验证', () => {
     });
   });
 });
+
+function createTestLoop({ routes = [] } = {}) {
+  const enqueued = [];
+  const events = [];
+  const states = new Map();
+  const routeMap = new Map(routes.map((r) => [r.key, r]));
+  return {
+    _frontier: {
+      enqueue: (item) => {
+        enqueued.push(item);
+        return true;
+      },
+    },
+    _routes: routeMap,
+    _emit: (e) => events.push(e),
+    stateFor: (rk) => {
+      let s = states.get(rk);
+      if (!s) {
+        s = new RouteState({ routeKey: rk });
+        states.set(rk, s);
+      }
+      return s;
+    },
+    _enqueueNextPage: CrawlLoop.prototype._enqueueNextPage,
+    _enqueueLongformItems: CrawlLoop.prototype._enqueueLongformItems,
+    enqueued,
+    events,
+  };
+}
+
+describe('发起的讨论多页翻页与生命周期（group.publish）', () => {
+  const routes = buildRoutes({ username: 'BlocksTower' });
+  const publishRoute = routes.find((r) => r.key === 'group.publish');
+  const itemRoute = routes.find((r) => r.key === 'group.item');
+  const publishProfile = profileForRoute('group.publish');
+
+  test('group.publish: cursorFromUrl 准确解析 start 参数与根 URL', () => {
+    assert.deepEqual(
+      cursorFromUrl('https://www.douban.com/group/people/BlocksTower/publish?start=50', publishRoute),
+      { kind: 'start', value: 50 },
+    );
+    assert.deepEqual(
+      cursorFromUrl('https://www.douban.com/group/people/BlocksTower/publish?start=0', publishRoute),
+      { kind: 'start', value: 0 },
+    );
+    assert.deepEqual(
+      cursorFromUrl('https://www.douban.com/group/people/BlocksTower/publish', publishRoute),
+      { kind: 'start', value: 0 },
+    );
+  });
+
+  test('group.publish: 第一页向后翻页，入队 start=50（步长 50）且继承路线属性', () => {
+    const loop = createTestLoop({ routes: [publishRoute, itemRoute] });
+    const item = {
+      routeKey: 'group.publish',
+      url: 'https://www.douban.com/group/people/BlocksTower/publish?start=0',
+      cursor: { kind: 'start', value: 0 },
+    };
+    const pairs = extractItemPairs(GROUP_PUBLISH_PAGINATED, publishProfile);
+
+    loop._enqueueNextPage(item, publishRoute, publishProfile, { bodyText: GROUP_PUBLISH_PAGINATED }, 'cap-pub-1', pairs);
+
+    assert.equal(loop.enqueued.length, 1);
+    assert.equal(loop.enqueued[0].url, 'https://www.douban.com/group/people/BlocksTower/publish?start=50');
+    assert.deepEqual(loop.enqueued[0].cursor, { kind: 'start', value: 50 });
+    assert.equal(loop.enqueued[0].routeKey, 'group.publish');
+    assert.equal(loop.enqueued[0].ordered, true);
+
+    const pageEvent = loop.events.find((e) => e.type === 'page');
+    assert.ok(pageEvent);
+    assert.equal(pageEvent.newIds, 44);
+  });
+
+  test('group.publish: 末页检测（page >= totalPages）触发 route_finished: last_page，不入队下一页', () => {
+    const loop = createTestLoop({ routes: [publishRoute, itemRoute] });
+    // 将第 1 页模拟为第 3 页（末页：3 of 3）
+    const lastPageHtml = GROUP_PUBLISH_PAGINATED.replace(
+      '<span class="thispage" data-total-page="3">1</span>',
+      '<span class="thispage" data-total-page="3">3</span>',
+    );
+    const item = {
+      routeKey: 'group.publish',
+      url: 'https://www.douban.com/group/people/BlocksTower/publish?start=100',
+      cursor: { kind: 'start', value: 100 },
+    };
+    const pairs = extractItemPairs(lastPageHtml, publishProfile);
+
+    loop._enqueueNextPage(item, publishRoute, publishProfile, { bodyText: lastPageHtml }, 'cap-pub-3', pairs);
+
+    assert.equal(loop.enqueued.length, 0, '末页不应再入队新页面');
+    const finishEvent = loop.events.find((e) => e.type === 'route_finished');
+    assert.ok(finishEvent);
+    assert.equal(finishEvent.reason, 'last_page');
+    assert.equal(finishEvent.page, 3);
+    assert.equal(finishEvent.totalPages, 3);
+  });
+
+  test('group.publish: 从多页讨论列表派生全部 44 个话题详情页，并发出 topic_enqueued 事件', () => {
+    const loop = createTestLoop({ routes: [publishRoute, itemRoute] });
+    const item = {
+      routeKey: 'group.publish',
+      url: 'https://www.douban.com/group/people/BlocksTower/publish?start=0',
+    };
+
+    loop._enqueueLongformItems(item, { bodyText: GROUP_PUBLISH_PAGINATED }, 'cap-pub-1');
+
+    assert.equal(loop.enqueued.length, 44);
+    assert.ok(loop.enqueued.every((e) => e.routeKey === 'group.item' && e.ordered === false));
+    assert.equal(loop.enqueued[0].url, 'https://www.douban.com/group/topic/475801232/');
+
+    const topicEvent = loop.events.find((e) => e.type === 'topic_enqueued');
+    assert.ok(topicEvent);
+    assert.equal(topicEvent.count, 44);
+    assert.equal(topicEvent.routeKey, 'group.item');
+  });
+});
+

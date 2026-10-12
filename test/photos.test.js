@@ -22,6 +22,8 @@ import {
 import { buildRoutes, PRIORITY } from '../src/crawl/routes.js';
 import { cursorFromUrl } from '../src/crawl/runner.js';
 import { routeName } from '../src/ui/route-names.js';
+import { CrawlLoop } from '../src/crawl/loop.js';
+import { RouteState } from '../src/crawl/route-state.js';
 
 const fixture = (n) => readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf-8');
 
@@ -190,3 +192,181 @@ describe('相册列表页（无相册用户 mewcatcher）', () => {
     assert.equal(pairs.containers, 0);
   });
 });
+
+function createTestLoop({ routes = [] } = {}) {
+  const enqueued = [];
+  const events = [];
+  const states = new Map();
+  const routeMap = new Map(routes.map((r) => [r.key, r]));
+  return {
+    _frontier: {
+      enqueue: (item) => {
+        enqueued.push(item);
+        return true;
+      },
+    },
+    _routes: routeMap,
+    _emit: (e) => events.push(e),
+    stateFor: (rk) => {
+      let s = states.get(rk);
+      if (!s) {
+        s = new RouteState({ routeKey: rk });
+        states.set(rk, s);
+      }
+      return s;
+    },
+    _enqueueNextPage: CrawlLoop.prototype._enqueueNextPage,
+    _enqueueLongformItems: CrawlLoop.prototype._enqueueLongformItems,
+    enqueued,
+    events,
+  };
+}
+
+describe('相册多页翻页与生命周期（photo.album_list & photo.album）', () => {
+  const routes = buildRoutes({ username: 'elmsley' });
+  const listRoute = routes.find((r) => r.key === 'photo.album_list');
+  const itemRoute = routes.find((r) => r.key === 'photo.album');
+  const listProfile = profileForRoute('photo.album_list');
+  const itemProfile = profileForRoute('photo.album');
+
+  test('photo.album_list: cursorFromUrl 准确解析 start 参数与无参数根 URL', () => {
+    assert.deepEqual(
+      cursorFromUrl('https://www.douban.com/people/elmsley/photos?start=18', listRoute),
+      { kind: 'start', value: 18 },
+    );
+    assert.deepEqual(
+      cursorFromUrl('https://www.douban.com/people/elmsley/photos?start=0', listRoute),
+      { kind: 'start', value: 0 },
+    );
+    assert.deepEqual(
+      cursorFromUrl('https://www.douban.com/people/elmsley/photos', listRoute),
+      { kind: 'start', value: 0 },
+    );
+  });
+
+  test('photo.album_list: 第一页向后翻页，入队 start=18 且继承路线属性', () => {
+    const loop = createTestLoop({ routes: [listRoute, itemRoute] });
+    const item = {
+      routeKey: 'photo.album_list',
+      url: 'https://www.douban.com/people/elmsley/photos?start=0',
+      cursor: { kind: 'start', value: 0 },
+    };
+    const pairs = extractItemPairs(PHOTOS_HOME, listProfile);
+
+    loop._enqueueNextPage(item, listRoute, listProfile, { bodyText: PHOTOS_HOME }, 'cap-list-1', pairs);
+
+    assert.equal(loop.enqueued.length, 1);
+    assert.equal(loop.enqueued[0].url, 'https://www.douban.com/people/elmsley/photos?start=18');
+    assert.deepEqual(loop.enqueued[0].cursor, { kind: 'start', value: 18 });
+    assert.equal(loop.enqueued[0].routeKey, 'photo.album_list');
+    assert.equal(loop.enqueued[0].ordered, true);
+
+    const pageEvent = loop.events.find((e) => e.type === 'page');
+    assert.ok(pageEvent);
+    assert.equal(pageEvent.newIds, 18);
+  });
+
+  test('photo.album_list: 末页检测（page >= totalPages）触发 route_finished: last_page，不入队下一页', () => {
+    const loop = createTestLoop({ routes: [listRoute, itemRoute] });
+    // 将第 1 页模拟为第 7 页（末页：7 of 7）
+    const lastPageHtml = PHOTOS_HOME.replace(
+      '<span class="thispage" data-total-page="7">1</span>',
+      '<span class="thispage" data-total-page="7">7</span>',
+    );
+    const item = {
+      routeKey: 'photo.album_list',
+      url: 'https://www.douban.com/people/elmsley/photos?start=108',
+      cursor: { kind: 'start', value: 108 },
+    };
+    const pairs = extractItemPairs(lastPageHtml, listProfile);
+
+    loop._enqueueNextPage(item, listRoute, listProfile, { bodyText: lastPageHtml }, 'cap-list-7', pairs);
+
+    assert.equal(loop.enqueued.length, 0, '末页不应再入队新页面');
+    const finishEvent = loop.events.find((e) => e.type === 'route_finished');
+    assert.ok(finishEvent);
+    assert.equal(finishEvent.reason, 'last_page');
+    assert.equal(finishEvent.page, 7);
+    assert.equal(finishEvent.totalPages, 7);
+  });
+
+  test('photo.album_list: 从列表页派生全部 18 个相册详情页，并发出 album_enqueued 事件', () => {
+    const loop = createTestLoop({ routes: [listRoute, itemRoute] });
+    const item = {
+      routeKey: 'photo.album_list',
+      url: 'https://www.douban.com/people/elmsley/photos?start=0',
+    };
+
+    loop._enqueueLongformItems(item, { bodyText: PHOTOS_HOME }, 'cap-list-1');
+
+    assert.equal(loop.enqueued.length, 18);
+    assert.ok(loop.enqueued.every((e) => e.routeKey === 'photo.album' && e.ordered === false));
+    assert.equal(loop.enqueued[0].url, 'https://www.douban.com/photos/album/100276481/');
+
+    const albumEvent = loop.events.find((e) => e.type === 'album_enqueued');
+    assert.ok(albumEvent);
+    assert.equal(albumEvent.count, 18);
+    assert.equal(albumEvent.routeKey, 'photo.album');
+  });
+
+  test('photo.album: 第一页向后翻页，入队 m_start=18 且 ordered 为 false', () => {
+    const loop = createTestLoop({ routes: [listRoute, itemRoute] });
+    const item = {
+      routeKey: 'photo.album',
+      url: 'https://www.douban.com/photos/album/100276481/',
+      cursor: { kind: 'start', value: 0 },
+    };
+    const pairs = extractItemPairs(PHOTOS_ALBUM, itemProfile);
+
+    loop._enqueueNextPage(item, itemRoute, itemProfile, { bodyText: PHOTOS_ALBUM }, 'cap-album-1', pairs);
+
+    assert.equal(loop.enqueued.length, 1);
+    assert.equal(loop.enqueued[0].url, 'https://www.douban.com/photos/album/100276481/?m_start=18');
+    assert.deepEqual(loop.enqueued[0].cursor, { kind: 'start', value: 18 });
+    assert.equal(loop.enqueued[0].ordered, false);
+
+    const pageEvent = loop.events.find((e) => e.type === 'page');
+    assert.ok(pageEvent);
+    assert.equal(pageEvent.newIds, 18);
+  });
+
+  test('photo.album: 末页检测（page 59 of 59）触发 route_finished: last_page', () => {
+    const loop = createTestLoop({ routes: [listRoute, itemRoute] });
+    const lastPageHtml = PHOTOS_ALBUM.replace(
+      '<span class="thispage" data-total-page="59">1</span>',
+      '<span class="thispage" data-total-page="59">59</span>',
+    );
+    const item = {
+      routeKey: 'photo.album',
+      url: 'https://www.douban.com/photos/album/100276481/?m_start=1044',
+      cursor: { kind: 'start', value: 1044 },
+    };
+    const pairs = extractItemPairs(lastPageHtml, itemProfile);
+
+    loop._enqueueNextPage(item, itemRoute, itemProfile, { bodyText: lastPageHtml }, 'cap-album-59', pairs);
+
+    assert.equal(loop.enqueued.length, 0);
+    const finishEvent = loop.events.find((e) => e.type === 'route_finished');
+    assert.ok(finishEvent);
+    assert.equal(finishEvent.reason, 'last_page');
+    assert.equal(finishEvent.page, 59);
+    assert.equal(finishEvent.totalPages, 59);
+  });
+
+  test('photo.album: 空相册页（条目数为 0）触发 empty_page 终止', () => {
+    const loop = createTestLoop({ routes: [listRoute, itemRoute] });
+    const item = {
+      routeKey: 'photo.album',
+      url: 'https://www.douban.com/photos/album/100276481/?m_start=18',
+      cursor: { kind: 'start', value: 18 },
+    };
+
+    loop._enqueueNextPage(item, itemRoute, itemProfile, { bodyText: '<html><body></body></html>' }, 'cap-album-empty', { ids: [], times: [] });
+
+    assert.equal(loop.enqueued.length, 0);
+    const finishEvent = loop.events.find((e) => e.type === 'route_finished');
+    assert.ok(finishEvent);
+    assert.equal(finishEvent.reason, 'empty_page');
+  });
+});
+
