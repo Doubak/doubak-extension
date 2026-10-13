@@ -42,9 +42,10 @@
         <div id="operator-session" class="muted small" aria-live="polite">留空即可备份我的账号，开始时会核对登录状态。</div>
         <label for="target-account">填写主页网址或用户 ID（留空默认备份已登录账号）</label>
         <div class="target-input-row btn-row">
-          <input id="target-account" type="text" autocomplete="off" spellcheck="false" value="https://www.douban.com/people/" placeholder="留空默认备份已登录账号">
-          <button id="probe-target" class="act" type="button">探测</button>
+          <input id="target-account" type="text" autocomplete="off" spellcheck="false" value="https://www.douban.com/people/" placeholder="留空默认备份已登录账号" aria-describedby="target-help">
+          <button id="probe-target" class="act" type="button" hidden>查看账号</button>
         </div>
+        <p id="target-help" class="muted small">留空或只保留网址前缀，直接点击「开始抓取」备份已登录账号。</p>
         <div id="target-accounts" class="btn-row" hidden></div>
         <div id="target-preview" class="card tone-idle" aria-live="polite" hidden></div>
         <div id="public-options" hidden>
@@ -449,7 +450,7 @@
         <li>
           <b>选择目标账号。</b>
           完整备份本人时先在任意标签页登录豆瓣，目标输入框留空即可。
-          归档他人公开数据时输入主页网址、用户名或数字 UID，点击「探测」确认身份；
+          归档公开数据时输入主页网址、用户名或数字 UID，点击「查看账号」查看昵称和可备份范围，再开始抓取；
           可使用当前登录账号作为操作者，也可匿名访问。该扩展与你的所有页面共用登录状态，
           <b>密码与 Cookie 均由浏览器管理</b>，本扩展不设任何后端服务器。
         </li>

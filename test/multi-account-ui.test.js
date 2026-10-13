@@ -45,8 +45,10 @@ test('会话探测在飞时空输入可立即开始；提示更新不覆盖用�
     assert.equal(dom.byId.get('actions').querySelector('button').disabled, false);
     const input = dom.byId.get('target-account');
     assert.equal(input.value, 'https://www.douban.com/people/');
+    assert.equal(dom.byId.get('probe-target').hidden, true);
     input.value = ''; input.dispatch('input');
     assert.equal(dom.byId.get('actions').querySelector('button').disabled, false);
+    assert.equal(dom.byId.get('probe-target').hidden, true);
     input.value = '正在输入';
     input.dispatch('input');
     resolve({ ok: true, session: { state: 'logged_in', account: { userId: '111', displayName: '我的昵称' } } });
@@ -55,6 +57,38 @@ test('会话探测在飞时空输入可立即开始；提示更新不覆盖用�
     for (let i = 0; i < 4; i++) await dom.tick();
     assert.equal(dom.sent.filter((m) => m.type === 'detectSession').length, 1);
     assert.match(dom.byId.get('operator-session').textContent, /我的昵称/);
+  } finally { dom.restore(); }
+});
+
+test('查看账号有加载与重试反馈，重复 Enter 不发请求，旧答复不能确认新输入', async () => {
+  const dom = await panel({ bundles: false });
+  try {
+    const input = dom.byId.get('target-account');
+    const button = dom.byId.get('probe-target');
+    const replies = [];
+    const original = dom.chrome.runtime.sendMessage;
+    dom.chrome.runtime.sendMessage = (msg, cb) => msg.type === 'probeTarget'
+      ? replies.push(cb) : original(msg, cb);
+    input.value = '222'; input.dispatch('input');
+    assert.equal(button.hidden, false);
+    assert.equal(button.textContent, '查看账号');
+    button.dispatch('click');
+    assert.equal(button.textContent, '正在查看…');
+    assert.equal(button.disabled, true);
+    input.dispatch('keydown', { key: 'Enter', preventDefault() {} });
+    assert.equal(replies.length, 1);
+    replies[0]({ ok: false, error: '网络不可用' }); await settle();
+    assert.equal(button.textContent, '重试查看');
+    assert.equal(button.disabled, false);
+    assert.match(dom.byId.get('target-preview').textContent, /网络不可用/);
+    button.dispatch('click');
+    input.value = '333'; input.dispatch('input');
+    replies[1]({ ok: true, target: { account: { userId: '222', username: '222', displayName: '旧账号' }, visibility: 'public', operatorMode: 'anonymous' } });
+    await settle();
+    assert.equal(button.textContent, '查看账号');
+    assert.equal(dom.byId.get('actions').querySelector('button').disabled, true);
+    assert.equal(dom.byId.get('target-preview').hidden, true);
+    assert.equal(dom.sent.some((m) => m.type === 'start'), false);
   } finally { dom.restore(); }
 });
 
