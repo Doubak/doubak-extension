@@ -16,8 +16,16 @@ import {
 } from './shared.js';
 import { loadArchive, invalidateSummary } from './archive.js';
 import { loadCoverage } from './coverage.js';
+import { initTargetControls, updateTargetControls, targetIntent } from './target.js';
 
 const PAUSE_COPY = {
+  operator_session_lost: ['warn', '公开抓取的操作者已退出登录', '请登录本次任务原操作者账号后继续，目标与进度均已保留。', '我登录好了，继续'],
+  operator_switched: ['error', '操作者发生切换', '请恢复本次任务原操作者的登录状态后继续。目标账号不会随登录者更换。', '我切回来了，继续'],
+  target_changed: ['error', '目标账号发生变化', '目标 UID 或域名发生变化。请中止原任务后重新探测并建立全量基准。', null],
+  target_unavailable: ['warn', '目标账号无法访问', '目标不存在或已注销。已有捕获完整保留，可中止任务后导出。', null],
+  resume_identity_missing: ['error', '无法确认原目标账号', '断点缺少原目标 UID，无法安全恢复。请查看档案与日志。', null],
+  resume_checkpoint_invalid: ['error', '断点进度损坏', '断点无法安全恢复。可中止任务并保留、导出已有捕获。', null],
+  resume_identity_mismatch: ['error', '断点身份不一致', '断点与原目标或档案不一致，已安全停止。请查看档案与日志。', null],
   challenge: ['warn', '豆瓣要求验证', '请在新标签页中完成验证，完成后返回并点击「继续」。扩展与浏览器共用登录状态。', '我验证好了，继续'],
   blocked: ['warn', '豆瓣暂时限制了访问', '抓取已停止，且不会自动重试：继续请求可能导致账号受限。建议等待 30 分钟以上再继续。', '现在试试'],
   session_expired: ['warn', '登录状态已失效', '这不是错误，抓取已安全停止，进度均已保留。请重新登录豆瓣后继续。', '我登录好了，继续'],
@@ -109,7 +117,7 @@ function setActions(buttons) {
   const el = $('actions');
   // **样式也要进这把钥匙。** 缓存这条路只换 onclick，不动 className——同一句标签
   // 换了样式就会留在旧样子上，而那种「改了没生效」最难看出来。
-  const key = buttons.map(([l, , k]) => `${l}\u0001${k ?? ''}`).join('\u0000');
+  const key = buttons.map(([l, , k, disabled]) => `${l}\u0001${k ?? ''}\u0001${!!disabled}`).join('\u0000');
   if (el.dataset.key === key) {
     // 标签一样，但回调可能捕获了新的状态，所以只换 onclick。
     const bs = el.querySelectorAll('button');
@@ -118,7 +126,7 @@ function setActions(buttons) {
   }
   el.dataset.key = key;
   el.replaceChildren();
-  for (const [label, fn, kind] of buttons) {
+  for (const [label, fn, kind, disabled] of buttons) {
     const b = document.createElement('button');
     // 第三个元素是**样式**，原样交给 class（`act danger` / `act primary`）。
     //
@@ -130,6 +138,7 @@ function setActions(buttons) {
     b.className = kind ? `act ${kind}` : 'act';
     b.textContent = label;
     b.onclick = fn;
+    b.disabled = Boolean(disabled);
     el.append(b);
   }
 }
@@ -188,8 +197,13 @@ function renderNotice() {
 }
 
 export async function refresh() {
+  initTargetControls(refresh);
   const s = await send({ type: 'status' });
   setLastStatus(s);
+  const r = s?.runner;
+  const context = r?.targetAccount ? { account: r.targetAccount, visibility: r.crawlScope,
+    operatorMode: r.operatorMode, operatorUserId: r.operatorUserId } : s?.checkpoint?.run_context;
+  updateTargetControls(context, !!(s?.checkpoint || r?.active || (s?.busyWith && s.busyWith !== '探测账号') || pendingCommand));
 
   // **一次抓取开始，就多出一个目录。**
   //
@@ -357,14 +371,15 @@ export async function refresh() {
     void showPreflight();
   }
   renderCrawlMode();
-  setActions([['开始抓取', async () => {
+  const intent = targetIntent(crawlMode);
+  setActions([[intent.label, async () => {
     // `pendingCommand` 只是**开口那一小段**的兜底：从点下去到 offscreen 真正拿到
     // 锁之间（可能还要先把 offscreen 建起来），后端还报不出 `busyWith`。
     // 一旦它报得出来，就以它为准——见上面 `busy` 那一行。
     pendingCommand = '开始抓取';
     refresh();
     try {
-      const r = await send({ type: 'start', mode: crawlMode });
+      const r = await send({ type: 'start', mode: crawlMode, target: targetIntent(crawlMode).target });
       if (!r?.ok) {
         pendingCommand = null;
         setActionError('无法开始', r?.error ?? '后台没有给出原因。');
@@ -375,7 +390,7 @@ export async function refresh() {
       pendingCommand = null;
     }
     refresh();
-  }, 'primary']]);
+  }, 'primary', !intent.ready]]);
 
   // **空闲态下这张表归 `showLastRun()` 管，这里不许再动它。**
   //
@@ -858,6 +873,8 @@ let crawlMode = CRAWL_MODES.INCREMENTAL;
  */
 function renderCrawlMode() {
   const el = $('crawl-mode');
+  if (el.dataset.choice === crawlMode) return;
+  el.dataset.choice = crawlMode;
   el.replaceChildren();
 
   const opts = /** @type {const} */ ([
@@ -908,6 +925,7 @@ function scopeText(inc) {
   if (crawlMode === CRAWL_MODES.FULL) {
     return '全量抓取（已选择）：视同从未抓取过，将重新建立一份基准档案';
   }
+  if (!inc) return '将在实时核对目标 UID、域名与抓取视角后选择增量基准；没有匹配基准时从最新抓至最早。';
   const n = inc?.routes?.length ?? 0;
   // **两种增量都要把「跳过什么」说出来**，措辞对齐上面那三个选项。图这一档在两种
   // 增量下都跳过，所以它不属于「已选择」的那半句——写成选项的样子会让人以为

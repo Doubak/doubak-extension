@@ -41,6 +41,7 @@ class FakeElement {
     this._text = '';
     this.hidden = false;
     this.disabled = false;
+    this.value = '';
     this.onclick = null;
     this.onchange = null;
     this.attributes = {};

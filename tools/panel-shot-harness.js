@@ -13,8 +13,12 @@
  * 的每一种消息都有答复」。
  */
 
+import { chainEntryFromManifest, chainOf, chainCoverage, findChainHoles } from '../crawl/chain.js';
+
+const seededEntries = [];
 const Q = new URLSearchParams(location.search);
 const STATE = Q.get('state') ?? 'first-run';
+const MULTI_ACCOUNT = ['multi-account', 'public-ready', 'public-crawling'].includes(STATE);
 
 /** 路线 key 用**真的**：媒介 × `collect / do / wish`，见 `ui/route-names.js`。 */
 const ROUTES = [
@@ -49,12 +53,17 @@ const RUNNER = {
     failures: [{ url: 'https://movie.douban.com/subject/1292052/', ordered: false, attempts: 11 }],
   },
 };
+RUNNER['public-crawling'] = { ...RUNNER.crawling, intervalMs: 3000,
+  targetAccount: { userId: '66133087', username: 'target', displayName: '叔叔' },
+  crawlScope: 'public', operatorMode: 'authenticated', operatorUserId: '82160871' };
 
 /**
  * 假答复。**字段名照界面真正读的写**——写错了不会报错，只会在屏幕上显示成
  * 「可用 NaN GB」那样的东西，而那看起来像产品的 bug。
  */
 const ANSWERS = {
+  detectSession: () => ({ ok: true, session: { state: 'logged_in', account: { userId: '82160871', username: 'someone', displayName: 'MewX' } } }),
+  probeTarget: () => ({ ok: true, target: { account: { userId: '66133087', username: 'target', displayName: '叔叔' }, visibility: 'public', operatorMode: 'authenticated', operatorUserId: '82160871' } }),
   status: () => ({ ok: true, checkpoint: null, busyWith: null, runner: RUNNER[STATE] ?? RUNNER['first-run'] }),
   preflight: () => ({
     ok: true,
@@ -63,7 +72,13 @@ const ANSWERS = {
     incremental: null,
   }),
   exportRecords: () => ({ ok: true, exportedAt: {} }),
-  chain: () => ({ ok: true, chain: { bundles: [] } }),
+  chain: (msg) => {
+    const head = chainOf(seededEntries, msg.bundleId ?? seededEntries.at(-1)?.bundleId);
+    return { ok: true, chain: {
+      bundles: head, routes: [...chainCoverage(head)].map(([routeKey, value]) => ({ routeKey, ...value })),
+      holes: findChainHoles(head), others: [],
+    } };
+  },
   readLog: () => ({
     ok: true,
     rows: [
@@ -104,7 +119,7 @@ globalThis.chrome = {
     getURL: (p) => '/' + p,
     getManifest: () => ({ version: '0.0.0-量具' }),
     lastError: null,
-    sendMessage(msg, cb) { cb((ANSWERS[msg.type] ?? (() => ({ ok: true })))()); },
+    sendMessage(msg, cb) { cb((ANSWERS[msg.type] ?? (() => ({ ok: true })))(msg)); },
     onMessage: { addListener() {} },
   },
   storage: { local: { get: (_k, cb) => cb?.({}), set: (_v, cb) => cb?.() } },
@@ -117,27 +132,39 @@ async function seed(n) {
   for await (const name of root.keys()) {
     if (name.startsWith('doubak-bundle-')) await root.removeEntry(name, { recursive: true });
   }
-  let prev = null;
+  const heads = new Map();
   for (let i = 0; i < n; i++) {
     const d = new Date(Date.UTC(2026, 6, 30 + i * 3, 0, 50, 10 + i));
     const id = d.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '') + '-'
       + (0x3eef52 + i * 0x1a7f3).toString(16).slice(-6);
     const dir = await root.getDirectoryHandle(`doubak-bundle-${id}`, { create: true });
     const captures = 180 + i * 940;
+    const uid = MULTI_ACCOUNT && i % 2 ? '66133087' : '82160871';
+    const visibility = uid === '66133087' ? 'public' : 'self';
+    const prev = heads.get(uid) ?? null;
     const put = async (name, text) => {
       const f = await dir.getFileHandle(name, { create: true });
       const w = await f.createWritable(); await w.write(text); await w.close();
     };
-    await put('manifest.json', JSON.stringify({
+    const manifest = {
       spec_version: 'bundle/1.4', bundle_id: id, created_at: d.toISOString(),
       previous_bundle_id: prev, status: 'complete',
       index: { filename: `index-${id}.ndjson`, line_count: captures },
-      account: { user_id: '82160871', username: 'someone' },
+      account: { user_id: uid, username: uid === '82160871' ? 'someone' : 'target', nickname: uid === '82160871' ? 'MewX' : '叔叔' },
+      crawl_scope: { visibility, operator_mode: 'authenticated', operator_user_id: '82160871' },
+      crawl_state: [{ route_key: 'broadcast.timeline', enumeration: 'bounded', advanced: true,
+        contiguous: true, gaps: [], high_water_time: d.toISOString() }],
       producer: { name: 'doubak-extension', version: '0.0.0-量具' },
-    }, null, 2));
-    await put(`index-${id}.ndjson`, 'x\n'.repeat(captures));
+    };
+    seededEntries.push(chainEntryFromManifest(manifest));
+    await put('manifest.json', JSON.stringify(manifest, null, 2));
+    await put(`index-${id}.ndjson`, Array.from({ length: captures }, (_, n) => JSON.stringify({
+      capture_id: `${id}#${String(n + 1).padStart(6, '0')}`, route_key: 'interest.item', intent: 'interest.item',
+      url: `https://movie.douban.com/subject/${1292052 + n}/`, verdict: 'ok', surface: 'html',
+      observed_at: d.toISOString(), segment: `data-${id}-000001.warc.gz`, offset: 0, length: 10,
+    })).join('\n') + '\n');
     await put(`data-${id}-000001.warc.gz`, 'y'.repeat(40_000 + i * 3_000));
-    prev = id;
+    heads.set(uid, id);
   }
 }
 
@@ -164,6 +191,10 @@ function measure() {
   try {
     await seed(Number(Q.get('bundles') ?? 0));
     await import('./panel.js');
+    if (STATE === 'public-ready') {
+      document.getElementById('target-account').value = '66133087';
+      await (await import('./panel/target.js')).probeTarget('66133087');
+    }
     // 模块跑完之后标签页的监听才装上；早于此 click() 是按钮在、监听不在。
     const tab = Q.get('tab');
     if (tab && tab !== 'overview') document.querySelector(`button[data-tab="${tab}"]`)?.click();

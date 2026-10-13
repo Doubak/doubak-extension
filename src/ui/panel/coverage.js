@@ -4,8 +4,8 @@
 
 import { chainRow, chainHeadline, holeText } from '../chain-label.js';
 import { routeName, contiguityLabel } from '../route-names.js';
-import { $, send, table, GAP_REASONS } from './shared.js';
-import { loadBundleSummary } from './archive.js';
+import { $, send, table, GAP_REASONS, scanBundleDirs } from './shared.js';
+import { loadBundleSummary, selectSummaryBundle } from './archive.js';
 
 /**
  * 覆盖率页自己去读档案。
@@ -40,10 +40,11 @@ export async function loadCoverage() {
     }
 
     renderCoverageSwitch();
+    await renderAccountScope(cur);
 
     if (coverageView === 'chain') {
       $('coverage').replaceChildren();
-      await renderChain();
+      await renderChain(cur.id);
       return;
     }
 
@@ -61,6 +62,68 @@ export async function loadCoverage() {
 }
 
 /** 「合起来 / 这一份」的切换。 */
+async function renderAccountScope(cur) {
+  const box = $('coverage-accounts');
+  if (!box) return;
+  box.replaceChildren();
+  box.className = 'account-picker';
+  const all = (await scanBundleDirs()).filter((e) => e.manifest?.account?.user_id);
+  const uids = [...new Set(all.map((e) => e.manifest.account.user_id))];
+  if (!uids.length) return;
+  const uid = cur.summary.account?.user_id ?? uids[0];
+  const scopeOf = (e) => {
+    const scope = e.manifest.crawl_scope;
+    if (scope?.visibility !== 'public') return 'self';
+    return scope.operator_mode === 'anonymous' ? 'public:anonymous'
+      : `public:authenticated:${scope.operator_user_id ?? 'unknown'}`;
+  };
+  const current = all.find((e) => e.bundleId === cur.id);
+  const scope = current ? scopeOf(current) : 'self';
+  const accountSelect = document.createElement('select');
+  accountSelect.setAttribute('aria-label', '覆盖率目标账号');
+  accountSelect.className = 'account-select';
+  for (const id of uids) {
+    const account = all.find((e) => e.manifest.account.user_id === id).manifest.account;
+    const option = document.createElement('option');
+    option.value = id;
+    option.textContent = `${account.nickname || account.username || id}（UID ${id}）`;
+    option.selected = id === uid;
+    accountSelect.append(option);
+  }
+  const scopeSelect = document.createElement('select');
+  scopeSelect.setAttribute('aria-label', '覆盖率抓取视角');
+  scopeSelect.className = 'account-select';
+  const scopes = [...new Set(all.filter((e) => e.manifest.account.user_id === uid).map(scopeOf))];
+  for (const s of scopes) {
+    const option = document.createElement('option');
+    option.value = s;
+    option.textContent = s === 'self' ? '本人视图' : s === 'public:anonymous' ? '公开视图 · 匿名访客'
+      : `公开视图 · ${s.endsWith(':unknown') ? '未记录操作者' : `操作者 UID ${s.split(':')[2]}`}`;
+    option.selected = s === scope;
+    scopeSelect.append(option);
+  }
+  const pick = (id, wantedScope = null) => {
+    const entries = all.filter((e) => e.manifest.account.user_id === id && (!wantedScope || scopeOf(e) === wantedScope));
+    entries.sort((a, b) => b.bundleId.localeCompare(a.bundleId));
+    if (entries[0]) selectSummaryBundle(entries[0].bundleId);
+    void loadCoverage();
+  };
+  accountSelect.addEventListener('change', () => pick(accountSelect.value));
+  scopeSelect.addEventListener('change', () => pick(accountSelect.value, scopeSelect.value));
+  for (const [title, select] of [['账号', accountSelect], ['抓取视角', scopeSelect]]) {
+    const label = document.createElement('label');
+    label.className = 'account-select-label';
+    label.append(document.createTextNode(title), select);
+    box.append(label);
+  }
+  if (scope.startsWith('public:')) {
+    const note = document.createElement('span');
+    note.className = 'muted small';
+    note.textContent = '公开视图不包含私密条目；数量差值是可见范围的事实，不代表删除或私密条目数。';
+    box.append(note);
+  }
+}
+
 function renderCoverageSwitch() {
   const el = $('coverage-view');
   el.replaceChildren();
@@ -85,12 +148,12 @@ function renderCoverageSwitch() {
  * 下界是闭区间、档案之间必然重叠，那个数只会误导；而这一页存在的全部理由就是
  * 「计数不能证明完整性，连续性才能」。
  */
-async function renderChain() {
+async function renderChain(bundleId) {
   const el = $('chain');
   el.className = 'muted';
   el.textContent = '正在读所有档案…';
 
-  const r = await send({ type: 'chain' });
+  const r = await send({ type: 'chain', bundleId });
   if (!r?.ok) {
     el.className = 'card tone-error';
     el.textContent = `读不出来：${r?.error ?? ''}`;

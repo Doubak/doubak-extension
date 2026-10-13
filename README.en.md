@@ -161,7 +161,9 @@ different question: **when an entry is deleted, what did the page actually say?*
 
 ## Privacy
 
-No data collection, no uploads, no analytics, no cookies, no server. Host permissions are
+No data uploads, analytics, tracking cookies, or backend server. The extension observes changes
+to Douban's login cookie to invalidate its local session hint cache; it does not store or export
+cookie values. Host permissions are
 limited to `*.douban.com` and `*.doubanio.com`. The full permission audit, including which
 broader permissions were deliberately *not* requested and why, is in
 [`docs/permissions.md`](docs/permissions.md).

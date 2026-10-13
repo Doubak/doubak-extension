@@ -93,6 +93,7 @@ function throwIfAborted(signal) {
 
 /** 选中要导哪个账号（`user_id`）。库里只有一个账号时是 null。 */
 let account = null;
+let needsAccountSelection = false;
 
 /**
  * 按账号把档案分组。
@@ -105,12 +106,15 @@ let account = null;
 export function groupByAccount(entries) {
   /** @type {Map<string, {userId: string, username: string|null, nickname: string|null, entries: object[]}>} */
   const by = new Map();
-  const info = accountsFromSources(entries);
+  const info = accountsFromSources(entries.map((e) => ({ ...e, manifest: e.manifest ?? (e.runContext ? {
+    account: { user_id: e.runContext.account.userId, username: e.runContext.account.username,
+      nickname: e.runContext.account.displayName },
+  } : null) })));
   const unattributed = [];
   for (const e of entries) {
     // **只按数字 id 分。** 改过名（id 相同、用户名不同）不是另一个人——
     // 导入那边是同一条判据（`isOtherAccount`），两处必须一致。
-    const id = e.manifest?.account?.user_id;
+    const id = e.manifest?.account?.user_id ?? e.runContext?.account?.userId;
     if (!id) { unattributed.push(e); continue; }
     const key = String(id);
     if (!by.has(key)) {
@@ -132,14 +136,19 @@ export function groupByAccount(entries) {
 /**
  * 这次要导哪些档案。
  *
- * 认不出账号的**总是跟着一起导**：一份没有 manifest 的档案多半是抓到一半被打断的，
- * 把它扔掉等于因为它残缺而惩罚它，而残缺恰恰是它最需要被带走的理由。
+ * 多账号只导所选 UID；未知归属只允许沿用单账号库的历史摄取规则。
+ * 有明确目标但尚未收尾的档案须先收尾，原始档案始终可单独带走。
  */
-function entriesFor(all) {
+export function entriesFor(all) {
   const { groups, unattributed } = groupByAccount(all);
-  if (groups.length <= 1) return all;
-  const pick = groups.find((g) => g.userId === account) ?? groups[0];
-  return [...pick.entries, ...unattributed];
+  if (groups.length <= 1) {
+    if (all.some((e) => !e.manifest && e.runContext)) throw new Error('目标档案尚未收尾，请先完成或中止抓取后再导出派生格式。原始档案可随时在「档案」页导出。');
+    return all;
+  }
+  const pick = groups.find((g) => g.userId === account);
+  if (!pick) throw new Error('请先选择要导出的账号。');
+  if (pick.entries.some((e) => !e.manifest && e.runContext)) throw new Error('目标档案尚未收尾，请先完成或中止抓取。');
+  return pick.entries;
 }
 
 /**
@@ -293,9 +302,13 @@ function hideProgress() {
  * 上面那条进度条确实还在页面顶上，但那要求人自己把两件事连起来。
  */
 function setBusy(on, exceptId = null) {
+  for (const input of $('tab-formats')?.querySelectorAll('input') ?? []) {
+    input.disabled = on || needsAccountSelection;
+  }
+  if ($('export-neodb-unknown') && $('export-neodb-notes-private')?.checked) $('export-neodb-unknown').disabled = true;
   for (const f of Object.values(FORMATS)) {
     const btn = $(f.button);
-    btn.disabled = on;
+    btn.disabled = on || needsAccountSelection;
     if (on) btn.textContent = f.button === exceptId ? '正在导出…' : '正在导另一种…';
     else btn.textContent = '导出…';
   }
@@ -311,7 +324,8 @@ function setBusy(on, exceptId = null) {
 
 /** @param {string} kind */
 async function runExport(kind) {
-  const format = FORMATS[kind];
+  const base = FORMATS[kind];
+  const format = { ...base, dir: account ? `${base.dir}-${account}` : base.dir };
   const el = $('formats-result');
 
   const all = await scanBundleDirs();
@@ -321,7 +335,9 @@ async function runExport(kind) {
     return;
   }
   // 混了账号时只导选中的那个。见文件头「库里混了两个账号」。
-  const entries = entriesFor(all);
+  let entries;
+  try { entries = entriesFor(all); }
+  catch (err) { el.className = 'card tone-error'; el.textContent = err.message; return; }
 
   /** @type {FileSystemDirectoryHandle | null} */
   let picked = null;
@@ -596,8 +612,7 @@ export function warningLines(warnings) {
 }
 
 /**
- * 库里不止一个账号时，画一排账号让人选。只有一个账号时**什么都不画**——
- * 一个只有一个选项的选择器只是噪音。
+ * 始终展示导出对象；单账号自动选中，多账号必须明确选择。
  */
 export async function loadFormats() {
   const box = $('formats-accounts');
@@ -611,17 +626,23 @@ export async function loadFormats() {
     return; // 存储读不出来时，导出按钮自己会报
   }
   const { groups, unattributed } = groupByAccount(entries);
-  if (groups.length <= 1) { account = null; return; }
+  if (!groups.length) { account = null; needsAccountSelection = false; setBusy(Boolean(running)); return; }
+  if (groups.length === 1) account = null;
 
-  // 默认选档案最多的那个。**不记住上次选的**：库变了（导入、删除）之后，
-  // 一个记着的选择会让人以为导的是全部。
-  if (!groups.some((g) => g.userId === account)) account = groups[0].userId;
+  // 库发生变化后只保留仍在库中的选择；多账号绝不暗选第一项。
+  if (!groups.some((g) => g.userId === account)) account = null;
+  needsAccountSelection = groups.length > 1 && !account;
+  setBusy(Boolean(running));
 
   box.hidden = false;
+  box.className = 'account-picker';
+  const heading = document.createElement('b');
+  heading.textContent = '导出账号';
+  box.append(heading);
   const hint = document.createElement('div');
   hint.className = 'small';
-  hint.textContent = `扩展里有 ${groups.length} 个账号的档案。一次导一个——`
-    + '两个账号合进同一份数据之后就拆不开了，而分开导一条也不会少。';
+  hint.textContent = groups.length === 1 ? '将导出以下账号的档案。'
+    : `扩展里有 ${groups.length} 个账号的档案。请选择一个账号，每次仅导出所选账号的档案。`;
   box.append(hint);
 
   const row = document.createElement('div');
@@ -631,12 +652,16 @@ export async function loadFormats() {
     b.className = 'act';
     const name = [g.nickname, g.username].filter(Boolean).join(' / ') || g.userId;
     b.textContent = `${name}（UID ${g.userId}，${g.entries.length} 份）`;
-    b.setAttribute('aria-selected', String(g.userId === account));
+    b.setAttribute('aria-selected', String(groups.length === 1 || g.userId === account));
+    b.setAttribute('aria-pressed', String(groups.length === 1 || g.userId === account));
     b.addEventListener('click', () => {
       if (running) return;
-      account = g.userId;
+      account = groups.length === 1 ? null : g.userId;
+      needsAccountSelection = false;
+      setBusy(false);
       for (const other of row.querySelectorAll('button')) {
         other.setAttribute('aria-selected', String(other === b));
+        other.setAttribute('aria-pressed', String(other === b));
       }
     });
     row.append(b);
@@ -648,7 +673,7 @@ export async function loadFormats() {
     const note = document.createElement('div');
     note.className = 'small muted';
     note.textContent = `另有 ${unattributed.length} 份档案认不出属于哪个账号`
-      + '（多半是抓到一半被打断、没写 manifest 的），它们会跟着一起导。';
+      + '（多半尚未收尾），它们不参与多账号派生导出，可在「档案」页单独导出原始档案。';
     box.append(note);
   }
 }
@@ -756,6 +781,7 @@ export function initFormats() {
 export function resetFormats() {
   running = null;
   account = null;
+  needsAccountSelection = false;
   // 小标签回到第一张。**不记住上次看的是哪一种**——与这一页的账号选择器同一条理由：
   // 面板重开是一次新的开始，而一个记着的选择会让人以为自己已经选过了。
   const first = $('formats-tabs')?.querySelector('button[data-format]');

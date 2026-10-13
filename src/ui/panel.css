@@ -622,3 +622,22 @@ ul.own li { margin: 2px 0; }
   /* 窄面板下让它自己横向滚，而不是把整张卡片撑宽。 */
   overflow-x: auto; white-space: pre;
 }
+/* 账号输入与本地候选只在空闲时可编辑，运行身份另由断点回显。 */
+.target-controls { border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin: 0 0 16px; }
+.target-controls legend { font-weight: 600; }
+.target-controls label { display: block; margin: 10px 0 6px; }
+.target-input-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.target-input-row > input { flex: 1; min-width: 200px; padding: 8px 10px; }
+.target-controls:disabled { opacity: .7; }
+.target-input-row > input, .account-select {
+  font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--r1);
+}
+.account-picker { display: flex; flex-wrap: wrap; gap: var(--s3); padding: var(--s3); margin-bottom: var(--s3); border: 1px solid var(--line); border-radius: var(--r1); }
+.account-picker > b, .account-picker > .small, .account-picker > .btn-row { flex-basis: 100%; }
+.account-select-label { display: flex; flex: 1 1 200px; min-width: 0; flex-direction: column; gap: var(--s2); color: var(--text-dim); }
+.account-select { width: 100%; min-width: 0; padding: var(--s2) var(--s3); }
+.account-select:focus-visible, .target-input-row > input:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+#target-accounts button[aria-selected="true"], #formats-accounts button[aria-selected="true"] {
+  border-color: var(--brand); background: var(--brand-soft); color: var(--brand);
+}

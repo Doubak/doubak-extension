@@ -408,10 +408,10 @@ describe('库里混了两个账号', () => {
     assert.equal(unattributed.length, 2, '认不出账号的必须被数出来，不能静静并进某一组');
   });
 
-  test('只有一个账号时不画选择器', async () => {
+  test('同一个账号的多份档案归为一个导出对象', async () => {
     const { groupByAccount } = await import('../src/ui/panel/formats.js');
     const { groups } = groupByAccount(mk('1', 'a', 5));
-    assert.equal(groups.length, 1, '一个只有一个选项的选择器只是噪音');
+    assert.equal(groups.length, 1);
   });
 
   test('保留账号昵称，改名或增量时合并昵称', async () => {
@@ -652,7 +652,8 @@ describe('看不出公不公开的那几篇日记，用户可以自己拨', () =
     // 时候消失。（它此前也从没真藏住过——`.opt { display:flex }` 盖掉了 hidden。）
     assert.ok(!/\bhidden\b/.test(m[1]), '这个选项框不许再默认藏起来');
     // 必须在 fieldset 里面：它是「日记导出设置为」这一个问题的子项，不是另一件事。
-    const group = html.slice(html.indexOf('<fieldset class="opt-group">'), html.indexOf('</fieldset>'));
+    const start = html.indexOf('<fieldset class="opt-group">');
+    const group = html.slice(start, html.indexOf('</fieldset>', start));
     assert.ok(group.includes('export-neodb-unknown-row'), '得在那一组里面，否则版式上会离得老远');
     assert.match(html, /<input type="checkbox" id="export-neodb-unknown">/);
     // **这句话只许用用户在豆瓣上见过的词，而且要把默认值写在括号里。**

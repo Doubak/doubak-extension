@@ -37,6 +37,23 @@
            后台状态重画，写在它上面的错误活不过两秒（见 panel.js 的
            `setActionError`）。这一块只由用户或下一次成功的操作清掉。 -->
       <div id="notice"></div>
+      <fieldset id="target-controls" class="target-controls">
+        <legend>目标账号</legend>
+        <div id="operator-session" class="muted small" aria-live="polite">留空即可备份我的账号，开始时会核对登录状态。</div>
+        <label for="target-account">填写主页网址或用户 ID（留空默认备份已登录账号）</label>
+        <div class="target-input-row btn-row">
+          <input id="target-account" type="text" autocomplete="off" spellcheck="false" value="https://www.douban.com/people/" placeholder="留空默认备份已登录账号">
+          <button id="probe-target" class="act" type="button">探测</button>
+        </div>
+        <div id="target-accounts" class="btn-row" hidden></div>
+        <div id="target-preview" class="card tone-idle" aria-live="polite" hidden></div>
+        <div id="public-options" hidden>
+          <label><input id="public-lightweight" type="checkbox" checked> 仅归档用户内容与标记列表（推荐，跳过作品详情页）</label>
+          <label><input id="public-covers" type="checkbox" checked> 包含列表中的作品封面图，便于离线阅读</label>
+          <p class="muted small">公开归档仅保存当前视角可见的内容，不包含私密条目与本人专属的小组发帖；缺失不代表删除。</p>
+        </div>
+      </fieldset>
+      <div id="run-identity" class="hint" hidden></div>
       <div id="state" class="card idle">正在读取状态…</div>
       <div id="actions" class="btn-row"></div>
       <div id="preflight"></div>
@@ -60,6 +77,7 @@
       <!-- 两个视角。增量之后，**单份档案的实抓数不再有完整性含义**——它可能只有
            3 条新的。完整性是整条链的属性。 -->
       <div id="coverage-view" class="btn-row"></div>
+      <div id="coverage-accounts" class="btn-row"></div>
       <div id="chain"></div>
       <div id="coverage"></div>
     </section>
@@ -429,8 +447,10 @@
       <h2 id="steps">使用步骤</h2>
       <ol class="steps">
         <li>
-          <b>先登录豆瓣。</b>
-          在任意标签页中登录即可。该扩展与你的所有页面共用登录状态，
+          <b>选择目标账号。</b>
+          完整备份本人时先在任意标签页登录豆瓣，目标输入框留空即可。
+          归档他人公开数据时输入主页网址、用户名或数字 UID，点击「探测」确认身份；
+          可使用当前登录账号作为操作者，也可匿名访问。该扩展与你的所有页面共用登录状态，
           <b>密码与 Cookie 均由浏览器管理</b>，本扩展不设任何后端服务器。
         </li>
         <li>
@@ -631,8 +651,8 @@
           <tr><td><b>重复</b></td><td>同一份档案在所选目录树中出现多次（例如重复解压）。导入一次即可。</td></tr>
           <tr><td><b>编号撞了</b></td><td>扩展内已有相同编号的档案，但内容不同。<b>不予覆盖</b>——同一编号下存在两种内容，
             无法判定哪一份正确。如需替换为当前这份，请先删除原有档案。</td></tr>
-          <tr><td><b>别的账号</b></td><td>该份档案属于另一个豆瓣账号。两个账号的档案混合后，解析器会拒绝整个目录，
-            且合并之后无法再分离。如确为你本人的另一账号，将提示确认。</td></tr>
+          <tr><td><b>多个账号</b></td><td>可以批量导入混合账号档案。面板按数字 UID 分组，派生导出时必须显式选择一个账号，
+            账号之间不会混合解析。</td></tr>
           <tr><td><b>不能导</b></td><td>该文件夹中的档案不完整：缺少段文件、字节数与 manifest 不符，
             或两份档案的文件被放入了同一目录。<b>提示中会指明具体文件。</b>
             源文件仍在你的磁盘上，数据未丢失——补齐缺失文件后重新导入即可。</td></tr>

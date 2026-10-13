@@ -64,6 +64,11 @@ export let currentBundleId = null;
 /** @type {{id: string, summary: object} | null} 摘要缓存，避免两个标签页各读一次 */
 let summaryCache = null;
 
+export function selectSummaryBundle(id) {
+  currentBundleId = id;
+  summaryCache = null;
+}
+
 /**
  * 存储变了：删了档案、抓完一次、清空。
  *
@@ -184,12 +189,19 @@ function renderBundlePicker(items) {
   // （`.with-aside:has(> aside[hidden])`），版面是主题的事。
   el.hidden = items.length === 0;
   if (el.hidden) return;
-  el.append(bundlePicker({
-    items,
-    selected: currentBundleId,
-    onPick: (id) => { if (id !== currentBundleId) openBundle(id); },
-    fmtBytes: bytes,
-  }));
+  const byAccount = new Map();
+  for (const item of items) {
+    const uid = item.account?.user_id ?? '未知归属';
+    if (!byAccount.has(uid)) byAccount.set(uid, []);
+    byAccount.get(uid).push(item);
+  }
+  for (const [uid, group] of byAccount) {
+    const head = document.createElement('h3');
+    const account = group[0].account;
+    head.textContent = account ? `${account.nickname || account.username || uid}（UID ${uid}）` : '归属待确认';
+    el.append(head, bundlePicker({ items: group, selected: currentBundleId,
+      onPick: (id) => { if (id !== currentBundleId) openBundle(id); }, fmtBytes: bytes }));
+  }
 }
 
 /**
@@ -213,7 +225,7 @@ async function describeBundles(scan, active, livePrevious) {
   } catch { exportedAt = null; }
 
   const out = [];
-  for (const { bundleId: id, files, manifest } of scan) {
+  for (const { bundleId: id, files, manifest, runContext } of scan) {
     const item = {
       id,
       live: id === active,
@@ -242,6 +254,9 @@ async function describeBundles(scan, active, livePrevious) {
     // （`newBundleId(now)` 生成），而 `bundle-writer.js` 写 `created_at` 时用的
     // 也正是 `bundleIdTime(bundleId)`。所以这两条路给出的是同一个数。
     item.at ??= bundleIdTime(id)?.toISOString() ?? null;
+    item.account = manifest?.account ?? (runContext ? { user_id: runContext.account.userId,
+      username: runContext.account.username, nickname: runContext.account.displayName } : null);
+    item.visibility = manifest?.crawl_scope?.visibility ?? runContext?.visibility ?? 'self';
     out.push(item);
   }
   // 新的在上。**按时间排，不按目录名排**——目录名恰好也是时间序，但那是巧合，
@@ -374,6 +389,13 @@ export async function openBundle(bundleId) {
           ['账号', s.account
             ? `${[s.account.nickname, s.account.username].filter(Boolean).join(' / ')}（UID ${s.account.user_id ?? ''}）`
             : { text: '要等收尾时写进 manifest', muted: true }],
+          ['抓取视角', s.crawlScope?.visibility === 'public' ? '公开视图：不包含私密条目，缺失不代表删除' : '本人视图'],
+          ...(s.crawlScope ? [
+            ['操作者', s.crawlScope.operator_mode === 'anonymous' ? '匿名访客'
+              : s.crawlScope.operator_user_id ? `UID ${s.crawlScope.operator_user_id}`
+                : s.crawlScope.visibility === 'self' ? `UID ${s.account?.user_id ?? '未知'}` : '旧档案未记录'],
+            ['作品详情页', s.crawlScope.skip_catalog ? '已跳过（轻量化模式）' : '包含在抓取范围中'],
+          ] : []),
           ['状态', STATUS_NAMES[s.status] ?? s.status],
           ['捕获条数', String(s.captures)],
           // 没有 manifest 时体积是从 index 累加的下界（段文件里还有 gzip 头尾），
