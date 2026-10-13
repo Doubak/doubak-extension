@@ -49,7 +49,7 @@ describe('截图量具的假后台', () => {
 
     const harness = read('tools/panel-shot-harness.js');
     const answered = new Set(
-      [...harness.matchAll(/^\s{2}([A-Za-z]+):\s*\(\)\s*=>/gm)].map((m) => m[1]),
+      [...harness.matchAll(/^\s{2}([A-Za-z]+):\s*\([^)]*\)\s*=>/gm)].map((m) => m[1]),
     );
     const passthrough = new Set(
       [...(harness.match(/const PASSTHROUGH = new Set\(\[([\s\S]*?)\]\)/)?.[1] ?? '')
