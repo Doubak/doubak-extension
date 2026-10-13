@@ -219,12 +219,19 @@ describe('汇总', () => {
 
   test('一行都没写时 finalize 也能用', async () => {
     const meta = await writer.finalize();
+    assert.equal(await store.exists(FILE), true, 'manifest 引用的空索引也必须真实落盘');
+    assert.equal((await store.read(FILE)).byteLength, 0);
     assert.equal(meta.line_count, 0);
     assert.equal(meta.sha256, EMPTY_SHA256);
   });
 });
 
 describe('恢复：index 的计数器必须接得上', () => {
+  test('恢复时已有捕获却丢了索引，不能伪造一个空索引收尾', async () => {
+    const resumed = new IndexWriter({ store, filename: FILE, resume: { lineCount: 1 } });
+    await assert.rejects(resumed.finalize(), /索引.*不存在/);
+    assert.equal(await store.exists(FILE), false);
+  });
   test('不接的话，被恢复过的抓取收不了尾', async () => {
     // 报上来的原样：
     //   record_count 为 219，但 index 中指向本段的行数为 0。段与索引已失去对应关系。
