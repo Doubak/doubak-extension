@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { normalizeTarget, inspectTarget } from '../src/crawl/target-account.js';
+import { normalizeTarget, inspectTarget, assertTargetResponse } from '../src/crawl/target-account.js';
 import { CrawlRunner } from '../src/crawl/runner.js';
 import { RunStore } from '../src/crawl/run-store.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
@@ -16,6 +16,29 @@ const profile = (target, operator) => `<html><title>目标</title>${nav(operator
   <div id="db-usr-profile"><div class="pic"><img src="https://img1.doubanio.com/icon/up${target}-1.jpg" alt="目标昵称"></div>
   <div class="info"><h1>目标 &amp; 昵称<span>编辑</span></h1></div></div></html>`;
 const probe = (target, operator, slug = 'target') => ({ status: 200, finalUrl: `https://www.douban.com/people/${slug}/`, bodyText: profile(target, operator) });
+const contactCaptchaProfile = readFileSync(new URL('./fixtures/profile-public-contact-captcha.html', import.meta.url), 'utf8');
+
+test('带 _dtcc 参数的正常公开主页：关注弹窗脚本不能误报验证码', () => {
+  const url = 'https://www.douban.com/people/38258402/?_dtcc=1';
+  const input = normalizeTarget(url);
+  assert.equal(input, '38258402');
+  const target = inspectTarget({ status: 200, finalUrl: url, bodyText: contactCaptchaProfile }, input);
+  assert.equal(target.account.userId, input);
+  assert.equal(target.operatorMode, 'anonymous');
+  assert.equal(target.visibility, 'public');
+  assert.doesNotThrow(() => assertTargetResponse({ ...probe('111', null), bodyText: profile('111', null) + '<p>我的简介提到了验证码和 captcha</p>' }));
+});
+
+test('实际验证码页面或表单仍拦截，不能因为包含主页框架就放行', () => {
+  for (const bodyText of [
+    '<html><title>请输入验证码</title><body>继续访问前请验证</body></html>',
+    '<html><body>请输入验证码</body></html>',
+    profile('111', null) + '<form><input name="captcha-solution" type="text"></form>',
+    profile('111', null) + "<iframe src='/captcha/challenge'></iframe>",
+  ]) assert.throws(() => assertTargetResponse({ status: 200, finalUrl: 'https://www.douban.com/people/111/', bodyText }), { reason: 'challenge' });
+  assert.throws(() => assertTargetResponse({ status: 403, finalUrl: 'https://www.douban.com/people/111/', bodyText: contactCaptchaProfile }), { reason: 'blocked' });
+  assert.throws(() => assertTargetResponse({ status: 200, finalUrl: 'https://sec.douban.com/', bodyText: contactCaptchaProfile }), { reason: 'blocked' });
+});
 
 test('目标输入只接受豆瓣主页、slug 或 UID，拒绝外域、子路径与凭据 URL', () => {
   for (const input of ['target', '111', 'https://www.douban.com/people/target/', 'https://douban.com/people/target/']) assert.equal(normalizeTarget(input), input.includes('https:') ? 'target' : input);
@@ -44,7 +67,7 @@ test('数字输入重定向绑定最新域名，但数字证据冲突或目标�
   assert.throws(() => inspectTarget(probe('111', '222'), 'target', { targetUserId: '333' }), { reason: 'target_changed' });
 });
 
-function harness() {
+function harness({ responseHtml = null } = {}) {
   const kv = new MemoryKvStore();
   const dirs = new Map();
   const calls = [];
@@ -60,7 +83,7 @@ function harness() {
       calls.push(url);
       const finalUrl = url.includes('statuses') ? url : `https://www.douban.com/people/${slug}/`;
       const body = privacy && url.includes('statuses') ? `<html>${nav(operator)}<div id="db-usr-profile"></div><div class="stream-items"><div class="people-truncation-hint">由于用户的设置，无法查看更多内容</div></div><span data-total-page="9223372036854775807">1</span><a href="?p=2">后页</a></html>` : profile(target, operator);
-      return { status: 200, url: finalUrl, headers: new Headers(), arrayBuffer: async () => new TextEncoder().encode(body).buffer };
+      return { status: 200, url: finalUrl, headers: new Headers(), arrayBuffer: async () => new TextEncoder().encode(responseHtml ?? body).buffer };
     },
   });
   return { dirs, calls, runStore, makeRunner, set: (data) => {
@@ -72,6 +95,21 @@ function harness() {
 }
 
 const options = { targetInput: 'target', targetUserId: '111', operatorUserId: '222', onlyRoutes: ['profile.overview'] };
+
+test('公开主页含备用验证码脚本时，查看、开始与冷恢复均成功', async () => {
+  const h = harness({ responseHtml: contactCaptchaProfile });
+  h.set({ target: '38258402', operator: null, slug: '38258402' });
+  const runner = h.makeRunner();
+  const target = await runner.probeTarget('https://www.douban.com/people/38258402/?_dtcc=1');
+  assert.equal(target.account.userId, '38258402');
+  await runner.start({ targetInput: '38258402', targetUserId: '38258402', operatorUserId: null, onlyRoutes: ['profile.overview'] });
+  await runner.pause();
+  const resumed = h.makeRunner();
+  await resumed.resume(await h.runStore.loadCheckpoint());
+  const manifest = await resumed.abort();
+  assert.equal(manifest.account.user_id, '38258402');
+  assert.equal(manifest.crawl_scope.operator_mode, 'anonymous');
+});
 
 for (const cold of [false, true]) {
   test(`${cold ? '冷' : '热'}公开恢复保留目标 A 和原操作者 B，拒绝 C、退出登录与 slug 被抢注`, async () => {

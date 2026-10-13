@@ -24,10 +24,16 @@ export function assertTargetResponse(probe) {
   }
   if (/sec\.douban\.com|passport\/login|accounts\/login/.test(probe.finalUrl)
     || [403, 418, 429].includes(probe.status) || /有异常请求|访问过于频繁/.test(probe.bodyText)) {
-    throw new SessionError('blocked', '当前访问受到限制，请在豆瓣确认访问正常后再探测。');
+    throw new SessionError('blocked', '当前访问受到限制，请在豆瓣确认访问正常后重新查看账号。');
   }
-  if (/验证码|captcha/i.test(probe.bodyText)) {
-    throw new SessionError('challenge', '豆瓣要求验证，请在浏览器完成后再探测。');
+  // 正常公开主页也带「关注用户」的验证码弹窗脚本。脚本源码不是当前页面的挑战。
+  const markup = probe.bodyText.replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+  const captchaControl = /<(?:input|iframe)\b[^>]*\s(?:id|name|class|src)\s*=\s*(["'])[^"']*(?:captcha|验证码)[^"']*\1/i.test(markup);
+  const captchaPage = /<title\b[^>]*>[^<]*(?:验证码|captcha)[^<]*<\/title>/i.test(markup)
+    || (!profileBlock(markup) && /验证码|captcha/i.test(markup));
+  if (captchaControl || captchaPage) {
+    throw new SessionError('challenge', '豆瓣要求验证，请在浏览器完成后重新查看账号。');
   }
   if (probe.status !== 200 || /<title>\s*登录豆瓣\s*<\/title>/.test(probe.bodyText)) {
     throw new SessionError('target_unavailable', '未取得可识别的目标主页，请确认豆瓣页面可正常访问。');

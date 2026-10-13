@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Reduced from the anonymous response to /people/38258402/?_dtcc=1 on 2026-10-14.
+     Profile text is replaced; the nav/profile structure and dormant contact captcha
+     script reproduce the failure without retaining the person's page content. -->
+<html><head><title>目标账号</title></head><body>
+<a href="https://accounts.douban.com/passport/login?source=main" class="nav-login" rel="nofollow">登录/注册</a>
+<div id="db-usr-profile" class="clearfix">
+  <div class="pic"><a href="https://www.douban.com/people/38258402/">
+    <img src="https://img3.doubanio.com/icon/up38258402-3.jpg" alt="目标账号"/>
+  </a></div>
+  <div class="info"><h1>目标账号<div class="signature_display">签名</div></h1></div>
+</div>
+<script>
+$('.add_contact').click(function () {
+  $.post_withck('/j/contact/addcontact', {people: this.id}, function (r) {
+    if (r.msg === 'need_captcha') {
+      $.get('/j/misc/captcha', function () {
+        const html = '<form><i>请输入验证码</i><input type="text" class="captcha-input"/></form>';
+        show_dialog(html, 300);
+      });
+    }
+  });
+});
+</script>
+</body></html>
