@@ -19,6 +19,8 @@ import { buildNeodbNdjson } from '../vendor/export-adapters/targets/neodb-ndjson
 import { instructions } from '../vendor/export-adapters/instructions.js';
 import { project } from '../vendor/site-generator/projection.js';
 import { buildPages } from '../vendor/site-generator/pages.js';
+import { resolveSiteTitle } from '../vendor/site-generator/site-title.js';
+import { accountsFromSources } from '../vendor/parser/account.js';
 import { canonicalFiles } from './run.js';
 import { indexImages, exportImages, reallyMissing } from './images.js';
 import { withoutPrivate } from '../vendor/site-generator/private.js';
@@ -119,6 +121,9 @@ export async function buildNeodb(data, options = {}) {
  * @param {(p: {done: number, total: number}) => void} [opts.onImageProgress]
  */
 export async function buildMarkdown(data, { sources, write, onImageProgress, includePrivate = false }) {
+  // 身份预检先于任何图片写入；也要在过滤私密内容之前保留档案作者信息。
+  const accountInfo = [...accountsFromSources(sources ?? []).values()];
+  const siteTitle = resolveSiteTitle(data, null, accountInfo);
   // **筛掉豆瓣上不公开的东西，与命令行那边同一份判据。**
   //
   // 命令行那边这一步在 `generate.js` 里，而 `generate.js` 是 I/O、不在 vendor 名单
@@ -165,31 +170,6 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
     write,
     onProgress: (done, total) => onImageProgress?.({ done, total }),
   });
-
-  const resolveAccount = () => {
-    for (const s of sources ?? []) {
-      const acc = s.manifest?.account;
-      if (acc?.nickname || acc?.username || acc?.user_id) return acc;
-    }
-    if (data?.account) return data.account;
-    for (const key of ['account', 'profile', 'marks', 'longform', 'broadcasts', 'albums', 'groupTopics', 'group_topics', 'groupJoins', 'group_joins', 'doulists']) {
-      const target = data?.[key] ?? p?.[key];
-      if (Array.isArray(target)) {
-        for (const item of target) {
-          const acc = item?.account;
-          if (acc?.nickname || acc?.username || (acc?.user_id && acc.user_id !== 'unknown')) return acc;
-        }
-      } else if (target && typeof target === 'object') {
-        const acc = target?.account ?? target;
-        if (acc?.nickname || acc?.username || (acc?.user_id && acc.user_id !== 'unknown')) return acc;
-      }
-    }
-    return null;
-  };
-
-  const account = resolveAccount();
-  const titleName = account?.nickname ?? account?.username ?? (account?.user_id && account.user_id !== 'unknown' ? account.user_id : null);
-  const siteTitle = titleName ? `${titleName}的豆瓣存档` : '我的豆瓣存档';
 
   const built = buildPages(p, { images: img.paths, coverBySubject: img.bySubject, siteTitle });
 

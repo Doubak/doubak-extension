@@ -372,9 +372,7 @@ export async function openBundle(bundleId) {
         [
           ['档案编号', s.bundleId],
           ['账号', s.account
-            ? (s.account.nickname
-                ? `${s.account.nickname}（${s.account.username ?? s.account.user_id ?? ''}）`
-                : `${s.account.username ?? ''}（${s.account.user_id ?? ''}）`)
+            ? `${[s.account.nickname, s.account.username].filter(Boolean).join(' / ')}（UID ${s.account.user_id ?? ''}）`
             : { text: '要等收尾时写进 manifest', muted: true }],
           ['状态', STATUS_NAMES[s.status] ?? s.status],
           ['捕获条数', String(s.captures)],

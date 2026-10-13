@@ -60,6 +60,7 @@ import {
 } from './shared.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
 import { parseLibrary } from '../../pipeline/run.js';
+import { accountsFromSources } from '../../vendor/parser/account.js';
 import { buildCanonical, buildNeodb, buildMarkdown, deflateRaw } from '../../pipeline/targets.js';
 // 请人去报一声的地址，与 CLI、包里那份说明共用同一个常量——同一个地址写三遍必然漂，
 // 而漂掉的那一份会把人送到一个空页面。
@@ -97,13 +98,14 @@ let account = null;
  * 按账号把档案分组。
  *
  * @param {Array<{bundleId: string, manifest: object|null}>} entries
- * @returns {{groups: Array<{userId: string, username: string|null, entries: object[]}>,
+ * @returns {{groups: Array<{userId: string, username: string|null, nickname: string|null, entries: object[]}>,
  *            unattributed: object[]}}
  *   `groups` 按档案数从多到少排；`unattributed` 是认不出账号的那些。
  */
 export function groupByAccount(entries) {
   /** @type {Map<string, {userId: string, username: string|null, nickname: string|null, entries: object[]}>} */
   const by = new Map();
+  const info = accountsFromSources(entries);
   const unattributed = [];
   for (const e of entries) {
     // **只按数字 id 分。** 改过名（id 相同、用户名不同）不是另一个人——
@@ -114,18 +116,10 @@ export function groupByAccount(entries) {
     if (!by.has(key)) {
       by.set(key, {
         userId: key,
-        username: e.manifest?.account?.username ?? null,
-        nickname: e.manifest?.account?.nickname ?? null,
+        username: info.get(key).username,
+        nickname: info.get(key).nickname,
         entries: [],
       });
-    } else {
-      const g = by.get(key);
-      if (!g.nickname && e.manifest?.account?.nickname) {
-        g.nickname = e.manifest.account.nickname;
-      }
-      if (!g.username && e.manifest?.account?.username) {
-        g.username = e.manifest.account.username;
-      }
     }
     by.get(key).entries.push(e);
   }
@@ -635,10 +629,8 @@ export async function loadFormats() {
   for (const g of groups) {
     const b = document.createElement('button');
     b.className = 'act';
-    const name = g.nickname
-      ? `${g.nickname} (${g.username ?? g.userId})`
-      : (g.username ?? g.userId);
-    b.textContent = `${name}（${g.entries.length} 份）`;
+    const name = [g.nickname, g.username].filter(Boolean).join(' / ') || g.userId;
+    b.textContent = `${name}（UID ${g.userId}，${g.entries.length} 份）`;
     b.setAttribute('aria-selected', String(g.userId === account));
     b.addEventListener('click', () => {
       if (running) return;

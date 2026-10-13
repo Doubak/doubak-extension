@@ -17,6 +17,7 @@
 import { extractMarks } from './extract.js';
 import { extractBroadcasts } from './extract-broadcast.js';
 import { topology, assertSingleAccount } from './topology.js';
+import { canonicalAccount, accountsFromSources } from './account.js';
 import { extractSubjectDetail } from './extract-subject.js';
 import { extractLongform } from './extract-longform.js';
 import { extractDoulist, mergeDoulistPages } from './extract-doulist.js';
@@ -155,8 +156,9 @@ export async function parse(sources, opts = {}) {
    * 目录里一个已知账号都没有时，大家一起用 `'unknown'`——那时它是**唯一**的
    * 键空间，不会劈开任何东西。
    */
+  const accounts = accountsFromSources(sources);
   const soleAccount = topo.accounts.length === 1
-    ? (sources.find((s) => s.manifest?.account?.user_id)?.manifest.account ?? null)
+    ? (accounts.get(topo.accounts[0]) ?? null)
     : null;
   /**
    * 哪些档案是被认领进来的。**认领了就要说出来**，否则这是一次静默的归属判断。
@@ -169,7 +171,8 @@ export async function parse(sources, opts = {}) {
     ? sources.filter((s) => !s.manifest?.account).map((s) => s.bundleId).sort()
     : [];
   /** @param {{manifest: object|null}} src */
-  const accountOf = (src) => src.manifest?.account ?? soleAccount ?? undefined;
+  const accountOf = (src) => accounts.get(String(src.manifest?.account?.user_id))
+    ?? src.manifest?.account ?? soleAccount ?? undefined;
 
   /** @type {Map<string, object>} 身份键 → 记录 */
   const marks = new Map();
@@ -933,20 +936,6 @@ function identityOf(store, resolved, m, medium, accountId) {
   return { key: upstream, layer: store.get(upstream)?.identity_layer ?? 'upstream_id' };
 }
 
-function canonicalAccount(account, defaultId = 'unknown') {
-  return {
-    user_id: account?.user_id ?? defaultId,
-    username: account?.username ?? null,
-    nickname: account?.nickname ?? null,
-  };
-}
-
-function mergeAccountInfo(rec, account) {
-  if (!rec?.account) return;
-  if (account?.nickname && !rec.account.nickname) rec.account.nickname = account.nickname;
-  if (account?.username && !rec.account.username) rec.account.username = account.username;
-}
-
 function upsertMark(store, resolved, { m, medium, status, account, observation, parserVersion, tz }) {
   const accountId = account?.user_id ?? 'unknown';
   const { key, layer } = identityOf(store, resolved, m, medium, accountId);
@@ -983,8 +972,6 @@ function upsertMark(store, resolved, { m, medium, status, account, observation, 
       revisions: [],
     };
     store.set(key, rec);
-  } else {
-    mergeAccountInfo(rec, account);
   }
   // 上游 id 后来才出现（2023-12 起才有 data-cid）——补上，但不改身份层，
   // 因为这条记录此前是靠退化键攒起来的，说成 upstream_id 会掩盖那件事。
@@ -1127,8 +1114,6 @@ function upsertBroadcast(store, { b, account, observation, parserVersion }) {
       revisions: [],
     };
     store.set(b.sid, rec);
-  } else {
-    mergeAccountInfo(rec, account);
   }
   appendRevision(rec.revisions, { fields, digests, observation, parserVersion });
 }
@@ -1171,8 +1156,6 @@ function upsertLongform(store, { lf, account, observation, parserVersion }) {
       revisions: [],
     };
     store.set(key, rec);
-  } else {
-    mergeAccountInfo(rec, account);
   }
   appendRevision(rec.revisions, { fields, digests, observation, parserVersion });
 }
@@ -1212,13 +1195,11 @@ function upsertDoulist(store, { d, account, observation, captureIds, parserVersi
       account: canonicalAccount(account),
       // 现在只抓自己编的（intent 是 `doulist.list.created`）。
       ownership: 'created',
-      owner: canonicalAccount(account, null),
+      owner: { user_id: account?.user_id ?? null, username: account?.username ?? null },
       url: d.url,
       revisions: [],
     };
     store.set(d.id, rec);
-  } else {
-    mergeAccountInfo(rec, account);
   }
   appendRevision(rec.revisions, {
     fields,
@@ -1291,8 +1272,6 @@ function upsertAlbum(store, { album, account, observation, captureIds, parserVer
       revisions: [],
     };
     store.set(album.id, rec);
-  } else {
-    mergeAccountInfo(rec, account);
   }
   appendRevision(rec.revisions, {
     fields,
@@ -1328,8 +1307,6 @@ function upsertGroupTopic(store, { topic, account, observation, parserVersion, t
       revisions: [],
     };
     store.set(topic.id, rec);
-  } else {
-    mergeAccountInfo(rec, account);
   }
   appendRevision(rec.revisions, {
     fields,
@@ -1359,8 +1336,6 @@ function upsertGroupJoin(store, { join, account, observation, parserVersion }) {
       revisions: [],
     };
     store.set(join.id, rec);
-  } else {
-    mergeAccountInfo(rec, account);
   }
   appendRevision(rec.revisions, {
     fields,

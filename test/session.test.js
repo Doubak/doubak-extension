@@ -75,6 +75,30 @@ describe('登录状态判定', () => {
 });
 
 describe('账号身份抽取', () => {
+  test('昵称中的 HTML 实体只解码一次，持久化的是展示文字', () => {
+    const hints = extractAccountHints('<span>Tom &amp; Jerry &amp;lt;的账号</span>');
+    assert.equal(hints.displayName, 'Tom & Jerry &lt;');
+  });
+
+  test('主页备选昵称不能把正在浏览的第三方主页挂到操作者 UID 上', () => {
+    const hints = extractAccountHints(`
+      <script>window._GLOBAL_NAV = { USER_ID: "111" };</script>
+      <div id="db-usr-profile"><img src="https://img1.doubanio.com/icon/up222-1.jpg">
+        <div class="info"><h1>别人的昵称</h1></div>
+      </div>`);
+    assert.equal(hints.userId, '111');
+    assert.equal(hints.displayName, null);
+  });
+
+  test('主页昵称回退支持单引号、h1 属性与实体，且不会越过 profile 容器', () => {
+    const nav = '<script>window._GLOBAL_NAV = { USER_ID: "111" };</script>';
+    const profile = `<div id='db-usr-profile'><div class='pic'>
+      <img src='https://img1.doubanio.com/icon/up111-1.jpg'></div>
+      <div class='info extra'><h1 class='name'>A &amp; B<span class='pl'>编辑</span></h1></div></div>`;
+    assert.equal(extractAccountHints(nav + profile).displayName, 'A & B');
+    const noHeading = `<div id='db-usr-profile'><img src='https://img1.doubanio.com/icon/up111-1.jpg'></div>`;
+    assert.equal(extractAccountHints(nav + noHeading + '<div class="info"><h1>别人的标题</h1></div>').displayName, null);
+  });
   test('取出数字 ID、用户名、昵称', () => {
     const h = extractAccountHints(loggedInPage({ display: '小明', username: 'xiaoming', uid: '82160871' }));
     assert.equal(h.userId, '82160871');
@@ -103,6 +127,7 @@ describe('账号身份抽取', () => {
       <div id="db-global-nav"><a href="https://www.douban.com/people/mewcatcher/">我的主页</a></div>
       <script>;window._GLOBAL_NAV = { USER_ID: "82160871" };</script>
       <div id="db-usr-profile" class="clearfix">
+        <img src="https://img1.doubanio.com/icon/up82160871-1.jpg" alt="MewX">
         <div class="info">
           <h1>
             MewX

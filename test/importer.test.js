@@ -31,7 +31,7 @@ const enc = new TextEncoder();
  * 所以这里由一处算出来，测试改不动它而不自知。
  */
 async function makeBundle({
-  id = ID, userId = '1000001', username = 'mewx', previous = null,
+  id = ID, userId = '1000001', username = 'mewx', nickname, previous = null,
   segBytes = 64, withManifest = true, extra = {},
 } = {}) {
   const store = new MemoryFileStore();
@@ -45,7 +45,7 @@ async function makeBundle({
       status: 'complete',
       completed_at: '2026-08-01T02:00:00Z',
       previous_bundle_id: previous,
-      account: { user_id: userId, username },
+      account: { user_id: userId, username, ...(nickname === undefined ? {} : { nickname }) },
       // **真摘要，不是占位。** 写死一个假的话，回读校验那一趟每次都失败，
       // 于是「校验通过」这个断言就永远验不到 —— 而那正是导入最要紧的一步。
       segments: [{ filename: seg, bytes: segBytes, sha256: await sha256Hex(segBody) }],
@@ -68,10 +68,18 @@ async function asExisting(store, bundleId, account = {}) {
     files,
     accountUserId: account.userId ?? '1000001',
     accountUsername: account.username ?? 'mewx',
+    accountNickname: account.nickname ?? null,
   };
 }
 
 describe('认出一份档案', () => {
+  test('nickname 为可选元数据：旧档案缺省，新档案完整读取', async () => {
+    const old = await readBundleMeta(await makeBundle(), '旧档案');
+    assert.equal(old.accountNickname, null);
+    const named = await readBundleMeta(await makeBundle({ nickname: '昵称 & 🌱' }), '新档案');
+    assert.equal(named.accountNickname, '昵称 & 🌱');
+    assert.deepEqual(named.fatal, []);
+  });
   test('好的那种：编号、账号、上游全读出来', async () => {
     const meta = await readBundleMeta(await makeBundle({ previous: OTHER }), `doubak-bundle-${ID}`);
     assert.deepEqual(meta.fatal, []);
@@ -255,6 +263,21 @@ describe('排一份「将要发生什么」的清单', () => {
     assert.equal(plan.items[0].action, ACTIONS.IMPORT);
   });
 
+  test('导入预览采用最新非空昵称，同时保留稳定 UID 供区分同名账号', () => {
+    const old = { bundleId: ID, accountUserId: '1000001', accountUsername: 'old', accountNickname: '旧昵称', files: [] };
+    const newer = { bundleId: OTHER, accountUserId: '1000001', accountUsername: 'new', accountNickname: '新昵称', files: [] };
+    const theirs = { bundleId: '20260901T000000Z-aaaaaa', accountUserId: '2000002',
+      accountUsername: 'new', accountNickname: '新昵称', files: [], fatal: [] };
+    for (const existing of [[old, newer], [newer, old]]) {
+      const plan = planImport({ existing, candidates: [theirs] });
+      assert.equal(plan.homeAccount.nickname, '新昵称');
+      assert.equal(plan.homeAccount.username, 'new');
+      assert.equal(plan.items[0].action, ACTIONS.OTHER_ACCOUNT);
+      assert.match(plan.items[0].detail, /UID 1000001/);
+      assert.match(plan.items[0].detail, /UID 2000002/);
+    }
+  });
+
   test('OPFS 空着时，主账号从候选里推 —— 少数派那些才是「别人」', async () => {
     const a = await readBundleMeta(await makeBundle({ id: ID, userId: '1000001' }), 'a');
     const b = await readBundleMeta(await makeBundle({ id: OTHER, userId: '1000001' }), 'b');
@@ -330,7 +353,7 @@ describe('比内容', () => {
 
 describe('真的搬一次', () => {
   test('字节一致，并且回读校验过', async () => {
-    const src = await makeBundle();
+    const src = await makeBundle({ nickname: '昵称 & 🌱' });
     const dest = new MemoryFileStore();
     const r = await importBundle({ source: src, dest });
 
@@ -338,6 +361,8 @@ describe('真的搬一次', () => {
     for (const name of await src.list()) {
       assert.deepEqual(await dest.read(name), await src.read(name), `${name} 字节对不上`);
     }
+    const imported = await readBundleMeta(dest, '导入后的档案');
+    assert.equal(imported.accountNickname, '昵称 & 🌱');
   });
 
   test('**checkpoint.json 不跟着导进来** —— 它会让人以为能接着抓那次没跑完的', async () => {

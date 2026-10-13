@@ -426,6 +426,25 @@ describe('库里混了两个账号', () => {
     assert.equal(groups[0].username, 'mew');
   });
 
+  test('选择器与解析器一样取最新非空资料，而不是列表先到的名字', async () => {
+    const { groupByAccount } = await import('../src/ui/panel/formats.js');
+    const old = { bundleId: '20260701T000000Z-aaaaaa', manifest: {
+      account: { user_id: '123', username: 'old', nickname: '旧昵称' },
+    } };
+    const renamed = { bundleId: '20260801T000000Z-bbbbbb', manifest: {
+      account: { user_id: '123', username: 'new', nickname: '新昵称' },
+    } };
+    const blank = { bundleId: '20260901T000000Z-cccccc', manifest: {
+      account: { user_id: '123', username: null, nickname: '  ' },
+    } };
+    for (const entries of [[old, renamed, blank], [blank, renamed, old]]) {
+      const { groups } = groupByAccount(entries);
+      assert.equal(groups.length, 1);
+      assert.equal(groups[0].username, 'new');
+      assert.equal(groups[0].nickname, '新昵称');
+    }
+  });
+
   test('**面板上没有「照样合并」这条路**，因为合出来的东西会说谎', async () => {
     // 实测（两个账号一起解析）：产出的 `account` 只有其中一个，而 marks 里两个
     // 账号的记录都在 —— NeoDB 的包会在文件头写着 A 的用户名，装着 B 的记录。

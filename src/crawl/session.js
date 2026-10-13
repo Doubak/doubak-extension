@@ -33,6 +33,8 @@
  * 之后每页只做「还是不是同一个账号、还在不在登录态」的**廉价复核**。
  */
 
+import { decodeEntities } from '../vendor/parser/html-entities.js';
+
 /** 已登录的标志：用户菜单或退出链接。 */
 const LOGGED_IN = /nav-user-account|\/accounts\/logout/;
 
@@ -40,10 +42,34 @@ const LOGGED_IN = /nav-user-account|\/accounts\/logout/;
 const LOGGED_OUT = /"nav-login"|class="nav-login"/;
 
 /** 导航栏里的「<昵称>的账号」。 */
-const DISPLAY_NAME = /<span>([^<]{1,64}?)的账号<\/span>/;
+const DISPLAY_NAME = /<span\b[^>]*>([^<]+?)的账号<\/span>/;
 
-/** 个人主页顶部个人资料里的昵称（备选，当导航栏中没有「...的账号」或改版时）。 */
-const PROFILE_NAME = /id="db-usr-profile"[\s\S]*?<div class="info"[^>]*>[\s\S]*?<h1>\s*([^<\r\n]{1,64}?)\s*<\/h1>/;
+/**
+ * 主页备选只用于登录者自己的主页。导航 UID 是操作者，正文可能是别人，不能拼接。
+ * 切片按 div 深度收口；没有 profile 标题时不能越过容器去抓页面后面的 h1。
+ */
+function ownProfileName(html, userId) {
+  if (!userId) return null;
+  const opening = /<div\b[^>]*\bid=(["'])db-usr-profile\1[^>]*>/i.exec(html);
+  if (!opening) return null;
+  const tags = /<\/?div\b[^>]*>/gi;
+  tags.lastIndex = opening.index + opening[0].length;
+  let depth = 1;
+  let end = -1;
+  for (let tag; (tag = tags.exec(html));) {
+    depth += /^<\//.test(tag[0]) ? -1 : 1;
+    if (depth === 0) { end = tags.lastIndex; break; }
+  }
+  if (end < 0) return null;
+  const profile = html.slice(opening.index, end);
+  const avatarId = /\/icon\/up([1-9]\d*)[-.]/.exec(profile)?.[1];
+  const linkId = /douban\.com\/people\/([1-9]\d*)\//.exec(profile)?.[1];
+  const profileId = avatarId ?? linkId;
+  if (profileId !== userId || (linkId && linkId !== userId)) return null;
+  const heading = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(profile)?.[1];
+  // 只取标题文字，后面的 <span> 编辑入口等 UI 不属于昵称。
+  return heading ? decodeEntities(heading.split('<')[0]).trim() || null : null;
+}
 
 /** 导航栏/页面里指向个人主页的链接。`mine` 是 /mine/ 跳转位，不是用户名。 */
 const PEOPLE_LINK = /douban\.com\/people\/([A-Za-z0-9_-]+)\//g;
@@ -140,12 +166,9 @@ export function extractAccountHints(html) {
   let displayName = null;
   const name = DISPLAY_NAME.exec(html);
   if (name && name[1]?.trim()) {
-    displayName = name[1].trim();
+    displayName = decodeEntities(name[1]).trim();
   } else {
-    const profile = PROFILE_NAME.exec(html);
-    if (profile && profile[1]?.trim()) {
-      displayName = profile[1].trim();
-    }
+    displayName = ownProfileName(html, userId);
   }
 
   /** @type {string | null} */

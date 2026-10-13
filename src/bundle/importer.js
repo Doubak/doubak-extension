@@ -40,6 +40,7 @@
 
 import { copyBundle, NOT_PART_OF_BUNDLE } from './exporter.js';
 import { bundleIdFromDirName, isBundleId } from '../core/ids.js';
+import { accountsFromSources } from '../vendor/parser/account.js';
 
 /** index 文件名的形状：`index-<bundle_id>.ndjson`。 */
 const INDEX_RE = /^index-(\d{8}T\d{6}Z-[0-9a-f]{6})\.ndjson$/;
@@ -394,12 +395,10 @@ export function planImport({
 
     // ── 账号。数字 ID 不同就是**别人的档案**。
     if (!allowOtherAccounts && isOtherAccount(meta, homeAccount)) {
-      const thisAcc = meta.accountNickname
-        ? `${meta.accountNickname} (${meta.accountUsername ?? meta.accountUserId})`
-        : (meta.accountUsername ?? meta.accountUserId);
-      const homeAcc = homeAccount.nickname
-        ? `${homeAccount.nickname} (${homeAccount.username ?? homeAccount.userId})`
-        : (homeAccount.username ?? homeAccount.userId);
+      const thisName = [meta.accountNickname, meta.accountUsername].filter(Boolean).join(' / ');
+      const homeName = [homeAccount.nickname, homeAccount.username].filter(Boolean).join(' / ');
+      const thisAcc = `${thisName || meta.accountUserId}（UID ${meta.accountUserId}）`;
+      const homeAcc = `${homeName || homeAccount.userId}（UID ${homeAccount.userId}）`;
       say(ACTIONS.OTHER_ACCOUNT,
         `这一份是账号 ${thisAcc} 的，`
         + `而这里已有的档案属于 ${homeAcc}。`
@@ -455,17 +454,21 @@ function pickHomeAccount(existing, candidates) {
   const count = (rows) => {
     /** @type {Map<string, {userId: string, username: string|null, nickname: string|null, n: number}>} */
     const m = new Map();
+    const info = accountsFromSources(rows.map((r) => ({
+      bundleId: r.bundleId ?? '',
+      manifest: { account: {
+        user_id: r.accountUserId, username: r.accountUsername, nickname: r.accountNickname,
+      } },
+    })));
     for (const r of rows) {
       const id = r.accountUserId;
       if (!id) continue;
       const cur = m.get(id) ?? {
         userId: id,
-        username: r.accountUsername ?? null,
-        nickname: r.accountNickname ?? null,
+        username: info.get(String(id)).username,
+        nickname: info.get(String(id)).nickname,
         n: 0,
       };
-      if (!cur.nickname && r.accountNickname) cur.nickname = r.accountNickname;
-      if (!cur.username && r.accountUsername) cur.username = r.accountUsername;
       cur.n += 1;
       m.set(id, cur);
     }
