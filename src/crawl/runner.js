@@ -25,7 +25,9 @@
 import { BundleWriter } from '../bundle/bundle-writer.js';
 import { CrawlLoop } from './loop.js';
 import { Frontier } from './frontier.js';
-import { SessionGuard, extractAccountHints, detectLoginState } from './session.js';
+import { SessionGuard, SessionError, extractAccountHints, detectLoginState } from './session.js';
+import { contextForResume } from './run-context.js';
+import { normalizeTarget, inspectTarget, extractTargetAccount, assertTargetResponse } from './target-account.js';
 import { Pacer } from './pacing.js';
 import { desktopUserAgent } from './desktop-ua.js';
 import { Transport } from './transport.js';
@@ -204,6 +206,42 @@ export class CrawlRunner {
     );
   }
 
+  /** UI 探测只是预告；start/resume 仍会重新请求并核对数字 UID。 */
+  async probeTarget(input, expected = {}) {
+    if (this._run || await this._runStore.getCurrentRun()) throw new Error('抓取进行中，不能探测另一个目标');
+    const slug = normalizeTarget(input);
+    if (!slug) throw new Error('请先输入目标账号');
+    this._gate.setPacer(new Pacer({ intervalMs: 3000, ...this._pacerOptions }));
+    const transport = new Transport({ gate: this._gate, fetchImpl: this._fetchImpl });
+    const probe = await transport.fetch(`https://www.douban.com/people/${encodeURIComponent(slug)}/`);
+    return inspectTarget(probe, slug, expected);
+  }
+
+  async detectSession() {
+    const context = this._run?.runContext ?? (await this._runStore.getCurrentRun())?.runContext;
+    if (context) return { state: context.operatorMode === 'anonymous' ? 'logged_out' : 'logged_in',
+      account: context.operatorUserId ? { userId: context.operatorUserId,
+        displayName: context.operatorName ?? (context.visibility === 'self' ? context.account.displayName : null) } : null };
+    const transport = new Transport({ gate: this._gate, fetchImpl: this._fetchImpl });
+    const probe = await transport.fetch('https://www.douban.com/mine/');
+    const state = detectLoginState(probe.bodyText);
+    const account = state === 'logged_in' ? extractAccountHints(probe.bodyText) : null;
+    return { state, account: account?.userId ? account : null };
+  }
+
+  async _verifyRun(transport, context) {
+    const probe = await transport.fetch(`https://www.douban.com/people/${encodeURIComponent(context.account.username)}/`);
+    assertTargetResponse(probe);
+    if (context.visibility === 'public' || /\/icon\/up?[1-9]\d*[-.]|\/feed\/people\/[1-9]\d*\//.test(probe.bodyText)) {
+      const live = extractTargetAccount(probe.bodyText, probe.finalUrl, context.account.username);
+      if (live.userId !== context.account.userId) throw new SessionError('target_changed', '目标 UID 已改变，拒绝继续原档案。');
+      if (live.username !== context.account.username) throw new SessionError('target_changed', '目标域名已改变，请中止后以数字 UID 开始新的全量基准。');
+    }
+    const guard = new SessionGuard({ targetAccount: context.account, ...context });
+    guard.preflight(probe.bodyText, { probe });
+    return { guard, probe };
+  }
+
   get active() {
     return this._run !== null;
   }
@@ -257,22 +295,40 @@ export class CrawlRunner {
    *   被它截断的抓取不算干净完成，水位线不会推进，产出的是不完整的档案。
    */
   async start({
-    username, mediums, includeCatalog = true, floors, floorSources, previousBundleId = null,
+    username, mediums, includeCatalog, floors, floorSources, previousBundleId = null,
     onlyRoutes = null, maxCaptures = null, bypassGates = false, resolveFloors = null,
     knownSubjectUrlKeys = null, refreshSubjectUrls = null, backlogAssets = null,
     knownLongformUrlKeys = null, refreshLongform = null, knownAssetUrlKeys = null,
     mode = null,
+    targetInput = null, targetUserId = null, operatorUserId = undefined, includeCovers,
   }) {
-    if (this._run) throw new Error('已有抓取在进行中');
+    if (this._run || await this._runStore.getCurrentRun()) throw new Error('已有抓取在进行中，请先继续或中止原任务');
 
-    const pacer = this._gate.setPacer(new Pacer(this._pacerOptions)).pacer;
+    let pacer = this._gate.setPacer(new Pacer(this._pacerOptions)).pacer;
     const gate = this._gate;
     const transport = new Transport({ gate, fetchImpl: this._fetchImpl, getCk: this._getCk });
 
     // ── 开工前的身份确认。取不到数字 ID 就不能开始。
-    const session = new SessionGuard();
+    let session = new SessionGuard();
+    let runContext;
+    let probe;
+    if (targetInput) {
+      const slug = normalizeTarget(targetInput);
+      this._gate.setPacer(new Pacer({ intervalMs: 3000, ...this._pacerOptions }));
+      probe = await transport.fetch(`https://www.douban.com/people/${encodeURIComponent(slug)}/`);
+      runContext = inspectTarget(probe, slug, { targetUserId, operatorUserId });
+      username = runContext.account.username;
+      session = new SessionGuard({ targetAccount: runContext.account, ...runContext });
+      if (runContext.visibility === 'public') {
+        pacer = new Pacer({ intervalMs: runContext.operatorMode === 'anonymous' ? 5000 : 3000, ...this._pacerOptions });
+        includeCatalog ??= false;
+        includeCovers ??= true;
+      }
+      this._gate.setPacer(pacer);
+    } else {
+      probe = await transport.fetch(`https://www.douban.com/people/${encodeURIComponent(username)}/`);
+    }
     const profileUrl = `https://www.douban.com/people/${encodeURIComponent(username)}/`;
-    const probe = await transport.fetch(profileUrl);
 
     // 不需要退路。数字 uid 取自**全局导航**（`_GLOBAL_NAV.USER_ID` 等），而全局
     // 导航是每张登录后页面都有的共享组件——包括作品详情页。
@@ -281,6 +337,16 @@ export class CrawlRunner {
     // 的问题：它默认「广播条目上的 data-uid 就是本人」，而在作品详情页上那是
     // **评论者**的 ID。见 session.js 里 UID_PATTERNS 的说明。
     const account = session.preflight(probe.bodyText, { probe });
+    runContext ??= {
+      account: { ...account, username },
+      visibility: 'self', operatorMode: 'authenticated', operatorUserId: account.userId,
+    };
+    account.visibility = runContext.visibility;
+    account.operatorMode = runContext.operatorMode;
+    account.operatorUserId = runContext.operatorUserId;
+    includeCatalog ??= true;
+    includeCovers ??= includeCatalog;
+    session.bindTarget(runContext.account);
     this._uaNote = desktopUaNote(probe.finalUrl);
     this._emit({ type: 'preflight', account });
 
@@ -331,6 +397,9 @@ export class CrawlRunner {
         nickname: account.displayName ?? null,
         profile_url: profileUrl,
       },
+      crawlScope: runContext.visibility === 'public' ? {
+        visibility: 'public', operator_mode: runContext.operatorMode, operator_user_id: runContext.operatorUserId, skip_catalog: !includeCatalog,
+      } : { visibility: 'self', operator_mode: 'authenticated', skip_catalog: !includeCatalog },
       producer: {
         name: 'doubak-extension',
         version: producerVersion,
@@ -339,7 +408,7 @@ export class CrawlRunner {
       now: this._now,
     });
 
-    let routeDefs = buildRoutes({ username, mediums, includeCatalog });
+    let routeDefs = buildRoutes({ username, mediums, includeCatalog, includeCovers, visibility: runContext.visibility });
     if (onlyRoutes?.length) {
       const want = new Set(onlyRoutes);
       routeDefs = routeDefs.filter((r) => want.has(r.key));
@@ -505,7 +574,12 @@ export class CrawlRunner {
 
     this._run = {
       bundleId, dir, store, writer, frontier, loop, pacer, routes, session,
-      maxCaptures, capturedSoFar: 0, previousBundleId,
+      maxCaptures, capturedSoFar: 0, previousBundleId, runContext,
+    };
+    runContext.options = {
+      mediums: mediums ?? null, includeCatalog, includeCovers, onlyRoutes, maxCaptures, bypassGates,
+      mode: mode ?? (floors?.size || previousBundleId ? CRAWL_MODES.INCREMENTAL : CRAWL_MODES.FULL),
+      floors: floors ? [...floors] : null, floorSources: floorSources ? [...floorSources] : null, previousBundleId,
     };
 
     // 指针先落盘，再写崩溃哨兵——顺序反了的话，哨兵会无处可写。
@@ -519,7 +593,7 @@ export class CrawlRunner {
     // 出路。（这个坑真的踩过。）
     try {
       await this._runStore.setCurrentRun({
-        bundleId, dir, username, mediums, includeCatalog, bypassGates,
+        bundleId, dir, username, mediums, includeCatalog, includeCovers, bypassGates, onlyRoutes, runContext,
         // 小范围试跑的上限也要跟着走。少了它，一次「最多抓 10 条」的调试跑在
         // 心跳恢复之后会变成一场全量抓取——而用户点的是「试一下」。
         maxCaptures,
@@ -590,6 +664,7 @@ export class CrawlRunner {
     knownSubjectUrlKeys = null,
     knownLongformUrlKeys = null,
     knownAssetUrlKeys = null,
+    loadOnly = false,
   } = {}) {
     // **已经在内存里、只是停着** —— 这是「用户点了暂停又点继续」的情形。
     //
@@ -600,6 +675,22 @@ export class CrawlRunner {
     // `active` 是「这次抓取还在内存里」，不是「正在发请求」——同一个混淆在界面上也
     // 咬过一次（docs/ui.md §4.4）。
     if (this._run) {
+      if (loadOnly) return { bundleId: this._run.bundleId };
+      if (cp && cp.bundle_id !== this._run.bundleId) throw new SessionError('resume_identity_mismatch', '断点不属于当前内存中的档案。');
+      if (overrideUser && overrideUser !== this._run.runContext.account.username) {
+        throw new SessionError('resume_identity_mismatch', '继续必须使用原目标账号，不能改为另一个账号。');
+      }
+      if (!this._run.frontier.stopped) return { bundleId: this._run.bundleId, alreadyRunning: true };
+      const { runContext } = this._run;
+      const transport = new Transport({ gate: this._gate, fetchImpl: this._fetchImpl, getCk: this._getCk });
+      const profileUrl = `https://www.douban.com/people/${encodeURIComponent(runContext.account.username)}/`;
+      try {
+        await this._verifyRun(transport, runContext);
+      } catch (err) {
+        this._run.frontier.stop(err.reason ?? 'network_down');
+        await this._saveCheckpoint(err.reason ?? 'network_down');
+        throw err;
+      }
       const { wasStopped, resumed } = this._run.frontier.clearStop();
       if (!wasStopped) return { bundleId: this._run.bundleId, alreadyRunning: true };
       await this._saveCheckpoint(CRASH_SENTINEL_REASON);
@@ -607,39 +698,52 @@ export class CrawlRunner {
       return { bundleId: this._run.bundleId, requeued: resumed };
     }
 
-    const pointer = await this._runStore.getCurrentRun();
+    let pointer = await this._runStore.getCurrentRun();
     if (!pointer?.dir) throw new Error('没有可恢复的抓取');
+    if (!loadOnly && (cp?.pause_reason === 'checkpoint_unreadable'
+      || !Array.isArray(cp?.routes) || !Array.isArray(cp?.frontier)
+      || (cp.last_capture_id && !cp.last_capture_id.startsWith(`${pointer.bundleId}#`)))) {
+      throw new SessionError('resume_checkpoint_invalid', '断点中的进度损坏或捕获编号不属于原档案，拒绝恢复。可中止并保留已有捕获。');
+    }
+    if (loadOnly) cp = { ...cp, routes: Array.isArray(cp.routes) ? cp.routes : [], frontier: Array.isArray(cp.frontier) ? cp.frontier : [] };
 
-    const username = overrideUser ?? pointer.username;
-    if (!username) throw new Error('指针里没有 username，无法重建路线表');
-
+    if (overrideUser && overrideUser !== pointer.username) {
+      throw new SessionError('resume_identity_mismatch', '继续必须使用原目标账号，不能改为另一个账号。');
+    }
     const store = await this._openBundle(pointer.dir);
+    const runContext = await contextForResume(pointer, cp, store);
+    const username = runContext.account.username;
+    if (runContext.options) pointer = { ...pointer, ...runContext.options,
+      mediums: runContext.options.mediums ?? undefined, username: runContext.account.username };
     const { recoverBundle } = await import('../bundle/recovery.js');
 
     // 先把磁盘修回自洽：崩溃可能留下撕裂的段尾或半行 index。
-    const repair = await recoverBundle({ store, bundleId: pointer.bundleId });
-    if (repair.repairs.length) this._emit({ type: 'repaired', repairs: repair.repairs });
-
     // 降速必须跟着恢复——不能因为崩了一次就回到原速。
     const pacer = this._gate.setPacer(Pacer.restore(cp.rate_state, this._pacerOptions)).pacer;
     const gate = this._gate;
     const transport = new Transport({ gate, fetchImpl: this._fetchImpl, getCk: this._getCk });
 
-    const session = new SessionGuard();
+    let session = new SessionGuard({ targetAccount: runContext.account, ...runContext });
     const profileUrl = `https://www.douban.com/people/${encodeURIComponent(username)}/`;
-    const probe = await transport.fetch(profileUrl);
-    session.preflight(probe.bodyText, { probe });
-    this._uaNote = desktopUaNote(probe.finalUrl);
+    if (!loadOnly) {
+      const verified = await this._verifyRun(transport, runContext);
+      session = verified.guard;
+      const probe = verified.probe;
+      this._uaNote = desktopUaNote(probe.finalUrl);
+    } else session.bindTarget(runContext.account);
+    // 身份核验失败不改写段文件、索引或断点。
+    const repair = await recoverBundle({ store, bundleId: pointer.bundleId });
+    if (repair.repairs.length) this._emit({ type: 'repaired', repairs: repair.repairs });
 
     // ── 恢复增量跳过名单（作品详情、长文正文、图片）
     //
     // checkpoint 只存未完成条目，已抓取名单此前只在 start() 里标记进 frontier 的去重集合。
     // 进程一旦重启或扩展重载，内存中的去重集合便丢失；若不重新把历史捕获名单注入
     // frontier，后续处理列表页时所有历史条目都会被当作「新条目」重新入队并全量抓取。
-    const resolver = resolveKnown ?? resolveFloors;
+    const resolver = loadOnly ? null : resolveKnown ?? resolveFloors;
     if (resolver && (!knownSubjectUrlKeys || !knownLongformUrlKeys || !knownAssetUrlKeys)) {
       try {
-        const inc = (await resolver(session.account)) ?? {};
+        const inc = (await resolver({ ...runContext.account, visibility: runContext.visibility, operatorMode: runContext.operatorMode, operatorUserId: runContext.operatorUserId })) ?? {};
         knownSubjectUrlKeys = knownSubjectUrlKeys ?? inc.knownSubjectUrlKeys;
         knownLongformUrlKeys = knownLongformUrlKeys ?? inc.knownLongformUrlKeys;
         knownAssetUrlKeys = knownAssetUrlKeys ?? inc.knownAssetUrlKeys;
@@ -654,9 +758,15 @@ export class CrawlRunner {
       store,
       bundleId: pointer.bundleId,
       account: {
-        user_id: session.account.userId,
-        username: session.account.username ?? username,
-        nickname: session.account.displayName ?? null,
+        user_id: runContext.account.userId,
+        username,
+        nickname: runContext.account.displayName ?? null,
+        profile_url: profileUrl,
+      },
+      crawlScope: {
+        visibility: runContext.visibility, operator_mode: runContext.operatorMode,
+        ...(runContext.visibility === 'public' ? { operator_user_id: runContext.operatorUserId } : {}),
+        skip_catalog: !(pointer.includeCatalog ?? true),
       },
       // 恢复路径以前一个字都没传 producer，全靠 BundleWriter 的默认值——也就是说
       // **崩溃恢复之后写下的每个段，`software:` 头都来自那个写死的 '0.0.1'**。
@@ -678,11 +788,14 @@ export class CrawlRunner {
     });
 
     // 路线表必须按**原来那次**的范围重建，否则恢复后会多抓或少抓路线。
-    const routeDefs = buildRoutes({
+    let routeDefs = buildRoutes({
       username,
       mediums: pointer.mediums,
       includeCatalog: pointer.includeCatalog ?? true,
+      includeCovers: pointer.includeCovers ?? true,
+      visibility: runContext.visibility,
     });
+    if (pointer.onlyRoutes?.length) routeDefs = routeDefs.filter((r) => pointer.onlyRoutes.includes(r.key));
     const routes = new Map(routeDefs.map((r) => [r.key, r]));
 
     // 队列从 checkpoint 里的未完成条目重建；已完成的不在里面——那是 index
@@ -829,7 +942,7 @@ export class CrawlRunner {
     });
 
     this._run = {
-      bundleId: pointer.bundleId, dir: pointer.dir, store, writer, frontier, loop, pacer, routes, session,
+      bundleId: pointer.bundleId, dir: pointer.dir, store, writer, frontier, loop, pacer, routes, session, runContext,
       // **这两个字段少了会让抓取全速空转。**
       //
       // 少写 `maxCaptures` 的话它是 `undefined`，而下面那句判的是 `=== null`：
@@ -844,6 +957,8 @@ export class CrawlRunner {
       capturedSoFar: 0,
       previousBundleId: pointer.previousBundleId ?? null,
     };
+    if (loadOnly) frontier.stop(cp.pause_reason ?? 'user_paused');
+    await this._runStore.setCurrentRun({ ...pointer, runContext });
     this._emit({ type: 'resumed', bundleId: pointer.bundleId, lastSeq: repair.lastSeq });
     return { bundleId: pointer.bundleId };
   }
@@ -1072,6 +1187,7 @@ export class CrawlRunner {
    */
   async retryFailed({ routeKey } = {}) {
     if (!this._run) throw new Error('没有进行中的抓取');
+    if (this._run.frontier.stopped) await this.resume(null);
     const n = this._run.frontier.retryFailed({ routeKey });
     if (n > 0) await this._saveCheckpoint(CRASH_SENTINEL_REASON);
     this._emit({ type: 'retry_requested', count: n, routeKey: routeKey ?? null });
@@ -1141,6 +1257,10 @@ export class CrawlRunner {
         lastError: it.lastError ?? null,
       })),
       bundleId,
+      targetAccount: { ...this._run.runContext.account },
+      crawlScope: this._run.runContext.visibility,
+      operatorMode: this._run.runContext.operatorMode,
+      operatorUserId: this._run.runContext.operatorUserId,
       // **manifest 要到收尾才写**，所以抓取途中界面无从知道这一次是不是增量。
       // 不报的话，档案页只能按「没有 previous_bundle_id」渲染成「全量」——
       // 那不是缺一个值，那是一句错话。
@@ -1182,14 +1302,14 @@ export class CrawlRunner {
     // 顺带 `advanced` 永远是 false，增量抓取永远不可能。规范 §7.1。
     const routes = new Map(loop.routeStates);
     await this._runStore.saveCheckpoint(
-      buildCheckpoint({
+      { ...buildCheckpoint({
         bundleId, frontier, pacer, routes, pauseReason: reason,
         // **必须记。** 这个字段在 checkpoint 的形状里一直都有，但从来没人往里填，
         // 于是真实档案里它恒为 null。恢复时要靠它算出「index 里有哪些是 checkpoint
         // 还没见过的」——不填就等于「全都没见过」，一恢复会把能派生的页面统统重抓
         // 一遍。见 replay.js。
         lastCaptureId: writer?.lastCaptureId ?? null,
-      }),
+      }), run_context: this._run.runContext },
     );
   }
 }

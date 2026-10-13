@@ -314,6 +314,7 @@ export class ScheduleStore {
     if (!p?.bundleId) return null;
     return {
       bundle_id: p.bundleId,
+      run_context: p.runContext ?? null,
       // 指针刚建、还没写过 checkpoint 时没有原因。当成崩溃哨兵——与
       // `runner.start()` 的做法一致：宁可把正常状态误判成崩溃（代价是多做一次
       // 幂等的恢复检查），也不要把崩溃误判成正常。

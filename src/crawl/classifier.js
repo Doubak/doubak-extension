@@ -130,7 +130,7 @@ const LOGIN_LINK = /"nav-login"|class="nav-login"/;
  *   该路线的滚动体积分布。样本太少时传 null。
  * @returns {Classification}
  */
-export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats = null }) {
+export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats = null, visibility = 'self' }) {
   /** @type {string[]} */
   const reasons = [];
   const itemCount = route.itemAnchor ? countMatches(bodyText, route.itemAnchor) : null;
@@ -210,6 +210,10 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
     reasons.push('页面含「页面不存在」');
     return { verdict: 'soft404', reasons, itemCount };
   }
+  if (itemCount === 0 && /该用户已经主动注销账号|该用户已被注销/.test(bodyText)) {
+    reasons.push('目标账号页面显示注销墓碑');
+    return { verdict: 'gone', reasons, itemCount };
+  }
 
   // ── 5. 会话是否还在
   //
@@ -217,7 +221,7 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   // 状态，说明会话在某个环节掉了——此时页面上的内容不代表这个账号。
   const userNav = route.userNav ?? DEFAULT_USER_NAV;
   const loggedIn = userNav.test(bodyText);
-  if (!loggedIn) {
+  if (!loggedIn && visibility !== 'public') {
     // 页面上可能照样有数据——豆瓣的公开列表对匿名访问者正常显示。但那是
     // 公开视图，私密条目不在里面，不能当作这个账号的数据。
     const explicit = LOGIN_LINK.test(bodyText) ? '（导航栏出现登录入口）' : '';
@@ -226,7 +230,7 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
     );
     return { verdict: 'login', reasons, itemCount };
   }
-  reasons.push('导航栏中存在登录状态');
+  reasons.push(loggedIn ? '导航栏中存在登录状态' : '公开归档：允许未登录视图');
 
   // ── 6a. 最终 URL 还是不是这条路线
   //
@@ -235,6 +239,11 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   if (route.urlAnchor && !route.urlAnchor.test(finalUrl)) {
     reasons.push(`最终 URL 不像这条路线：${finalUrl}`);
     return { verdict: null, reason: 'url_drifted', reasons, itemCount };
+  }
+  if (visibility === 'public' && /由于用户的设置，无法查看更多内容|people-truncation-hint/.test(bodyText)
+    && /\/people\/[^/]+\/statuses(?:\?|$)/.test(finalUrl)) {
+    return { verdict: 'ok', reasons: [...reasons, '广播因用户隐私设置截断，停止翻页'],
+      itemCount: 0, hasMore: false, privacyTruncated: true };
   }
   if (route.urlAnchor) reasons.push('最终 URL 仍是这条路线');
 

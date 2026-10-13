@@ -34,12 +34,13 @@
  */
 
 import { decodeEntities } from '../vendor/parser/html-entities.js';
+import { targetUidEvidence } from './profile-identity.js';
 
 /** 已登录的标志：用户菜单或退出链接。 */
 const LOGGED_IN = /nav-user-account|\/accounts\/logout/;
 
 /** 未登录的正向标志：导航栏出现登录入口。 */
-const LOGGED_OUT = /"nav-login"|class="nav-login"/;
+const LOGGED_OUT = /["']nav-login["']/;
 
 /** 导航栏里的「<昵称>的账号」。 */
 const DISPLAY_NAME = /<span\b[^>]*>([^<]+?)的账号<\/span>/;
@@ -275,7 +276,11 @@ export class SessionError extends Error {
  * 可重试错误——见文件开头的三条理由。
  */
 export class SessionGuard {
-  constructor() {
+  constructor({ targetAccount = null, visibility = 'self', operatorMode = 'authenticated', operatorUserId = null } = {}) {
+    this._expected = targetAccount;
+    this._visibility = visibility;
+    this._operatorMode = operatorMode;
+    this._operatorUserId = operatorUserId;
     /** @type {AccountHints | null} */
     this._account = null;
     /** @type {LoginState} */
@@ -291,6 +296,11 @@ export class SessionGuard {
     return this._state;
   }
 
+  get visibility() { return this._visibility; }
+
+  /** 已确认的原目标可以离线装载；真正继续仍需权威握手。 */
+  bindTarget(account) { this._expected = { ...account }; this._account = { ...account }; }
+
   /**
    * 抓取前的身份确认。
    *
@@ -304,6 +314,13 @@ export class SessionGuard {
    */
   preflight(html, { fallbackFrom, probe } = {}) {
     const state = detectLoginState(html);
+    if (this._visibility === 'public') {
+      this._account = { ...this._expected };
+      this.verify(html, probe?.finalUrl);
+      if (state === 'unknown') throw new SessionError('operator_session_lost', '无法确认操作者状态，拒绝继续。');
+      this._state = state;
+      return this._account;
+    }
     if (state !== 'logged_in') {
       if (state === 'logged_out') {
         throw new SessionError(
@@ -328,6 +345,8 @@ export class SessionGuard {
       );
     }
 
+    const mismatch = this._expected && describeMismatch(this._expected, hints, { fields: ['userId'] });
+    if (mismatch) throw new SessionError('account_switched', `请切回原抓取账号后继续（${mismatch}）。`);
     this._account = hints;
     this._state = 'logged_in';
     return hints;
@@ -342,10 +361,36 @@ export class SessionGuard {
    * @param {string} html
    * @throws {SessionError}
    */
-  verify(html) {
+  verify(html, url) {
     if (!this._account) throw new Error('尚未 preflight，不能复核');
 
+    // 作品、日记正文和图片没有 people 路径；用户路线不能跳到另一账号。
+    if (url && this._expected) {
+      const slug = /\/(?:group\/)?people\/([^/?#]+)/.exec(new URL(url).pathname)?.[1];
+      if (slug && slug !== this._account.username && slug !== this._account.userId) {
+        throw new SessionError('target_changed', '页面跳到了其他目标账号，已安全停止。');
+      }
+      if (slug) {
+        const ids = targetUidEvidence(html);
+        if ([...ids].some((id) => id !== this._account.userId)) {
+          throw new SessionError('target_changed', '用户资料区块的数字 UID 与原目标不符，已安全停止。');
+        }
+      }
+    }
+
     const state = detectLoginState(html);
+    if (this._visibility === 'public') {
+      if (this._operatorMode === 'anonymous') {
+        if (state === 'logged_in') throw new SessionError('operator_switched', '匿名抓取期间登录状态发生变化，请恢复原操作者状态后继续。');
+        return;
+      }
+      if (state === 'logged_out') throw new SessionError('operator_session_lost', '公开抓取的操作者已退出登录，请登录原操作者账号后继续。');
+      if (state === 'logged_in') {
+        const actual = extractAccountHints(html).userId;
+        if (actual && actual !== this._operatorUserId) throw new SessionError('operator_switched', '公开抓取的操作者发生切换，请切回原操作者后继续。');
+      }
+      return;
+    }
     if (state === 'logged_out') {
       this._state = 'logged_out';
       throw new SessionError(

@@ -10,6 +10,8 @@
     "type": "module"
   },
   "permissions": [
+    "storage",
+    "cookies",
     "unlimitedStorage",
     "alarms",
     "offscreen",

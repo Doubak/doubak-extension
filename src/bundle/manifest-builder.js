@@ -189,7 +189,8 @@ export class ManifestBuilder {
    * @param {string} opts.timezoneAssumption
    * @param {string} opts.createdAt
    */
-  constructor({ bundleId, previousBundleId, account, producer, timezoneAssumption, createdAt }) {
+  constructor({ bundleId, previousBundleId, account, producer, timezoneAssumption, createdAt, crawlScope = null }) {
+    this._crawlScope = crawlScope;
     if (!bundleId) throw new Error('缺少 bundleId');
     if (!account?.user_id) throw new Error('缺少 account.user_id（数字 ID 是稳定主键）');
     if (!producer?.name || !producer?.version) throw new Error('缺少 producer.name/version');
@@ -292,6 +293,7 @@ export class ManifestBuilder {
       crawl_state: this._crawlState,
     };
     if (counts) manifest.counts = counts;
+    if (this._crawlScope) manifest.crawl_scope = { ...this._crawlScope };
     if (notes) manifest.notes = notes;
 
     return manifest;

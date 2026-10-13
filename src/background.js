@@ -47,7 +47,8 @@ import { ScheduleStore } from './crawl/run-store.js';
 import { IdbKvStore } from './storage/idb-kv-store.js';
 import { makeDebugLog, loadDebugFlag } from './core/debug-log.js';
 import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
-import { FAILURES_PENDING, FINALIZE_FAILED } from './crawl/resume-policy.js';
+import { FAILURES_PENDING, FINALIZE_FAILED, policyFor } from './crawl/resume-policy.js';
+import { SessionDetector } from './crawl/session-detector.js';
 import { readLog, clearLog } from './crawl/event-log.js';
 import { installRefererRule } from './crawl/referer-rule.js';
 import { installDesktopUaRule } from './crawl/desktop-ua.js';
@@ -66,6 +67,19 @@ const debugLog = makeDebugLog('[doubak]');
 let supervisor = null;
 /** @type {ScheduleStore | null} */
 let runStore = null;
+const SESSION_CACHE_KEY = 'doubak.sessionHints';
+let lastSessionStop = null;
+const sessionDetector = new SessionDetector({
+  probe: async () => (await withHost({ op: 'detectSession' })).session,
+  read: async () => globalThis.chrome?.storage?.session ? (await chrome.storage.session.get(SESSION_CACHE_KEY))[SESSION_CACHE_KEY] ?? null : null,
+  write: async (value) => { if (globalThis.chrome?.storage?.session) await chrome.storage.session.set({ [SESSION_CACHE_KEY]: value }); },
+});
+globalThis.chrome?.cookies?.onChanged?.addListener(({ cookie }) => {
+  if (cookie?.name === 'dbcl2' && /(?:^|\.)douban\.com$/.test(cookie.domain.replace(/^\./, ''))) {
+    sessionDetector.invalidate();
+    void chrome.runtime.sendMessage({ type: 'sessionHintsInvalidated' }).catch(() => {});
+  }
+});
 /** @type {IdbKvStore | null} */
 let kv = null;
 
@@ -129,7 +143,15 @@ function getSupervisor() {
         //
         // 每次都先确保 offscreen 在：「我上次建过了」这个念头在 service worker
         // 里本身就不可靠，它的内存随时清零。
-        await withHost({ op: 'resume' });
+        try {
+          await withHost({ op: 'resume' });
+        } catch (err) {
+          if (policyFor(err?.reason)?.autoResume === false) {
+            await getSupervisor().pauseRun(err.reason);
+            await notifyNeedsAction(err.reason, { kv: getKv() });
+          }
+          throw err;
+        }
         await drive();
       },
       onBlocked: async (decision) => {
@@ -421,6 +443,9 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           const cp = await getRunStore().loadCheckpoint();
           // offscreen 不在就**不去建**——只是看一眼状态，没必要为此把它拉起来。
           const st = await withHost({ op: 'status' }).catch(() => null);
+          if (['session_expired', 'account_switched', 'operator_session_lost', 'operator_switched'].includes(cp?.pause_reason)
+            && cp.pause_reason !== lastSessionStop) sessionDetector.invalidate();
+          lastSessionStop = cp?.pause_reason ?? null;
           sendResponse({
             ok: true,
             // 「现在在不在跑」只有 offscreen 答得出（`busyWith` / `runner`）。这里
@@ -477,6 +502,14 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           });
           break;
         }
+        case 'detectSession':
+          sendResponse({ ok: true, session: await sessionDetector.detect({ force: Boolean(msg.force) }) });
+          break;
+        case 'probeTarget': {
+          const result = await withHost({ op: 'probeTarget', input: msg.input, targetUserId: msg.targetUserId });
+          sendResponse(result);
+          break;
+        }
 
         case 'start': {
           // 权限没了就别开始——第一页就会失败，而失败的样子像网络问题。
@@ -503,7 +536,11 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           // 否则两个「开始抓取」会各自发一次身份确认请求。
           const started = await withHost({
             op: 'start',
-            options: serializeScope(scopeToOptions(msg?.scope)),
+            options: serializeScope({ ...scopeToOptions(msg?.scope),
+              ...(msg.target ? { targetInput: msg.target.input, targetUserId: msg.target.userId,
+                operatorUserId: msg.target.operatorUserId, includeCatalog: msg.target.includeCatalog,
+                includeCovers: msg.target.includeCovers } : {}),
+            }),
             // 全量 / 增量 / 增量+重抓详情页。**默认增量，但由用户决定**。
             mode: msg?.mode ?? 'incremental',
           });
@@ -531,7 +568,13 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
             // 那次）：抛在这儿 → `resumeRun()` 没跑 → checkpoint 一直写着
             // `user_paused` → 心跳从此每 30 秒判一次「未恢复：你手动暂停了抓取」。
             // **用户点的那一下「继续」，唯一的效果是让抓取再也不会自己回来。**
-            if (/** @type {any} */ (err)?.reason !== 'busy') throw err;
+            if (/** @type {any} */ (err)?.reason !== 'busy') {
+              if (policyFor(err?.reason)?.autoResume === false) {
+                await getSupervisor().pauseRun(err.reason);
+                await notifyNeedsAction(err.reason, { kv: getKv() });
+              }
+              throw err;
+            }
             debugLog('继续', '上一段还占着锁，镜像照改；卡死的话会被判死后抢占');
           }
           // **调度镜像也要改回哨兵。** 它还写着 user_paused 的话，心跳每 30 秒就会

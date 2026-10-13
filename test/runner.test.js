@@ -1031,7 +1031,7 @@ describe('恢复要能自足 —— 指针里带够信息', () => {
     assert.deepEqual(new Map(p.floors ?? []), new Map([['broadcast.timeline', FLOOR]]));
   });
 
-  test('指针里没有 username 时明确报错', async () => {
+  test('指针里缺失旧 username 字段时，从已锁定的 run_context 恢复原目标', async () => {
     const { runner, runStore, kv } = harness(broadcastOnly([bcPage(0)]));
     await runner.start({ username: 'example', mediums: [], includeCatalog: false });
     const cp = await runStore.loadCheckpoint();
@@ -1040,7 +1040,8 @@ describe('恢复要能自足 —— 指针里带够信息', () => {
     await kv.set('doubak.currentRun', p);
     runner._run = null;
 
-    await assert.rejects(() => runner.resume(cp), /username/);
+    await runner.resume(cp);
+    assert.equal(runner.status().targetAccount.username, 'example');
   });
 });
 

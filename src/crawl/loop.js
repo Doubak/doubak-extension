@@ -459,12 +459,23 @@ export class CrawlLoop {
         bodyText: res.bodyText,
         route: profile,
         sizeStats: sizes.stats(),
+        visibility: this._session.visibility ?? 'self',
       });
     } else {
       // 没有判定描述的路线（比如作品详情页）只做最基本的判断
       cls = { verdict: res.status === 200 ? 'ok' : null, reasons: ['该路线没有判定描述'], itemCount: null };
     }
 
+    let sessionError = null;
+    if (route.surface !== 'asset') {
+      try { this._session.verify(res.bodyText, res.finalUrl); }
+      catch (err) {
+        if (!(err instanceof SessionError)) throw err;
+        sessionError = err;
+        // 留存原始响应，但不能把串号页面标成 ok 让解析器摄取。
+        cls = { ...cls, verdict: 'unknown', reason: null, reasons: [...cls.reasons, err.message] };
+      }
+    }
     // 图片的体积分布与页面完全不是一回事，混进同一个滚动统计会把两边都毁掉。
     // 而图片本来也用不上这条判据（`classifyAsset` 不看 sizeStats）。
     if (cls.verdict === 'ok' && route.surface !== 'asset') sizes.add(res.bodyText.length);
@@ -646,7 +657,7 @@ export class CrawlLoop {
     // 真正的防线在别处：图片是从**刚刚复核过**的那张详情页上抽出来的，中间隔不了
     // 几秒；而图片响应本身若变成了 HTML 登录页，`classifyAsset` 已经判掉了。
     try {
-      if (route.surface !== 'asset') this._session.verify(res.bodyText);
+      if (sessionError) throw sessionError;
     } catch (err) {
       if (err instanceof SessionError) {
         // 被打断的路线不许推进水位线：已抓到的数据留在 WARC 里，但下次仍从
@@ -703,7 +714,11 @@ export class CrawlLoop {
       // 叶子路线（没有分页的，比如作品详情页）不走 `observePage`，得在这里记一笔，
       // 否则它抓了几千页仍然显示「已抓 0」——而且只在出错时才出现在进度表上。
       if (!route.pagination) this.stateFor(item.routeKey).recordLeafCapture();
-      this._enqueueNextPage(item, route, profile, res, written.captureId, items);
+      if (cls.privacyTruncated) {
+        const state = this.stateFor(item.routeKey);
+        state.markStopped('user_privacy_settings');
+        this._emit({ type: 'privacy_truncated', routeKey: item.routeKey, url: item.url });
+      } else this._enqueueNextPage(item, route, profile, res, written.captureId, items);
       this._enqueueSubjects(item, res, written.captureId);
       this._enqueueLongformItems(item, res, written.captureId);
       this._enqueueEmbeddedImages(item, res, written.captureId);
@@ -1035,9 +1050,17 @@ export class CrawlLoop {
   }
 
   _enqueueCover(item, res, captureId) {
-    if (item.routeKey !== 'interest.item') return;
     const target = this._routes.get('asset.subject_cover');
     if (!target) return;
+    if (!this._routes.has('interest.item') && item.routeKey.startsWith('interest.')) {
+      // 轻量化模式沿用列表中实际出现的缩略图 URL，不猜测大图地址。
+      const urls = new Set([...res.bodyText.matchAll(/<img\b[^>]*\ssrc=(["'])(https:\/\/[^"']+)\1/gi)]
+        .map((m) => m[2]).filter((url) => /^https:\/\/[^/]+\.doubanio\.com\/(?:view\/(?:subject|photo)|[blsp]pic)\//.test(url)));
+      for (const url of urls) this._frontier.enqueue({ url, urlKey: urlKey(url), routeKey: target.key,
+        intent: target.intent, enqueuedBy: captureId, ordered: false, priority: target.priority, referer: item.url });
+      return;
+    }
+    if (item.routeKey !== 'interest.item') return;
 
     const { url, reason } = extractCoverImage(res.bodyText);
     if (!url) {

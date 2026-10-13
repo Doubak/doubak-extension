@@ -134,6 +134,7 @@ export function eventNote(e) {
 }
 
 export const GAP_REASONS = {
+  user_privacy_settings: '目标用户设置了广播隐私保护，已停止翻页',
   aborted: '抓取中途停下了，这条线还有没抓完的页',
   fetch_failed: '有页面反复抓不下来',
   blocked: '被豆瓣限制了',
@@ -158,6 +159,8 @@ export const GAP_REASONS = {
  * 值：[标题, 说明]。
  */
 export const BUSY_COPY = {
+  探测账号: ['正在探测账号…', '正在核对目标数字 UID 与当前登录状态。'],
+  装载断点: ['正在装载断点…', '正在读取原档案的进度，已抓取数据会完整保留。'],
   开始抓取: ['正在确认账号…', '要先抓一次个人主页取到数字用户 ID，并确认登录状态。这一步也走正常的请求节奏，可能要几秒。'],
   恢复抓取: ['正在恢复…', '要先修好上次没写完的段尾，再确认登录状态还在。'],
   演练: ['正在演练…', '零网络请求，只走一遍真实链路。'],
@@ -358,9 +361,23 @@ export function getOpfsWorker() {
  *   files: Array<{name: string, bytes: number}>, manifest: object | null}>>}
  */
 let bundleScan = null;
+let bundleScanFlight = null;
+let bundleScanGeneration = 0;
 export async function scanBundleDirs({ force = false } = {}) {
-  if (bundleScan && !force) return bundleScan;
+  if (force) invalidateBundleScan();
+  if (bundleScan) return bundleScan;
+  if (bundleScanFlight) return bundleScanFlight;
+  const generation = bundleScanGeneration;
+  const flight = readBundleDirs().then((out) => {
+    if (generation === bundleScanGeneration) bundleScan = out;
+    return out;
+  });
+  bundleScanFlight = flight;
+  try { return await flight; }
+  finally { if (bundleScanFlight === flight) bundleScanFlight = null; }
+}
 
+async function readBundleDirs() {
   const worker = getOpfsWorker();
   const dirNames = await WorkerFileStore.listBundleDirs(worker);
   const out = [];
@@ -378,14 +395,22 @@ export async function scanBundleDirs({ force = false } = {}) {
       manifest = JSON.parse(new TextDecoder().decode(await store.read('manifest.json')));
     } catch { /* 没收尾，或者坏了。两种都由调用方按 null 处理 */ }
 
-    out.push({ bundleId, dir, files, manifest });
+    let runContext = null;
+    if (!manifest) {
+      try {
+        const cp = JSON.parse(new TextDecoder().decode(await store.read('checkpoint.json')));
+        if (cp.bundle_id === bundleId) runContext = cp.run_context ?? null;
+      } catch { /* 未知归属单独呈现，不能猜 */ }
+    }
+    out.push({ bundleId, dir, files, manifest, runContext });
   }
-  bundleScan = out;
   return out;
 }
 
 export function invalidateBundleScan() {
   bundleScan = null;
+  bundleScanFlight = null;
+  bundleScanGeneration++;
 }
 
 /**
@@ -423,7 +448,7 @@ export const setStorageUsage = (rows) => { storageUsage = rows; };
  * 抓完一次多一个目录、导入多几个、删除少几个。只清用量不清扫描的话，档案页左边
  * 那份清单里就**看不见刚抓完的那一份**——而那正是用户此刻要去导出的东西。
  */
-export const invalidateStorageUsage = () => { storageUsage = []; bundleScan = null; };
+export const invalidateStorageUsage = () => { storageUsage = []; invalidateBundleScan(); };
 
 /**
  * 记一笔「这份导出过了」，**并且让界面跟上**。
@@ -480,7 +505,7 @@ export const setLastStatus = (s) => { lastStatus = s; };
  */
 export function resetShared() {
   opfsWorker = null;
-  bundleScan = null;
+  invalidateBundleScan();
   storageUsage = [];
   lastStatus = null;
 }

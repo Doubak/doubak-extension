@@ -339,7 +339,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'album_list', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'album_list', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -353,7 +353,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'album', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'album', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -367,7 +367,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'group_joins', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'group_joins', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -381,7 +381,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'group_publish', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'group_publish', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -395,7 +395,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'group_topic', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'group_topic', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -411,7 +411,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'doulist', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'doulist', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -425,7 +425,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'longform', lfKind, auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'longform', lfKind, auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -439,7 +439,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'broadcast', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'broadcast', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -447,7 +447,7 @@ export async function parse(sources, opts = {}) {
         // 详情页不产生新的作品记录，只给已有的补字段——记录本身来自列表页
         // （那才是「我标记过它」的来源）。所以这里只入队，合并在下面做。
         if (hasUnknownVerdict(row) || !isContent(row)) { bump(stats.skipped, `verdict:${row.verdict}`); continue; }
-        work.push({ src, row, kind: 'detail', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'detail', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -467,7 +467,7 @@ export async function parse(sources, opts = {}) {
         continue;
       }
 
-      work.push({ src, row, kind: 'mark', medium, status, auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+      work.push({ src, row, kind: 'mark', medium, status, auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
     }
   }
   // ── 哪些「判不出来」是真的还缺内容
@@ -722,6 +722,12 @@ export async function parse(sources, opts = {}) {
       }
 
       const observation = { ...observationBase };
+      if (src.manifest?.crawl_scope?.operator_mode === 'anonymous' && m.tags == null) {
+        observation.omitted_fields = ['tags'];
+      }
+      if (src.manifest?.crawl_scope?.operator_mode === 'anonymous' && medium === 'game' && m.rating == null) {
+        observation.omitted_fields = [...(observation.omitted_fields ?? []), 'rating'];
+      }
 
       upsertMark(marks, markKeys, { m, medium, status, account: accountOf(src), observation, parserVersion, tz });
       upsertSubject(subjects, {
@@ -958,6 +964,12 @@ function upsertMark(store, resolved, { m, medium, status, account, observation, 
     // 那正是这套设计从头到尾在防的「假编辑」，而且发生在最不该发生的地方：
     // 标记表存的是用户自己写的东西。权威的作品数据在 subjects.ndjson。
   };
+  for (const key of observation.omitted_fields ?? []) delete fields[key];
+  const prior = store.get(key)?.revisions?.at(-1);
+  // 页面未展示的字段保留上一版已知值；缺失不制造标签清空修订。
+  for (const omitted of observation.omitted_fields ?? []) {
+    if (prior && Object.hasOwn(prior.fields, omitted)) fields[omitted] = prior.fields[omitted];
+  }
   const digests = digestAll(fields);
 
   let rec = store.get(key);
