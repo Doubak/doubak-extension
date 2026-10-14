@@ -48,6 +48,7 @@ describe('抓取宿主怎么挑（#12）', () => {
       runtime: {
         getContexts: async () => [],
         getURL: (/** @type {string} */ p) => `chrome-extension://x/${p}`,
+        sendMessage: async () => ({ ok: true }),
       },
     };
 

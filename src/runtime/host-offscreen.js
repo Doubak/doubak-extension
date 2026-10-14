@@ -24,14 +24,12 @@ let creating = null;
  * 浏览器。
  */
 export async function ensureHost() {
-  if (await hasHost()) return;
-
   // 并发保护：闹钟、界面命令、启动检查可能同时走到这里，而重复
   // createDocument 会抛「Only a single offscreen document may be created」。
   if (creating) return creating;
   creating = (async () => {
     try {
-      await chrome.offscreen.createDocument({
+      if (!(await hasHost())) await chrome.offscreen.createDocument({
         url: OFFSCREEN_PATH,
         // WORKERS：我们要的就是在里面起一个专用 Worker 来写 OPFS。
         reasons: [chrome.offscreen.Reason?.WORKERS ?? 'WORKERS'],
@@ -42,11 +40,22 @@ export async function ensureHost() {
     } catch (e) {
       // 竞态下另一个调用可能刚好建完了。那不是错误。
       if (!/single offscreen document/i.test(String(e?.message ?? e))) throw e;
-    } finally {
-      creating = null;
     }
+    // getContexts/createDocument 只证明文档已建，ES module 可能还没注册监听器。
+    // 只重试无副作用的 ping；start 等写命令永远只发一次。
+    await waitForHost();
   })();
-  return creating;
+  try { await creating; } finally { creating = null; }
+}
+
+/** 等消息监听器就绪；只重试无副作用的握手。 */
+async function waitForHost() {
+  const attempts = 40;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try { if ((await callHost({ op: 'ping' }))?.ok) return; } catch { /* 模块仍在启动 */ }
+    if (attempt + 1 < attempts) await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error('抓取组件未能就绪。请在扩展管理页重新加载豆备，再刷新面板；已有档案会保留。');
 }
 
 /** @returns {Promise<boolean>} */
