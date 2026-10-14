@@ -414,6 +414,8 @@ export class CrawlLoop {
   async _fetchOne(item) {
     const route = this._routes.get(item.routeKey) ?? {};
     const profile = profileForRoute(item.routeKey);
+    // 每次取页重新按运行范围判断，旧 checkpoint 排队的作品页也不能继承 Cookie。
+    const anonymousCatalog = this._session.visibility === 'public' && route.kind === 'catalog';
 
     // **只要为这条路线发过一次请求，它就必须出现在完整性证据里。**
     //
@@ -432,6 +434,8 @@ export class CrawlLoop {
         // 条目自带的优先：派生出来的条目（封面图）各有各的来源页。
         referer: item.referer ?? route.referer,
         withCk: route.surface === 'api',
+        credentials: anonymousCatalog ? 'omit' : 'include',
+        minimumIntervalMs: anonymousCatalog ? 5000 : 0,
       });
     } catch (err) {
       return await this._handleTransportError(item, err);
@@ -468,7 +472,7 @@ export class CrawlLoop {
 
     let sessionError = null;
     if (route.surface !== 'asset') {
-      try { this._session.verify(res.bodyText, res.finalUrl); }
+      try { this._session.verify(res.bodyText, res.finalUrl, { anonymousCatalog }); }
       catch (err) {
         if (!(err instanceof SessionError)) throw err;
         sessionError = err;
@@ -612,7 +616,9 @@ export class CrawlLoop {
         // 0 是「数过了，是空的」——而空页正是翻页终点的正常形态。
         itemCount: profile ? cls.itemCount : null,
         itemTimeRange: itemTimeRange(items.times),
-        note: cls.verdict === null ? `判不出来：${cls.reasons.join('；')}` : undefined,
+        note: [anonymousCatalog ? '公开目录请求：不携带登录凭据，不复用浏览器缓存。' : null,
+          cls.verdict === null ? `判不出来：${cls.reasons.join('；')}` : null,
+          sessionError?.message].filter(Boolean).join('；') || undefined,
       });
     } catch (err) {
       const se = classifyWriteError(err);

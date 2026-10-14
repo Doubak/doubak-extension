@@ -1,6 +1,6 @@
 # 公开与多账号归档：实现覆盖核对
 
-核对日期：2026-10-14。对应 extension PR #23、specs PR #5、parser PR #8、site-generator PR #5。
+核对日期：2026-10-15。对应 extension PR #23、specs PR #5、parser PR #8、site-generator PR #5。
 依据：[设计正文](public-and-third-party-account-archive.md)。这是实现验收记录，不能代替设计全文。
 
 ## 本轮界面约定
@@ -65,3 +65,12 @@
 - Firefox 无头截图检查概览、覆盖率、导出及窄屏；后台与 OPFS 内容由截图量具注入，**不是当前豆瓣实网采集验收**。
 
 结论：本轮请求的界面修正与多账号恢复保护已覆盖。整份设计仍有上述明确缺口，不能标记阶段一至四全部完成；尤其不得宣称已支持封禁账号抢救或全生态统一 `--account`。
+
+## 2026-10-15：页面访问者隔离与 Chrome 启动
+
+已补充[逐路线 bundle 取证和隔离核对](public-viewer-context-audit.md)：公开目录无凭据请求、
+游戏正文评分/短评、旧断点的目录请求策略，以及 Chrome 开始消息中账号对象与离屏地址的冲突。
+此前记录的未实现项仍保留；本轮不是对整个设计已完成的声明。
+
+本轮最终回归：扩展 2061 通过、0 失败、1 个既有跳过；解析器 307 通过、0 失败、1 个既有跳过。
+Chromium 使用模拟豆瓣响应，实际 service worker/offscreen/OPFS 链路验证公开账号与本人先后启动成功。

@@ -166,12 +166,18 @@ export class Transport {
    * @param {object} [opts]
    * @param {string} [opts.referer]  会被 DNR 规则改写成真正的 Referer
    * @param {boolean} [opts.withCk]  是否自动拼上 ck 令牌
+   * @param {'include'|'omit'} [opts.credentials]  目录请求可明确禁用登录凭据
+   * @param {number} [opts.minimumIntervalMs]  此请求的最小间隔，仍受全局退避约束
    * @param {boolean} [opts.followRedirects]  只影响**手动**跟随（注入的 fetch 替身
    *   会给出可读的 302）。真实浏览器里跳转由浏览器跟，这个开关管不着——
    *   `redirect` 一律是 `follow`。
    * @returns {Promise<FetchOutcome>}
    */
-  async fetch(url, { referer, withCk = false, followRedirects = true } = {}) {
+  async fetch(url, { referer, withCk = false, followRedirects = true, credentials = 'include', minimumIntervalMs = 0 } = {}) {
+    if (!['include', 'omit'].includes(credentials)) throw new Error('不支持的 credentials');
+    if (credentials === 'omit' && (withCk || new URL(url).searchParams.has('ck'))) {
+      throw new Error('无登录凭据的请求不能携带 ck');
+    }
     const requestedUrl = withCk ? withCkToken(url, await this._getCk()) : url;
     const startedAt = this._now();
 
@@ -203,7 +209,9 @@ export class Transport {
             {
               // 不伪造身份：不设 User-Agent，交给浏览器
               headers: referer ? { 'X-Override-Referer': referer } : {},
-              credentials: 'include',
+              credentials,
+              // 不复用浏览器里可能含登录者收藏/短评的缓存页。
+              ...(credentials === 'omit' ? { cache: 'no-store' } : {}),
               // **一律 follow。** `manual` 在浏览器里给的是 opaqueredirect：
               // status 0、url 空、header 列表全空，读不到 Location，跟不了。
               // 见文件开头。
@@ -217,7 +225,7 @@ export class Transport {
               // 的 finally 里就已经撤了。实测卡死过 8494 秒，见 errors.js。
               readBody: (res) => res.arrayBuffer(),
             },
-          ),
+          ), { minimumIntervalMs },
         );
       } catch (err) {
         // 站点权限被撤之后，fetch 抛的是 `TypeError`——**和网络故障一模一样**。

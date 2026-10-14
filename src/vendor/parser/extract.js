@@ -49,15 +49,16 @@ const FIELD = {
   rating: {
     movie: /class="rating(\d)-t"/, music: /class="rating(\d)-t"/,
     book: /class="rating(\d)-t"/, drama: /class="rating(\d)-t"/,
-    game: /data-rating="(\d)"/,
+    // 正文星级属于列表主人；修改收藏按钮属于访问者，公开页面还可能根本没有按钮。
+    game: /class="rating-info"[^>]*>\s*<span\b[^>]*class="[^"]*\ballstar([1-5])0\b[^"]*"/,
   },
   comment: {
     // 影视 / 音乐 / 舞台剧共用一个**结构**判据，不是三个各写各的 class。
     // 见 listComment() 里的说明：`<span class="comment">` 只有影视有。
     movie: listComment, music: listComment, drama: listComment,
     book: /<p class="comment[^"]*"[^>]*>\s*([^<]+)/,
-    // 游戏的短评在一个**没有 class 的裸 div** 里，只能靠它在 user-operation 前面定位。
-    game: /<\/div>\s*<div>([^<]{2,})<\/div>\s*<div class="user-operation"/,
+    // common-item 内唯一的裸 div 是短评；不能要求公开页面也有「修改/删除」操作栏。
+    game: /<div>\s*([^<]+)<\/div>/,
   },
   raw_meta: {
     movie: /<li class="intro">([^<]+)/, music: /<li class="intro">([^<]+)/,
@@ -235,7 +236,9 @@ export function extractMarks(html, medium) {
   let idless = 0;
 
   for (let i = 0; i < at.length; i++) {
-    const seg = html.slice(at[i], i + 1 < at.length ? at[i + 1] : undefined);
+    const tail = html.slice(at[i], i + 1 < at.length ? at[i + 1] : undefined);
+    // 最后一项后面还有访问者的收藏表单，不能让它补上目标条目缺失的字段。
+    const seg = medium === 'game' ? gameItem(tail) : tail;
     const idm = SUBJECT_ID.exec(seg);
     const date = pick(seg, medium, 'date');
 
@@ -271,6 +274,16 @@ export function extractMarks(html, medium) {
   }
 
   return { marks, containers: at.length, idless };
+}
+
+/** 限定在 common-item 的闭合边界内；不完整的页面宁可不解释。 */
+function gameItem(html) {
+  let depth = 0;
+  for (const m of html.matchAll(/<\/?div\b[^>]*>/gi)) {
+    depth += m[0].startsWith('</') ? -1 : 1;
+    if (depth === 0) return html.slice(0, m.index + m[0].length);
+  }
+  return '';
 }
 
 /**

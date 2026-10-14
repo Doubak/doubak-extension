@@ -69,7 +69,8 @@ import {
 //        没写动作词。12 个标记动作词一个都没变形：3265 条有状态的广播保住 3265、丢 0。
 // 0.14.0：扩展与 parser 保持一致。
 // 0.15.0：支持个人相册（albums.ndjson）与豆瓣小组（group_topics.ndjson、group_joins.ndjson）。
-export const PARSER_VERSION = 'doubak-data-parser/0.15.0';
+// 0.15.1：游戏评分取列表正文星级，短评不再依赖本人操作栏，限定条目边界。
+export const PARSER_VERSION = 'doubak-data-parser/0.15.1';
 export const CANONICAL_VERSION = 'canonical/1.2';
 
 /** 路线状态词 → canonical 的封闭词表。 */

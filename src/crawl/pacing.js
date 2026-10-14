@@ -255,11 +255,12 @@ export class RequestGate {
    *
    * @template T
    * @param {() => Promise<T>} fn
+   * @param {{minimumIntervalMs?: number}} [opts]
    * @returns {Promise<{result: T, waitedMs: number}>}
    */
-  async run(fn) {
+  async run(fn, { minimumIntervalMs = 0 } = {}) {
     const run = this._tail.then(async () => {
-      const target = this._pacer.nextDelayMs();
+      const target = Math.max(this._pacer.nextDelayMs(), minimumIntervalMs);
       const wait =
         this._lastFinishedAt === null
           ? 0

@@ -361,7 +361,7 @@ export class SessionGuard {
    * @param {string} html
    * @throws {SessionError}
    */
-  verify(html, url) {
+  verify(html, url, { anonymousCatalog = false } = {}) {
     if (!this._account) throw new Error('尚未 preflight，不能复核');
 
     // 作品、日记正文和图片没有 people 路径；用户路线不能跳到另一账号。
@@ -379,6 +379,12 @@ export class SessionGuard {
     }
 
     const state = detectLoginState(html);
+    // 公开目录请求刻意不带 Cookie；它的退出登录导航不代表操作者退出了登录。
+    // 仅对这一跳豁免会话检查，不能改变任务绑定或放宽下一张目标账号页面。
+    if (anonymousCatalog && this._visibility === 'public') {
+      if (state === 'logged_in') throw new SessionError('operator_switched', '无登录凭据的作品目录请求返回了登录者页面，已停止以免混入个人内容。');
+      return;
+    }
     if (this._visibility === 'public') {
       if (this._operatorMode === 'anonymous') {
         if (state === 'logged_in') throw new SessionError('operator_switched', '匿名抓取期间登录状态发生变化，请恢复原操作者状态后继续。');
