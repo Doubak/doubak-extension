@@ -1338,6 +1338,9 @@ export class SessionGuard {
 档案页（[**`src/ui/panel/archive.js`**](file:///home/mewx/codes/doubak/doubak-extension/src/ui/panel/archive.js)）承担用户对归档内容的查看与自验证需求。
 
 #### 6.3.1 档案列表（左栏）多账号分组
+
+账号选择器位于档案清单上方，默认「全部账号」，选项显示昵称、UID 与档案份数，并保留「归属待确认」入口。筛选后左栏与右侧详情同步切换；未收尾档案可依据匹配 bundle ID 的 checkpoint 身份归组。所选账号已无档案时退回全部账号。此筛选只影响清单与详情，上方存储占用及「清空全部」仍作用于整个档案库。
+
 遵循 `ui.md` §4.9.2，档案列表固定在左侧自己滚动，右侧为详情。列表项明确标注账号归属与性质：
 
 ```
