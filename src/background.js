@@ -55,6 +55,7 @@ import { installDesktopUaRule } from './crawl/desktop-ua.js';
 import { preflightStorage } from './storage/quota.js';
 import { exportedKey } from './storage/storage-usage.js';
 import { ensureHost, withHost, serializeScope } from './runtime/host.js';
+import { OFFSCREEN_TARGET } from './offscreen/protocol.js';
 import {
   notifyNeedsAction, notifyDone, clearAttention, wireNotificationClicks, openPanel,
 } from './ui/notify.js';
@@ -432,7 +433,8 @@ globalThis.chrome?.permissions?.onRemoved?.addListener(async (removed) => {
 globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) => {
   // 发给 offscreen 的消息不归我管。`sendMessage` 是广播式的，不加这个判别，
   // 我会抢在 offscreen 之前用「未知命令」把它答掉。
-  if (msg?.target) return;
+  // start.target 是账号选择对象，不是消息目的地；只忽略明确发给离屏宿主的消息。
+  if (msg?.target === OFFSCREEN_TARGET) return;
   // offscreen 转发给界面的抓取事件也不是命令。
   if (msg?.type === 'crawl_event') return;
 
