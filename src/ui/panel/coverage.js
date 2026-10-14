@@ -22,16 +22,24 @@ import { loadBundleSummary, selectSummaryBundle } from './archive.js';
  * @type {'chain' | 'one'}
  */
 let coverageView = 'chain';
+let sourceFilter = 'all';
+let filterAccount = null;
+let coverageGeneration = 0;
 
 export async function loadCoverage() {
+  const generation = ++coverageGeneration;
   const el = $('coverage');
+  $('chain').replaceChildren();
   el.className = 'muted';
   el.textContent = '正在读取档案…';
   delete el.dataset.stale;
 
   try {
     const cur = await loadBundleSummary();
+    if (generation !== coverageGeneration) return;
     if (!cur) {
+      $('coverage-accounts').replaceChildren();
+      $('coverage-accounts').hidden = true;
       $('coverage-view').replaceChildren();
       $('chain').replaceChildren();
       el.className = 'muted';
@@ -39,97 +47,150 @@ export async function loadCoverage() {
       return;
     }
 
-    renderCoverageSwitch();
-    await renderAccountScope(cur);
-
-    if (coverageView === 'chain') {
-      $('coverage').replaceChildren();
-      await renderChain(cur.id);
-      return;
+    const all = await scanBundleDirs();
+    if (generation !== coverageGeneration) return;
+    const selected = renderAccountScope(cur, all);
+    renderCoverageSwitch(selected.length > 1);
+    el.replaceChildren();
+    const container = coverageView === 'chain' ? $('chain') : el;
+    container.className = '';
+    for (const item of selected) {
+      const section = document.createElement('section');
+      section.className = 'coverage-source';
+      section.append(sourceNote(item.summary.crawlScope, Boolean(item.summary.account?.user_id)));
+      const content = document.createElement('div');
+      section.append(content);
+      container.append(section);
+      if (coverageView === 'chain') {
+        await renderChain(item.id, content);
+        if (generation !== coverageGeneration) return;
+      } else if (!item.summary.hasManifest) {
+        content.className = 'muted';
+        content.textContent = '本次抓取尚未收尾——覆盖率证据在收尾时生成，目前尚不可用。';
+      } else {
+        renderCoverage(item.summary.coverage, item.summary.crawlState, item.id, content);
+      }
     }
-
-    $('chain').replaceChildren();
-    if (!cur.summary.hasManifest) {
-      el.className = 'muted';
-      el.textContent = '本次抓取尚未收尾——覆盖率证据在收尾时生成，目前尚不可用。';
-      return;
-    }
-    renderCoverage(cur.summary.coverage, cur.summary.crawlState, cur.id);
   } catch (e) {
+    if (generation !== coverageGeneration) return;
     el.className = 'card tone-error';
     el.textContent = `读不出来：${e.message}`;
   }
 }
 
-/** 「合起来 / 这一份」的切换。 */
-async function renderAccountScope(cur) {
+/** 来源仅用于展示和筛选；链的身份校验仍由后台执行。 */
+function scopeOf(scope) {
+  if (scope?.visibility !== 'public') return 'self';
+  return scope.operator_mode === 'anonymous' ? 'public:anonymous'
+    : `public:authenticated:${scope.operator_user_id ?? 'unknown'}`;
+}
+
+function sourceLabel(scope) {
+  if (scope?.visibility !== 'public') return '本人登录时备份';
+  if (scope.operator_mode === 'anonymous') return '公开页面备份 · 未登录';
+  return `公开页面备份 · ${scope.operator_user_id ? `登录账号 UID ${scope.operator_user_id}` : '未记录登录账号'}`;
+}
+
+function sourceNote(scope, known) {
+  const note = document.createElement('div');
+  note.className = 'coverage-source-note small';
+  const label = document.createElement('b');
+  label.textContent = known ? sourceLabel(scope) : '备份来源待确认';
+  note.append(label);
+  if (scope?.visibility === 'public') {
+    const detail = document.createElement('span');
+    detail.className = 'muted';
+    detail.textContent = '仅反映当时可见的公开内容；数量差值不代表删除或私密条目数。';
+    note.append(detail);
+  }
+  return note;
+}
+
+/** 默认按账号展示各来源；只有多种来源时才提供可选筛选。 */
+function renderAccountScope(cur, all) {
   const box = $('coverage-accounts');
-  if (!box) return;
   box.replaceChildren();
   box.className = 'account-picker';
-  const all = (await scanBundleDirs()).filter((e) => e.manifest?.account?.user_id);
-  const uids = [...new Set(all.map((e) => e.manifest.account.user_id))];
-  if (!uids.length) return;
-  const uid = cur.summary.account?.user_id ?? uids[0];
-  const scopeOf = (e) => {
-    const scope = e.manifest.crawl_scope;
-    if (scope?.visibility !== 'public') return 'self';
-    return scope.operator_mode === 'anonymous' ? 'public:anonymous'
-      : `public:authenticated:${scope.operator_user_id ?? 'unknown'}`;
-  };
-  const current = all.find((e) => e.bundleId === cur.id);
-  const scope = current ? scopeOf(current) : 'self';
+  const known = all.filter((e) => e.manifest?.account?.user_id);
+  const uids = [...new Set(known.map((e) => e.manifest.account.user_id))];
+  const uid = cur.summary.account?.user_id;
+  box.hidden = !uid;
+  if (!uid) {
+    filterAccount = null;
+    sourceFilter = 'all';
+    return [cur];
+  }
+  if (filterAccount !== uid) {
+    filterAccount = uid;
+    sourceFilter = 'all';
+  }
   const accountSelect = document.createElement('select');
   accountSelect.setAttribute('aria-label', '覆盖率目标账号');
   accountSelect.className = 'account-select';
   for (const id of uids) {
-    const account = all.find((e) => e.manifest.account.user_id === id).manifest.account;
+    const account = known.find((e) => e.manifest.account.user_id === id).manifest.account;
     const option = document.createElement('option');
     option.value = id;
     option.textContent = `${account.nickname || account.username || id}（UID ${id}）`;
     option.selected = id === uid;
     accountSelect.append(option);
   }
-  const scopeSelect = document.createElement('select');
-  scopeSelect.setAttribute('aria-label', '覆盖率抓取视角');
-  scopeSelect.className = 'account-select';
-  const scopes = [...new Set(all.filter((e) => e.manifest.account.user_id === uid).map(scopeOf))];
-  for (const s of scopes) {
-    const option = document.createElement('option');
-    option.value = s;
-    option.textContent = s === 'self' ? '本人视图' : s === 'public:anonymous' ? '公开视图 · 匿名访客'
-      : `公开视图 · ${s.endsWith(':unknown') ? '未记录操作者' : `操作者 UID ${s.split(':')[2]}`}`;
-    option.selected = s === scope;
-    scopeSelect.append(option);
+  const items = known.filter((e) => e.manifest.account.user_id === uid)
+    .sort((a, b) => b.bundleId.localeCompare(a.bundleId));
+  // 档案页选中的那份仍作为该来源的起点；其他来源取最近的一份。
+  const groups = new Map([[scopeOf(cur.summary.crawlScope), cur]]);
+  for (const entry of items) {
+    const m = entry.manifest;
+    const key = scopeOf(m.crawl_scope);
+    if (!groups.has(key)) groups.set(key, { id: entry.bundleId, summary: {
+      hasManifest: true, account: m.account, crawlScope: m.crawl_scope, coverage: m.coverage, crawlState: m.crawl_state,
+    } });
   }
-  const pick = (id, wantedScope = null) => {
-    const entries = all.filter((e) => e.manifest.account.user_id === id && (!wantedScope || scopeOf(e) === wantedScope));
-    entries.sort((a, b) => b.bundleId.localeCompare(a.bundleId));
-    if (entries[0]) selectSummaryBundle(entries[0].bundleId);
-    void loadCoverage();
-  };
-  accountSelect.addEventListener('change', () => pick(accountSelect.value));
-  scopeSelect.addEventListener('change', () => pick(accountSelect.value, scopeSelect.value));
-  for (const [title, select] of [['账号', accountSelect], ['抓取视角', scopeSelect]]) {
+  if (!groups.has(sourceFilter)) sourceFilter = 'all';
+  const addSelect = (title, select) => {
     const label = document.createElement('label');
     label.className = 'account-select-label';
     label.append(document.createTextNode(title), select);
     box.append(label);
-  }
-  if (scope.startsWith('public:')) {
+  };
+  addSelect('账号', accountSelect);
+  accountSelect.addEventListener('change', () => {
+    const entry = known.filter((e) => e.manifest.account.user_id === accountSelect.value)
+      .sort((a, b) => b.bundleId.localeCompare(a.bundleId))[0];
+    if (entry) selectSummaryBundle(entry.bundleId);
+    sourceFilter = 'all';
+    void loadCoverage();
+  });
+  if (groups.size > 1) {
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', '筛选备份来源');
+    select.className = 'account-select';
+    for (const [key, label] of [['all', '全部来源'], ...[...groups].map(([key, item]) => [key, sourceLabel(item.summary.crawlScope)])]) {
+      const option = document.createElement('option');
+      option.value = key;
+      option.textContent = label;
+      option.selected = key === sourceFilter;
+      select.append(option);
+    }
+    select.addEventListener('change', () => {
+      sourceFilter = select.value;
+      void loadCoverage();
+    });
+    addSelect('备份来源（可选）', select);
     const note = document.createElement('span');
     note.className = 'muted small';
-    note.textContent = '公开视图不包含私密条目；数量差值是可见范围的事实，不代表删除或私密条目数。';
+    note.textContent = '不同来源能看到的内容可能不同，下面分别展示连续性，不合并计数。';
     box.append(note);
   }
+  return sourceFilter === 'all' ? [...groups.values()] : [groups.get(sourceFilter)];
 }
 
-function renderCoverageSwitch() {
+function renderCoverageSwitch(multiple) {
   const el = $('coverage-view');
   el.replaceChildren();
   for (const [key, label, why] of /** @type {const} */ ([
     ['chain', '合起来', '整条链覆盖到哪儿 —— 完整性是链的属性'],
-    ['one', '这一份', '这一次抓取自己做了什么'],
+    ['one', multiple ? '各看一份' : '这一份', '查看所选档案；其他来源各取最近的一份'],
   ])) {
     const b = document.createElement('button');
     b.className = 'act';
@@ -148,8 +209,7 @@ function renderCoverageSwitch() {
  * 下界是闭区间、档案之间必然重叠，那个数只会误导；而这一页存在的全部理由就是
  * 「计数不能证明完整性，连续性才能」。
  */
-async function renderChain(bundleId) {
-  const el = $('chain');
+async function renderChain(bundleId, el) {
   el.className = 'muted';
   el.textContent = '正在读所有档案…';
 
@@ -217,8 +277,7 @@ async function renderChain(bundleId) {
 }
 
 /** @param {object[]} coverage @param {object[]} crawlState @param {string} [bundleId] */
-function renderCoverage(coverage, crawlState, bundleId) {
-  const el = $('coverage');
+function renderCoverage(coverage, crawlState, bundleId, el) {
   el.replaceChildren();
 
   // 说清这是**哪一份**档案的对账。档案页有个下拉可以切换，不写出来的话两页对不上时
@@ -233,7 +292,7 @@ function renderCoverage(coverage, crawlState, bundleId) {
 
   if (!coverage?.length) {
     el.className = 'muted';
-    el.textContent = '还没有数据——跑完一条路线之后才会有。';
+    el.append(document.createTextNode('还没有数据——跑完一条路线之后才会有。'));
     return;
   }
   el.className = '';

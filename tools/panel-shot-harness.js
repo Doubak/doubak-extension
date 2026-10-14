@@ -140,8 +140,10 @@ async function seed(n) {
     const dir = await root.getDirectoryHandle(`doubak-bundle-${id}`, { create: true });
     const captures = 180 + i * 940;
     const uid = MULTI_ACCOUNT && i % 2 ? '66133087' : '82160871';
-    const visibility = uid === '66133087' ? 'public' : 'self';
-    const prev = heads.get(uid) ?? null;
+    const visibility = uid === '66133087' || (STATE === 'coverage-sources' && i % 2) ? 'public' : 'self';
+    const operatorMode = STATE === 'coverage-sources' && visibility === 'public' ? 'anonymous' : 'authenticated';
+    const sourceKey = `${uid}:${visibility}:${operatorMode}`;
+    const prev = heads.get(sourceKey) ?? null;
     const put = async (name, text) => {
       const f = await dir.getFileHandle(name, { create: true });
       const w = await f.createWritable(); await w.write(text); await w.close();
@@ -151,7 +153,7 @@ async function seed(n) {
       previous_bundle_id: prev, status: 'complete',
       index: { filename: `index-${id}.ndjson`, line_count: captures },
       account: { user_id: uid, username: uid === '82160871' ? 'someone' : 'target', nickname: uid === '82160871' ? 'MewX' : '叔叔' },
-      crawl_scope: { visibility, operator_mode: 'authenticated', operator_user_id: '82160871' },
+      crawl_scope: { visibility, operator_mode: operatorMode, operator_user_id: operatorMode === 'anonymous' ? null : '82160871' },
       crawl_state: [{ route_key: 'broadcast.timeline', enumeration: 'bounded', advanced: true,
         contiguous: true, gaps: [], high_water_time: d.toISOString() }],
       producer: { name: 'doubak-extension', version: '0.0.0-量具' },
@@ -164,7 +166,7 @@ async function seed(n) {
       observed_at: d.toISOString(), segment: `data-${id}-000001.warc.gz`, offset: 0, length: 10,
     })).join('\n') + '\n');
     await put(`data-${id}-000001.warc.gz`, 'y'.repeat(40_000 + i * 3_000));
-    heads.set(uid, id);
+    heads.set(sourceKey, id);
   }
 }
 

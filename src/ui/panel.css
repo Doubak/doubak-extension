@@ -641,3 +641,7 @@ ul.own li { margin: 2px 0; }
 #target-accounts button[aria-selected="true"], #formats-accounts button[aria-selected="true"] {
   border-color: var(--brand); background: var(--brand-soft); color: var(--brand);
 }
+
+/* 覆盖率按账号呈现，各备份来源的证据保持独立。 */
+.coverage-source + .coverage-source { margin-top: var(--s5); }
+.coverage-source-note { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); margin-bottom: var(--s2); color: var(--text-dim); }

@@ -6,13 +6,13 @@ import { fakeOpfsWorker, seedBundle } from './helpers/fake-opfs-worker.js';
 let nonce = 0;
 const settle = () => new Promise((r) => setTimeout(r, 15));
 
-async function panel({ pendingSession = null, status = null, bundles = true } = {}) {
+async function panel({ pendingSession = null, status = null, bundles = true, extraSources = [] } = {}) {
   const worker = fakeOpfsWorker();
   if (bundles) {
-    for (const [uid, nickname, id] of [['111', '我的昵称', '20261001T000000Z-aaaaaa'], ['222', '朋友昵称', '20261002T000000Z-bbbbbb']]) {
+    for (const [uid, nickname, id, scope] of [['111', '我的昵称', '20261001T000000Z-aaaaaa'], ['222', '朋友昵称', '20261002T000000Z-bbbbbb'], ...extraSources]) {
       await seedBundle(worker, `doubak-bundle-${id}`, {
         'manifest.json': JSON.stringify({ bundle_id: id, account: { user_id: uid, username: uid, nickname },
-          status: 'complete', crawl_scope: { visibility: uid === '111' ? 'self' : 'public', operator_mode: 'authenticated', operator_user_id: '111' },
+          status: 'complete', crawl_scope: scope ?? { visibility: uid === '111' ? 'self' : 'public', operator_mode: 'authenticated', operator_user_id: '111' },
           created_at: '2026-10-01T00:00:00Z', segments: [], index: { line_count: 0 },
           coverage: [], crawl_state: [{ route_key: 'broadcast.timeline', advanced: true, contiguous: true, high_water_time: '2026-10-01T00:00:00Z', gaps: [], enumeration: 'bounded' }] }),
         [`index-${id}.ndjson`]: '',
@@ -174,7 +174,7 @@ test('完整主页网址包含跟踪参数也能探测；单账号导出仍显�
   } finally { dom.restore(); }
 });
 
-test('覆盖率按选择的账号与视角请求具体链，档案页按 UID 分组', async () => {
+test('覆盖率只有一种来源时无需筛选，按账号请求具体链，档案页按 UID 分组', async () => {
   const dom = await panel();
   try {
     const archive = await import('../src/ui/panel/archive.js');
@@ -186,11 +186,94 @@ test('覆盖率按选择的账号与视角请求具体链，档案页按 UID 分
       ? (dom.sent.push(msg), cb({ ok: true, chain: { routes: [], bundles: [], holes: [], others: [] } })) : original(msg, cb);
     await coverage.loadCoverage();
     assert.equal(dom.sent.findLast((m) => m.type === 'chain').bundleId, '20261001T000000Z-aaaaaa');
+    assert.equal(dom.byId.get('coverage-accounts').querySelectorAll('select').length, 1);
+    assert.match(dom.byId.get('chain').textContent, /本人登录时备份/);
     const select = dom.byId.get('coverage-accounts').querySelector('select');
     select.value = '222'; select.dispatch('change'); await settle();
     assert.equal(dom.sent.findLast((m) => m.type === 'chain').bundleId, '20261002T000000Z-bbbbbb');
+    assert.equal(dom.byId.get('coverage-accounts').querySelectorAll('select').length, 1);
+    assert.match(dom.byId.get('chain').textContent, /公开页面备份 · 登录账号 UID 111/);
+    assert.doesNotMatch(dom.byId.get('coverage-accounts').textContent, /视图|视角/);
     await archive.loadArchive();
     assert.match(dom.byId.get('bundle-pick').textContent, /我的昵称（UID 111）/);
     assert.match(dom.byId.get('bundle-pick').textContent, /朋友昵称（UID 222）/);
+  } finally { dom.restore(); }
+});
+
+
+test('同一账号默认展示全部来源的独立链，筛选不串账号；单份对账保留来源和档案标识', async () => {
+  const ids = ['20261001T000000Z-aaaaaa', '20261003T000000Z-cccccc', '20261004T000000Z-dddddd'];
+  const dom = await panel({ extraSources: [
+    ['111', '我的昵称', ids[1], { visibility: 'public', operator_mode: 'anonymous' }],
+    ['111', '我的昵称', ids[2], { visibility: 'public', operator_mode: 'authenticated', operator_user_id: '333' }],
+  ] });
+  try {
+    const archive = await import('../src/ui/panel/archive.js');
+    archive.selectSummaryBundle(ids[0]);
+    const coverage = await import('../src/ui/panel/coverage.js');
+    const original = dom.chrome.runtime.sendMessage;
+    dom.chrome.runtime.sendMessage = (msg, cb) => msg.type === 'chain'
+      ? (dom.sent.push(msg), cb({ ok: true, chain: { routes: [], bundles: [], holes: [], others: [] } })) : original(msg, cb);
+    await coverage.loadCoverage();
+    assert.deepEqual(dom.sent.filter((m) => m.type === 'chain').map((m) => m.bundleId).sort(), ids);
+    const box = dom.byId.get('coverage-accounts');
+    assert.equal(box.querySelectorAll('select').length, 2);
+    assert.match(box.textContent, /全部来源/);
+    for (const label of ['本人登录时备份', '公开页面备份 · 未登录', '公开页面备份 · 登录账号 UID 333']) {
+      assert.ok(dom.byId.get('chain').textContent.includes(label));
+    }
+    const filter = box.querySelectorAll('select')[1];
+    dom.sent.length = 0;
+    filter.value = 'public:anonymous'; filter.dispatch('change'); await settle();
+    assert.deepEqual(dom.sent.filter((m) => m.type === 'chain').map((m) => m.bundleId), [ids[1]]);
+    assert.doesNotMatch(dom.byId.get('chain').textContent, /本人登录时备份|登录账号 UID 333/);
+    const one = dom.byId.get('coverage-view').querySelectorAll('button')[1];
+    one.onclick(); await settle();
+    assert.match(dom.byId.get('coverage').textContent, /公开页面备份 · 未登录/);
+    assert.ok(dom.byId.get('coverage').textContent.includes(ids[1]));
+    assert.equal(dom.byId.get('chain').textContent, '');
+    // 切到只有一种来源的账号后，不继承上一账号的匿名筛选。
+    const account = box.querySelector('select');
+    account.value = '222'; account.dispatch('change'); await settle();
+    assert.equal(box.querySelectorAll('select').length, 1);
+    assert.match(dom.byId.get('coverage').textContent, /公开页面备份 · 登录账号 UID 111/);
+    assert.doesNotMatch(dom.byId.get('coverage').textContent, /未登录|UID 333/);
+    // 返回原账号时恢复全部来源；每份数据仍带独立档案标识。
+    const back = box.querySelector('select');
+    back.value = '111'; back.dispatch('change'); await settle();
+    for (const id of ids) assert.ok(dom.byId.get('coverage').textContent.includes(id));
+    dom.byId.get('coverage-view').querySelector('button').onclick(); await settle();
+  } finally { dom.restore(); }
+});
+
+test('覆盖率快速切换账号时旧链答复不覆盖新账号，清空档案后清除旧筛选', async () => {
+  const dom = await panel();
+  try {
+    const archive = await import('../src/ui/panel/archive.js');
+    archive.selectSummaryBundle('20261001T000000Z-aaaaaa');
+    const coverage = await import('../src/ui/panel/coverage.js');
+    const original = dom.chrome.runtime.sendMessage;
+    let reply;
+    const empty = { ok: true, chain: { routes: [], bundles: [], holes: [], others: [] } };
+    dom.chrome.runtime.sendMessage = (msg, cb) => {
+      if (msg.type !== 'chain') return original(msg, cb);
+      if (msg.bundleId === '20261001T000000Z-aaaaaa') reply = () => cb(empty);
+      else cb(empty);
+    };
+    const first = coverage.loadCoverage();
+    await settle();
+    const select = dom.byId.get('coverage-accounts').querySelector('select');
+    select.value = '222'; select.dispatch('change'); await settle();
+    reply(); await first;
+    assert.match(dom.byId.get('chain').textContent, /公开页面备份 · 登录账号 UID 111/);
+    assert.doesNotMatch(dom.byId.get('chain').textContent, /本人登录时备份/);
+    const shared = await import('../src/ui/panel/shared.js');
+    (await shared.scanBundleDirs()).length = 0;
+    archive.invalidateBundles([]);
+    await coverage.loadCoverage();
+    assert.match(dom.byId.get('coverage').textContent, /暂无档案/);
+    assert.equal(dom.byId.get('coverage-accounts').hidden, true);
+    assert.equal(dom.byId.get('coverage-accounts').textContent, '');
+    assert.equal(dom.byId.get('chain').textContent, '');
   } finally { dom.restore(); }
 });

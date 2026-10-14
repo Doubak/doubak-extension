@@ -34,7 +34,7 @@
 应中止旧任务，再以数字 UID 探测并建立新的全量基准。旧断点只从已存主页补身份，取证
 不足时拒绝恢复；中止可解除任务占用并保留原始捕获。
 
-覆盖率可切换账号与本人/公开视角，公开增量基准还按操作者 UID 隔离，档案清单按 UID 分组。
+覆盖率按账号展示，记录旁标注「本人登录时备份」或「公开页面备份」。同一账号有多种备份来源时，默认全部展示，也可按来源筛选；各来源的连续性分别计算。公开增量基准仍按操作者 UID 隔离，档案清单按 UID 分组。
 导出页始终显示账号，单账号自动选中；多账号派生导出必须先显式选择
 一个账号，目录与 ZIP 名带所选 UID；未知归属不混入多账号派生数据。混合账号文件夹可
 批量导入，仍逐份检查重复编号、摘要与回滚，原始 WARC 字节保持不变。OPFS 沿用已有
@@ -137,6 +137,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 ```sh
 node tools/panel-shot.mjs formats --out=/tmp/export.png
 node tools/panel-shot.mjs overview --state=crawling      # 模拟抓取中 / paused / failures 等运行状态
+node tools/panel-shot.mjs coverage --state=coverage-sources --bundles=4 --wait=15000 # 同账号多来源
 node tools/panel-shot.mjs archive --bundles=14           # 模拟向 OPFS 中写入 14 份测试归档
 node tools/panel-shot.mjs help --height=5200 --theme=light
 node tools/panel-shot.mjs overview --measure             # 仅测量并输出各个页面的渲染高度
