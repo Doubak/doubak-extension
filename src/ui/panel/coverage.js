@@ -4,7 +4,7 @@
 
 import { chainRow, chainHeadline, holeText } from '../chain-label.js';
 import { routeName, contiguityLabel } from '../route-names.js';
-import { $, send, table, GAP_REASONS, scanBundleDirs } from './shared.js';
+import { $, send, table, GAP_REASONS, scanBundleDirs, getLastStatus } from './shared.js';
 import { loadBundleSummary, selectSummaryBundle } from './archive.js';
 
 /**
@@ -38,6 +38,8 @@ export async function loadCoverage() {
     const cur = await loadBundleSummary();
     if (generation !== coverageGeneration) return;
     if (!cur) {
+      filterAccount = null;
+      sourceFilter = 'all';
       $('coverage-accounts').replaceChildren();
       $('coverage-accounts').hidden = true;
       $('coverage-view').replaceChildren();
@@ -50,6 +52,13 @@ export async function loadCoverage() {
     const all = await scanBundleDirs();
     if (generation !== coverageGeneration) return;
     const selected = renderAccountScope(cur, all);
+    if (!selected.length) {
+      renderCoverageSwitch(false);
+      $('chain').replaceChildren();
+      el.className = 'muted';
+      el.textContent = '本次抓取尚未收尾——覆盖率证据在收尾时生成，目前尚不可用。';
+      return;
+    }
     renderCoverageSwitch(selected.length > 1);
     el.replaceChildren();
     const container = coverageView === 'chain' ? $('chain') : el;
@@ -61,12 +70,12 @@ export async function loadCoverage() {
       const content = document.createElement('div');
       section.append(content);
       container.append(section);
-      if (coverageView === 'chain') {
-        await renderChain(item.id, content);
-        if (generation !== coverageGeneration) return;
-      } else if (!item.summary.hasManifest) {
+      if (!item.summary.hasManifest) {
         content.className = 'muted';
         content.textContent = '本次抓取尚未收尾——覆盖率证据在收尾时生成，目前尚不可用。';
+      } else if (coverageView === 'chain') {
+        await renderChain(item.id, content);
+        if (generation !== coverageGeneration) return;
       } else {
         renderCoverage(item.summary.coverage, item.summary.crawlState, item.id, content);
       }
@@ -113,17 +122,36 @@ function renderAccountScope(cur, all) {
   box.className = 'account-picker';
   const known = all.filter((e) => e.manifest?.account?.user_id);
   const uids = [...new Set(known.map((e) => e.manifest.account.user_id))];
-  const uid = cur.summary.account?.user_id;
-  box.hidden = !uid;
-  if (!uid) {
+
+  if (!uids.length) {
+    box.hidden = true;
     filterAccount = null;
     sourceFilter = 'all';
-    return [cur];
+    return cur?.summary?.hasManifest ? [cur] : [];
   }
+
+  let uid = (cur?.summary?.hasManifest && cur.summary.account?.user_id && uids.includes(cur.summary.account.user_id))
+    ? cur.summary.account.user_id
+    : (filterAccount && uids.includes(filterAccount))
+      ? filterAccount
+      : null;
+
+  if (!uid) {
+    const st = getLastStatus();
+    const activeUid = st?.runner?.targetAccount?.userId ?? st?.checkpoint?.run_context?.account?.userId;
+    if (activeUid && uids.includes(activeUid)) {
+      uid = activeUid;
+    } else {
+      uid = uids[0];
+    }
+  }
+
+  box.hidden = false;
   if (filterAccount !== uid) {
     filterAccount = uid;
     sourceFilter = 'all';
   }
+
   const accountSelect = document.createElement('select');
   accountSelect.setAttribute('aria-label', '覆盖率目标账号');
   accountSelect.className = 'account-select';
@@ -135,18 +163,41 @@ function renderAccountScope(cur, all) {
     option.selected = id === uid;
     accountSelect.append(option);
   }
+  accountSelect.value = uid;
+
   const items = known.filter((e) => e.manifest.account.user_id === uid)
     .sort((a, b) => b.bundleId.localeCompare(a.bundleId));
-  // 档案页选中的那份仍作为该来源的起点；其他来源取最近的一份。
-  const groups = new Map([[scopeOf(cur.summary.crawlScope), cur]]);
+
+  // 档案页选中的那份若属于该账号且已收尾，仍作为该来源的起点；其他来源取最近的一份。
+  const groups = new Map();
+  if (cur?.summary?.hasManifest && cur.summary.account?.user_id === uid) {
+    groups.set(scopeOf(cur.summary.crawlScope), cur);
+  }
   for (const entry of items) {
     const m = entry.manifest;
     const key = scopeOf(m.crawl_scope);
-    if (!groups.has(key)) groups.set(key, { id: entry.bundleId, summary: {
-      hasManifest: true, account: m.account, crawlScope: m.crawl_scope, coverage: m.coverage, crawlState: m.crawl_state,
-    } });
+    if (!groups.has(key)) {
+      groups.set(key, {
+        id: entry.bundleId,
+        summary: {
+          hasManifest: true,
+          account: m.account,
+          crawlScope: m.crawl_scope,
+          coverage: m.coverage,
+          crawlState: m.crawl_state,
+        },
+      });
+    }
   }
+
   if (!groups.has(sourceFilter)) sourceFilter = 'all';
+
+  // 同步当前选中的代表性档案给 summary 缓存，避免后续切视角时读到未收尾档案
+  const rep = groups.get(sourceFilter) ?? groups.values().next().value;
+  if (rep?.id && (!cur?.summary?.hasManifest || cur.summary.account?.user_id !== uid)) {
+    selectSummaryBundle(rep.id);
+  }
+
   const addSelect = (title, select) => {
     const label = document.createElement('label');
     label.className = 'account-select-label';
@@ -154,13 +205,16 @@ function renderAccountScope(cur, all) {
     box.append(label);
   };
   addSelect('账号', accountSelect);
+
   accountSelect.addEventListener('change', () => {
     const entry = known.filter((e) => e.manifest.account.user_id === accountSelect.value)
       .sort((a, b) => b.bundleId.localeCompare(a.bundleId))[0];
     if (entry) selectSummaryBundle(entry.bundleId);
+    filterAccount = accountSelect.value;
     sourceFilter = 'all';
     void loadCoverage();
   });
+
   if (groups.size > 1) {
     const select = document.createElement('select');
     select.setAttribute('aria-label', '筛选备份来源');
@@ -172,6 +226,7 @@ function renderAccountScope(cur, all) {
       option.selected = key === sourceFilter;
       select.append(option);
     }
+    select.value = sourceFilter;
     select.addEventListener('change', () => {
       sourceFilter = select.value;
       void loadCoverage();
