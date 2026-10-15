@@ -361,11 +361,22 @@ export class RollingSize {
   }
 }
 
+// 2026-10-15 第三方日记空页样本：没有 note-list，也没有「暂无日记」文案。
+// 只能接受完整的已知空模板：article 内只有 pic/info 资料块，之后直接关闭
+// article 并进入带日记 RSS 的 aside。禁止跨 div 吞掉未识别列表/错误提示，
+// 也不能仅凭标题或条目数为零就把分页线收尾。
+const NOTE_LIST_OR_EMPTY_FRAME = new RegExp([
+  'class="note-list"|',
+  String.raw`<div class="article">\s*<div id="db-usr-profile" class="clearfix">\s*`,
+  String.raw`<div class="pic">(?:(?!<\/?div\b)[\s\S])*<\/div>\s*`,
+  String.raw`<div class="info">(?:(?!<\/?div\b)[\s\S])*<\/div>\s*`,
+  String.raw`<\/div>\s*<\/div>\s*<div class="aside">`,
+  String.raw`[\s\S]*?<a href="/feed/people/[^/"\s]+/notes">\s*feed: rss 2\.0\s*</a>`,
+].join(''));
+
 /**
  * 已知路线的判定描述。
- *
- * 锚点取自真实旧档案里实际出现的 markup。注意 `frameAnchors` 用的是页面
- * 框架而非条目——空列表页也必须能被判为 ok。
+ * 锚点取自真实页面；框架而非条目决定是否接受，空列表页也必须能被判为 ok。
  */
 export const ROUTE_PROFILES = {
   'broadcast.timeline': {
@@ -563,9 +574,9 @@ export const ROUTE_PROFILES = {
   /**
    * 日记列表 `www.douban.com/people/<user>/notes`。
    *
-   * 全部锚点都是对着一份真实页面量出来的，不是照别的路线套的。三处与标记列表不同：
+   * 锚点取自本人页面及第三方空/非空页面样本。三处与标记列表不同：
    *
-   * **① 没有声明数量。** 标题就是 `<h1>我的日记</h1>`，没有 `(N)`——整页找不出第二个
+   * **① 没有声明数量。** 本人标题是「我的日记」，第三方是「昵称的日记」，没有 `(N)`——整页找不出第二个
    * 带数字的括号。所以 `claimedCount: null`：这条路线的完整性**只能**靠连续性证明，
    * 没有第二个信号可以对账。（评论列表有，是 `<h1>我的评论(2)</h1>`。）
    *
@@ -580,8 +591,8 @@ export const ROUTE_PROFILES = {
    * **③ 时间是完整时刻。** `2025-04-14 18:47:50`，不像标记列表只有日期。
    */
   'note.list': {
-    urlAnchor: /\/people\/[^/]+\/notes/,
-    frameAnchors: [/<h1>\s*我的日记\s*<\/h1>/, /class="note-list"/],
+    urlAnchor: /\/people\/[^/]+\/notes\/?(?:\?|$)/,
+    frameAnchors: [/<h1>\s*[^<]+的日记\s*<\/h1>/, NOTE_LIST_OR_EMPTY_FRAME],
     itemAnchor: /class="note-item"/,
     // **日记有不止一种 URL 形状，两种都要认。**
     //
