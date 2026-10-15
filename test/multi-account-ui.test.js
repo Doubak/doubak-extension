@@ -362,3 +362,24 @@ test('仅有未收尾的抓取档案时，覆盖率页提示尚未收尾而非�
     assert.match(dom.byId.get('coverage').textContent, /本次抓取尚未收尾——覆盖率证据在收尾时生成，目前尚不可用。/);
   } finally { dom.restore(); }
 });
+
+for (const cold of [false, true]) {
+  test(`覆盖率如实显示${cold ? '冷断点' : '内存任务'}暂停状态`, async () => {
+    const account = { userId: '111', username: '111' };
+    const dom = await panel({ status: {
+      ok: true,
+      runner: cold ? { active: false } : { active: true, stopped: true, targetAccount: account },
+      checkpoint: cold ? { run_context: { account }, pause_reason: 'challenge' } : null,
+    } });
+    try {
+      const archive = await import('../src/ui/panel/archive.js');
+      archive.selectSummaryBundle('20261001T000000Z-aaaaaa');
+      const original = dom.chrome.runtime.sendMessage;
+      dom.chrome.runtime.sendMessage = (msg, cb) => msg.type === 'chain'
+        ? cb({ ok: true, chain: { routes: [], bundles: [], holes: [], others: [] } }) : original(msg, cb);
+      await (await import('../src/ui/panel/coverage.js')).loadCoverage();
+      assert.match(dom.byId.get('chain').textContent, /本次抓取已暂停/);
+      assert.doesNotMatch(dom.byId.get('chain').textContent, /本次抓取正在进行中/);
+    } finally { dom.restore(); }
+  });
+}

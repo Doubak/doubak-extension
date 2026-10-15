@@ -266,7 +266,7 @@ describe('判定超时后其他非锁操作的事件不得重置心跳', () => {
 describe('活着的证据必须由持有者自己出具', () => {
   test('不持锁的操作所发送的事件不作为存活心跳证明', async () => {
     const { EVENTS_WITHOUT_LOCK, provesLiveness } = await import('../src/crawl/driver.js');
-    for (const t of ['paused', 'aborted', 'finished', 'retry_requested']) {
+    for (const t of ['paused', 'aborted', 'finished', 'retry_requested', 'pacer_reset']) {
       assert.equal(provesLiveness(t), false, `${t} 不该被当成「抓取还在动」`);
       assert.ok(EVENTS_WITHOUT_LOCK.has(t));
     }

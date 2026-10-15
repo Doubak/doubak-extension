@@ -63,13 +63,15 @@ export async function loadCoverage() {
     el.replaceChildren();
     const container = coverageView === 'chain' ? $('chain') : el;
     container.className = '';
-    const activeRunner = getLastStatus()?.runner;
-    const activeUid = activeRunner?.targetAccount?.userId ?? getLastStatus()?.checkpoint?.run_context?.account?.userId;
-    if (activeRunner?.active && activeUid && selected.some((item) => item.summary.account?.user_id === activeUid)) {
+    const status = getLastStatus();
+    const activeRunner = status?.runner;
+    const activeUid = activeRunner?.targetAccount?.userId ?? status?.checkpoint?.run_context?.account?.userId;
+    if ((activeRunner?.active || status?.checkpoint) && activeUid && selected.some((item) => item.summary.account?.user_id === activeUid)) {
       const activeNotice = document.createElement('div');
       activeNotice.className = 'card tone-idle';
       const b = document.createElement('b');
-      b.textContent = '本次抓取正在进行中';
+      b.textContent = activeRunner?.active && !activeRunner.stopped
+        ? '本次抓取正在进行中' : '本次抓取已暂停';
       activeNotice.append(b, document.createTextNode('（实时进度可在「概览」页查看）。覆盖率证据与连续性证明将在本次抓取收尾时生成并合并入链。'));
       container.append(activeNotice);
     }

@@ -2646,3 +2646,32 @@ describe('恢复与软封锁（awaiting_human）条目的重新排队', () => {
   });
 });
 
+
+for (const cold of [false, true]) {
+  test(`真实 challenge 响应经${cold ? '冷' : '热'}恢复后成功抓取并修复连续性`, async () => {
+    let challenged = true;
+    const normal = broadcastOnly([bcPage(1), bcPage(0)]);
+    const { runner, runStore, calls } = harness((url) => {
+      if (challenged && url.includes('statuses')) return `${NAV}<p>请输入验证码</p>`;
+      return normal(url);
+    });
+    await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+    const blocked = await runner.runBatch();
+    assert.equal(blocked.stoppedBy, 'challenge');
+    assert.equal(runner.status().counts.awaiting_human, 1);
+    assert.equal(calls.filter((url) => url.includes('statuses')).length, 1);
+    const cp = await runStore.loadCheckpoint();
+    challenged = false;
+    if (cold) runner._run = null;
+    await runner.resume(cold ? cp : null);
+    let result;
+    do { result = await runner.runBatch(); } while (!result.done);
+    assert.equal(result.stoppedBy, null);
+    assert.equal(runner.status().counts.awaiting_human ?? 0, 0);
+    const manifest = await runner.finish();
+    const route = manifest.crawl_state.find((row) => row.route_key === 'broadcast.timeline');
+    assert.equal(route.contiguous, true);
+    assert.deepEqual(route.gaps, []);
+    assert.equal(manifest.account.user_id, '82160871');
+  });
+}

@@ -792,3 +792,9 @@ describe('判不出来时要说清是哪一种', () => {
     assert.equal(r.reason, undefined);
   });
 });
+
+// 注释起点若在 script 字符串中，不得跨越 </script> 吞掉真正显示的风控提示。
+test('脚本中的注释字面量不会掩盖随后可见的验证码提示', () => {
+  const bodyText = fixtures.broadcastPage + '<script>const marker = "<!--";</script><p>请输入验证码</p><!-- footer -->';
+  assert.equal(classify({ bodyText }).verdict, 'challenge');
+});

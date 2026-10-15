@@ -83,8 +83,7 @@ const MARKERS = {
  */
 export function stripScriptAndStyle(html) {
   return String(html ?? '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+    .replace(/<!--[\s\S]*?-->|<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
 }
 
 /**
