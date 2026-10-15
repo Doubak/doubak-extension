@@ -79,6 +79,25 @@ describe('退避：只增不减', () => {
     assert.equal(typeof (/** @type {any} */ (p).reset), 'undefined');
   });
 
+  test('resetLevel：允许由人显式重置层级', () => {
+    const p = new Pacer({ intervalMs: 1000, jitterRatio: 0 });
+    p.slowDown();
+    p.slowDown();
+    assert.equal(p.level, 2);
+    assert.equal(p.intervalMs, 4000);
+
+    const r = p.resetLevel();
+    assert.equal(r.level, 0);
+    assert.equal(r.intervalMs, 1000);
+    assert.equal(p.level, 0);
+    assert.equal(p.intervalMs, 1000);
+
+    // 也支持指定层级
+    p.resetLevel(1);
+    assert.equal(p.level, 1);
+    assert.equal(p.intervalMs, 2000);
+  });
+
   test('间隔有上限', () => {
     const p = new Pacer({ intervalMs: 1000, jitterRatio: 0 });
     for (let i = 0; i < 20; i++) p.slowDown();

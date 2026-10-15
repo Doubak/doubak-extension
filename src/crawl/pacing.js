@@ -144,6 +144,22 @@ export class Pacer {
   }
 
   /**
+   * 重置退避层级（由用户显式触发）。
+   *
+   * 自动逻辑中退避层级只增不减，但允许用户在等待足够时间或确认误报后手动恢复原速。
+   *
+   * @param {number} [targetLevel=0]
+   * @returns {{level: number, intervalMs: number}}
+   */
+  resetLevel(targetLevel = 0) {
+    this._level = Math.max(0, Math.floor(targetLevel));
+    return {
+      level: this._level,
+      intervalMs: this.intervalMs,
+    };
+  }
+
+  /**
    * 软封锁后建议的冷却时长。
    *
    * 随层级递增：第一次半小时，第二次一小时，之后四小时。豆瓣不会告诉我们

@@ -1229,6 +1229,21 @@ export class CrawlRunner {
     this._emit({ type: 'paused', reason, checkpointSaved: true });
   }
 
+  /**
+   * 重置当前运行的退避限速等级（由用户显式触发恢复原速）。
+   *
+   * @param {number} [level=0]
+   * @returns {Promise<{level: number, intervalMs: number}>}
+   */
+  async resetPacerLevel(level = 0) {
+    if (!this._run) throw new Error('没有进行中的抓取');
+    const result = this._run.pacer.resetLevel(level);
+    const stopped = this._run.frontier.stopped;
+    await this._saveCheckpoint(stopped ? this._run.frontier.stopReason : CRASH_SENTINEL_REASON);
+    this._emit({ type: 'pacer_reset', level: result.level, intervalMs: result.intervalMs });
+    return result;
+  }
+
   /** 当前进度快照，供界面读取。 */
   status() {
     if (!this._run) return { active: false };

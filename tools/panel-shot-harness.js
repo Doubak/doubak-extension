@@ -109,7 +109,7 @@ const ANSWERS = {
  */
 const PASSTHROUGH = new Set([
   'start', 'pause', 'resume', 'abort', 'retryFailed', 'finishWithGaps',
-  'deleteBundle', 'clearLog', 'markExported',
+  'deleteBundle', 'clearLog', 'markExported', 'resetPacer',
   'dryRun', 'chainDiff',
 ]);
 

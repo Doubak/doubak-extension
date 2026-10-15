@@ -74,6 +74,20 @@ const MARKERS = {
 };
 
 /**
+ * 剥离 HTML 中的脚本、样式、模板与注释。
+ *
+ * 正常公开主页可能包含「关注用户需要验证码」的前端弹窗脚本代码；广播与长文也可能
+ * 包含内联脚本或样式。这些脚本源码中的字符不是当前页面的状态。
+ *
+ * @param {string} html
+ */
+export function stripScriptAndStyle(html) {
+  return String(html ?? '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+}
+
+/**
  * 一条路线的判定描述。
  *
  * @typedef {object} RouteProfile
@@ -202,15 +216,19 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   }
 
   // ── 4. 以 200 返回的异常页
-  if (MARKERS.abnormalRequest.test(bodyText)) {
+  //
+  // 注意：正常页面（如个人主页）可能包含「关注用户需要验证码」的前端弹窗脚本源码，
+  // 脚本代码中的「请输入验证码」不是当前页面遭遇了风控。必须剥离脚本与注释后再检测。
+  const markup = stripScriptAndStyle(bodyText);
+  if (MARKERS.abnormalRequest.test(markup)) {
     reasons.push('页面含风控提示文案');
-    return { verdict: MARKERS.captcha.test(bodyText) ? 'challenge' : 'blocked', reasons, itemCount };
+    return { verdict: MARKERS.captcha.test(markup) ? 'challenge' : 'blocked', reasons, itemCount };
   }
-  if (MARKERS.pageNotFound.test(bodyText)) {
+  if (MARKERS.pageNotFound.test(markup)) {
     reasons.push('页面含「页面不存在」');
     return { verdict: 'soft404', reasons, itemCount };
   }
-  if (itemCount === 0 && /该用户已经主动注销账号|该用户已被注销/.test(bodyText)) {
+  if (itemCount === 0 && /该用户已经主动注销账号|该用户已被注销/.test(markup)) {
     reasons.push('目标账号页面显示注销墓碑');
     return { verdict: 'gone', reasons, itemCount };
   }

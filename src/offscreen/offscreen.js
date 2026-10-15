@@ -69,6 +69,7 @@
  */
 
 import { CrawlRunner } from '../crawl/runner.js';
+import { Pacer } from '../crawl/pacing.js';
 import { RunStore, checkpointFailures } from '../crawl/run-store.js';
 import { createDrive, driveWithinBudget, provesLiveness } from '../crawl/driver.js';
 import { MemoryKvStore } from '../storage/kv-store.js';
@@ -666,6 +667,23 @@ export async function handleOp(msg) {
         // 立一个标志，不发请求。
         await getRunner().pause(msg.reason);
         return { ok: true };
+
+      case 'resetPacer': {
+        const r = getRunner();
+        if (r.active) {
+          const result = await r.resetPacerLevel();
+          return { ok: true, result };
+        }
+        const runStore = getRunStore();
+        const cp = await runStore.loadCheckpoint();
+        if (cp) {
+          const pacer = Pacer.restore(cp.rate_state);
+          const result = pacer.resetLevel();
+          await runStore.saveCheckpoint({ ...cp, rate_state: pacer.serialize() });
+          return { ok: true, result };
+        }
+        throw new Error('没有进行中的抓取或断点');
+      }
 
       case 'abort': {
         // 中止：收尾成 aborted 并放开指针，之后这份档案就能删了。

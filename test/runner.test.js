@@ -2562,3 +2562,32 @@ describe('「重抓作品详情页」排进来的条目没有 parent', () => {
     assert.match(src, /this\._lastCapture\.get\(item\.routeKey\)/);
   });
 });
+
+describe('恢复原速与重置限速等级', () => {
+  test('resetPacerLevel 重置退避层级并持久化到 checkpoint', async () => {
+    const { runner, runStore, events } = harness(broadcastOnly([
+      bcPage(20, 0),
+      bcPage(20, 20),
+    ]));
+    await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+    runner._run.pacer.slowDown();
+    runner._run.pacer.slowDown();
+    assert.equal(runner.status().backoffLevel, 2);
+
+    const res = await runner.resetPacerLevel();
+    assert.equal(res.level, 0);
+    assert.equal(runner.status().backoffLevel, 0);
+
+    const cp = await runStore.loadCheckpoint();
+    assert.equal(cp.rate_state.backoff_level, 0);
+
+    const evt = events.find((e) => e.type === 'pacer_reset');
+    assert.ok(evt);
+    assert.equal(evt.level, 0);
+  });
+
+  test('没有进行中的抓取时 resetPacerLevel 抛错', async () => {
+    const { runner } = harness(() => PROFILE);
+    await assert.rejects(() => runner.resetPacerLevel(), /没有进行中的抓取/);
+  });
+});

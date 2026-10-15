@@ -81,6 +81,19 @@ describe('风控', () => {
     assert.equal(classify({ status: 429 }).verdict, 'blocked');
     assert.equal(classify({ status: 403 }).verdict, 'blocked');
   });
+
+  test('脚本与注释里的验证码文案不作为风控证据', () => {
+    // 正常公开主页包含「关注用户需要验证码」的弹窗脚本源码，其中的「请输入验证码」不是当前遭遇了风控
+    const html = readFileSync(new URL('./fixtures/profile-public-contact-captcha.html', import.meta.url), 'utf-8');
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/people/154611037/',
+      status: 200,
+      bodyText: html,
+      route: profileForRoute('profile.overview'),
+      visibility: 'public',
+    });
+    assert.equal(r.verdict, 'ok', JSON.stringify(r.reasons));
+  });
 });
 
 describe('不存在', () => {

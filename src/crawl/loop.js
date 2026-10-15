@@ -680,8 +680,10 @@ export class CrawlLoop {
     const t = this._frontier.settle(item, cls.verdict, cls.reasons);
 
     if (t.state === 'awaiting_human') {
-      // 软封锁：降速，且**不自动重试**。等人处理完、金丝雀确认之后再继续。
+      // 软封锁/人机验证：降速，停机等人处理，且**不自动重试**。
+      // 在软封锁或人机验证出现时绝不能继续请求其他路线，否则会导致限流升级甚至封号。
       this.stateFor(item.routeKey).markStopped(t.reason ?? 'blocked');
+      this._frontier.stop(t.reason ?? 'blocked');
       const slowed = this._pacer.slowDown();
       this._emit({
         type: 'awaiting_human',
@@ -689,7 +691,8 @@ export class CrawlLoop {
         intervalMs: slowed.intervalMs,
         cooldownMs: slowed.cooldownMs,
       });
-      return 'failed';
+      this._emit({ type: 'stopped', reason: t.reason ?? 'blocked', url: item.url });
+      return 'stop';
     }
     if (t.stopRun) {
       this.stateFor(item.routeKey).markStopped(t.reason ?? 'terminal');
