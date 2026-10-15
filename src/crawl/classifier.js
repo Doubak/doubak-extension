@@ -68,7 +68,8 @@ const TEAPOT_REASON =
  */
 const MARKERS = {
   loginTitle: /<title>\s*登录豆瓣\s*<\/title>/,
-  pageNotFound: /页面不存在/,
+  // 错误页的标题，不是广播正文、链接标题里引用的这句话。
+  pageNotFound: /<(title|h1)\b[^>]*>\s*页面不存在\s*<\/\1>/i,
   captcha: /验证码|captcha/i,
   abnormalRequest: /有异常请求|请输入验证码|访问过于频繁|该用户账号状态异常|账号状态异常/,
 };
@@ -224,7 +225,7 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
     return { verdict: MARKERS.captcha.test(markup) ? 'challenge' : 'blocked', reasons, itemCount };
   }
   if (MARKERS.pageNotFound.test(markup)) {
-    reasons.push('页面含「页面不存在」');
+    reasons.push('页面错误标题为「页面不存在」');
     return { verdict: 'soft404', reasons, itemCount };
   }
   if (itemCount === 0 && /该用户已经主动注销账号|该用户已被注销/.test(markup)) {

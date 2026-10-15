@@ -2675,3 +2675,18 @@ for (const cold of [false, true]) {
     assert.equal(manifest.account.user_id, '82160871');
   });
 }
+
+
+test('topic 正文引用页面不存在：第一页成功入档并继续翻页', async () => {
+  const first = readFileSync(new URL('./fixtures/broadcast-topic.html', import.meta.url), 'utf8').replaceAll('"111"', '"82160871"');
+  const { runner, calls } = harness(broadcastOnly([first, bcPage(0)]));
+  await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+  for (let i = 0; i < 5; i++) { if ((await runner.runBatch()).done) break; }
+  const manifest = await runner.finish('complete');
+  assert.equal(manifest.counts.by_verdict.soft404 ?? 0, 0);
+  assert.ok(calls.some((url) => url.endsWith('statuses?p=2')), '不能在第一页按不存在结束');
+  const state = manifest.crawl_state.find((row) => row.route_key === 'broadcast.timeline');
+  assert.equal(state.contiguous, true);
+  assert.deepEqual(state.gaps, []);
+  assert.ok(state.high_water_ids.includes('9001'));
+});

@@ -85,14 +85,14 @@ export function buildSearchIndex(p) {
   for (const b of p.broadcasts) {
     // 没有正文的广播不进索引——纯标记动作在标记那条里已经能搜到，
     // 收进来只会让结果里全是「想看 X」。
-    if (!b.text) continue;
+    if (!b.text && !b.title) continue;
     rows.push({
       t: 'b',
       // 链到月页。**不猜锚点**：小标题的 id 是 SSG 生成的，各家规则不同，
       // 猜错了就是一个点了没反应的结果。结果里带时间，够用户在页面上找到它。
       u: `broadcast/${(b.postedAtRaw ?? '').slice(0, 7)}`,
-      n: null,
-      c: b.text,
+      n: b.title ?? null,
+      c: b.text ?? '',
       d: b.postedAtRaw ?? '',
     });
   }

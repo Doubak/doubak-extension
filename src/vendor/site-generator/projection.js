@@ -352,6 +352,7 @@ function projectBroadcast(b, targets, have = { subjects: new Set(), doulists: ne
     postedAt: f.posted_at?.iso ?? null,
     postedAtRaw: f.posted_at?.raw ?? null,
     text: f.text ?? null,
+    title: f.title ?? null,
     // 只有作者本人看得见的那些。**默认根本不会走到这里**（`withoutPrivate` 在
     // `generate()` 入口就筛掉了），带上它是为了 `--include-private` 那条路：
     // 发出去时页面上得看得出「这条在豆瓣上是不公开的」。

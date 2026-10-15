@@ -216,6 +216,7 @@ function fullTextUrl(seg) {
  * @property {string} sid            data-sid，广播的身份
  * @property {string|null} postedAt  秒级时间戳（原始字符串）
  * @property {string|null} text      正文。实测 65% 的广播有（其余是纯标记动作）
+ * @property {string|null} title     topic 动态自己的标题，不是引用的作品卡片标题
  * @property {string|null} action    动作原文（想看 / 收藏图书到豆列 / …）
  * @property {{text: string, url?: string}[]|null} actionParts  动作句的分段，
  *   带上句子里那几个链接。**拼起来必须逐字等于 `action`**；没有链接时是 null
@@ -432,6 +433,17 @@ export function extractBroadcasts(html, ownerUserId) {
       : null;
     const rating = stars ? ((stars.match(/&#9733;|★/g) ?? []).length || null) : null;
     let quote = blockquote ? (/<p[^>]*>([\s\S]*?)<\/p>/.exec(blockquote)?.[1] ?? null) : null;
+    if (!quote && blockquote) {
+      // 真实页面的另一种形状：转发附言或部分正文直接写在 <blockquote> 中，不带 <p> 标签。
+      // 先去掉评分星，再切掉可能尾随的转发引言卡片：
+      // - 正常状态形如 <span><a class="reshared_by"...>作者</a>...</span>
+      // - 对方私密/注销状态形如 <span class="reshared_by deleted">[ 该广播仅作者本人可见 ]</span>
+      // - 以及尾随的 <a class="reshared_by more-reshare"...>
+      let raw = blockquote.replace(/<span class="rating-stars">[\s\S]*?<\/span>/g, '');
+      const reshareIdx = raw.search(/(?:<span[^>]*>\s*)?<[a-zA-Z]+[^>]*class="[^"]*reshared_by/);
+      if (reshareIdx >= 0) raw = raw.slice(0, reshareIdx);
+      if (stripTagsAndDecode(raw).trim()) quote = raw;
+    }
     // 「（全文）」是豆瓣的链接文字，**不是用户写的字**，所以不进正文——
     // 与「未知作品」「1740人浏览」「暂无封面」是同一条规则：占位符不是内容。
     // 截断这件事本身记在 fullTextUrl 上，不靠正文末尾的字来表达。
@@ -441,6 +453,7 @@ export function extractBroadcasts(html, ownerUserId) {
     // 所以一段里正常只有一个；用第一个而不是「有没有出现过」，是为了不让
     // 后面某段的 class 漏进来。
     const itemCls = itemClasses(seg);
+    const topic = topicHeading(seg);
 
     broadcasts.push({
       sid: sid[1],
@@ -452,6 +465,7 @@ export function extractBroadcasts(html, ownerUserId) {
       postedAt: /class="created_at"[^>]*title="([^"]+)"/.exec(seg)?.[1] ?? null,
       // 正文原样保留，只把标签剥掉——里面常有链接（`douc.cc` 短链）与表情。
       text: quote ? stripTags(quote) : null,
+      title: topic?.title ?? null,
       action,
       // **句子里那几个链接。** 没有链接时是 null，不是空数组：3423 条广播里只有
       // 90 条带链接，其余给一份单段数组等于把同一句话存两遍。
@@ -470,7 +484,7 @@ export function extractBroadcasts(html, ownerUserId) {
       // 整页扫的话会取到别人那条转发的标题（第三方内容藏在自己的页面里，
       // 这个项目已经踩过三次）。
       targetTitle: cardTitle(seg),
-      url: /data-status-url="([^"]+)"/.exec(seg)?.[1] ?? null,
+      url: /data-status-url="([^"]+)"/.exec(seg)?.[1] ?? topic?.url ?? null,
       // **空数组，不是 null。** 广播页整个抓到了，就等于看清了「这条有没有图」——
       // 这与「没抽到」是两回事。null 会让下游分不清「确认没有」和「没看过」。
       images: photos.urls,
@@ -482,6 +496,21 @@ export function extractBroadcasts(html, ownerUserId) {
   }
 
   return { broadcasts, skippedOthers, idless, unresolvedImages };
+}
+
+/** topic 动态没有 data-status-url；标题链接与 wrapper 的 data-aid 必须对应。 */
+function topicHeading(seg) {
+  const wrapper = seg.slice(0, seg.indexOf('>') + 1);
+  if (!/\bdata-atype="topic"/.test(wrapper)) return null;
+  const id = /\bdata-aid="(\d+)"/.exec(wrapper)?.[1];
+  if (!id) return null;
+  const heading = /<div class="content">\s*<div class="title">([\s\S]*?)<\/div>/.exec(seg)?.[1];
+  const link = heading && /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/.exec(heading);
+  if (!link) return null;
+  let url;
+  try { url = new URL(decodeEntities(link[1])); } catch { return null; }
+  if (url.origin !== 'https://www.douban.com' || url.pathname !== `/topic/${id}/`) return null;
+  return { title: stripTags(link[2]), url: url.href };
 }
 
 /**

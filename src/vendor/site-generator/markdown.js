@@ -617,6 +617,8 @@ export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../'
   const stamp = b.postedAtRaw ?? b.postedAt ?? '时间未知';
   const out = [`### ${stamp}`, ''];
   if (b.url) out.push(`[豆瓣原页](${b.url} "${SOURCE_LINK_TITLE}")`, '');
+  // 保留时间标题和锚点；动态自己的标题单独显示，不冒充作品卡片。
+  if (b.title) out.push(`**${plainText(b.title)}**`, '');
   // **只有作者本人看得见的那些，页面上要说出来。**
   //
   // 走到这里说明生成时加了 `--include-private`——默认那条路在 `generate()` 入口

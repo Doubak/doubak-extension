@@ -55,10 +55,25 @@ export function extractTargetAccount(html, finalUrl, input) {
   if (ids.size > 1) throw new SessionError('target_changed', '目标主页中的数字 UID 证据不一致，拒绝抓取。');
   const userId = [...ids][0];
   if (!userId) throw new SessionError('missing_user_id', '目标主页找不到稳定数字 UID，请尝试输入数字 UID；不会用用户名冒充账号身份。');
+  // 数字主页不一定重定向。只读目标头像的主页链接（不读导航、签名或访客），
+  // 使 UID / 域名两种输入都沿用同一增量链。头像 UID 已在上面交叉核对。
+  const avatar = /<a\b[^>]*\shref=(["'])(.*?)\1[^>]*>\s*<img\b[^>]*\/icon\/up?[1-9]\d*[-.][^>]*>\s*<\/a>/i.exec(block);
+  let username = slug;
+  if (avatar) {
+    const link = new URL(decodeEntities(avatar[2]), url);
+    const ownerSlug = /^\/people\/([A-Za-z0-9_-]+)\/?$/.exec(link.pathname)?.[1];
+    if (link.protocol === 'https:' && ['www.douban.com', 'douban.com'].includes(link.hostname)
+      && !link.username && !link.password && !link.port && ownerSlug && ownerSlug !== 'mine') {
+      if (/^\d+$/.test(ownerSlug) && ownerSlug !== userId) {
+        throw new SessionError('target_changed', '目标头像链接与数字 UID 不一致，拒绝抓取。');
+      }
+      username = ownerSlug;
+    }
+  }
   const heading = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(block)?.[1];
   const alt = /<img\b[^>]*\salt=(["'])(.*?)\1/i.exec(block)?.[2];
   const displayName = decodeEntities(heading?.split('<')[0] || alt || '').trim() || null;
-  return { userId, username: slug, displayName };
+  return { userId, username, displayName };
 }
 
 export function inspectTarget(probe, input, { targetUserId = null, operatorUserId = undefined } = {}) {
