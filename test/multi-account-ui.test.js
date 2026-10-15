@@ -6,7 +6,7 @@ import { fakeOpfsWorker, seedBundle } from './helpers/fake-opfs-worker.js';
 let nonce = 0;
 const settle = () => new Promise((r) => setTimeout(r, 15));
 
-async function panel({ pendingSession = null, status = null, bundles = true, extraSources = [] } = {}) {
+async function panel({ pendingSession = null, status = null, bundles = true, extraSources = [], extraBundles = [] } = {}) {
   const worker = fakeOpfsWorker();
   if (bundles) {
     for (const [uid, nickname, id, scope] of [['111', '我的昵称', '20261001T000000Z-aaaaaa'], ['222', '朋友昵称', '20261002T000000Z-bbbbbb'], ...extraSources]) {
@@ -19,6 +19,9 @@ async function panel({ pendingSession = null, status = null, bundles = true, ext
       });
     }
   }
+  for (const [dir, files] of extraBundles) {
+    await seedBundle(worker, dir, files);
+  }
   const session = { state: 'logged_in', account: { userId: '111', displayName: '我的昵称' } };
   const dom = await installFakeDom({ html: await readRepoFile('src/ui/panel.html'), extra: { Worker: class { constructor() { return worker; } } },
     onMessage: (msg) => {
@@ -29,6 +32,7 @@ async function panel({ pendingSession = null, status = null, bundles = true, ext
       return { ok: true };
     },
   });
+  dom.worker = worker;
   // 假 DOM 从 HTML 取 id；checked 属性在真实浏览器中由 HTML 初始值提供。
   dom.byId.get('public-lightweight').checked = true;
   dom.byId.get('public-covers').checked = true;
@@ -277,3 +281,105 @@ test('覆盖率快速切换账号时旧链答复不覆盖新账号，清空档�
     assert.equal(dom.byId.get('chain').textContent, '');
   } finally { dom.restore(); }
 });
+
+test('在抓取进行中（最新档案无 manifest）时，覆盖率页显示已归档账号覆盖率并允许切换账号', async () => {
+  const activeId = '20261015T000000Z-abcdef';
+  const dom = await panel({
+    status: {
+      ok: true,
+      runner: { active: true, bundleId: activeId, targetAccount: { userId: '111', username: '111', displayName: '我的昵称' } },
+      checkpoint: null,
+    },
+    extraBundles: [
+      [`doubak-bundle-${activeId}`, {
+        [`index-${activeId}.ndjson`]: '',
+        'checkpoint.json': JSON.stringify({
+          bundle_id: activeId,
+          run_context: { account: { userId: '111', username: '111', displayName: '我的昵称' } },
+        }),
+      }],
+    ],
+  });
+  try {
+    const coverage = await import('../src/ui/panel/coverage.js');
+    const original = dom.chrome.runtime.sendMessage;
+    dom.chrome.runtime.sendMessage = (msg, cb) => msg.type === 'chain'
+      ? (dom.sent.push(msg), cb({ ok: true, chain: { routes: [{ name: '广播', span: '1..10', bundles: 1, verdict: '✔ 已验证' }], bundles: [{ bundleId: msg.bundleId }], holes: [], others: [] } }))
+      : original(msg, cb);
+
+    await coverage.loadCoverage();
+
+    // 覆盖率账号选择框可见，包含两个已收尾的账号
+    assert.equal(dom.byId.get('coverage-accounts').hidden, false);
+    const select = dom.byId.get('coverage-accounts').querySelector('select');
+    assert.ok(select);
+    assert.equal(select.querySelectorAll('option').length, 2);
+    assert.equal(select.value, '111');
+
+    // 默认展示正在抓取账号 UID 111 已收尾的链，且提示抓取正在进行中
+    const lastChain = dom.sent.findLast((m) => m.type === 'chain');
+    assert.equal(lastChain.bundleId, '20261001T000000Z-aaaaaa');
+    assert.doesNotMatch(dom.byId.get('chain').textContent, /备份来源待确认/);
+    assert.doesNotMatch(dom.byId.get('chain').textContent, /暂无已收尾的档案/);
+    assert.match(dom.byId.get('chain').textContent, /本人登录时备份/);
+    assert.match(dom.byId.get('chain').textContent, /本次抓取正在进行中/);
+
+    // 切换到另一个账号 UID 222（未在抓取该账号，不展示进行中提示）
+    select.value = '222';
+    select.dispatch('change');
+    await settle();
+    assert.equal(dom.sent.findLast((m) => m.type === 'chain').bundleId, '20261002T000000Z-bbbbbb');
+    assert.match(dom.byId.get('chain').textContent, /公开页面备份 · 登录账号 UID 111/);
+    assert.doesNotMatch(dom.byId.get('chain').textContent, /本次抓取正在进行中/);
+  } finally { dom.restore(); }
+});
+
+test('仅有未收尾的抓取档案时，覆盖率页提示尚未收尾而非空链或来源待确认', async () => {
+  const activeId = '20261015T000000Z-abcdef';
+  const dom = await panel({
+    bundles: false,
+    status: {
+      ok: true,
+      runner: { active: true, bundleId: activeId, targetAccount: { userId: '111', username: '111', displayName: '我的昵称' } },
+      checkpoint: null,
+    },
+    extraBundles: [
+      [`doubak-bundle-${activeId}`, {
+        [`index-${activeId}.ndjson`]: '',
+        'checkpoint.json': JSON.stringify({
+          bundle_id: activeId,
+          run_context: { account: { userId: '111', username: '111', displayName: '我的昵称' } },
+        }),
+      }],
+    ],
+  });
+  try {
+    const coverage = await import('../src/ui/panel/coverage.js');
+    await coverage.loadCoverage();
+    assert.equal(dom.byId.get('coverage-accounts').hidden, true);
+    assert.doesNotMatch(dom.byId.get('coverage').textContent, /备份来源待确认/);
+    assert.doesNotMatch(dom.byId.get('chain').textContent, /暂无已收尾的档案/);
+    assert.match(dom.byId.get('coverage').textContent, /本次抓取尚未收尾——覆盖率证据在收尾时生成，目前尚不可用。/);
+  } finally { dom.restore(); }
+});
+
+for (const cold of [false, true]) {
+  test(`覆盖率如实显示${cold ? '冷断点' : '内存任务'}暂停状态`, async () => {
+    const account = { userId: '111', username: '111' };
+    const dom = await panel({ status: {
+      ok: true,
+      runner: cold ? { active: false } : { active: true, stopped: true, targetAccount: account },
+      checkpoint: cold ? { run_context: { account }, pause_reason: 'challenge' } : null,
+    } });
+    try {
+      const archive = await import('../src/ui/panel/archive.js');
+      archive.selectSummaryBundle('20261001T000000Z-aaaaaa');
+      const original = dom.chrome.runtime.sendMessage;
+      dom.chrome.runtime.sendMessage = (msg, cb) => msg.type === 'chain'
+        ? cb({ ok: true, chain: { routes: [], bundles: [], holes: [], others: [] } }) : original(msg, cb);
+      await (await import('../src/ui/panel/coverage.js')).loadCoverage();
+      assert.match(dom.byId.get('chain').textContent, /本次抓取已暂停/);
+      assert.doesNotMatch(dom.byId.get('chain').textContent, /本次抓取正在进行中/);
+    } finally { dom.restore(); }
+  });
+}

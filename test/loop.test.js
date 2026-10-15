@@ -241,6 +241,38 @@ describe('软封锁：降速并等人，绝不重试', () => {
     await loop.run({ maxItems: 10 });
     assert.equal(frontier.next(), null, '等人处理期间不该继续抓这条线');
   });
+
+  test('遇到 awaiting_human（如封锁或验证码）时停止整场抓取，不继续请求其他页面', async () => {
+    const { loop, frontier, events } = await harness([
+      { body: broadcastPage(20, 0) },
+      { body: BLOCKED_PAGE },
+      { body: broadcastPage(20, 40) },
+    ]);
+    const r = await loop.run({ maxItems: 10 });
+    assert.equal(r.stoppedBy, 'blocked', '软封锁/人机验证必须停下整场抓取');
+    assert.equal(frontier.stopped, true);
+    assert.equal(frontier.stopReason, 'blocked');
+    assert.ok(events.some((e) => e.type === 'stopped' && e.reason === 'blocked'));
+  });
+
+  test('软封锁/人机验证时记录缺口但包含 URL，待恢复成功后能正确治愈缺口', async () => {
+    const { loop, frontier } = await harness([
+      { body: BLOCKED_PAGE },
+    ]);
+    const r = await loop.run({ maxItems: 1 });
+    assert.equal(r.stoppedBy, 'blocked');
+    const state = loop.stateFor('broadcast.timeline');
+    assert.equal(state.gaps.length, 1);
+    assert.ok(state.gaps[0].url);
+
+    // 人机验证通过后继续抓取
+    frontier.clearStop({ resumeHuman: true });
+    const item = frontier.next();
+    assert.ok(item);
+    const healed = state.resolveGap(item.url);
+    assert.equal(healed, 1);
+    assert.equal(state.gaps.length, 0);
+  });
 });
 
 describe('网络错误可重试，风控不可', () => {

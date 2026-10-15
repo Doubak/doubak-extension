@@ -2562,3 +2562,116 @@ describe('「重抓作品详情页」排进来的条目没有 parent', () => {
     assert.match(src, /this\._lastCapture\.get\(item\.routeKey\)/);
   });
 });
+
+describe('恢复原速与重置限速等级', () => {
+  test('resetPacerLevel 重置退避层级并持久化到 checkpoint', async () => {
+    const { runner, runStore, events } = harness(broadcastOnly([
+      bcPage(20, 0),
+      bcPage(20, 20),
+    ]));
+    await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+    runner._run.pacer.slowDown();
+    runner._run.pacer.slowDown();
+    assert.equal(runner.status().backoffLevel, 2);
+
+    const res = await runner.resetPacerLevel();
+    assert.equal(res.level, 0);
+    assert.equal(runner.status().backoffLevel, 0);
+
+    const cp = await runStore.loadCheckpoint();
+    assert.equal(cp.rate_state.backoff_level, 0);
+
+    const evt = events.find((e) => e.type === 'pacer_reset');
+    assert.ok(evt);
+    assert.equal(evt.level, 0);
+  });
+
+  test('没有进行中的抓取时 resetPacerLevel 抛错', async () => {
+    const { runner } = harness(() => PROFILE);
+    await assert.rejects(() => runner.resetPacerLevel(), /没有进行中的抓取/);
+  });
+});
+
+describe('恢复与软封锁（awaiting_human）条目的重新排队', () => {
+  test('内存中 runner.resume 重新排队 awaiting_human 条目，即使 frontier.stopped 为 false', async () => {
+    const { runner } = harness(broadcastOnly([bcPage(20, 0)]));
+    await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+
+    const item = runner._run.frontier._items[0];
+    runner._run.frontier.settle(item, 'challenge', ['需验证码']);
+    assert.equal(item.state, 'awaiting_human');
+    runner._run.frontier._stopped = false;
+    assert.equal(runner._run.frontier.awaitingHumanItems().length, 1);
+
+    const res = await runner.resume();
+    assert.equal(res.requeued, 1);
+    assert.equal(runner._run.frontier.awaitingHumanItems().length, 0);
+    assert.equal(item.state, 'pending');
+  });
+
+  test('断点冷恢复 runner.resume(cp) 非 loadOnly 时自动重新排队 awaiting_human 条目', async () => {
+    const { runner, runStore } = harness(broadcastOnly([bcPage(20, 0)]));
+    await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+
+    const item = runner._run.frontier._items[0];
+    runner._run.frontier.settle(item, 'blocked', ['403']);
+    await runner.pause('blocked');
+    const cp = await runStore.loadCheckpoint();
+    assert.equal(cp.frontier[0].state, 'awaiting_human');
+
+    runner._run = null; // 模拟 worker 重启
+    const res = await runner.resume(cp, { loadOnly: false });
+    assert.equal(res.requeued, 1);
+    assert.equal(runner._run.frontier.awaitingHumanItems().length, 0);
+    assert.equal(runner._run.frontier._items[0].state, 'pending');
+    assert.equal(runner._run.frontier.stopped, false);
+  });
+
+  test('runBatch 遇到无 ready 条目且有 awaiting_human 条目时，标记 stopped 并返回对应 stoppedBy', async () => {
+    const { runner, runStore } = harness(broadcastOnly([bcPage(20, 0)]));
+    await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+
+    const item = runner._run.frontier._items[0];
+    runner._run.frontier.settle(item, 'challenge', ['人机验证']);
+    runner._run.frontier._stopped = false;
+
+    const b = await runner.runBatch();
+    assert.equal(b.done, true);
+    assert.equal(b.stoppedBy, 'challenge');
+    assert.equal(runner._run.frontier.stopped, true);
+    assert.equal(runner._run.frontier.stopReason, 'challenge');
+
+    const cp = await runStore.loadCheckpoint();
+    assert.equal(cp.pause_reason, 'challenge');
+  });
+});
+
+
+for (const cold of [false, true]) {
+  test(`真实 challenge 响应经${cold ? '冷' : '热'}恢复后成功抓取并修复连续性`, async () => {
+    let challenged = true;
+    const normal = broadcastOnly([bcPage(1), bcPage(0)]);
+    const { runner, runStore, calls } = harness((url) => {
+      if (challenged && url.includes('statuses')) return `${NAV}<p>请输入验证码</p>`;
+      return normal(url);
+    });
+    await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+    const blocked = await runner.runBatch();
+    assert.equal(blocked.stoppedBy, 'challenge');
+    assert.equal(runner.status().counts.awaiting_human, 1);
+    assert.equal(calls.filter((url) => url.includes('statuses')).length, 1);
+    const cp = await runStore.loadCheckpoint();
+    challenged = false;
+    if (cold) runner._run = null;
+    await runner.resume(cold ? cp : null);
+    let result;
+    do { result = await runner.runBatch(); } while (!result.done);
+    assert.equal(result.stoppedBy, null);
+    assert.equal(runner.status().counts.awaiting_human ?? 0, 0);
+    const manifest = await runner.finish();
+    const route = manifest.crawl_state.find((row) => row.route_key === 'broadcast.timeline');
+    assert.equal(route.contiguous, true);
+    assert.deepEqual(route.gaps, []);
+    assert.equal(manifest.account.user_id, '82160871');
+  });
+}

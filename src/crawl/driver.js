@@ -122,12 +122,13 @@ export function createDrive({ run, onPreempt, staleAfterMs, now }) {
  * | `abort`       | `aborted` |
  * | `finish`      | `finished` |
  * | `retryFailed` | `retry_requested` |
+ * | `resetPacer`  | `pacer_reset` |
  *
  * 用排除法而不是白名单：**「又抓到一页」的形态不止一种**（capture、batch、retry、
  * gate、error……），漏掉一种就会把一段活着的抓取判死并抢占。而不持锁的 op 只有
  * 四个，且都在同一个 switch 里——数得清的那一侧才适合列举。
  */
-export const EVENTS_WITHOUT_LOCK = new Set(['paused', 'aborted', 'finished', 'retry_requested']);
+export const EVENTS_WITHOUT_LOCK = new Set(['paused', 'aborted', 'finished', 'retry_requested', 'pacer_reset']);
 
 /**
  * 这条事件能不能算作「持有者还活着」。

@@ -631,6 +631,7 @@ ul.own li { margin: 2px 0; }
 .target-input-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .target-input-row > input { flex: 1; min-width: 200px; padding: 8px 10px; }
 .target-controls:disabled { opacity: .7; }
+#target-accounts:not([hidden]) + #target-preview { margin-top: var(--s3); }
 .target-input-row > input, .account-select {
   font: inherit; color: var(--text); background: var(--bg);
   border: 1px solid var(--line); border-radius: var(--r1);

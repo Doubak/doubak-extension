@@ -267,9 +267,12 @@ export async function refresh() {
     if (r.stopped) {
       const [tone, title, why, action] = PAUSE_COPY[r.stoppedBy] ??
         ['warn', '抓取已停下', `原因：${r.stoppedBy}`, '继续'];
-      setState(tone, title, why);
+      const speedNote = r.backoffLevel ? `\n当前请求间隔 ${(r.intervalMs / 1000).toFixed(1)} 秒（已降速 ${r.backoffLevel} 级）。` : '';
+      setState(tone, title, why + speedNote);
+      const backoffAction = r.backoffLevel > 0 ? [['恢复原速', resetPacerSpeed]] : [];
       setActions([
         ...(action ? [[action, resumeCrawl, 'primary']] : []),
+        ...backoffAction,
         // **只要有抓不下来的条目就摆出来，不管是哪种停法。**
         //
         // 原来只在没有「继续」时才给（failures_pending），理由是「决定在失败清单
@@ -295,6 +298,7 @@ export async function refresh() {
     setState('busy', '正在抓取', `档案 ${r.bundleId} · 当前间隔 ${(r.intervalMs / 1000).toFixed(1)} 秒` +
       (r.backoffLevel ? `（已降速 ${r.backoffLevel} 级）` : '') + where);
     renderFailures(r.failures ?? []);
+    const backoffAction = r.backoffLevel > 0 ? [['恢复原速', resetPacerSpeed]] : [];
     setActions([
       ['暂停', async () => {
         // 立刻给反馈。一批最长 22 秒，期间不给任何回应的话按钮看起来就是坏的。
@@ -302,6 +306,7 @@ export async function refresh() {
         await send({ type: 'pause' });
         refresh();
       }],
+      ...backoffAction,
       ['中止', () => abortCrawl(r.bundleId), 'danger'],
     ]);
     renderRoutes(r.routes ?? []);
@@ -311,9 +316,15 @@ export async function refresh() {
   if (s.checkpoint) {
     const [tone, title, why, action] = PAUSE_COPY[s.checkpoint.pause_reason] ??
       ['warn', '抓取已停下', `原因：${s.checkpoint.pause_reason}`, '继续'];
-    setState(tone, title, why);
+    const cpBackoff = s.checkpoint.rate_state?.backoff_level ?? 0;
+    const cpInterval = s.checkpoint.rate_state?.interval_ms ?? 1000;
+    const currentInterval = Math.min(cpInterval * (2 ** cpBackoff), 60000);
+    const speedNote = cpBackoff ? `\n当前请求间隔 ${(currentInterval / 1000).toFixed(1)} 秒（已降速 ${cpBackoff} 级）。` : '';
+    setState(tone, title, why + speedNote);
+    const backoffAction = cpBackoff > 0 ? [['恢复原速', resetPacerSpeed]] : [];
     setActions([
       ...(action ? [[action, resumeCrawl, 'primary']] : []),
+      ...backoffAction,
       // offscreen 只读完整断点提供失败清单，手动暂停也直接显示重试入口。
       // 清单尚不可读时保留通用重试；不能在不知道是否有分页失败时提供带缺口收尾。
       ...(Array.isArray(s.checkpoint.failures) ? failureActions(s.checkpoint.failures)
@@ -803,6 +814,20 @@ function failureActions(failures) {
  * 「开始」和「中止」都查了 `r.ok`，只有「继续」没查——这类不一致最容易漏，
  * 因为它不报错，只是安静。
  */
+async function resetPacerSpeed() {
+  try {
+    const r = await send({ type: 'resetPacer' });
+    if (!r?.ok) {
+      setActionError('恢复原速失败', r?.error ?? '后台没有给出原因。');
+      return;
+    }
+    clearActionError();
+  } catch (err) {
+    setActionError('恢复原速失败', err?.message ?? String(err));
+  }
+  refresh();
+}
+
 async function resumeCrawl() {
   // 恢复要好几秒（修段尾 + 确认登录状态，都是真请求），先给个兜底状态——
   // 否则点下去到几秒后之间界面一动不动，看起来像没反应。

@@ -261,16 +261,21 @@ async function drive() {
     // （预算 22 秒），而通知说的是整场抓取——见 notify.js 里那段。
     await notifyDone({ ...r.result, manifest: fin?.manifest }, { kv: getKv() });
   } else if (r.result.done && awaitingHuman) {
-    // 豆瓣在拒绝我们，而不是我们抓不下来。该做的是等、降速、再试——所以走
-    // `blocked` 那条路（界面上有「现在试试」按钮），不是「有几个页面抓不下来」。
-    await getSupervisor().pauseRun('blocked');
-    await notifyNeedsAction('blocked', { kv: getKv() });
+    // 豆瓣在要求验证或限制访问，而不是我们抓不下来。该做的是等人处理/降速，
+    // 按实际停止原因区分 challenge 与 blocked。
+    const reason = (r.result.stoppedBy && r.result.stoppedBy !== 'user_paused')
+      ? r.result.stoppedBy
+      : 'blocked';
+    await withHost({ op: 'pause', reason }).catch(() => {});
+    await getSupervisor().pauseRun(reason);
+    await notifyNeedsAction(reason, { kv: getKv() });
   } else if (r.result.done && r.result.unresolvedFailures) {
     // 跑不动了，但**不是**干净跑完：有抓不下来的条目。
     //
     // 绝不自动标 complete——那是假的完整性声明，而这个项目最不能出的就是这个错。
     // 也不自动重试：反复撞同一面墙，如果那面墙是风控，代价是账号。
     // 交给用户：面板上会列出这些条目，可以重试，也可以确认「就这样收尾」。
+    await withHost({ op: 'pause', reason: FAILURES_PENDING }).catch(() => {});
     await getSupervisor().pauseRun(FAILURES_PENDING);
     await notifyNeedsAction(FAILURES_PENDING, { kv: getKv() });
   } else if (r.result.stoppedBy) {
@@ -627,6 +632,12 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           await clearLog(getKv());
           sendResponse({ ok: true });
           break;
+
+        case 'resetPacer': {
+          const r = await withHost({ op: 'resetPacer' });
+          sendResponse({ ok: true, result: r.result });
+          break;
+        }
 
         case 'retryFailed': {
           // 装不回来（没有存档点）与「装回来了但一条失败都没有」是两件不同的事，
