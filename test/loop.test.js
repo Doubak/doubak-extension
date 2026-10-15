@@ -254,6 +254,25 @@ describe('软封锁：降速并等人，绝不重试', () => {
     assert.equal(frontier.stopReason, 'blocked');
     assert.ok(events.some((e) => e.type === 'stopped' && e.reason === 'blocked'));
   });
+
+  test('软封锁/人机验证时记录缺口但包含 URL，待恢复成功后能正确治愈缺口', async () => {
+    const { loop, frontier } = await harness([
+      { body: BLOCKED_PAGE },
+    ]);
+    const r = await loop.run({ maxItems: 1 });
+    assert.equal(r.stoppedBy, 'blocked');
+    const state = loop.stateFor('broadcast.timeline');
+    assert.equal(state.gaps.length, 1);
+    assert.ok(state.gaps[0].url);
+
+    // 人机验证通过后继续抓取
+    frontier.clearStop({ resumeHuman: true });
+    const item = frontier.next();
+    assert.ok(item);
+    const healed = state.resolveGap(item.url);
+    assert.equal(healed, 1);
+    assert.equal(state.gaps.length, 0);
+  });
 });
 
 describe('网络错误可重试，风控不可', () => {

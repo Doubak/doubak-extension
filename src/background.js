@@ -266,6 +266,7 @@ async function drive() {
     const reason = (r.result.stoppedBy && r.result.stoppedBy !== 'user_paused')
       ? r.result.stoppedBy
       : 'blocked';
+    await withHost({ op: 'pause', reason }).catch(() => {});
     await getSupervisor().pauseRun(reason);
     await notifyNeedsAction(reason, { kv: getKv() });
   } else if (r.result.done && r.result.unresolvedFailures) {
@@ -274,6 +275,7 @@ async function drive() {
     // 绝不自动标 complete——那是假的完整性声明，而这个项目最不能出的就是这个错。
     // 也不自动重试：反复撞同一面墙，如果那面墙是风控，代价是账号。
     // 交给用户：面板上会列出这些条目，可以重试，也可以确认「就这样收尾」。
+    await withHost({ op: 'pause', reason: FAILURES_PENDING }).catch(() => {});
     await getSupervisor().pauseRun(FAILURES_PENDING);
     await notifyNeedsAction(FAILURES_PENDING, { kv: getKv() });
   } else if (r.result.stoppedBy) {

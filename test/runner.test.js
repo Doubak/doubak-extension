@@ -2591,3 +2591,58 @@ describe('恢复原速与重置限速等级', () => {
     await assert.rejects(() => runner.resetPacerLevel(), /没有进行中的抓取/);
   });
 });
+
+describe('恢复与软封锁（awaiting_human）条目的重新排队', () => {
+  test('内存中 runner.resume 重新排队 awaiting_human 条目，即使 frontier.stopped 为 false', async () => {
+    const { runner } = harness(broadcastOnly([bcPage(20, 0)]));
+    await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+
+    const item = runner._run.frontier._items[0];
+    runner._run.frontier.settle(item, 'challenge', ['需验证码']);
+    assert.equal(item.state, 'awaiting_human');
+    runner._run.frontier._stopped = false;
+    assert.equal(runner._run.frontier.awaitingHumanItems().length, 1);
+
+    const res = await runner.resume();
+    assert.equal(res.requeued, 1);
+    assert.equal(runner._run.frontier.awaitingHumanItems().length, 0);
+    assert.equal(item.state, 'pending');
+  });
+
+  test('断点冷恢复 runner.resume(cp) 非 loadOnly 时自动重新排队 awaiting_human 条目', async () => {
+    const { runner, runStore } = harness(broadcastOnly([bcPage(20, 0)]));
+    await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+
+    const item = runner._run.frontier._items[0];
+    runner._run.frontier.settle(item, 'blocked', ['403']);
+    await runner.pause('blocked');
+    const cp = await runStore.loadCheckpoint();
+    assert.equal(cp.frontier[0].state, 'awaiting_human');
+
+    runner._run = null; // 模拟 worker 重启
+    const res = await runner.resume(cp, { loadOnly: false });
+    assert.equal(res.requeued, 1);
+    assert.equal(runner._run.frontier.awaitingHumanItems().length, 0);
+    assert.equal(runner._run.frontier._items[0].state, 'pending');
+    assert.equal(runner._run.frontier.stopped, false);
+  });
+
+  test('runBatch 遇到无 ready 条目且有 awaiting_human 条目时，标记 stopped 并返回对应 stoppedBy', async () => {
+    const { runner, runStore } = harness(broadcastOnly([bcPage(20, 0)]));
+    await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+
+    const item = runner._run.frontier._items[0];
+    runner._run.frontier.settle(item, 'challenge', ['人机验证']);
+    runner._run.frontier._stopped = false;
+
+    const b = await runner.runBatch();
+    assert.equal(b.done, true);
+    assert.equal(b.stoppedBy, 'challenge');
+    assert.equal(runner._run.frontier.stopped, true);
+    assert.equal(runner._run.frontier.stopReason, 'challenge');
+
+    const cp = await runStore.loadCheckpoint();
+    assert.equal(cp.pause_reason, 'challenge');
+  });
+});
+

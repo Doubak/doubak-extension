@@ -680,7 +680,9 @@ export class CrawlRunner {
       if (overrideUser && overrideUser !== this._run.runContext.account.username) {
         throw new SessionError('resume_identity_mismatch', '继续必须使用原目标账号，不能改为另一个账号。');
       }
-      if (!this._run.frontier.stopped) return { bundleId: this._run.bundleId, alreadyRunning: true };
+      if (!this._run.frontier.stopped && this._run.frontier.awaitingHumanItems().length === 0) {
+        return { bundleId: this._run.bundleId, alreadyRunning: true };
+      }
       const { runContext } = this._run;
       const transport = new Transport({ gate: this._gate, fetchImpl: this._fetchImpl, getCk: this._getCk });
       const profileUrl = `https://www.douban.com/people/${encodeURIComponent(runContext.account.username)}/`;
@@ -691,8 +693,8 @@ export class CrawlRunner {
         await this._saveCheckpoint(err.reason ?? 'network_down');
         throw err;
       }
-      const { wasStopped, resumed } = this._run.frontier.clearStop();
-      if (!wasStopped) return { bundleId: this._run.bundleId, alreadyRunning: true };
+      const { wasStopped, resumed } = this._run.frontier.clearStop({ resumeHuman: true });
+      if (!wasStopped && resumed === 0) return { bundleId: this._run.bundleId, alreadyRunning: true };
       await this._saveCheckpoint(CRASH_SENTINEL_REASON);
       this._emit({ type: 'resumed', bundleId: this._run.bundleId, requeued: resumed });
       return { bundleId: this._run.bundleId, requeued: resumed };
@@ -957,10 +959,16 @@ export class CrawlRunner {
       capturedSoFar: 0,
       previousBundleId: pointer.previousBundleId ?? null,
     };
-    if (loadOnly) frontier.stop(cp.pause_reason ?? 'user_paused');
+    let resumed = 0;
+    if (loadOnly) {
+      frontier.stop(cp.pause_reason ?? 'user_paused');
+    } else {
+      const clearRes = frontier.clearStop({ resumeHuman: true });
+      resumed = clearRes.resumed;
+    }
     await this._runStore.setCurrentRun({ ...pointer, runContext });
-    this._emit({ type: 'resumed', bundleId: pointer.bundleId, lastSeq: repair.lastSeq });
-    return { bundleId: pointer.bundleId };
+    this._emit({ type: 'resumed', bundleId: pointer.bundleId, lastSeq: repair.lastSeq, requeued: resumed });
+    return { bundleId: pointer.bundleId, requeued: resumed };
   }
 
   /**
@@ -1024,7 +1032,13 @@ export class CrawlRunner {
 
     // 每批之后落一次 checkpoint。worker 被杀最多丢掉这一批的游标，而捕获
     // 本身早就落盘了，恢复时按 index 重建即可。
-    const stopped = frontier.stopped;
+    let stopped = frontier.stopped;
+    if (!stopped && !frontier.hasReady() && frontier.awaitingHumanItems().length > 0) {
+      const waiting = frontier.awaitingHumanItems();
+      const firstReason = waiting[0]?.lastError?.split('：')?.[0] || 'blocked';
+      frontier.stop(firstReason);
+      stopped = true;
+    }
     await this._saveCheckpoint(stopped ? frontier.stopReason : CRASH_SENTINEL_REASON);
 
     const hitCap = Number.isFinite(cap) && run.capturedSoFar >= cap;
@@ -1032,9 +1046,10 @@ export class CrawlRunner {
     // 会白白消耗一个条目并让它永远卡住，进而堵死整条路线。
     const done = stopped || hitCap || !frontier.hasReady();
 
+    const stoppedBy = stopped ? frontier.stopReason : (r.stoppedBy ?? null);
     // 被安全阀截断 ≠ 干净完成。如实说出来，否则用户会以为「跑完了」。
-    this._emit({ type: 'batch', ...r, done, truncated: hitCap });
-    return { ...r, done, truncated: hitCap };
+    this._emit({ type: 'batch', ...r, done, stoppedBy, truncated: hitCap });
+    return { ...r, done, stoppedBy, truncated: hitCap };
   }
 
   /**
