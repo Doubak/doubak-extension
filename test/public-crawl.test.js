@@ -17,6 +17,7 @@ const profile = (target, operator) => `<html><title>目标</title>${nav(operator
   <div class="info"><h1>目标 &amp; 昵称<span>编辑</span></h1></div></div></html>`;
 const probe = (target, operator, slug = 'target') => ({ status: 200, finalUrl: `https://www.douban.com/people/${slug}/`, bodyText: profile(target, operator) });
 const contactCaptchaProfile = readFileSync(new URL('./fixtures/profile-public-contact-captcha.html', import.meta.url), 'utf8');
+const userAbnormalProfile = readFileSync(new URL('./fixtures/profile-user-abnormal.html', import.meta.url), 'utf8');
 
 test('带 _dtcc 参数的正常公开主页：关注弹窗脚本不能误报验证码', () => {
   const url = 'https://www.douban.com/people/38258402/?_dtcc=1';
@@ -38,6 +39,8 @@ test('实际验证码页面或表单仍拦截，不能因为包含主页框架�
   ]) assert.throws(() => assertTargetResponse({ status: 200, finalUrl: 'https://www.douban.com/people/111/', bodyText }), { reason: 'challenge' });
   assert.throws(() => assertTargetResponse({ status: 403, finalUrl: 'https://www.douban.com/people/111/', bodyText: contactCaptchaProfile }), { reason: 'blocked' });
   assert.throws(() => assertTargetResponse({ status: 200, finalUrl: 'https://sec.douban.com/', bodyText: contactCaptchaProfile }), { reason: 'blocked' });
+  assert.throws(() => assertTargetResponse({ status: 200, finalUrl: 'https://www.douban.com/people/mahoo1219/', bodyText: userAbnormalProfile }), { reason: 'blocked' });
+  assert.throws(() => inspectTarget({ status: 200, finalUrl: 'https://www.douban.com/people/mahoo1219/', bodyText: userAbnormalProfile }, 'mahoo1219'), { reason: 'blocked' });
 });
 
 test('目标输入只接受豆瓣主页、slug 或 UID，拒绝外域、子路径与凭据 URL', () => {

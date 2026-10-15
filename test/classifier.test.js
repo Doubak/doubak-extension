@@ -77,6 +77,23 @@ describe('风控', () => {
     assert.equal(blocked.verdict, 'blocked');
   });
 
+  test('以 200 返回的「该用户账号状态异常」（用户软封锁）判为 blocked', () => {
+    const synthetic = classify({ bodyText: fixtures.userAbnormalPage });
+    assert.equal(synthetic.verdict, 'blocked');
+    assert.ok(synthetic.reasons.some((x) => x.includes('账号状态异常')));
+
+    const real = readFileSync(new URL('./fixtures/profile-user-abnormal.html', import.meta.url), 'utf-8');
+    const r = classifyResponse({
+      finalUrl: 'https://www.douban.com/people/mahoo1219/',
+      status: 200,
+      bodyText: real,
+      route: profileForRoute('profile.overview'),
+      visibility: 'public',
+    });
+    assert.equal(r.verdict, 'blocked');
+    assert.ok(r.reasons.some((x) => x.includes('账号状态异常')));
+  });
+
   test('429 与 403 判为 blocked', () => {
     assert.equal(classify({ status: 429 }).verdict, 'blocked');
     assert.equal(classify({ status: 403 }).verdict, 'blocked');

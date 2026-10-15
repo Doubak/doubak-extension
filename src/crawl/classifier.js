@@ -70,7 +70,7 @@ const MARKERS = {
   loginTitle: /<title>\s*登录豆瓣\s*<\/title>/,
   pageNotFound: /页面不存在/,
   captcha: /验证码|captcha/i,
-  abnormalRequest: /有异常请求|请输入验证码|访问过于频繁/,
+  abnormalRequest: /有异常请求|请输入验证码|访问过于频繁|该用户账号状态异常|账号状态异常/,
 };
 
 /**
@@ -220,7 +220,7 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   // 脚本代码中的「请输入验证码」不是当前页面遭遇了风控。必须剥离脚本与注释后再检测。
   const markup = stripScriptAndStyle(bodyText);
   if (MARKERS.abnormalRequest.test(markup)) {
-    reasons.push('页面含风控提示文案');
+    reasons.push(/该用户账号状态异常|账号状态异常/.test(markup) ? '页面显示账号状态异常（用户软封锁）' : '页面含风控提示文案');
     return { verdict: MARKERS.captcha.test(markup) ? 'challenge' : 'blocked', reasons, itemCount };
   }
   if (MARKERS.pageNotFound.test(markup)) {
