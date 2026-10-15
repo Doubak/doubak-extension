@@ -316,19 +316,21 @@ test('在抓取进行中（最新档案无 manifest）时，覆盖率页显示�
     assert.equal(select.querySelectorAll('option').length, 2);
     assert.equal(select.value, '111');
 
-    // 默认展示正在抓取账号 UID 111 已收尾的链，而不是进行中的未收尾档案
+    // 默认展示正在抓取账号 UID 111 已收尾的链，且提示抓取正在进行中
     const lastChain = dom.sent.findLast((m) => m.type === 'chain');
     assert.equal(lastChain.bundleId, '20261001T000000Z-aaaaaa');
     assert.doesNotMatch(dom.byId.get('chain').textContent, /备份来源待确认/);
     assert.doesNotMatch(dom.byId.get('chain').textContent, /暂无已收尾的档案/);
     assert.match(dom.byId.get('chain').textContent, /本人登录时备份/);
+    assert.match(dom.byId.get('chain').textContent, /本次抓取正在进行中/);
 
-    // 切换到另一个账号 UID 222
+    // 切换到另一个账号 UID 222（未在抓取该账号，不展示进行中提示）
     select.value = '222';
     select.dispatch('change');
     await settle();
     assert.equal(dom.sent.findLast((m) => m.type === 'chain').bundleId, '20261002T000000Z-bbbbbb');
     assert.match(dom.byId.get('chain').textContent, /公开页面备份 · 登录账号 UID 111/);
+    assert.doesNotMatch(dom.byId.get('chain').textContent, /本次抓取正在进行中/);
   } finally { dom.restore(); }
 });
 
