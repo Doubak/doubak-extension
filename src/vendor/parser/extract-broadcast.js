@@ -432,6 +432,17 @@ export function extractBroadcasts(html, ownerUserId) {
       : null;
     const rating = stars ? ((stars.match(/&#9733;|★/g) ?? []).length || null) : null;
     let quote = blockquote ? (/<p[^>]*>([\s\S]*?)<\/p>/.exec(blockquote)?.[1] ?? null) : null;
+    if (!quote && blockquote) {
+      // 真实页面的另一种形状：转发附言或部分正文直接写在 <blockquote> 中，不带 <p> 标签。
+      // 先去掉评分星，再切掉可能尾随的转发引言卡片：
+      // - 正常状态形如 <span><a class="reshared_by"...>作者</a>...</span>
+      // - 对方私密/注销状态形如 <span class="reshared_by deleted">[ 该广播仅作者本人可见 ]</span>
+      // - 以及尾随的 <a class="reshared_by more-reshare"...>
+      let raw = blockquote.replace(/<span class="rating-stars">[\s\S]*?<\/span>/g, '');
+      const reshareIdx = raw.search(/(?:<span[^>]*>\s*)?<[a-zA-Z]+[^>]*class="[^"]*reshared_by/);
+      if (reshareIdx >= 0) raw = raw.slice(0, reshareIdx);
+      if (stripTagsAndDecode(raw).trim()) quote = raw;
+    }
     // 「（全文）」是豆瓣的链接文字，**不是用户写的字**，所以不进正文——
     // 与「未知作品」「1740人浏览」「暂无封面」是同一条规则：占位符不是内容。
     // 截断这件事本身记在 fullTextUrl 上，不靠正文末尾的字来表达。
