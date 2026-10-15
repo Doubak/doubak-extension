@@ -69,7 +69,7 @@
  */
 
 import { CrawlRunner } from '../crawl/runner.js';
-import { RunStore } from '../crawl/run-store.js';
+import { RunStore, checkpointFailures } from '../crawl/run-store.js';
 import { createDrive, driveWithinBudget, provesLiveness } from '../crawl/driver.js';
 import { MemoryKvStore } from '../storage/kv-store.js';
 import { IdbKvStore } from '../storage/idb-kv-store.js';
@@ -695,9 +695,8 @@ export async function handleOp(msg) {
         };
 
       case 'retryFailed':
-        // 不加锁：它只是把 frontier 里的状态改回 pending，不发请求。
-        // 真正的抓取由随后的 drive() 推进，那一步是有锁的。
-        return { ok: true, count: await getRunner().retryFailed({ routeKey: msg.routeKey }) };
+        // 暂停后的 retryFailed 会先恢复并验证会话，确实会发请求；与推进互斥。
+        return { ok: true, count: await lock.run('恢复并重试', () => getRunner().retryFailed({ routeKey: msg.routeKey })) };
 
       case 'chain': {
         // 覆盖率页「合起来」那个视角。只读档案、不发请求，所以不加锁。
@@ -814,9 +813,14 @@ export async function handleOp(msg) {
         break;
       }
 
-      case 'status':
+      case 'status': {
         // 同样不加锁：读状态必须在抓取跑着的时候也能读到。
-        return { ok: true, status: getRunner().status(), busyWith: lock.holder };
+        const status = getRunner().status();
+        // 只读断点，不恢复、不发请求。重载后也能展示失败分页及正确的重试入口。
+        const cp = status.active ? null : await getRunStore().loadCheckpoint();
+        return { ok: true, status, busyWith: lock.holder, checkpointBundleId: cp?.bundle_id,
+          checkpointFailures: checkpointFailures(cp) };
+      }
 
       case 'deleteBundle': {
         // 删除走**这条唯一的写入路径**，而不是让面板的只读 Worker 破例。

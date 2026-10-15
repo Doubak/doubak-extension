@@ -1602,7 +1602,8 @@ describe('仅剩 checkpoint 时顶部操作栏仍须提供有效操作', () => {
     const retryIdx = bg.indexOf("case 'retryFailed'");
     const finishIdx = bg.indexOf("case 'finishWithGaps'");
     assert.ok(retryIdx > 0 && finishIdx > 0);
-    assert.match(bg.slice(retryIdx, retryIdx + 300), /ensureRunLoaded\(\)/);
+    assert.match(bg.slice(retryIdx, retryIdx + 400), /retryCommand\(msg.routeKey\)/);
+    assert.match(bg, /load: ensureRunLoaded/);
     assert.match(bg.slice(finishIdx, finishIdx + 300), /ensureRunLoaded\(\)/);
   });
 
@@ -1620,6 +1621,54 @@ describe('仅剩 checkpoint 时顶部操作栏仍须提供有效操作', () => {
     const i = js.indexOf('async function finishWithGaps(leaves)');
     const body = js.slice(i, js.indexOf('\n}', i));
     assert.match(body, /confirm\(/);
+  });
+});
+
+describe('重载后的失败清单与重试等待状态', () => {
+  const failure = { url: 'https://www.douban.com/people/111/notes?start=0', routeKey: 'note.list',
+    attempts: 1, ordered: true, lastError: 'unclassified' };
+
+  test('冷启动的手动暂停断点直接提供失败分页的重试入口，不能带缺口收尾', async () => {
+    const dom = await loadUi({ which: 'panel', onMessage: msg => msg.type === 'status'
+      ? { ok: true, runner: { active: false }, checkpoint: { bundle_id: '20260802T101500Z-a1b2c3',
+        pause_reason: 'user_paused', failures: [failure] } } : IDLE(msg) });
+    try {
+      const labels = dom.byId.get('actions').children.map(b => b.textContent);
+      assert.ok(labels.includes('继续'));
+      assert.ok(labels.includes('继续，并重试这 1 个'));
+      assert.ok(!labels.includes('就这样收尾'));
+      assert.match(dom.byId.get('failures').textContent, /note|日记/);
+    } finally { dom.restore(); }
+  });
+
+  test('重试验证会话期间持续显示等待，轮询和重复点击不再发送第二个命令', async () => {
+    let release, retryCount = 0, complete = false;
+    const dom = await loadUi({ which: 'panel', onMessage: msg => {
+      if (msg.type === 'status') return complete ? IDLE(msg) : { ok: true,
+        runner: { active: true, stopped: true, stoppedBy: 'user_paused',
+          bundleId: '20260802T101500Z-a1b2c3', failures: [failure], routes: [] } };
+      if (msg.type === 'retryFailed') {
+        retryCount++;
+        return new Promise(resolve => { release = resolve; });
+      }
+      return IDLE(msg);
+    } });
+    try {
+      const retry = dom.byId.get('actions').children.find(b => b.textContent.includes('重试')).onclick;
+      const pending = retry();
+      assert.match(dom.byId.get('state').textContent, /正在准备重试/);
+      await dom.tick();
+      assert.match(dom.byId.get('state').textContent, /正在准备重试/);
+      assert.equal(dom.byId.get('actions').children.length, 0);
+      assert.equal(dom.byId.get('failures').children.length, 0);
+      await retry();
+      assert.equal(retryCount, 1);
+      complete = true;
+      release({ ok: true, count: 1, loaded: true });
+      await pending;
+      assert.equal(dom.byId.get('notice').textContent, '');
+      assert.match(dom.byId.get('state').textContent, /没有进行中的抓取/);
+    } finally { dom.restore(); }
   });
 });
 

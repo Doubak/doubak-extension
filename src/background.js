@@ -49,6 +49,7 @@ import { makeDebugLog, loadDebugFlag } from './core/debug-log.js';
 import { checkHostAccess, HOST_PERMISSION_LOST } from './crawl/permissions.js';
 import { FAILURES_PENDING, FINALIZE_FAILED, policyFor } from './crawl/resume-policy.js';
 import { SessionDetector } from './crawl/session-detector.js';
+import { createRetryCommand } from './crawl/retry-command.js';
 import { readLog, clearLog } from './crawl/event-log.js';
 import { installRefererRule } from './crawl/referer-rule.js';
 import { installDesktopUaRule } from './crawl/desktop-ua.js';
@@ -300,6 +301,14 @@ function driveDetached() {
   return drive().catch((err) => debugLog('推进失败（甩出去的那一次）', err));
 }
 
+const retryCommand = createRetryCommand({
+  load: ensureRunLoaded,
+  retry: async routeKey => (await withHost({ op: 'retryFailed', routeKey })).count,
+  resumeSchedule: () => getSupervisor().resumeRun(),
+  clearAttention: () => clearAttention({ kv: getKv() }),
+  drive: driveDetached,
+});
+
 wireNotificationClicks();
 
 /**
@@ -453,7 +462,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
             // 「现在在不在跑」只有 offscreen 答得出（`busyWith` / `runner`）。这里
             // 原来还报一个 service worker 自己的 `running` 布尔量，那是它猜的——
             // 它每 30 秒就被杀一次，而推进在另一个上下文里。已随那个标志一起删掉。
-            checkpoint: cp,
+            checkpoint: cp ? { ...cp, failures: st?.checkpointBundleId === cp.bundle_id ? st.checkpointFailures : null } : null,
             runner: st?.status ?? { active: false },
             // **正在做什么**（全局互斥锁的持有者）。
             //
@@ -622,15 +631,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
         case 'retryFailed': {
           // 装不回来（没有存档点）与「装回来了但一条失败都没有」是两件不同的事，
           // 界面要能分开说——否则两种情况看起来都是「按了没反应」。
-          const loaded = await ensureRunLoaded();
-          const r = loaded
-            ? await withHost({ op: 'retryFailed', routeKey: msg.routeKey })
-            : { count: 0 };
-          if (r.count > 0) {
-            await clearAttention({ kv: getKv() });
-            void driveDetached();
-          }
-          sendResponse({ ok: true, count: r.count, loaded });
+          sendResponse(await retryCommand(msg.routeKey));
           break;
         }
 

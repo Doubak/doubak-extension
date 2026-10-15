@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { RunStore, ScheduleStore, buildCheckpoint, CURRENT_RUN_KEY } from '../src/crawl/run-store.js';
+import { RunStore, ScheduleStore, buildCheckpoint, checkpointFailures, CURRENT_RUN_KEY } from '../src/crawl/run-store.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
 import { kvStoreContract } from './helpers/kv-store-contract.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
@@ -11,6 +11,24 @@ import { SPEC_VERSION } from '../src/core/spec-constants.js';
 
 const BID = '20260729T101500Z-a3f9c1';
 const DIR = `doubak-bundle-${BID}`;
+
+test('断点失败摘要读取持久化字段，并从路线恢复分页约束', () => {
+  const cp = { frontier: [
+    { url: 'https://www.douban.com/people/111/notes?start=0', route_key: 'note.list', state: 'failed', attempts: 1, last_error: 'unclassified' },
+    { url: 'https://www.douban.com/note/123/', route_key: 'note.item', state: 'failed', attempts: 2 },
+    { url: 'https://www.douban.com/unknown', route_key: 'unknown', state: 'failed' },
+    { route_key: 'note.list', state: 'pending' },
+    { route_key: 'note.list', state: 'awaiting_human' },
+  ] };
+  const rows = checkpointFailures(cp);
+  assert.deepEqual(rows.map(row => [row.routeKey, row.ordered, row.lastError, row.attempts]), [
+    ['note.list', true, 'unclassified', 1], ['note.item', false, null, 2], ['unknown', true, null, 0],
+  ]);
+  assert.deepEqual(checkpointFailures({ frontier: [] }), []);
+  assert.equal(checkpointFailures(null), null);
+  assert.equal(checkpointFailures({}), null);
+  assert.equal(cp.frontier[0].state, 'failed', '读取不能重排失败项');
+});
 
 function harness() {
   const kv = new MemoryKvStore();

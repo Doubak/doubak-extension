@@ -233,11 +233,12 @@ export async function refresh() {
   // 没反应，等了五秒忽然全出来了」。
   //
   // 恢复本身就慢（修段尾 + 确认登录状态，都是真请求），所以这几秒必须有交代。
-  const busy = s.busyWith ?? pendingCommand;
-  if (busy && !s.runner?.active) {
+  const busy = pendingCommand ?? s.busyWith;
+  if (busy && (!s.runner?.active || busy === '恢复并重试')) {
     const [title, why] = BUSY_COPY[busy] ?? ['正在处理…', ''];
     setState('busy', title, why);
     setActions([]);
+    if (busy === '恢复并重试') renderFailures([]);
     return;
   }
 
@@ -313,22 +314,17 @@ export async function refresh() {
     setState(tone, title, why);
     setActions([
       ...(action ? [[action, resumeCrawl, 'primary']] : []),
-      // **没有「继续」时也必须有出路。**
-      //
-      // `failures_pending` 刻意不给「继续」，因为该做的决定是「重试」还是
-      // 「就这样收尾」。而在这条分支里（offscreen 被回收了，只剩 checkpoint）
-      // 失败清单**根本不渲染**——于是整个界面只剩一个「中止这次抓取」：用户唯一
-      // 能做的事，是把一次跑了几小时、只差几个页面的抓取扔掉。
-      //
-      // 这两个动作会先把抓取从 checkpoint 装回内存（见 background 的
-      // `ensureRunLoaded`），所以在这里点得动。
-      ...(action || s.checkpoint.pause_reason !== 'failures_pending'
+      // offscreen 只读完整断点提供失败清单，手动暂停也直接显示重试入口。
+      // 清单尚不可读时保留通用重试；不能在不知道是否有分页失败时提供带缺口收尾。
+      ...(Array.isArray(s.checkpoint.failures) ? failureActions(s.checkpoint.failures)
+        : action || s.checkpoint.pause_reason !== 'failures_pending'
         ? []
-        : [['重试抓不下来的页面', retryFailures], ['就这样收尾', () => finishWithGaps()]]),
+        : [['重试抓不下来的页面', retryFailures]]),
       // **这里也要能中止。** 刚打开插件时 offscreen 还没起来，只有 checkpoint——
       // 而那正是用户最可能想说「这次不抓了」的时刻。
       ['中止这次抓取', () => abortCrawl(s.checkpoint.bundle_id), 'danger'],
     ]);
+    renderFailures(s.checkpoint.failures ?? []);
     // 进度表交给「上一次的结果」：这时候没有 runner，但档案里的 crawl_state 有。
     // 空着一片什么都不说，比显示上一次的结果糟糕。
     if (!lastRunShown) {
@@ -570,6 +566,7 @@ let lastRunShown = false;
  * @type {string | null}
  */
 let pendingCommand = null;
+let retryInFlight = false;
 
 /**
  * 重新渲染**当前打开的那个标签页**。
@@ -678,34 +675,47 @@ async function showLastRun() {
  * 界面回到原样、一个请求都没发。得说出来它是**哪一种**没发生。
  */
 async function retryFailures() {
-  const r = await send({ type: 'retryFailed' });
-  if (!r?.ok) {
-    // **别把不相干的问题挂在这次操作头上。** 「重试失败：当前未登录豆瓣」看起来
-    // 像重试功能坏了，而实际发生的是会话过期——界面里本来就有一块专门处理它的。
-    // 后台已经把整场抓取的状态改成了对应原因，刷一下就会切到那个界面去。
-    if (r?.reason) {
-      const [, title] = PAUSE_COPY[r.reason] ?? [];
-      setActionError(title ?? '抓取已停下', r.error ?? '');
-      refresh();
+  if (retryInFlight) return;
+  retryInFlight = true;
+  pendingCommand = '恢复并重试';
+  const [title, why] = BUSY_COPY[pendingCommand];
+  clearActionError();
+  setState('busy', title, why);
+  setActions([]);
+  renderFailures([]);
+  try {
+    const r = await send({ type: 'retryFailed' });
+    if (!r?.ok) {
+      // **别把不相干的问题挂在这次操作头上。** 「重试失败：当前未登录豆瓣」看起来
+      // 像重试功能坏了，而实际发生的是会话过期——界面里本来就有一块专门处理它的。
+      // 后台已经把整场抓取的状态改成了对应原因，刷一下就会切到那个界面去。
+      if (r?.reason) {
+        const [, title] = PAUSE_COPY[r.reason] ?? [];
+        setActionError(title ?? '抓取已停下', r.error ?? '');
+        return;
+      }
+      setActionError('重试失败', r?.error ?? '后台没有给出原因。');
       return;
     }
-    setActionError('重试失败', r?.error ?? '后台没有给出原因。');
-    return;
+    if (!r.count) {
+      setActionError(
+        '没有可重试的条目',
+        r.loaded === false
+          ? '这次抓取已经不在内存里，也没有可恢复的存档点——它可能已经收尾或被中止了。'
+          // **不要在这里让用户去按「继续」。** `failures_pending` 状态下压根没有那个
+          // 按钮（其余部分都抓完了，没有什么可继续的），指过去就是条死路。
+          : '失败清单已经变化：这些页面可能已排队、正在重试或已经抓取成功。请查看当前进度与日志。',
+      );
+      return;
+    }
+    clearActionError();
+  } catch (err) {
+    setActionError('重试失败', String(err?.message ?? err));
+  } finally {
+    pendingCommand = null;
+    await refresh();
+    retryInFlight = false;
   }
-  if (!r.count) {
-    setActionError(
-      '没有可重试的条目',
-      r.loaded === false
-        ? '这次抓取已经不在内存里，也没有可恢复的存档点——它可能已经收尾或被中止了。'
-        // **不要在这里让用户去按「继续」。** `failures_pending` 状态下压根没有那个
-        // 按钮（其余部分都抓完了，没有什么可继续的），指过去就是条死路。
-        : '队列里没有处于「失败」状态的条目。若这些页面是被豆瓣挡住的（软封锁），'
-          + '那不算失败——它们会等到下一次抓取再试，现在重试只会更快撞上限流。',
-    );
-    return;
-  }
-  clearActionError();
-  refresh();
 }
 
 /**
@@ -1132,6 +1142,7 @@ export function resetOverview() {
   preflightShown = false;
   lastRunShown = false;
   pendingCommand = null;
+  retryInFlight = false;
   actionError = null;
   setLastStatus(null);
   routeRows.clear();
