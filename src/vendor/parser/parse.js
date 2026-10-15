@@ -71,7 +71,8 @@ import {
 // 0.15.0：支持个人相册（albums.ndjson）与豆瓣小组（group_topics.ndjson、group_joins.ndjson）。
 // 0.15.1：游戏评分取列表正文星级，短评不再依赖本人操作栏，限定条目边界。
 // 0.15.2：支持不带 <p> 的广播与转发附言正文抽取，剔除尾随转发卡片与私密/注销占位符。
-export const PARSER_VERSION = 'doubak-data-parser/0.15.2';
+// 0.15.3：保留 topic 广播的独立标题和原页链接。
+export const PARSER_VERSION = 'doubak-data-parser/0.15.3';
 export const CANONICAL_VERSION = 'canonical/1.2';
 
 /** 路线状态词 → canonical 的封闭词表。 */
@@ -1085,6 +1086,7 @@ function upsertBroadcast(store, { b, account, observation, parserVersion }) {
       ? { raw: b.postedAt, iso: b.postedAt.replace(' ', 'T') + '+08:00', precision: 'second', timezone_assumption: 'Asia/Shanghai' }
       : null,
     text: b.text,
+    title: b.title ?? null,
     action: b.action,
     // 动作句里那几个链接（豆列名、作品名、相册…）。**拼起来逐字等于 `action`**，
     // 所以下游重建带链接的句子不需要任何子串匹配——而子串匹配对不上时是静默的。

@@ -239,3 +239,57 @@ test('上游取目标最新档案，全库最新的 B 和公开视图不能成�
   assert.equal(newestForAccount(entries, { accountUserId: '111', accountUsername: 'target' }).bundleId, entries[0].bundleId);
   assert.equal(newestForAccount(entries, {}), null);
 });
+
+
+const aliasProfile = () => profile('111', '111').replace(
+  '<img src="https://img1.doubanio.com/icon/up111-1.jpg" alt="目标昵称">',
+  '<a href="https://www.douban.com/people/owner/"><img src="https://img1.doubanio.com/icon/up111-1.jpg" alt="目标昵称"></a>',
+);
+
+test('数字主页没有重定向时，域名取目标头像链接，不取访客或操作者', () => {
+  for (const slug of ['111', 'owner']) {
+    const result = inspectTarget({ status: 200, finalUrl: `https://www.douban.com/people/${slug}/`, bodyText: aliasProfile() }, slug);
+    assert.equal(result.account.username, 'owner');
+    assert.equal(result.account.userId, '111');
+  }
+  const publicHtml = aliasProfile().replace('USER_ID: "111"', 'USER_ID: "222"');
+  assert.equal(inspectTarget({ status: 200, finalUrl: 'https://www.douban.com/people/111/', bodyText: publicHtml }, '111').account.username, 'owner');
+  assert.throws(() => inspectTarget({ status: 200, finalUrl: 'https://www.douban.com/people/111/', bodyText: aliasProfile().replace('/people/owner/', '/people/222/') }, '111'), { reason: 'target_changed' });
+});
+
+for (const explicit of [false, true]) {
+  test(`${explicit ? '网址输入' : '默认检测'}以数字地址访问也选回原域名的增量基准`, async () => {
+    const h = harness({ responseHtml: aliasProfile() }); h.set({ target: '111', operator: '111', slug: '111' });
+    const runner = h.makeRunner();
+    const entries = [chainEntryFromManifest({ bundle_id: '20261011T000000Z-aaaaaa', account: { user_id: '111', username: 'owner' },
+      crawl_state: [{ route_key: 'broadcast.timeline', advanced: true, high_water_time: '2026-10-11T00:00:00+08:00' }] })];
+    let picked;
+    await runner.start({ ...(explicit ? { targetInput: 'https://www.douban.com/people/111/' } : { username: '111' }),
+      onlyRoutes: ['profile.overview'], includeCatalog: false,
+      resolveFloors: (account) => {
+        picked = pickFloors(entries, { accountUserId: account.userId, accountUsername: account.username });
+        return { floors: new Map([...picked].map(([k, v]) => [k, v.floorTime])), previousBundleId: newestForAccount(entries, { accountUserId: account.userId, accountUsername: account.username })?.bundleId };
+      },
+    });
+    assert.equal(picked.size, 1);
+    await runner.pause();
+    await h.makeRunner().resume(await h.runStore.loadCheckpoint());
+    const cp = await h.runStore.loadCheckpoint();
+    assert.equal(cp.run_context.account.username, 'owner');
+    assert.equal((await h.runStore.getCurrentRun()).previousBundleId, '20261011T000000Z-aaaaaa');
+  });
+}
+
+for (const cold of [false, true]) {
+  test(`${cold ? '冷' : '热'}恢复旧数字域名断点时不改任务地址`, async () => {
+    const h = harness(); h.set({ target: '111', operator: '111', slug: '111' });
+    const runner = h.makeRunner();
+    await runner.start({ targetInput: '111', onlyRoutes: ['profile.overview'], includeCatalog: false });
+    await runner.pause();
+    const resumed = cold ? h.makeRunner() : runner;
+    resumed._fetchImpl = async (url) => ({ status: 200, url, headers: new Headers(), arrayBuffer: async () => new TextEncoder().encode(aliasProfile()).buffer });
+    await resumed.resume(await h.runStore.loadCheckpoint());
+    assert.equal(resumed.status().targetAccount.username, '111');
+    assert.equal((await h.runStore.loadCheckpoint()).run_context.account.username, '111');
+  });
+}

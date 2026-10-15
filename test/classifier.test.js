@@ -798,3 +798,14 @@ test('脚本中的注释字面量不会掩盖随后可见的验证码提示', ()
   const bodyText = fixtures.broadcastPage + '<script>const marker = "<!--";</script><p>请输入验证码</p><!-- footer -->';
   assert.equal(classify({ bodyText }).verdict, 'challenge');
 });
+
+// 真实故障的结构化缩小样本：topic 正文引用错误页文案。
+test('广播正文中的「页面不存在」不能把第一页判成 soft404', () => {
+  const bodyText = readFileSync(new URL('./fixtures/broadcast-topic.html', import.meta.url), 'utf8');
+  const result = classify({ bodyText });
+  assert.equal(result.verdict, 'ok');
+  assert.equal(result.itemCount, 1);
+  for (const tag of ['title', 'h1']) {
+    assert.equal(classify({ bodyText: `<html><${tag}>页面不存在</${tag}></html>` }).verdict, 'soft404');
+  }
+});

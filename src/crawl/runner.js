@@ -235,7 +235,9 @@ export class CrawlRunner {
     if (context.visibility === 'public' || /\/icon\/up?[1-9]\d*[-.]|\/feed\/people\/[1-9]\d*\//.test(probe.bodyText)) {
       const live = extractTargetAccount(probe.bodyText, probe.finalUrl, context.account.username);
       if (live.userId !== context.account.userId) throw new SessionError('target_changed', '目标 UID 已改变，拒绝继续原档案。');
-      if (live.username !== context.account.username) throw new SessionError('target_changed', '目标域名已改变，请中止后以数字 UID 开始新的全量基准。');
+      // 升级前以数字地址建立的断点继续使用原地址；UID 已核对，不能因现在能
+      // 读出头像链接的域名就拒绝恢复。真正的自定义域名变化仍拒绝。
+      if (live.username !== context.account.username && context.account.username !== context.account.userId) throw new SessionError('target_changed', '目标域名已改变，请中止后以数字 UID 开始新的全量基准。');
     }
     const guard = new SessionGuard({ targetAccount: context.account, ...context });
     guard.preflight(probe.bodyText, { probe });
@@ -327,6 +329,11 @@ export class CrawlRunner {
       this._gate.setPacer(pacer);
     } else {
       probe = await transport.fetch(`https://www.douban.com/people/${encodeURIComponent(username)}/`);
+      if (/\/icon\/up?[1-9]\d*[-.]|\/feed\/people\/[1-9]\d*\//.test(probe.bodyText)) {
+        runContext = inspectTarget(probe, username, { targetUserId, operatorUserId });
+        if (runContext.visibility !== 'self') throw new SessionError('account_switched', '目标不是当前登录账号，请重新查看账号。');
+        username = runContext.account.username;
+      }
     }
     const profileUrl = `https://www.douban.com/people/${encodeURIComponent(username)}/`;
 
@@ -337,6 +344,7 @@ export class CrawlRunner {
     // 的问题：它默认「广播条目上的 data-uid 就是本人」，而在作品详情页上那是
     // **评论者**的 ID。见 session.js 里 UID_PATTERNS 的说明。
     const account = session.preflight(probe.bodyText, { probe });
+    account.username = username;
     runContext ??= {
       account: { ...account, username },
       visibility: 'self', operatorMode: 'authenticated', operatorUserId: account.userId,
