@@ -203,6 +203,7 @@ export class BundleReader {
       status: manifest?.status ?? 'in_progress',
       hasManifest: Boolean(manifest),
       account: manifest?.account ?? null,
+      crawlScope: manifest?.crawl_scope ?? null,
       createdAt: manifest?.created_at ?? null,
       completedAt: manifest?.completed_at ?? null,
       captures: index.length,

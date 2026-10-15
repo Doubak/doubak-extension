@@ -268,3 +268,15 @@ describe('请求闸门：并发恒为 1，间隔从上次结束算起', () => {
     assert.deepEqual(r.result, { status: 200 });
   });
 });
+
+test('目录最小间隔保留全局串行队列及更慢的退避', async () => {
+  let now = 0;
+  const pacer = new Pacer({ intervalMs: 3000, jitterRatio: 0 });
+  const gate = new RequestGate({ pacer, now: () => now, sleep: async ms => { now += ms; } });
+  await gate.run(async () => {});
+  const a = gate.run(async () => now, { minimumIntervalMs: 5000 });
+  const b = gate.run(async () => now, { minimumIntervalMs: 5000 });
+  assert.deepEqual((await Promise.all([a, b])).map(x => x.result), [5000, 10000]);
+  pacer.slowDown();
+  assert.equal((await gate.run(async () => now, { minimumIntervalMs: 5000 })).waitedMs, 6000);
+});

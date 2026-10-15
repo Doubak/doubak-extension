@@ -118,6 +118,8 @@ export function buildRoutes({
   username,
   mediums = [...MEDIUMS],
   includeCatalog = true,
+  includeCovers = includeCatalog,
+  visibility = 'self',
 }) {
   if (!username) throw new Error('缺少 username');
   /** @type {RouteDef[]} */
@@ -553,7 +555,17 @@ export function buildRoutes({
     });
   }
 
-  return routes.sort((a, b) => a.priority - b.priority || (a.key < b.key ? -1 : 1));
+  if (!includeCovers) {
+    const at = routes.findIndex((r) => r.key === 'asset.subject_cover');
+    if (at >= 0) routes.splice(at, 1);
+  } else if (!includeCatalog) {
+    routes.push({ key: 'asset.subject_cover', intent: 'asset.image.catalog_thumbnail', kind: 'catalog',
+      surface: 'asset', priority: PRIORITY.CATALOG + 1, source: 'archive', enumeration: 'bounded',
+      safetyNet: 'contiguity', ordered: false, note: '轻量化模式：保存标记列表里的封面图' });
+  }
+  const permitted = visibility === 'public'
+    ? routes.filter((r) => !['group.publish', 'group.item'].includes(r.key)) : routes;
+  return permitted.sort((a, b) => a.priority - b.priority || (a.key < b.key ? -1 : 1));
 }
 
 /**

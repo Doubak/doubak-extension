@@ -69,7 +69,7 @@
  */
 
 import { CrawlRunner } from '../crawl/runner.js';
-import { RunStore } from '../crawl/run-store.js';
+import { RunStore, checkpointFailures } from '../crawl/run-store.js';
 import { createDrive, driveWithinBudget, provesLiveness } from '../crawl/driver.js';
 import { MemoryKvStore } from '../storage/kv-store.js';
 import { IdbKvStore } from '../storage/idb-kv-store.js';
@@ -84,7 +84,7 @@ import { backlogFromIndex, capturedAssets } from '../crawl/backlog.js';
 import {
   chainEntryFromManifest, pickFloors, floorsFor, newestFirst, renamedBundles,
   chainCoverage, findChainHoles, diffAgainstChain, splitChains, bundlesForAccount,
-  chainOf,
+  chainOf, newestForAccount, sameAccount,
 } from '../crawl/chain.js';
 import { CRAWL_MODES } from '../crawl/crawl-modes.js';
 import {
@@ -306,6 +306,8 @@ async function incrementalOptions(account, mode = 'incremental') {
   const me = {
     accountUserId: account?.userId ?? null,
     accountUsername: account?.username ?? null,
+    visibility: account?.visibility ?? 'self', operatorMode: account?.operatorMode ?? 'authenticated',
+    operatorUserId: account?.operatorUserId ?? null,
   };
 
   let picks;
@@ -333,7 +335,7 @@ async function incrementalOptions(account, mode = 'incremental') {
   if (picks.size === 0) return fallback('no_floors');
 
   debugLog('增量：', [...picks].map(([k, v]) => `${k}←${v.fromBundleId}`).join(' '));
-  const newest = newestFirst(entries)[0];
+  const newest = newestForAccount(entries, me);
 
   // ── 到这里下界已经定了，下面每一样都是**锦上添花，各自兜底**。
   const mine = bundlesForAccount(entries, me);
@@ -395,6 +397,8 @@ async function resolveKnownCaptures(account, mode = 'incremental') {
     const me = {
       accountUserId: account?.userId ?? null,
       accountUsername: account?.username ?? null,
+      visibility: account?.visibility ?? 'self', operatorMode: account?.operatorMode ?? 'authenticated',
+      operatorUserId: account?.operatorUserId ?? null,
     };
     const mine = bundlesForAccount(entries, me);
     const known = await knownCaptures(mine);
@@ -597,6 +601,10 @@ export async function handleOp(msg) {
     switch (msg.op) {
       case 'ping':
         return { ok: true };
+      case 'detectSession':
+        return { ok: true, session: await getRunner().detectSession() };
+      case 'probeTarget':
+        return { ok: true, target: await lock.run('探测账号', () => getRunner().probeTarget(msg.input, { targetUserId: msg.targetUserId })) };
 
       case 'start': {
         // 身份确认与开工必须是**一个**临界区。分成两条消息的话，两个「开始
@@ -607,7 +615,7 @@ export async function handleOp(msg) {
           if (r.active) throw new Error('已有抓取在进行中');
           const opts = reviveScope(msg.options);
           // 用户不该被要求手输用户名——他已经登录了，浏览器里就有答案。
-          const who = opts.username ? { username: opts.username } : await r.discoverUsername();
+          const who = opts.targetInput || opts.username ? { username: opts.username } : await r.discoverUsername();
           // 全量是**用户明说的**，那就一个下界都不挑——当作从来没抓过。
           if (msg.mode === CRAWL_MODES.FULL) {
             return r.start({ ...opts, username: who.username, mode: CRAWL_MODES.FULL });
@@ -632,7 +640,7 @@ export async function handleOp(msg) {
             // 停着就清掉停机状态并把等待人工的条目放回队列；本来就在跑就是空操作。
             //
             // 早先这里 `if (r.active) return` 直接跳过，于是「继续」什么也没做。
-            await r.resume(null);
+            await r.resume(null, { loadOnly: Boolean(msg.loadOnly) });
             return;
           }
           // **自己读档案里的 checkpoint。** service worker 读不了 OPFS，它手上
@@ -642,6 +650,7 @@ export async function handleOp(msg) {
           const pointer = await getRunStore().getCurrentRun();
           const mode = pointer?.mode ?? (pointer?.floors?.length || pointer?.previousBundleId ? CRAWL_MODES.INCREMENTAL : CRAWL_MODES.FULL);
           await r.resume(cp, {
+            loadOnly: Boolean(msg.loadOnly),
             resolveKnown: (account) => resolveKnownCaptures(account, mode),
           });
         });
@@ -658,10 +667,24 @@ export async function handleOp(msg) {
         await getRunner().pause(msg.reason);
         return { ok: true };
 
-      case 'abort':
+      case 'abort': {
         // 中止：收尾成 aborted 并放开指针，之后这份档案就能删了。
         // **不加锁**：它要在抓取正跑着的时候也能按下去，跟暂停同理。
-        return { ok: true, manifest: await getRunner().abort() };
+        const r = getRunner();
+        if (!r.active) await lock.run('装载断点', async () => {
+          const cp = await getRunStore().loadCheckpoint();
+          if (!cp) throw new Error('没有可中止的抓取');
+          try { await r.resume(cp, { loadOnly: true }); }
+          catch (err) {
+            if (err?.reason !== 'resume_identity_missing') throw err;
+            // 无 UID 的旧半成品不能编造 manifest；用户中止时只解除任务占用，原字节原样保留。
+            await getRunStore().releaseCurrentRun();
+            relayEvent({ type: 'aborted', bundleId: cp.bundle_id, message: '旧断点无法归属，已解除任务占用；原始捕获与断点完整保留。' });
+          }
+        });
+        if (!r.active) return { ok: true, detached: true };
+        return { ok: true, manifest: await r.abort() };
+      }
 
       case 'finish':
         return {
@@ -672,9 +695,8 @@ export async function handleOp(msg) {
         };
 
       case 'retryFailed':
-        // 不加锁：它只是把 frontier 里的状态改回 pending，不发请求。
-        // 真正的抓取由随后的 drive() 推进，那一步是有锁的。
-        return { ok: true, count: await getRunner().retryFailed({ routeKey: msg.routeKey }) };
+        // 暂停后的 retryFailed 会先恢复并验证会话，确实会发请求；与推进互斥。
+        return { ok: true, count: await lock.run('恢复并重试', () => getRunner().retryFailed({ routeKey: msg.routeKey })) };
 
       case 'chain': {
         // 覆盖率页「合起来」那个视角。只读档案、不发请求，所以不加锁。
@@ -704,7 +726,8 @@ export async function handleOp(msg) {
             // 不在这条链上的那些。**要说出来**：用户手上可能有好几次独立的全量，
             // 而界面只讲最新那条链——不提的话看起来像档案丢了。
             others: chains
-              .filter((c) => c[0]?.bundleId !== head[0]?.bundleId)
+              .filter((c) => c[0]?.bundleId !== head[0]?.bundleId && head[0]
+                && c[0]?.accountUserId === head[0].accountUserId && sameAccount(c[0], head[0]))
               .map((c) => ({ head: c[0]?.bundleId, size: c.length })),
           },
         };
@@ -773,7 +796,10 @@ export async function handleOp(msg) {
         // 不加锁：只读档案，不发请求。
         try {
           const entries = await readChainEntries();
-          const picks = pickFloors(entries);
+          if (!msg.account?.userId) return { ok: true, result: null };
+          const picks = pickFloors(entries, { accountUserId: msg.account.userId,
+            accountUsername: msg.account.username, visibility: msg.account.visibility ?? 'self',
+            operatorMode: msg.account.operatorMode ?? 'authenticated', operatorUserId: msg.account.operatorUserId ?? null });
           return {
             ok: true,
             result: {
@@ -787,9 +813,14 @@ export async function handleOp(msg) {
         break;
       }
 
-      case 'status':
+      case 'status': {
         // 同样不加锁：读状态必须在抓取跑着的时候也能读到。
-        return { ok: true, status: getRunner().status(), busyWith: lock.holder };
+        const status = getRunner().status();
+        // 只读断点，不恢复、不发请求。重载后也能展示失败分页及正确的重试入口。
+        const cp = status.active ? null : await getRunStore().loadCheckpoint();
+        return { ok: true, status, busyWith: lock.holder, checkpointBundleId: cp?.bundle_id,
+          checkpointFailures: checkpointFailures(cp) };
+      }
 
       case 'deleteBundle': {
         // 删除走**这条唯一的写入路径**，而不是让面板的只读 Worker 破例。

@@ -30,7 +30,7 @@ const ID = '20260801T005010Z-3eef52';
 const OLDER = '20260731T043423Z-d40c1d';
 
 /** 一份长得像真档案的目录。 */
-function bundleFiles(id, { previous = null } = {}) {
+function bundleFiles(id, { previous = null, account = { user_id: '1000001', username: 'mewx' } } = {}) {
   return {
     'manifest.json': JSON.stringify({
       bundle_id: id,
@@ -39,7 +39,7 @@ function bundleFiles(id, { previous = null } = {}) {
       created_at: bundleIdTime(id).toISOString(),
       completed_at: '2026-08-01T02:00:00Z',
       previous_bundle_id: previous,
-      account: { user_id: '1000001', username: 'mewx' },
+      account,
       segments: [{ filename: `pages-${id}-00001.warc.gz`, bytes: 4 }],
       index: { filename: `index-${id}.ndjson`, line_count: 1 },
       crawl_state: [],
@@ -616,4 +616,81 @@ describe('档案页（真的跑一遍）', () => {
       dom.restore();
     }
   });
+});
+
+
+test('档案账号筛选默认全部，切换联动详情，待确认档案始终可选', async () => {
+  const unknown = '20260802T000000Z-abcdef';
+  const pending = '20260803T000000Z-abcdee';
+  const other = { user_id: '2000002', nickname: '朋友昵称', username: 'friend' };
+  const { dom, worker } = await openArchiveTab({ bundles: {
+    [`doubak-bundle-${ID}`]: bundleFiles(ID),
+    [`doubak-bundle-${OLDER}`]: bundleFiles(OLDER, { account: other }),
+    [`doubak-bundle-${unknown}`]: { [`index-${unknown}.ndjson`]: '' },
+    [`doubak-bundle-${pending}`]: { [`index-${pending}.ndjson`]: '',
+      'checkpoint.json': JSON.stringify({ bundle_id: pending, run_context: { account: { userId: '2000002', username: 'friend', displayName: '朋友昵称' } } }) },
+  } });
+  const settle = () => new Promise((r) => setTimeout(r, 25));
+  try {
+    const box = dom.byId.get('archive-accounts');
+    assert.equal(box.hidden, false);
+    assert.equal(box.querySelector('select').value, 'all');
+    assert.match(box.textContent, /全部账号（4 份档案）/);
+    assert.match(box.textContent, /朋友昵称（UID 2000002 · 2 份档案）/);
+    assert.match(box.textContent, /归属待确认（1 份档案）/);
+    assert.equal(dom.byId.get('bundle-pick').querySelectorAll('.picker-row').length, 4);
+    const select = box.querySelector('select');
+    select.value = '2000002'; select.dispatch('change'); await settle();
+    const archive = await import('../src/ui/panel/archive.js');
+    const rows = dom.byId.get('bundle-pick').querySelectorAll('.picker-row');
+    assert.deepEqual(rows.map((r) => r.dataset.id).sort(), [OLDER, pending].sort());
+    assert.ok([OLDER, pending].includes(archive.currentBundleId));
+    assert.ok(dom.byId.get('archive-summary').textContent.includes(archive.currentBundleId));
+    assert.equal(rows.filter((r) => r.getAttribute('aria-selected') === 'true').length, 1);
+    const next = box.querySelector('select');
+    next.value = 'unknown'; next.dispatch('change'); await settle();
+    assert.equal(archive.currentBundleId, unknown);
+    assert.equal(dom.byId.get('bundle-pick').querySelectorAll('.picker-row').length, 1);
+    assert.equal(dom.byId.get('export').disabled, false);
+    // 被筛选的最后一份档案删除后退回全部，不留下空筛选或旧详情。
+    worker.dirs.delete(`doubak-bundle-${unknown}`);
+    const shared = await import('../src/ui/panel/shared.js');
+    shared.invalidateBundleScan();
+    archive.invalidateBundles([ID, OLDER, pending]);
+    await archive.loadArchive();
+    assert.equal(box.querySelector('select').value, 'all');
+    assert.equal(dom.byId.get('bundle-pick').querySelectorAll('.picker-row').length, 3);
+    assert.notEqual(archive.currentBundleId, unknown);
+    // 覆盖率选中的档案回来时仍可见，不受之前的账号筛选隐藏。
+    const filter = box.querySelector('select');
+    filter.value = '2000002'; filter.dispatch('change'); await settle();
+    archive.selectSummaryBundle(ID);
+    await archive.loadArchive();
+    assert.equal(box.querySelector('select').value, 'all');
+    assert.equal(archive.currentBundleId, ID);
+  } finally { dom.restore(); }
+});
+
+test('迟到的档案读取不覆盖新账号的摘要、索引与选中状态', async () => {
+  const { dom, worker } = await openArchiveTab({ bundles: {
+    [`doubak-bundle-${ID}`]: bundleFiles(ID),
+    [`doubak-bundle-${OLDER}`]: bundleFiles(OLDER, { account: { user_id: '2000002', nickname: '另一个账号' } }),
+  } });
+  try {
+    const archive = await import('../src/ui/panel/archive.js');
+    const store = worker.dirs.get(`doubak-bundle-${OLDER}`);
+    const originalRead = store.read.bind(store);
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    store.read = async (...args) => { await gate; return originalRead(...args); };
+    const old = archive.openBundle(OLDER);
+    assert.equal(dom.byId.get('export').disabled, true);
+    await archive.openBundle(ID);
+    release(); await old;
+    assert.equal(archive.currentBundleId, ID);
+    assert.match(dom.byId.get('archive-summary').textContent, /mewx/);
+    assert.doesNotMatch(dom.byId.get('archive-summary').textContent, /另一个账号/);
+    assert.equal(archive.entries[0].capture_id, `${ID}#000001`);
+    assert.equal(dom.byId.get('export').disabled, false);
+  } finally { dom.restore(); }
 });

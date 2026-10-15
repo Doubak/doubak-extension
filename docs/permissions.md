@@ -13,6 +13,8 @@
 
 | 权限 | 为什么要 | 安装警告 |
 |---|---|---|
+| `storage` | 将登录状态提示的 5 分钟 TTL 缓存放在 `storage.session`；开始与继续仍实时核对身份。缓存不含 Cookie 或密码，不使用同步存储 | 无 |
+| `cookies` | 监听豆瓣 `dbcl2` 登录 Cookie 的变化并使会话提示缓存失效。只判断 Cookie 名称与域名，不保存或输出 Cookie 值 | 与现有豆瓣 host 权限共同生效 |
 | `unlimitedStorage` | 不声明的话几百 MB 的档案放不下。**它也是 OPFS 不被浏览器在磁盘压力下清掉的实际保护**（`persist()` 在扩展里恒为 false，见 DESIGN.md 附录 C.9） | 无 |
 | `alarms` | 心跳。service worker 约 30 秒空闲即被杀，闹钟是**唯一一个我们死了它还在**的东西 | 无 |
 | `offscreen` | 抓取本体跑在 offscreen document 里。service worker 不是专用 Worker，`createSyncAccessHandle()` 用不了，所以它写不了 OPFS（见 `src/offscreen/offscreen.js`）。**Firefox 那份 manifest 里没有这一条**——那边的后台本身就是页面，直接起 Worker，少一层；接缝在 `src/runtime/host.js`，按能力挑不按 UA 挑 | 无 |

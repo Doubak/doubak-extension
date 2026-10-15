@@ -483,3 +483,23 @@ describe('查看内容（真的跑一遍）', () => {
     }
   });
 });
+
+
+test('切换档案后迟到的内容解析不能覆盖新档案', async () => {
+  const dom = await installFakeDom({ html: await readRepoFile('src/ui/panel.html') });
+  try {
+    const content = await import('../src/ui/panel/content.js');
+    content.resetContent();
+    const entries = [{ verdict: 'ok', intent: 'broadcast.timeline', url: 'https://www.douban.com/people/mewx/statuses' }];
+    let release;
+    const oldPage = new Promise((r) => { release = r; });
+    const old = content.renderContent({ entries, userId: UID, reader: { readEntry: () => oldPage } });
+    content.resetContent();
+    await content.renderContent({ entries, userId: UID,
+      reader: { readEntry: async () => ({ bodyText: broadcastPage(MY_COMMENT) }) } });
+    release({ bodyText: broadcastPage(OLD_COMMENT) });
+    await old;
+    assert.match(dom.byId.get('content-list').textContent, new RegExp(MY_COMMENT));
+    assert.doesNotMatch(dom.byId.get('content-list').textContent, new RegExp(OLD_COMMENT));
+  } finally { dom.restore(); }
+});

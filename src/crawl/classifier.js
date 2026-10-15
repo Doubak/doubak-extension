@@ -130,7 +130,7 @@ const LOGIN_LINK = /"nav-login"|class="nav-login"/;
  *   该路线的滚动体积分布。样本太少时传 null。
  * @returns {Classification}
  */
-export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats = null }) {
+export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats = null, visibility = 'self' }) {
   /** @type {string[]} */
   const reasons = [];
   const itemCount = route.itemAnchor ? countMatches(bodyText, route.itemAnchor) : null;
@@ -210,6 +210,10 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
     reasons.push('页面含「页面不存在」');
     return { verdict: 'soft404', reasons, itemCount };
   }
+  if (itemCount === 0 && /该用户已经主动注销账号|该用户已被注销/.test(bodyText)) {
+    reasons.push('目标账号页面显示注销墓碑');
+    return { verdict: 'gone', reasons, itemCount };
+  }
 
   // ── 5. 会话是否还在
   //
@@ -217,7 +221,7 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   // 状态，说明会话在某个环节掉了——此时页面上的内容不代表这个账号。
   const userNav = route.userNav ?? DEFAULT_USER_NAV;
   const loggedIn = userNav.test(bodyText);
-  if (!loggedIn) {
+  if (!loggedIn && visibility !== 'public') {
     // 页面上可能照样有数据——豆瓣的公开列表对匿名访问者正常显示。但那是
     // 公开视图，私密条目不在里面，不能当作这个账号的数据。
     const explicit = LOGIN_LINK.test(bodyText) ? '（导航栏出现登录入口）' : '';
@@ -226,7 +230,7 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
     );
     return { verdict: 'login', reasons, itemCount };
   }
-  reasons.push('导航栏中存在登录状态');
+  reasons.push(loggedIn ? '导航栏中存在登录状态' : '公开归档：允许未登录视图');
 
   // ── 6a. 最终 URL 还是不是这条路线
   //
@@ -235,6 +239,11 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   if (route.urlAnchor && !route.urlAnchor.test(finalUrl)) {
     reasons.push(`最终 URL 不像这条路线：${finalUrl}`);
     return { verdict: null, reason: 'url_drifted', reasons, itemCount };
+  }
+  if (visibility === 'public' && /由于用户的设置，无法查看更多内容|people-truncation-hint/.test(bodyText)
+    && /\/people\/[^/]+\/statuses(?:\?|$)/.test(finalUrl)) {
+    return { verdict: 'ok', reasons: [...reasons, '广播因用户隐私设置截断，停止翻页'],
+      itemCount: 0, hasMore: false, privacyTruncated: true };
   }
   if (route.urlAnchor) reasons.push('最终 URL 仍是这条路线');
 
@@ -352,11 +361,22 @@ export class RollingSize {
   }
 }
 
+// 2026-10-15 第三方日记空页样本：没有 note-list，也没有「暂无日记」文案。
+// 只能接受完整的已知空模板：article 内只有 pic/info 资料块，之后直接关闭
+// article 并进入带日记 RSS 的 aside。禁止跨 div 吞掉未识别列表/错误提示，
+// 也不能仅凭标题或条目数为零就把分页线收尾。
+const NOTE_LIST_OR_EMPTY_FRAME = new RegExp([
+  'class="note-list"|',
+  String.raw`<div class="article">\s*<div id="db-usr-profile" class="clearfix">\s*`,
+  String.raw`<div class="pic">(?:(?!<\/?div\b)[\s\S])*<\/div>\s*`,
+  String.raw`<div class="info">(?:(?!<\/?div\b)[\s\S])*<\/div>\s*`,
+  String.raw`<\/div>\s*<\/div>\s*<div class="aside">`,
+  String.raw`[\s\S]*?<a href="/feed/people/[^/"\s]+/notes">\s*feed: rss 2\.0\s*</a>`,
+].join(''));
+
 /**
  * 已知路线的判定描述。
- *
- * 锚点取自真实旧档案里实际出现的 markup。注意 `frameAnchors` 用的是页面
- * 框架而非条目——空列表页也必须能被判为 ok。
+ * 锚点取自真实页面；框架而非条目决定是否接受，空列表页也必须能被判为 ok。
  */
 export const ROUTE_PROFILES = {
   'broadcast.timeline': {
@@ -554,9 +574,9 @@ export const ROUTE_PROFILES = {
   /**
    * 日记列表 `www.douban.com/people/<user>/notes`。
    *
-   * 全部锚点都是对着一份真实页面量出来的，不是照别的路线套的。三处与标记列表不同：
+   * 锚点取自本人页面及第三方空/非空页面样本。三处与标记列表不同：
    *
-   * **① 没有声明数量。** 标题就是 `<h1>我的日记</h1>`，没有 `(N)`——整页找不出第二个
+   * **① 没有声明数量。** 本人标题是「我的日记」，第三方是「昵称的日记」，没有 `(N)`——整页找不出第二个
    * 带数字的括号。所以 `claimedCount: null`：这条路线的完整性**只能**靠连续性证明，
    * 没有第二个信号可以对账。（评论列表有，是 `<h1>我的评论(2)</h1>`。）
    *
@@ -571,8 +591,8 @@ export const ROUTE_PROFILES = {
    * **③ 时间是完整时刻。** `2025-04-14 18:47:50`，不像标记列表只有日期。
    */
   'note.list': {
-    urlAnchor: /\/people\/[^/]+\/notes/,
-    frameAnchors: [/<h1>\s*我的日记\s*<\/h1>/, /class="note-list"/],
+    urlAnchor: /\/people\/[^/]+\/notes\/?(?:\?|$)/,
+    frameAnchors: [/<h1>\s*[^<]+的日记\s*<\/h1>/, NOTE_LIST_OR_EMPTY_FRAME],
     itemAnchor: /class="note-item"/,
     // **日记有不止一种 URL 形状，两种都要认。**
     //

@@ -31,6 +31,20 @@
  */
 
 import { SPEC_VERSION } from '../core/spec-constants.js';
+import { buildRoutes } from './routes.js';
+
+/** 断点用 snake_case 且不存 ordered；从路线定义恢复，只读展示，不启动抓取。 */
+export function checkpointFailures(cp) {
+  if (!Array.isArray(cp?.frontier)) return null;
+  const routes = new Map(buildRoutes({ username: cp.run_context?.account?.username ?? 'unknown' })
+    .map(route => [route.key, route]));
+  return cp.frontier.filter(it => it.state === 'failed').map(it => {
+    const route = routes.get(it.route_key);
+    return { url: it.url, routeKey: it.route_key, attempts: it.attempts ?? 0,
+      ordered: route ? (route.ordered ?? Boolean(route.pagination)) : true,
+      lastError: it.last_error ?? null };
+  });
+}
 
 /** KV 里存「当前在抓什么」的键。 */
 export const CURRENT_RUN_KEY = 'doubak.currentRun';
@@ -314,6 +328,7 @@ export class ScheduleStore {
     if (!p?.bundleId) return null;
     return {
       bundle_id: p.bundleId,
+      run_context: p.runContext ?? null,
       // 指针刚建、还没写过 checkpoint 时没有原因。当成崩溃哨兵——与
       // `runner.start()` 的做法一致：宁可把正常状态误判成崩溃（代价是多做一次
       // 幂等的恢复检查），也不要把崩溃误判成正常。

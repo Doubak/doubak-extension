@@ -130,6 +130,17 @@ Same rule: **the language caveat goes near the top**, not in a footnote.
 
 ## 权限理由
 
+### `storage`
+
+> 在浏览器会话级存储中缓存当前登录账号的提示，避免面板轮询反复请求豆瓣。
+> 缓存只有数字 UID、展示名称和探测时间，没有登录凭据，不同步到云端。
+> 开始与恢复抓取仍实时核对目标与操作者身份。
+
+### `cookies`
+
+> 监听豆瓣登录 Cookie `dbcl2` 的变动，使本地会话提示缓存及时失效。
+> 不保存或输出 Cookie 值；抓取请求仍由用户浏览器直接访问豆瓣。
+
 ### `unlimitedStorage`
 
 > 备份生成的档案通常有数百 MB（实测一次全量抓取约 170 MB，含图片）。不声明这条权限，

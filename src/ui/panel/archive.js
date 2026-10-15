@@ -63,6 +63,17 @@ let accountUserId = null;
 export let currentBundleId = null;
 /** @type {{id: string, summary: object} | null} 摘要缓存，避免两个标签页各读一次 */
 let summaryCache = null;
+let archiveAccount = 'all';
+let archiveLoadGeneration = 0;
+let bundleOpenGeneration = 0;
+
+export function selectSummaryBundle(id) {
+  ++archiveLoadGeneration;
+  ++bundleOpenGeneration;
+  archiveAccount = 'all';
+  currentBundleId = id;
+  summaryCache = null;
+}
 
 /**
  * 存储变了：删了档案、抓完一次、清空。
@@ -111,12 +122,16 @@ export async function loadBundleSummary({ force = false } = {}) {
 }
 
 export async function loadArchive() {
+  const generation = ++archiveLoadGeneration;
+  ++bundleOpenGeneration;
+  setArchiveButtons(false);
   // 抓取跑完之后 checkpoint 与指针都不再指向那份档案——所以不能只看状态，
   // 得直接去 OPFS 里数目录。否则「跑完了」恰好等于「再也导不出来」。
   let scan = [];
   try {
     scan = await scanBundleDirs();
   } catch (e) {
+    if (generation !== archiveLoadGeneration) return;
     $('archive-summary').className = 'card tone-error';
     $('archive-summary').textContent = `读不出存储：${e.message}`;
     return;
@@ -124,14 +139,19 @@ export async function loadArchive() {
 
   const st = getLastStatus();
   const active = st?.runner?.bundleId ?? st?.checkpoint?.bundle_id ?? null;
-  const ids = scan.map((d) => d.bundleId);
-
   // 正在抓的那一份没有 manifest，上游只能从 runner 的状态里拿。
   // runner 不在（只有 checkpoint、offscreen 还没起来）时它是 undefined ——
   // **那是「还不知道」，不是「没有上游」**，两者在选择器里长得不一样。
-  renderBundlePicker(await describeBundles(scan, active, st?.runner?.previousBundleId));
+  const items = await describeBundles(scan, active, st?.runner?.previousBundleId);
+  if (generation !== archiveLoadGeneration) return;
+  const visible = renderArchiveAccounts(items);
+  const ids = visible.map((item) => item.id);
+  renderBundlePicker(visible);
   if (ids.length === 0) {
-    currentBundleId = null;
+    clearSelection();
+    for (const id of ['archive-incremental', 'archive-chain', 'versions', 'vanished', 'content-kinds', 'content-list', 'preview']) {
+      $(id).replaceChildren();
+    }
     $('archive-summary').className = 'muted';
     $('archive-summary').textContent = '暂无档案。发起一次抓取后此处将显示详细内容。';
     setArchiveButtons(false);
@@ -142,7 +162,48 @@ export async function loadArchive() {
 
   await openBundle(currentBundleId && ids.includes(currentBundleId)
     ? currentBundleId
-    : (active ?? ids[0]));
+    : (ids.includes(active) ? active : ids[0]));
+}
+
+/** 只筛选档案清单；上方存储占用与「清空全部」仍属于整个档案库。 */
+function renderArchiveAccounts(items) {
+  const box = $('archive-accounts');
+  box.replaceChildren();
+  box.hidden = items.length === 0;
+  const keyOf = (item) => item.account?.user_id || 'unknown';
+  const groups = new Map();
+  for (const item of items) {
+    const key = keyOf(item);
+    if (!groups.has(key)) groups.set(key, { account: item.account, count: 0 });
+    groups.get(key).count++;
+  }
+  if (!groups.has(archiveAccount)) archiveAccount = 'all';
+  if (!items.length) return [];
+  const select = document.createElement('select');
+  select.className = 'account-select';
+  select.setAttribute('aria-label', '筛选档案账号');
+  const options = [['all', `全部账号（${items.length} 份档案）`]];
+  for (const [uid, { account, count }] of groups) {
+    options.push([uid, uid === 'unknown' ? `归属待确认（${count} 份档案）`
+      : `${account.nickname || account.username || uid}（UID ${uid} · ${count} 份档案）`]);
+  }
+  for (const [value, text] of options) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = text;
+    option.selected = value === archiveAccount;
+    select.append(option);
+  }
+  select.value = archiveAccount;
+  select.addEventListener('change', () => {
+    archiveAccount = select.value;
+    void loadArchive();
+  });
+  const label = document.createElement('label');
+  label.className = 'account-select-label';
+  label.append(document.createTextNode('账号'), select);
+  box.append(label);
+  return archiveAccount === 'all' ? items : items.filter((item) => keyOf(item) === archiveAccount);
 }
 
 /**
@@ -184,12 +245,19 @@ function renderBundlePicker(items) {
   // （`.with-aside:has(> aside[hidden])`），版面是主题的事。
   el.hidden = items.length === 0;
   if (el.hidden) return;
-  el.append(bundlePicker({
-    items,
-    selected: currentBundleId,
-    onPick: (id) => { if (id !== currentBundleId) openBundle(id); },
-    fmtBytes: bytes,
-  }));
+  const byAccount = new Map();
+  for (const item of items) {
+    const uid = item.account?.user_id || '未知归属';
+    if (!byAccount.has(uid)) byAccount.set(uid, []);
+    byAccount.get(uid).push(item);
+  }
+  for (const [uid, group] of byAccount) {
+    const head = document.createElement('h3');
+    const account = group[0].account;
+    head.textContent = account?.user_id ? `${account.nickname || account.username || uid}（UID ${uid}）` : '归属待确认';
+    el.append(head, bundlePicker({ items: group, selected: currentBundleId,
+      onPick: (id) => { if (id !== currentBundleId) openBundle(id); }, fmtBytes: bytes }));
+  }
 }
 
 /**
@@ -213,7 +281,7 @@ async function describeBundles(scan, active, livePrevious) {
   } catch { exportedAt = null; }
 
   const out = [];
-  for (const { bundleId: id, files, manifest } of scan) {
+  for (const { bundleId: id, files, manifest, runContext } of scan) {
     const item = {
       id,
       live: id === active,
@@ -242,6 +310,9 @@ async function describeBundles(scan, active, livePrevious) {
     // （`newBundleId(now)` 生成），而 `bundle-writer.js` 写 `created_at` 时用的
     // 也正是 `bundleIdTime(bundleId)`。所以这两条路给出的是同一个数。
     item.at ??= bundleIdTime(id)?.toISOString() ?? null;
+    item.account = manifest?.account ?? (runContext?.account?.userId ? { user_id: runContext.account.userId,
+      username: runContext.account.username, nickname: runContext.account.displayName } : null);
+    item.visibility = manifest?.crawl_scope?.visibility ?? runContext?.visibility ?? 'self';
     out.push(item);
   }
   // 新的在上。**按时间排，不按目录名排**——目录名恰好也是时间序，但那是巧合，
@@ -339,6 +410,15 @@ function markPicked(bundleId) {
 
 /** @param {string} bundleId */
 export async function openBundle(bundleId) {
+  ++archiveLoadGeneration;
+  const generation = ++bundleOpenGeneration;
+  setArchiveButtons(false);
+  reader = null;
+  entries = [];
+  resetContent();
+  for (const id of ['captures', 'content-kinds', 'content-list', 'preview', 'vanished', 'archive-chain', 'versions']) {
+    $(id).replaceChildren();
+  }
   currentBundleId = bundleId;
   markPicked(bundleId);
   // **上一份档案的操作结果要清干净，class 也要清。**
@@ -351,15 +431,21 @@ export async function openBundle(bundleId) {
     el.replaceChildren();
   }
   const summaryEl = $('archive-summary');
+  summaryEl.className = 'muted';
+  summaryEl.textContent = '正在读取档案…';
   $('export-result').replaceChildren();
   $('verify-result').replaceChildren();
 
   try {
     const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(bundleId) });
-    reader = new BundleReader({ store, bundleId });
-    const cur = await loadBundleSummary({ force: true });
-    const s = cur?.summary ?? (await reader.summary());
-    entries = await reader.index();
+    const nextReader = new BundleReader({ store, bundleId });
+    reader = nextReader; // 摘要损坏时仍允许校验这份档案的原始字节。
+    const s = await nextReader.summary();
+    const nextEntries = await nextReader.index();
+    if (generation !== bundleOpenGeneration || currentBundleId !== bundleId) return;
+    reader = nextReader;
+    entries = nextEntries;
+    summaryCache = { id: bundleId, summary: s };
     // 广播抽取要按 `data-uid` 滤掉转发进来的别人的广播（实测 149 个附图条目里有 30
     // 个是别人的），所以「我是谁」得从 manifest 里取出来传下去。取不到就传 null——
     // 那时抽取器会一条都不认，这比把第三方内容当成你的显示出来要好。
@@ -372,8 +458,15 @@ export async function openBundle(bundleId) {
         [
           ['档案编号', s.bundleId],
           ['账号', s.account
-            ? `${s.account.username ?? ''}（${s.account.user_id ?? ''}）`
+            ? `${[s.account.nickname, s.account.username].filter(Boolean).join(' / ')}（UID ${s.account.user_id ?? ''}）`
             : { text: '要等收尾时写进 manifest', muted: true }],
+          ['抓取视角', s.crawlScope?.visibility === 'public' ? '公开视图：不包含私密条目，缺失不代表删除' : '本人视图'],
+          ...(s.crawlScope ? [
+            ['操作者', s.crawlScope.operator_mode === 'anonymous' ? '匿名访客'
+              : s.crawlScope.operator_user_id ? `UID ${s.crawlScope.operator_user_id}`
+                : s.crawlScope.visibility === 'self' ? `UID ${s.account?.user_id ?? '未知'}` : '旧档案未记录'],
+            ['作品详情页', s.crawlScope.skip_catalog ? '已跳过（轻量化模式）' : '包含在抓取范围中'],
+          ] : []),
           ['状态', STATUS_NAMES[s.status] ?? s.status],
           ['捕获条数', String(s.captures)],
           // 没有 manifest 时体积是从 index 累加的下界（段文件里还有 gzip 头尾），
@@ -443,6 +536,7 @@ export async function openBundle(bundleId) {
     if (openPane === 'captures') renderCaptureList();
     else if (openPane === 'content') void renderContent({ entries, reader, userId: accountUserId });
   } catch (e) {
+    if (generation !== bundleOpenGeneration || currentBundleId !== bundleId) return;
     summaryEl.className = 'card tone-error';
     summaryEl.textContent = `读不出这个档案：${e.message}`;
     // 读不出摘要不代表导不出去——字节还在，照样该让用户把它搬走。
@@ -466,10 +560,12 @@ async function loadChainDiff() {
   vEl.replaceChildren();
   if (!currentBundleId) return;
 
-  const r = await send({ type: 'chainDiff', bundleId: currentBundleId });
+  const bundleId = currentBundleId;
+  const generation = bundleOpenGeneration;
+  const r = await send({ type: 'chainDiff', bundleId });
   if (!r?.ok || !r.diff) return;
-  // 用户可能在这期间切了档案
-  if (!currentBundleId) return;
+  // 用户可能在这期间切了档案或账号。
+  if (bundleId !== currentBundleId || generation !== bundleOpenGeneration) return;
 
   const repeated = new Set(r.diff.repeated ?? []);
   if (repeated.size) {
@@ -726,6 +822,8 @@ function renderCaptureList() {
 
 /** @param {object} entry */
 async function showCapture(entry) {
+  const generation = bundleOpenGeneration;
+  const captureReader = reader;
   for (const d of $('captures').querySelectorAll('div[data-id]')) {
     d.setAttribute('aria-selected', String(d.dataset.id === entry.capture_id));
   }
@@ -735,7 +833,8 @@ async function showCapture(entry) {
   el.replaceChildren(document.createTextNode('正在读取…'));
 
   try {
-    const r = await reader.readEntry(entry);
+    const r = await captureReader.readEntry(entry);
+    if (generation !== bundleOpenGeneration || captureReader !== reader) return;
     el.replaceChildren();
 
     // 一栏，不是两列表格——这一块只有四百来点宽，理由见 `fieldList`。
@@ -773,6 +872,7 @@ async function showCapture(entry) {
       }
     }
   } catch (e) {
+    if (generation !== bundleOpenGeneration || captureReader !== reader) return;
     el.className = 'card tone-error';
     el.textContent = `读不出这条捕获：${e.message}`;
   }
@@ -795,6 +895,11 @@ export function invalidateSummary() {
  * 同上：原来是存储页直接改 `currentBundleId` 与 `entries` 两个变量。
  */
 export function clearSelection() {
+  ++archiveLoadGeneration;
+  ++bundleOpenGeneration;
+  reader = null;
+  summaryCache = null;
+  resetContent();
   currentBundleId = null;
   entries = [];
 }
@@ -810,6 +915,9 @@ export function clearSelection() {
  * 是个空操作；而测试里同一个进程要反复开面板，靠的就是它。
  */
 export function resetArchive() {
+  archiveAccount = 'all';
+  ++archiveLoadGeneration;
+  ++bundleOpenGeneration;
   reader = null;
   entries = [];
   currentBundleId = null;

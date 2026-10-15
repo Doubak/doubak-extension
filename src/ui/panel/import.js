@@ -85,6 +85,7 @@ async function readExisting() {
     files: d.files,
     accountUserId: d.manifest?.account?.user_id ?? null,
     accountUsername: d.manifest?.account?.username ?? null,
+    accountNickname: d.manifest?.account?.nickname ?? null,
   }));
 }
 
@@ -102,6 +103,19 @@ function renderPlan(plan, scan) {
     ? `准备导入 ${plan.count} 份档案，共 ${bytes(plan.bytes)}`
     : '没有需要导入的档案';
   box.append(head);
+  const accounts = new Map();
+  for (const item of plan.items.filter((i) => WILL_WRITE.has(i.action))) {
+    const uid = item.meta.accountUserId ?? '未知归属';
+    const group = accounts.get(uid) ?? { count: 0, name: item.meta.accountNickname ?? item.meta.accountUsername ?? uid };
+    group.count++;
+    accounts.set(uid, group);
+  }
+  for (const [uid, group] of accounts) {
+    const line = document.createElement('div');
+    line.className = 'cap-sub';
+    line.textContent = `${group.name}（UID ${uid}）：${group.count} 份。导入后按账号独立查看与导出。`;
+    box.append(line);
+  }
 
   if (scan.truncated) {
     const t = document.createElement('div');
@@ -353,28 +367,9 @@ export function initImport() {
 
     const activeBundleId = getLastStatus()?.runner?.bundleId
       ?? getLastStatus()?.checkpoint?.bundle_id ?? null;
-    let plan = planImport({
-      candidates, existing: await readExisting(), activeBundleId,
+    const plan = planImport({
+      candidates, existing: await readExisting(), activeBundleId, allowOtherAccounts: true,
     });
-
-    // 「别的账号」是**唯一一种用户可以推翻的拒绝**：他可能真的有两个豆瓣号。
-    // 但要问一次，而且要说清代价——解析器会拒绝混了两个账号的目录。
-    const others = plan.items.filter((i) => i.action === ACTIONS.OTHER_ACCOUNT);
-    if (others.length) {
-      $('import-result').replaceChildren(renderPlan(plan, scan));
-      $('import-result').className = 'card tone-warn';
-      const ok = confirm(
-        `有 ${others.length} 份档案属于另一个豆瓣账号。\n\n`
-        + '默认不导入：两个账号的档案混在一起之后，解析器会拒绝整个目录，'
-        + '而合过之后是拆不开的。\n\n如果这确实是你自己的另一个账号，可以照导。\n\n'
-        + '导入它们吗？（点取消则只导入本账号的那些）',
-      );
-      if (ok) {
-        plan = planImport({
-          candidates, existing: await readExisting(), activeBundleId, allowOtherAccounts: true,
-        });
-      }
-    }
 
     $('import-result').className = 'card tone-idle';
     $('import-result').replaceChildren(renderPlan(plan, scan));

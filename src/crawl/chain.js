@@ -71,6 +71,9 @@ export function chainEntryFromManifest(manifest) {
     completedAt: manifest.completed_at ?? null,
     accountUserId: manifest.account?.user_id ?? null,
     accountUsername: manifest.account?.username ?? null,
+    visibility: manifest.crawl_scope?.visibility ?? 'self',
+    operatorMode: manifest.crawl_scope?.operator_mode ?? 'authenticated',
+    operatorUserId: manifest.crawl_scope?.operator_user_id ?? null,
     previousBundleId: manifest.previous_bundle_id ?? null,
     crawlState: manifest.crawl_state ?? [],
   };
@@ -135,12 +138,12 @@ export function newestFirst(entries) {
  * @param {string | null} [opts.accountUsername]  用户名也要一样，理由见文件开头②。
  * @returns {Map<string, FloorPick>}
  */
-export function pickFloors(entries, { accountUserId = null, accountUsername = null } = {}) {
+export function pickFloors(entries, { accountUserId = null, accountUsername = null, visibility = 'self', operatorMode = null, operatorUserId = null } = {}) {
   /** @type {Map<string, FloorPick>} */
   const out = new Map();
 
   for (const e of newestFirst(entries)) {
-    if (!sameAccount(e, { accountUserId, accountUsername })) continue;
+    if (!sameAccount(e, { accountUserId, accountUsername, visibility, operatorMode, operatorUserId })) continue;
 
     for (const cs of e.crawlState) {
       if (out.has(cs.route_key)) continue; // 更新的那一份已经给过下界了
@@ -173,9 +176,14 @@ export function pickFloors(entries, { accountUserId = null, accountUsername = nu
  * @param {ChainEntry} e
  * @param {{accountUserId?: string | null, accountUsername?: string | null}} me
  */
-export function sameAccount(e, { accountUserId = null, accountUsername = null } = {}) {
+export function sameAccount(e, { accountUserId = null, accountUsername = null, visibility = 'self', operatorMode = null, operatorUserId = null } = {}) {
   if (accountUserId && e.accountUserId !== accountUserId) return false;
   if (accountUsername && e.accountUsername !== accountUsername) return false;
+  if ((e.visibility ?? 'self') !== visibility) return false;
+  if (visibility === 'public' && operatorMode && (e.operatorMode ?? 'authenticated') !== operatorMode) return false;
+  // 不同登录者的可见集合可能不同；没有原操作者证据的公开档案不授予增量资格。
+  if (visibility === 'public' && (e.operatorMode ?? 'authenticated') === 'authenticated'
+    && (!operatorUserId || e.operatorUserId !== operatorUserId)) return false;
   return true;
 }
 
@@ -251,7 +259,8 @@ export function findChainHoles(entries) {
       }
 
       const baseCs = base.crawlState.find((x) => x.route_key === cs.route_key);
-      if (!baseCs || baseCs.high_water_time !== cs.floor_time) {
+      if (!sameAccount(base, { accountUserId: e.accountUserId, accountUsername: e.accountUsername,
+        visibility: e.visibility ?? 'self', operatorMode: e.operatorMode, operatorUserId: e.operatorUserId }) || !baseCs || baseCs.high_water_time !== cs.floor_time) {
         holes.push({
           routeKey: cs.route_key,
           bundleId: e.bundleId,
@@ -294,7 +303,9 @@ export function chainOf(entries, headId) {
   while (cur && !seen.has(cur.bundleId)) {
     seen.add(cur.bundleId); // 环是坏数据，但不能让它把我们转死
     out.push(cur);
-    cur = cur.previousBundleId ? byId.get(cur.previousBundleId) : undefined;
+    const prev = cur.previousBundleId ? byId.get(cur.previousBundleId) : undefined;
+    cur = prev && sameAccount(prev, { accountUserId: cur.accountUserId, accountUsername: cur.accountUsername,
+      visibility: cur.visibility ?? 'self', operatorMode: cur.operatorMode, operatorUserId: cur.operatorUserId }) ? prev : undefined;
   }
   return out;
 }
@@ -532,4 +543,10 @@ export function diffAgainstChain(current, others) {
  */
 export function bundlesForAccount(entries, me) {
   return entries.filter((e) => sameAccount(e, me));
+}
+
+/** 上游与下界使用同一组目标/视角筛选，不能接到全库最新的其他账号。 */
+export function newestForAccount(entries, me) {
+  if (!me?.accountUserId) return null;
+  return newestFirst(bundlesForAccount(entries, me))[0] ?? null;
 }

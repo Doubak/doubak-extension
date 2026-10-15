@@ -17,6 +17,7 @@
 import { extractMarks } from './extract.js';
 import { extractBroadcasts } from './extract-broadcast.js';
 import { topology, assertSingleAccount } from './topology.js';
+import { canonicalAccount, accountsFromSources } from './account.js';
 import { extractSubjectDetail } from './extract-subject.js';
 import { extractLongform } from './extract-longform.js';
 import { extractDoulist, mergeDoulistPages } from './extract-doulist.js';
@@ -68,7 +69,8 @@ import {
 //        没写动作词。12 个标记动作词一个都没变形：3265 条有状态的广播保住 3265、丢 0。
 // 0.14.0：扩展与 parser 保持一致。
 // 0.15.0：支持个人相册（albums.ndjson）与豆瓣小组（group_topics.ndjson、group_joins.ndjson）。
-export const PARSER_VERSION = 'doubak-data-parser/0.15.0';
+// 0.15.1：游戏评分取列表正文星级，短评不再依赖本人操作栏，限定条目边界。
+export const PARSER_VERSION = 'doubak-data-parser/0.15.1';
 export const CANONICAL_VERSION = 'canonical/1.2';
 
 /** 路线状态词 → canonical 的封闭词表。 */
@@ -155,8 +157,9 @@ export async function parse(sources, opts = {}) {
    * 目录里一个已知账号都没有时，大家一起用 `'unknown'`——那时它是**唯一**的
    * 键空间，不会劈开任何东西。
    */
+  const accounts = accountsFromSources(sources);
   const soleAccount = topo.accounts.length === 1
-    ? (sources.find((s) => s.manifest?.account?.user_id)?.manifest.account ?? null)
+    ? (accounts.get(topo.accounts[0]) ?? null)
     : null;
   /**
    * 哪些档案是被认领进来的。**认领了就要说出来**，否则这是一次静默的归属判断。
@@ -169,7 +172,8 @@ export async function parse(sources, opts = {}) {
     ? sources.filter((s) => !s.manifest?.account).map((s) => s.bundleId).sort()
     : [];
   /** @param {{manifest: object|null}} src */
-  const accountOf = (src) => src.manifest?.account ?? soleAccount ?? undefined;
+  const accountOf = (src) => accounts.get(String(src.manifest?.account?.user_id))
+    ?? src.manifest?.account ?? soleAccount ?? undefined;
 
   /** @type {Map<string, object>} 身份键 → 记录 */
   const marks = new Map();
@@ -336,7 +340,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'album_list', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'album_list', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -350,7 +354,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'album', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'album', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -364,7 +368,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'group_joins', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'group_joins', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -378,7 +382,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'group_publish', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'group_publish', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -392,7 +396,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'group_topic', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'group_topic', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -408,7 +412,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'doulist', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'doulist', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -422,7 +426,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'longform', lfKind, auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'longform', lfKind, auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -436,7 +440,7 @@ export async function parse(sources, opts = {}) {
           if (isRecalibratable(row)) recalibratable.push({ route_key: row.route_key, url: row.url });
           continue;
         }
-        work.push({ src, row, kind: 'broadcast', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'broadcast', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -444,7 +448,7 @@ export async function parse(sources, opts = {}) {
         // 详情页不产生新的作品记录，只给已有的补字段——记录本身来自列表页
         // （那才是「我标记过它」的来源）。所以这里只入队，合并在下面做。
         if (hasUnknownVerdict(row) || !isContent(row)) { bump(stats.skipped, `verdict:${row.verdict}`); continue; }
-        work.push({ src, row, kind: 'detail', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+        work.push({ src, row, kind: 'detail', auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
         continue;
       }
 
@@ -464,7 +468,7 @@ export async function parse(sources, opts = {}) {
         continue;
       }
 
-      work.push({ src, row, kind: 'mark', medium, status, auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key)) });
+      work.push({ src, row, kind: 'mark', medium, status, auth: absenceAuthority(cs.get(row.route_key), src.status, cov.get(row.route_key), src.manifest?.crawl_scope) });
     }
   }
   // ── 哪些「判不出来」是真的还缺内容
@@ -719,6 +723,12 @@ export async function parse(sources, opts = {}) {
       }
 
       const observation = { ...observationBase };
+      if (src.manifest?.crawl_scope?.operator_mode === 'anonymous' && m.tags == null) {
+        observation.omitted_fields = ['tags'];
+      }
+      if (src.manifest?.crawl_scope?.operator_mode === 'anonymous' && medium === 'game' && m.rating == null) {
+        observation.omitted_fields = [...(observation.omitted_fields ?? []), 'rating'];
+      }
 
       upsertMark(marks, markKeys, { m, medium, status, account: accountOf(src), observation, parserVersion, tz });
       upsertSubject(subjects, {
@@ -955,6 +965,12 @@ function upsertMark(store, resolved, { m, medium, status, account, observation, 
     // 那正是这套设计从头到尾在防的「假编辑」，而且发生在最不该发生的地方：
     // 标记表存的是用户自己写的东西。权威的作品数据在 subjects.ndjson。
   };
+  for (const key of observation.omitted_fields ?? []) delete fields[key];
+  const prior = store.get(key)?.revisions?.at(-1);
+  // 页面未展示的字段保留上一版已知值；缺失不制造标签清空修订。
+  for (const omitted of observation.omitted_fields ?? []) {
+    if (prior && Object.hasOwn(prior.fields, omitted)) fields[omitted] = prior.fields[omitted];
+  }
   const digests = digestAll(fields);
 
   let rec = store.get(key);
@@ -963,7 +979,7 @@ function upsertMark(store, resolved, { m, medium, status, account, observation, 
       canonical_version: CANONICAL_VERSION,
       identity_layer: layer,
       upstream_id: m.upstreamId ?? null,
-      account: { user_id: accountId, username: account?.username ?? null },
+      account: canonicalAccount(account, accountId),
       medium,
       subject: { id: m.subjectId, url: m.subjectUrl, upstream_deleted: m.upstreamDeleted },
       revisions: [],
@@ -1106,7 +1122,7 @@ function upsertBroadcast(store, { b, account, observation, parserVersion }) {
       canonical_version: CANONICAL_VERSION,
       identity_layer: 'upstream_id',
       upstream_id: b.sid,
-      account: { user_id: account?.user_id ?? 'unknown', username: account?.username ?? null },
+      account: canonicalAccount(account),
       url: b.url,
       revisions: [],
     };
@@ -1148,7 +1164,7 @@ function upsertLongform(store, { lf, account, observation, parserVersion }) {
       kind: lf.kind,
       identity_layer: 'upstream_id',
       upstream_id: lf.id,
-      account: { user_id: account?.user_id ?? 'unknown', username: account?.username ?? null },
+      account: canonicalAccount(account),
       url: lf.url,
       revisions: [],
     };
@@ -1189,7 +1205,7 @@ function upsertDoulist(store, { d, account, observation, captureIds, parserVersi
       canonical_version: CANONICAL_VERSION,
       identity_layer: 'upstream_id',
       upstream_id: d.id,
-      account: { user_id: account?.user_id ?? 'unknown', username: account?.username ?? null },
+      account: canonicalAccount(account),
       // 现在只抓自己编的（intent 是 `doulist.list.created`）。
       ownership: 'created',
       owner: { user_id: account?.user_id ?? null, username: account?.username ?? null },
@@ -1264,7 +1280,7 @@ function upsertAlbum(store, { album, account, observation, captureIds, parserVer
       canonical_version: CANONICAL_VERSION,
       identity_layer: 'upstream_id',
       upstream_id: album.id,
-      account: { user_id: account?.user_id ?? 'unknown', username: account?.username ?? null },
+      account: canonicalAccount(account),
       url: album.url ?? null,
       revisions: [],
     };
@@ -1299,7 +1315,7 @@ function upsertGroupTopic(store, { topic, account, observation, parserVersion, t
       canonical_version: CANONICAL_VERSION,
       identity_layer: 'upstream_id',
       upstream_id: topic.id,
-      account: { user_id: account?.user_id ?? 'unknown', username: account?.username ?? null },
+      account: canonicalAccount(account),
       url: topic.url ?? null,
       revisions: [],
     };
@@ -1328,7 +1344,7 @@ function upsertGroupJoin(store, { join, account, observation, parserVersion }) {
       canonical_version: CANONICAL_VERSION,
       identity_layer: 'upstream_id',
       upstream_id: join.id,
-      account: { user_id: account?.user_id ?? 'unknown', username: account?.username ?? null },
+      account: canonicalAccount(account),
       url: join.url ?? null,
       revisions: [],
     };

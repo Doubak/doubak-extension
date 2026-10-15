@@ -16,8 +16,16 @@ import {
 } from './shared.js';
 import { loadArchive, invalidateSummary } from './archive.js';
 import { loadCoverage } from './coverage.js';
+import { initTargetControls, updateTargetControls, targetIntent } from './target.js';
 
 const PAUSE_COPY = {
+  operator_session_lost: ['warn', '公开抓取的操作者已退出登录', '请登录本次任务原操作者账号后继续，目标与进度均已保留。', '我登录好了，继续'],
+  operator_switched: ['error', '操作者发生切换', '请恢复本次任务原操作者的登录状态后继续。目标账号不会随登录者更换。', '我切回来了，继续'],
+  target_changed: ['error', '目标账号发生变化', '目标 UID 或域名发生变化。请中止原任务后重新探测并建立全量基准。', null],
+  target_unavailable: ['warn', '目标账号无法访问', '目标不存在或已注销。已有捕获完整保留，可中止任务后导出。', null],
+  resume_identity_missing: ['error', '无法确认原目标账号', '断点缺少原目标 UID，无法安全恢复。请查看档案与日志。', null],
+  resume_checkpoint_invalid: ['error', '断点进度损坏', '断点无法安全恢复。可中止任务并保留、导出已有捕获。', null],
+  resume_identity_mismatch: ['error', '断点身份不一致', '断点与原目标或档案不一致，已安全停止。请查看档案与日志。', null],
   challenge: ['warn', '豆瓣要求验证', '请在新标签页中完成验证，完成后返回并点击「继续」。扩展与浏览器共用登录状态。', '我验证好了，继续'],
   blocked: ['warn', '豆瓣暂时限制了访问', '抓取已停止，且不会自动重试：继续请求可能导致账号受限。建议等待 30 分钟以上再继续。', '现在试试'],
   session_expired: ['warn', '登录状态已失效', '这不是错误，抓取已安全停止，进度均已保留。请重新登录豆瓣后继续。', '我登录好了，继续'],
@@ -109,7 +117,7 @@ function setActions(buttons) {
   const el = $('actions');
   // **样式也要进这把钥匙。** 缓存这条路只换 onclick，不动 className——同一句标签
   // 换了样式就会留在旧样子上，而那种「改了没生效」最难看出来。
-  const key = buttons.map(([l, , k]) => `${l}\u0001${k ?? ''}`).join('\u0000');
+  const key = buttons.map(([l, , k, disabled]) => `${l}\u0001${k ?? ''}\u0001${!!disabled}`).join('\u0000');
   if (el.dataset.key === key) {
     // 标签一样，但回调可能捕获了新的状态，所以只换 onclick。
     const bs = el.querySelectorAll('button');
@@ -118,7 +126,7 @@ function setActions(buttons) {
   }
   el.dataset.key = key;
   el.replaceChildren();
-  for (const [label, fn, kind] of buttons) {
+  for (const [label, fn, kind, disabled] of buttons) {
     const b = document.createElement('button');
     // 第三个元素是**样式**，原样交给 class（`act danger` / `act primary`）。
     //
@@ -130,6 +138,7 @@ function setActions(buttons) {
     b.className = kind ? `act ${kind}` : 'act';
     b.textContent = label;
     b.onclick = fn;
+    b.disabled = Boolean(disabled);
     el.append(b);
   }
 }
@@ -188,8 +197,13 @@ function renderNotice() {
 }
 
 export async function refresh() {
+  initTargetControls(refresh);
   const s = await send({ type: 'status' });
   setLastStatus(s);
+  const r = s?.runner;
+  const context = r?.targetAccount ? { account: r.targetAccount, visibility: r.crawlScope,
+    operatorMode: r.operatorMode, operatorUserId: r.operatorUserId } : s?.checkpoint?.run_context;
+  updateTargetControls(context, !!(s?.checkpoint || r?.active || (s?.busyWith && s.busyWith !== '探测账号') || pendingCommand));
 
   // **一次抓取开始，就多出一个目录。**
   //
@@ -219,11 +233,12 @@ export async function refresh() {
   // 没反应，等了五秒忽然全出来了」。
   //
   // 恢复本身就慢（修段尾 + 确认登录状态，都是真请求），所以这几秒必须有交代。
-  const busy = s.busyWith ?? pendingCommand;
-  if (busy && !s.runner?.active) {
+  const busy = pendingCommand ?? s.busyWith;
+  if (busy && (!s.runner?.active || busy === '恢复并重试')) {
     const [title, why] = BUSY_COPY[busy] ?? ['正在处理…', ''];
     setState('busy', title, why);
     setActions([]);
+    if (busy === '恢复并重试') renderFailures([]);
     return;
   }
 
@@ -299,22 +314,17 @@ export async function refresh() {
     setState(tone, title, why);
     setActions([
       ...(action ? [[action, resumeCrawl, 'primary']] : []),
-      // **没有「继续」时也必须有出路。**
-      //
-      // `failures_pending` 刻意不给「继续」，因为该做的决定是「重试」还是
-      // 「就这样收尾」。而在这条分支里（offscreen 被回收了，只剩 checkpoint）
-      // 失败清单**根本不渲染**——于是整个界面只剩一个「中止这次抓取」：用户唯一
-      // 能做的事，是把一次跑了几小时、只差几个页面的抓取扔掉。
-      //
-      // 这两个动作会先把抓取从 checkpoint 装回内存（见 background 的
-      // `ensureRunLoaded`），所以在这里点得动。
-      ...(action || s.checkpoint.pause_reason !== 'failures_pending'
+      // offscreen 只读完整断点提供失败清单，手动暂停也直接显示重试入口。
+      // 清单尚不可读时保留通用重试；不能在不知道是否有分页失败时提供带缺口收尾。
+      ...(Array.isArray(s.checkpoint.failures) ? failureActions(s.checkpoint.failures)
+        : action || s.checkpoint.pause_reason !== 'failures_pending'
         ? []
-        : [['重试抓不下来的页面', retryFailures], ['就这样收尾', () => finishWithGaps()]]),
+        : [['重试抓不下来的页面', retryFailures]]),
       // **这里也要能中止。** 刚打开插件时 offscreen 还没起来，只有 checkpoint——
       // 而那正是用户最可能想说「这次不抓了」的时刻。
       ['中止这次抓取', () => abortCrawl(s.checkpoint.bundle_id), 'danger'],
     ]);
+    renderFailures(s.checkpoint.failures ?? []);
     // 进度表交给「上一次的结果」：这时候没有 runner，但档案里的 crawl_state 有。
     // 空着一片什么都不说，比显示上一次的结果糟糕。
     if (!lastRunShown) {
@@ -357,14 +367,15 @@ export async function refresh() {
     void showPreflight();
   }
   renderCrawlMode();
-  setActions([['开始抓取', async () => {
+  const intent = targetIntent(crawlMode);
+  setActions([[intent.label, async () => {
     // `pendingCommand` 只是**开口那一小段**的兜底：从点下去到 offscreen 真正拿到
     // 锁之间（可能还要先把 offscreen 建起来），后端还报不出 `busyWith`。
     // 一旦它报得出来，就以它为准——见上面 `busy` 那一行。
     pendingCommand = '开始抓取';
     refresh();
     try {
-      const r = await send({ type: 'start', mode: crawlMode });
+      const r = await send({ type: 'start', mode: crawlMode, target: targetIntent(crawlMode).target });
       if (!r?.ok) {
         pendingCommand = null;
         setActionError('无法开始', r?.error ?? '后台没有给出原因。');
@@ -375,7 +386,7 @@ export async function refresh() {
       pendingCommand = null;
     }
     refresh();
-  }, 'primary']]);
+  }, 'primary', !intent.ready]]);
 
   // **空闲态下这张表归 `showLastRun()` 管，这里不许再动它。**
   //
@@ -555,6 +566,7 @@ let lastRunShown = false;
  * @type {string | null}
  */
 let pendingCommand = null;
+let retryInFlight = false;
 
 /**
  * 重新渲染**当前打开的那个标签页**。
@@ -663,34 +675,47 @@ async function showLastRun() {
  * 界面回到原样、一个请求都没发。得说出来它是**哪一种**没发生。
  */
 async function retryFailures() {
-  const r = await send({ type: 'retryFailed' });
-  if (!r?.ok) {
-    // **别把不相干的问题挂在这次操作头上。** 「重试失败：当前未登录豆瓣」看起来
-    // 像重试功能坏了，而实际发生的是会话过期——界面里本来就有一块专门处理它的。
-    // 后台已经把整场抓取的状态改成了对应原因，刷一下就会切到那个界面去。
-    if (r?.reason) {
-      const [, title] = PAUSE_COPY[r.reason] ?? [];
-      setActionError(title ?? '抓取已停下', r.error ?? '');
-      refresh();
+  if (retryInFlight) return;
+  retryInFlight = true;
+  pendingCommand = '恢复并重试';
+  const [title, why] = BUSY_COPY[pendingCommand];
+  clearActionError();
+  setState('busy', title, why);
+  setActions([]);
+  renderFailures([]);
+  try {
+    const r = await send({ type: 'retryFailed' });
+    if (!r?.ok) {
+      // **别把不相干的问题挂在这次操作头上。** 「重试失败：当前未登录豆瓣」看起来
+      // 像重试功能坏了，而实际发生的是会话过期——界面里本来就有一块专门处理它的。
+      // 后台已经把整场抓取的状态改成了对应原因，刷一下就会切到那个界面去。
+      if (r?.reason) {
+        const [, title] = PAUSE_COPY[r.reason] ?? [];
+        setActionError(title ?? '抓取已停下', r.error ?? '');
+        return;
+      }
+      setActionError('重试失败', r?.error ?? '后台没有给出原因。');
       return;
     }
-    setActionError('重试失败', r?.error ?? '后台没有给出原因。');
-    return;
+    if (!r.count) {
+      setActionError(
+        '没有可重试的条目',
+        r.loaded === false
+          ? '这次抓取已经不在内存里，也没有可恢复的存档点——它可能已经收尾或被中止了。'
+          // **不要在这里让用户去按「继续」。** `failures_pending` 状态下压根没有那个
+          // 按钮（其余部分都抓完了，没有什么可继续的），指过去就是条死路。
+          : '失败清单已经变化：这些页面可能已排队、正在重试或已经抓取成功。请查看当前进度与日志。',
+      );
+      return;
+    }
+    clearActionError();
+  } catch (err) {
+    setActionError('重试失败', String(err?.message ?? err));
+  } finally {
+    pendingCommand = null;
+    await refresh();
+    retryInFlight = false;
   }
-  if (!r.count) {
-    setActionError(
-      '没有可重试的条目',
-      r.loaded === false
-        ? '这次抓取已经不在内存里，也没有可恢复的存档点——它可能已经收尾或被中止了。'
-        // **不要在这里让用户去按「继续」。** `failures_pending` 状态下压根没有那个
-        // 按钮（其余部分都抓完了，没有什么可继续的），指过去就是条死路。
-        : '队列里没有处于「失败」状态的条目。若这些页面是被豆瓣挡住的（软封锁），'
-          + '那不算失败——它们会等到下一次抓取再试，现在重试只会更快撞上限流。',
-    );
-    return;
-  }
-  clearActionError();
-  refresh();
 }
 
 /**
@@ -858,6 +883,8 @@ let crawlMode = CRAWL_MODES.INCREMENTAL;
  */
 function renderCrawlMode() {
   const el = $('crawl-mode');
+  if (el.dataset.choice === crawlMode) return;
+  el.dataset.choice = crawlMode;
   el.replaceChildren();
 
   const opts = /** @type {const} */ ([
@@ -908,6 +935,7 @@ function scopeText(inc) {
   if (crawlMode === CRAWL_MODES.FULL) {
     return '全量抓取（已选择）：视同从未抓取过，将重新建立一份基准档案';
   }
+  if (!inc) return '将在实时核对目标 UID、域名与抓取视角后选择增量基准；没有匹配基准时从最新抓至最早。';
   const n = inc?.routes?.length ?? 0;
   // **两种增量都要把「跳过什么」说出来**，措辞对齐上面那三个选项。图这一档在两种
   // 增量下都跳过，所以它不属于「已选择」的那半句——写成选项的样子会让人以为
@@ -1114,6 +1142,7 @@ export function resetOverview() {
   preflightShown = false;
   lastRunShown = false;
   pendingCommand = null;
+  retryInFlight = false;
   actionError = null;
   setLastStatus(null);
   routeRows.clear();

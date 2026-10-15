@@ -79,12 +79,12 @@ function capture(over) {
 }
 
 /** 写一份能解析的档案，返回 `{store, entry}`。 */
-async function writeBundle(over = {}) {
+async function writeBundle(over = {}, { capturePage = true } = {}) {
   const store = new MemoryFileStore();
   const writer = new BundleWriter({
     producer: TEST_PRODUCER, store, account: ACCOUNT, now: () => AT, ...over,
   });
-  await writer.writeCapture(capture());
+  if (capturePage) await writer.writeCapture(capture());
   await writer.finalize?.();
 
   let manifest = null;
@@ -296,6 +296,47 @@ describe('三种产出', () => {
     assert.equal(report.images, 0);
     assert.equal(written.size, 0);
     assert.ok(Array.isArray(report.remote));
+  });
+
+  test('Markdown：首页标题随账号昵称动态生成（<昵称>的豆瓣存档）', async () => {
+    const bundleWithNickname = await writeBundle({
+      account: { user_id: '82160871', username: 'mewcatcher', nickname: 'MewX' },
+    });
+    const { data, sources } = await run([bundleWithNickname]);
+    const { files } = await buildMarkdown(data, { sources, write: async () => {} });
+    const home = files.find((f) => f.name === 'content/_index.md');
+    assert.ok(home, '必须生成 content/_index.md');
+    const text = dec.decode(home.bytes);
+    assert.match(text, /title:\s*"?MewX的豆瓣存档"?/, '首页 front matter 必须是 <昵称>的豆瓣存档');
+  });
+
+  test('旧档案在前、带昵称的新档案在后：扩展与 CLI 共用相同站名', async () => {
+    const old = await writeBundle({ bundleId: '20260701T000000Z-aaaaaa' });
+    const newer = await writeBundle({
+      bundleId: '20260801T000000Z-bbbbbb',
+      account: { ...ACCOUNT, nickname: '新昵称' },
+    });
+    const { data, sources } = await run([newer, old]);
+    const { files } = await buildMarkdown(data, { sources, write: async () => {} });
+    const home = dec.decode(files.find((f) => f.name === 'content/_index.md').bytes);
+    assert.match(home, /新昵称的豆瓣存档/);
+    assert.equal(data.marks[0].account.nickname, '新昵称');
+  });
+
+  test('只有账号资料的空增量也能落盘、被发现并补齐旧记录的站名', async () => {
+    const old = await writeBundle({ bundleId: '20260701T000000Z-aaaaaa' });
+    const metadataOnly = await writeBundle({ bundleId: '20260801T000000Z-bbbbbb',
+      account: { ...ACCOUNT, nickname: '新昵称' },
+    }, { capturePage: false });
+    const filename = metadataOnly.entry.manifest.index.filename;
+    assert.equal(await metadataOnly.store.exists(filename), true);
+    assert.equal((await metadataOnly.store.read(filename)).byteLength, 0);
+    const { data, sources } = await run([old, metadataOnly]);
+    assert.equal(sources.length, 2);
+    assert.equal(data.marks[0].account.nickname, '新昵称');
+    assert.equal(data.marks[0].revisions.length, 1);
+    const { files } = await buildMarkdown(data, { sources, write: async () => {} });
+    assert.match(dec.decode(files.find((f) => f.name === 'content/_index.md').bytes), /新昵称的豆瓣存档/);
   });
 
   test('Markdown：用户写的字被转义了，片名不会整个消失', async () => {

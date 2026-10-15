@@ -245,9 +245,13 @@ export class IndexWriter {
    * @returns {Promise<{filename: string, sha256: string, line_count: number}>}
    */
   async finalize() {
-    const bytes = (await this._store.exists(this._filename))
-      ? await this._store.read(this._filename)
-      : new Uint8Array(0);
+    if (!(await this._store.exists(this._filename))) {
+      if (this._lineCount > 0) throw new Error(`索引 ${this._filename} 不存在，不能把已有捕获当成空档案收尾`);
+      // 零捕获的增量也可以携带账号资料。manifest 列出的索引必须真的存在，
+      // 否则它不合规，命令行也发现不了这份档案（按 index 文件名发现）。
+      await this._store.replace(this._filename, new Uint8Array(0));
+    }
+    const bytes = await this._store.read(this._filename);
 
     this._recountFromFile(bytes);
 

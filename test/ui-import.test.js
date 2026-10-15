@@ -353,20 +353,20 @@ describe('导入（从点按钮到字节落盘）', () => {
     }
   });
 
-  test('**另一个账号的默认不导**，并且先问一句', async () => {
+  test('另一个账号原生导入，只需确认具体导入计划', async () => {
     const mine = await exportedBundle(ID);
     const OTHER = '20260804T084014Z-627045';
     const theirs = await exportedBundle(OTHER, { userId: '2000002' });
     const { dom, worker, asked, result } = await clickImport({
       picked: fakeDir(`doubak-bundle-${OTHER}`, theirs),
       have: { [`doubak-bundle-${ID}`]: mine },
-      confirmed: false, // 「要导别的账号吗」→ 不要
+      confirmed: true,
     });
     try {
-      assert.match(result(), /别的账号/);
-      assert.match(asked[0], /另一个豆瓣账号/);
-      assert.match(asked[0], /解析器会拒绝整个目录/, '要说清代价，不是只说「不建议」');
-      assert.equal(worker.dirs.has(`doubak-bundle-${OTHER}`), false);
+      assert.match(result(), /1 份档案已导入/);
+      assert.equal(asked.length, 1, '多账号不增加额外阻断确认');
+      assert.equal(worker.dirs.has(`doubak-bundle-${OTHER}`), true);
+      assert.equal(worker.dirs.has(`doubak-bundle-${ID}`), true);
     } finally {
       dom.restore();
     }

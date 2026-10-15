@@ -96,6 +96,19 @@ const POLICY = {
     reason: '抓取途中账号变了。一个档案只能属于一个账号',
     userVisible: true,
   },
+  resume_identity_missing: {
+    autoResume: false, userVisible: true,
+    reason: '断点缺少原目标身份，无法安全自动恢复',
+  },
+  resume_checkpoint_invalid: { autoResume: false, userVisible: true, reason: '断点进度损坏，拒绝自动恢复以免丢失连续性证据' },
+  resume_identity_mismatch: {
+    autoResume: false, userVisible: true,
+    reason: '断点与原目标或档案不一致，拒绝恢复',
+  },
+  operator_session_lost: { autoResume: false, userVisible: true, reason: '公开抓取的原操作者已退出登录，需要登录原操作者后继续' },
+  operator_switched: { autoResume: false, userVisible: true, reason: '操作者身份发生变化，需要恢复原操作者后继续' },
+  target_changed: { autoResume: false, userVisible: true, reason: '目标账号 UID 或域名发生变化，拒绝继续原档案' },
+  target_unavailable: { autoResume: false, userVisible: true, reason: '目标账号已注销或无法访问，已安全停止' },
 
   /**
    * 站点权限被用户收回。

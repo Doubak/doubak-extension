@@ -28,7 +28,9 @@
  * @param {object|undefined} coverage    manifest.coverage 里对应的那一行
  * @returns {Authority}
  */
-export function absenceAuthority(crawlState, bundleStatus, coverage) {
+export function absenceAuthority(crawlState, bundleStatus, coverage, crawlScope) {
+  // 公开视图永远不能代表私密集合，即使公开分页从头走到尾。
+  if ((crawlScope?.visibility && crawlScope.visibility !== 'self') || crawlScope?.operator_mode === 'anonymous') return 'none';
   // 没有 crawl_state 就没有连续性证明。没有证明就没有资格——**默认必须是 none**，
   // 不是「大概没事」。没收尾的档案走的就是这条路（它连 manifest 都还没有）。
   if (!crawlState) return 'none';

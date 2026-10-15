@@ -46,7 +46,7 @@ export class BundleWriter {
   /**
    * @param {object} opts
    * @param {import('../storage/file-store.js').FileStore} opts.store
-   * @param {{user_id: string, username?: string | null, profile_url?: string}} opts.account
+   * @param {{user_id: string, username?: string | null, nickname?: string | null, profile_url?: string}} opts.account
    * @param {string} [opts.bundleId]
    * @param {string | null} [opts.previousBundleId]
    * @param {{name: string, version: string, user_agent?: string, platform?: string}} opts.producer
@@ -68,6 +68,7 @@ export class BundleWriter {
     account,
     bundleId,
     previousBundleId = null,
+    crawlScope = null,
     producer,
     timezoneAssumption = 'Asia/Shanghai',
     maxSegmentBytes = DEFAULT_MAX_SEGMENT_BYTES,
@@ -112,6 +113,7 @@ export class BundleWriter {
     this._manifest = new ManifestBuilder({
       bundleId: this._bundleId,
       previousBundleId,
+      crawlScope,
       account,
       producer,
       timezoneAssumption,

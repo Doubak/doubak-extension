@@ -171,6 +171,7 @@ function startOf(url) {
 }
 
 let current = null;
+let renderGeneration = 0;
 
 /** 这一份档案里有哪几类、各多少条捕获。 */
 function tally(entries) {
@@ -237,6 +238,7 @@ function badEl(text) {
  * @param {{reader: object, userId: string|null}} ctx
  */
 async function renderKind(kind, ctx) {
+  const generation = ++renderGeneration;
   const box = $('content-list');
   box.className = 'muted';
   box.textContent = `正在解析 ${kind.name}…`;
@@ -256,6 +258,7 @@ async function renderKind(kind, ctx) {
       // 一个静静少掉的条目比一句「这条读不出来」糟得多。
       failed += 1;
     }
+    if (generation !== renderGeneration) return;
   }
 
   // 横跨几页的记录在这里合成一条（目前只有豆列）。见 KINDS 的说明。
@@ -299,6 +302,7 @@ function scopeEl({ kind, shown, failed }) {
  * @param {{entries: object[], reader: object, userId: string|null}} ctx
  */
 export async function renderContent(ctx) {
+  ++renderGeneration;
   const kinds = tally(ctx.entries);
   const bar = $('content-kinds');
   bar.replaceChildren();
@@ -332,5 +336,6 @@ export async function renderContent(ctx) {
 
 /** 换档案时忘掉上次选的类别。 */
 export function resetContent() {
+  ++renderGeneration;
   current = null;
 }

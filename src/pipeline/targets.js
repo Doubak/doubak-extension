@@ -19,6 +19,8 @@ import { buildNeodbNdjson } from '../vendor/export-adapters/targets/neodb-ndjson
 import { instructions } from '../vendor/export-adapters/instructions.js';
 import { project } from '../vendor/site-generator/projection.js';
 import { buildPages } from '../vendor/site-generator/pages.js';
+import { resolveSiteTitle } from '../vendor/site-generator/site-title.js';
+import { accountsFromSources } from '../vendor/parser/account.js';
 import { canonicalFiles } from './run.js';
 import { indexImages, exportImages, reallyMissing } from './images.js';
 import { withoutPrivate } from '../vendor/site-generator/private.js';
@@ -119,6 +121,9 @@ export async function buildNeodb(data, options = {}) {
  * @param {(p: {done: number, total: number}) => void} [opts.onImageProgress]
  */
 export async function buildMarkdown(data, { sources, write, onImageProgress, includePrivate = false }) {
+  // 身份预检先于任何图片写入；也要在过滤私密内容之前保留档案作者信息。
+  const accountInfo = [...accountsFromSources(sources ?? []).values()];
+  const siteTitle = resolveSiteTitle(data, null, accountInfo);
   // **筛掉豆瓣上不公开的东西，与命令行那边同一份判据。**
   //
   // 命令行那边这一步在 `generate.js` 里，而 `generate.js` 是 I/O、不在 vendor 名单
@@ -166,7 +171,7 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
     onProgress: (done, total) => onImageProgress?.({ done, total }),
   });
 
-  const built = buildPages(p, { images: img.paths, coverBySubject: img.bySubject });
+  const built = buildPages(p, { images: img.paths, coverBySubject: img.bySubject, siteTitle });
 
   // 按作品 id 找到的不算缺，占位图也不算缺。判定在 image-index.js 里，与站点
   // 生成器同一份——一条永远存在的假告警会让真的那条也被忽略。

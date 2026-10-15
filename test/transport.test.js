@@ -330,3 +330,15 @@ describe('跳转模式', () => {
     assert.equal(r.finalUrl, 'https://www.douban.com/people/mewcatcher/');
   });
 });
+
+test('无凭据请求的每一跳都 omit/no-store，不能偷偷加 ck', async () => {
+  const { transport, calls } = makeTransport({ http: fakeHttp([
+    { status: 302, headers: { location: 'https://movie.douban.com/subject/2/' } }, { body: '目录' },
+  ]) });
+  await transport.fetch('https://movie.douban.com/subject/1/', { credentials: 'omit', minimumIntervalMs: 5000 });
+  assert.equal(calls.length, 2);
+  for (const c of calls) { assert.equal(c.init.credentials, 'omit'); assert.equal(c.init.cache, 'no-store'); }
+  await assert.rejects(() => transport.fetch('https://www.douban.com/x', { credentials: 'omit', withCk: true }), /ck/);
+  await assert.rejects(() => transport.fetch('https://www.douban.com/x?ck=token', { credentials: 'omit' }), /ck/);
+  assert.equal(calls.length, 2);
+});
