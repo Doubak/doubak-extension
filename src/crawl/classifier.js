@@ -87,6 +87,13 @@ export function stripScriptAndStyle(html) {
     .replace(/<!--[\s\S]*?-->|<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
 }
 
+/** 目标账号异常页：标题与专用错误插图同时出现，不能按正文中的一句话判断。 */
+export function isAbnormalAccountPage(html) {
+  const markup = stripScriptAndStyle(html);
+  return /<title\b[^>]*>\s*该用户账号状态异常\s*<\/title>/i.test(markup)
+    && /<img\b[^>]*\ssrc\s*=\s*(["'])[^"']*\/user_abnormal\.png(?:\?[^"']*)?\1/i.test(markup);
+}
+
 /**
  * 一条路线的判定描述。
  *
@@ -220,6 +227,10 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   // 注意：正常页面（如个人主页）可能包含「关注用户需要验证码」的前端弹窗脚本源码，
   // 脚本代码中的「请输入验证码」不是当前页面遭遇了风控。必须剥离脚本与注释后再检测。
   const markup = stripScriptAndStyle(bodyText);
+  if (isAbnormalAccountPage(bodyText)) {
+    reasons.push('豆瓣显示目标账号状态异常，请稍后确认目标主页是否恢复');
+    return { verdict: 'blocked', reason: 'account_abnormal', reasons, itemCount };
+  }
   if (MARKERS.abnormalRequest.test(markup)) {
     reasons.push('页面含风控提示文案');
     return { verdict: MARKERS.captcha.test(markup) ? 'challenge' : 'blocked', reasons, itemCount };

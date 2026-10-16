@@ -77,6 +77,18 @@ describe('风控', () => {
     assert.equal(blocked.verdict, 'blocked');
   });
 
+  test('以 200 返回的目标账号异常页判为 blocked，不误报改版或会话过期', () => {
+    const html = readFileSync(new URL('./fixtures/profile-user-abnormal.html', import.meta.url), 'utf8');
+    for (const visibility of ['public', 'self']) {
+      const r = classifyResponse({
+        finalUrl: 'https://www.douban.com/people/target/', status: 200,
+        bodyText: html, route: profileForRoute('profile.overview'), visibility,
+      });
+      assert.equal(r.verdict, 'blocked');
+      assert.ok(r.reasons.some((x) => x.includes('目标账号状态异常')));
+    }
+  });
+
   test('429 与 403 判为 blocked', () => {
     assert.equal(classify({ status: 429 }).verdict, 'blocked');
     assert.equal(classify({ status: 403 }).verdict, 'blocked');
@@ -808,4 +820,23 @@ test('广播正文中的「页面不存在」不能把第一页判成 soft404', 
   for (const tag of ['title', 'h1']) {
     assert.equal(classify({ bodyText: `<html><${tag}>页面不存在</${tag}></html>` }).verdict, 'soft404');
   }
+});
+
+
+test('账号异常文案只能来自异常页结构，正常广播与脚本引用不能误报', () => {
+  const html = readFileSync(new URL('./fixtures/broadcast-topic.html', import.meta.url), 'utf8');
+  const errorPage = readFileSync(new URL('./fixtures/profile-user-abnormal.html', import.meta.url), 'utf8');
+  for (const quoted of [
+    '<p>有人提到该用户账号状态异常，也有人只写账号状态异常。</p>',
+    '<a href="https://example.org/">账号状态异常</a>',
+    `<script>const example = ${JSON.stringify(errorPage)};</script>`,
+    `<style>/* ${errorPage} */</style>`,
+    `<template>${errorPage}</template>`,
+    `<!-- ${errorPage} -->`,
+  ]) {
+    assert.equal(classify({ bodyText: html.replace('</body>', quoted + '</body>') }).verdict, 'ok', quoted);
+  }
+  // 名字恰好是提示文案，或正文展示同一张插图，也不等于错误页。
+  assert.equal(classify({ bodyText: html.replace('<title>示例的广播</title>', '<title>该用户账号状态异常</title>') }).verdict, 'ok');
+  assert.equal(classify({ bodyText: html.replace('</body>', '<img src="https://asset.doubanio.com/cuphead/sns-static/common/pics/user_abnormal.png"><p>账号状态异常</p></body>') }).verdict, 'ok');
 });

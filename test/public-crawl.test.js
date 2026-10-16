@@ -17,6 +17,7 @@ const profile = (target, operator) => `<html><title>目标</title>${nav(operator
   <div class="info"><h1>目标 &amp; 昵称<span>编辑</span></h1></div></div></html>`;
 const probe = (target, operator, slug = 'target') => ({ status: 200, finalUrl: `https://www.douban.com/people/${slug}/`, bodyText: profile(target, operator) });
 const contactCaptchaProfile = readFileSync(new URL('./fixtures/profile-public-contact-captcha.html', import.meta.url), 'utf8');
+const userAbnormalProfile = readFileSync(new URL('./fixtures/profile-user-abnormal.html', import.meta.url), 'utf8');
 
 test('带 _dtcc 参数的正常公开主页：关注弹窗脚本不能误报验证码', () => {
   const url = 'https://www.douban.com/people/38258402/?_dtcc=1';
@@ -38,6 +39,8 @@ test('实际验证码页面或表单仍拦截，不能因为包含主页框架�
   ]) assert.throws(() => assertTargetResponse({ status: 200, finalUrl: 'https://www.douban.com/people/111/', bodyText }), { reason: 'challenge' });
   assert.throws(() => assertTargetResponse({ status: 403, finalUrl: 'https://www.douban.com/people/111/', bodyText: contactCaptchaProfile }), { reason: 'blocked' });
   assert.throws(() => assertTargetResponse({ status: 200, finalUrl: 'https://sec.douban.com/', bodyText: contactCaptchaProfile }), { reason: 'blocked' });
+  assert.throws(() => assertTargetResponse({ status: 200, finalUrl: 'https://www.douban.com/people/target/', bodyText: userAbnormalProfile }), { reason: 'blocked' });
+  assert.throws(() => inspectTarget({ status: 200, finalUrl: 'https://www.douban.com/people/target/', bodyText: userAbnormalProfile }, 'target'), { reason: 'blocked' });
 });
 
 test('目标输入只接受豆瓣主页、slug 或 UID，拒绝外域、子路径与凭据 URL', () => {
@@ -91,6 +94,7 @@ function harness({ responseHtml = null } = {}) {
     if ('operator' in data) operator = data.operator;
     if ('slug' in data) slug = data.slug;
     if ('privacy' in data) privacy = data.privacy;
+    if ('responseHtml' in data) responseHtml = data.responseHtml;
   } };
 }
 
@@ -293,3 +297,74 @@ for (const cold of [false, true]) {
     assert.equal((await h.runStore.loadCheckpoint()).run_context.account.username, '111');
   });
 }
+
+
+test('目标简介和脚本引用账号异常文案时仍可查看账号', () => {
+  for (const extra of [
+    '<p>我写过「该用户账号状态异常」的排查记录。</p>',
+    `<script>const message = "账号状态异常";</script>`,
+    `<template>${userAbnormalProfile}</template>`,
+    `<!-- ${userAbnormalProfile} -->`,
+  ]) {
+    const result = inspectTarget({ ...probe('111', '222'), bodyText: profile('111', '222') + extra }, 'target');
+    assert.equal(result.account.userId, '111');
+  }
+});
+
+test('异常账号查看与开工明确拒绝，不创建空 bundle 或任务指针', async () => {
+  const h = harness({ responseHtml: userAbnormalProfile });
+  const runner = h.makeRunner();
+  for (const action of [() => runner.probeTarget('target'), () => runner.start(options)]) {
+    await assert.rejects(action, (error) => {
+      assert.equal(error.reason, 'blocked');
+      assert.match(error.message, /目标账号.*状态异常/);
+      return true;
+    });
+    assert.equal(h.dirs.size, 0);
+    assert.equal((await h.runStore.getCurrentRun()) ?? null, null);
+  }
+});
+
+for (const cold of [false, true]) {
+  test(`${cold ? '冷' : '热'}恢复时目标账号变异常：保留原断点，恢复正常后可继续`, async () => {
+    const h = harness();
+    const original = h.makeRunner();
+    await original.start(options);
+    await original.runBatch();
+    await original.pause();
+    const cp = await h.runStore.loadCheckpoint();
+    const pointer = await h.runStore.getCurrentRun();
+    h.set({ responseHtml: userAbnormalProfile });
+    const runner = cold ? h.makeRunner() : original;
+    await assert.rejects(() => runner.resume(cp), { reason: 'blocked' });
+    const after = await h.runStore.loadCheckpoint();
+    for (const field of ['bundle_id', 'last_capture_id', 'routes', 'frontier', 'run_context']) {
+      assert.deepEqual(after[field], cp[field], field);
+    }
+    const current = await h.runStore.getCurrentRun();
+    for (const field of ['bundleId', 'dir', 'username', 'runContext', 'floors', 'floorSources', 'previousBundleId']) {
+      assert.deepEqual(current[field], pointer[field], field);
+    }
+    h.set({ responseHtml: null });
+    await runner.resume(cp);
+    assert.equal(runner.status().targetAccount.userId, '111');
+    await runner.abort();
+  });
+}
+
+
+test('公开抓取中的账号异常页不会被错误页登录入口改判为操作者退出', async () => {
+  const h = harness();
+  const runner = h.makeRunner();
+  await runner.start(options);
+  h.set({ responseHtml: userAbnormalProfile });
+  assert.equal((await runner.runBatch()).stoppedBy, 'blocked');
+  assert.equal(runner.status().counts.awaiting_human, 1);
+  h.set({ responseHtml: null });
+  await runner.resume();
+  await runner.runBatch();
+  const manifest = await runner.finish();
+  assert.equal(manifest.account.user_id, '111');
+  assert.equal(manifest.counts.by_verdict.blocked, 1);
+  assert.equal(manifest.crawl_state[0].contiguous, true);
+});

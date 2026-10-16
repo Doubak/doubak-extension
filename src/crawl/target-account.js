@@ -2,6 +2,7 @@
 import { decodeEntities } from '../vendor/parser/html-entities.js';
 import { SessionError, extractAccountHints, detectLoginState } from './session.js';
 import { profileBlock, targetUidEvidence } from './profile-identity.js';
+import { isAbnormalAccountPage, stripScriptAndStyle } from './classifier.js';
 export { profileBlock } from './profile-identity.js';
 
 export function normalizeTarget(value) {
@@ -23,12 +24,15 @@ export function assertTargetResponse(probe) {
     throw new SessionError('target_unavailable', '目标账号不存在或已注销，无法开始或继续抓取。');
   }
   if (/sec\.douban\.com|passport\/login|accounts\/login/.test(probe.finalUrl)
-    || [403, 418, 429].includes(probe.status) || /有异常请求|访问过于频繁/.test(probe.bodyText)) {
+    || [403, 418, 429].includes(probe.status)
+    || /有异常请求|访问过于频繁/.test(probe.bodyText)) {
     throw new SessionError('blocked', '当前访问受到限制，请在豆瓣确认访问正常后重新查看账号。');
   }
+  if (probe.status === 200 && isAbnormalAccountPage(probe.bodyText)) {
+    throw new SessionError('blocked', '豆瓣显示目标账号状态异常，暂时无法抓取。请稍后确认目标主页恢复正常后再继续。');
+  }
   // 正常公开主页也带「关注用户」的验证码弹窗脚本。脚本源码不是当前页面的挑战。
-  const markup = probe.bodyText.replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+  const markup = stripScriptAndStyle(probe.bodyText);
   const captchaControl = /<(?:input|iframe)\b[^>]*\s(?:id|name|class|src)\s*=\s*(["'])[^"']*(?:captcha|验证码)[^"']*\1/i.test(markup);
   const captchaPage = /<title\b[^>]*>[^<]*(?:验证码|captcha)[^<]*<\/title>/i.test(markup)
     || (!profileBlock(markup) && /验证码|captcha/i.test(markup));
