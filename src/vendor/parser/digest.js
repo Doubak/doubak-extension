@@ -42,6 +42,7 @@ export function fieldDigest(value) {
   const norm = text
     .normalize('NFC')
     .replace(/\r\n/g, '\n')
+    .replace(/\\r\\n/g, '\\n')
     .replace(/[ \t]+$/gm, '')
     .replace(/\s+$/, '');
 

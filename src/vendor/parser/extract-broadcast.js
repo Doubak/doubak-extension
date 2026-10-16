@@ -216,6 +216,8 @@ function fullTextUrl(seg) {
  * @property {string} sid            data-sid，广播的身份
  * @property {string|null} postedAt  秒级时间戳（原始字符串）
  * @property {string|null} text      正文。实测 65% 的广播有（其余是纯标记动作）
+ * @property {{text: string, url?: string}[]|null} textParts 正文的分段，带上正文里的链接。
+ *   **拼起来必须逐字等于 `text`**；没有链接时是 null
  * @property {string|null} title     topic 动态自己的标题，不是引用的作品卡片标题
  * @property {string|null} action    动作原文（想看 / 收藏图书到豆列 / …）
  * @property {{text: string, url?: string}[]|null} actionParts  动作句的分段，
@@ -452,6 +454,7 @@ export function extractBroadcasts(html, ownerUserId) {
     // **只看这一段里第一个 `status-item`。** 转发被豆瓣渲染成顶层 wrapper，
     // 所以一段里正常只有一个；用第一个而不是「有没有出现过」，是为了不让
     // 后面某段的 class 漏进来。
+    const txt = broadcastText(quote);
     const itemCls = itemClasses(seg);
     const topic = topicHeading(seg);
 
@@ -464,7 +467,9 @@ export function extractBroadcasts(html, ownerUserId) {
       // 秒级。**比标记页的日期精确**，合并同一条记录的观测时不得用低精度覆盖它。
       postedAt: /class="created_at"[^>]*title="([^"]+)"/.exec(seg)?.[1] ?? null,
       // 正文原样保留，只把标签剥掉——里面常有链接（`douc.cc` 短链）与表情。
-      text: quote ? stripTags(quote) : null,
+      text: txt.text,
+      // 正文里那几个链接。没有链接时是 null，不变量是 parts 拼起来逐字等于 text。
+      textParts: txt.parts,
       title: topic?.title ?? null,
       action,
       // **句子里那几个链接。** 没有链接时是 null，不是空数组：3423 条广播里只有
@@ -547,3 +552,74 @@ function cardTitle(seg) {
 function stripTags(s) {
   return stripTagsAndDecode(s).trim() || null;
 }
+
+/**
+ * 解除豆瓣外链中转（link2）。
+ * 真实页面中形如 https://www.douban.com/link2/?url=https%3A%2F%2Fdoubak.com%2F...&link2key=...
+ * 提取其中真实目标 URL，使离线/备份站点直达目标，摆脱外部中转服务依赖。
+ *
+ * @param {string} rawUrl
+ * @returns {string}
+ */
+function unwrapLink(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    if ((u.hostname === 'www.douban.com' || u.hostname === 'douban.com') && u.pathname === '/link2/') {
+      const target = u.searchParams.get('url');
+      if (target) return target;
+    }
+  } catch {}
+  return rawUrl;
+}
+
+/**
+ * 广播正文：剥离标签保留纯文本，同时在存在链接时保留结构化分段。
+ *
+ * ## 与 `actionSentence` 相同的契约与理由
+ *
+ * - `text` 保持纯文本（去标签、解实体、首尾去空白），供检索、摘要与向后兼容。
+ * - `parts` 仅在**真有链接**时提供，记录文本片段及指向的 URL（已解包 link2 中转）。
+ * - **硬性不变量**：`parts ? parts.map((p) => p.text).join('') === text : true`。
+ *
+ * @param {string|null} quote
+ * @returns {{text: string|null, parts: {text: string, url?: string}[]|null}}
+ */
+function broadcastText(quote) {
+  if (!quote) return { text: null, parts: null };
+  const fullText = stripTags(quote);
+  if (!fullText) return { text: null, parts: null };
+
+  const rawParts = [];
+  let cursor = 0;
+  for (const m of quote.matchAll(/<a\s[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g)) {
+    if (m.index > cursor) {
+      rawParts.push({ text: stripTagsAndDecode(quote.slice(cursor, m.index)) });
+    }
+    const linkText = stripTagsAndDecode(m[2]);
+    const rawUrl = decodeEntities(m[1]);
+    const url = unwrapLink(rawUrl);
+    rawParts.push({ text: linkText, url });
+    cursor = m.index + m[0].length;
+  }
+  if (cursor < quote.length) {
+    rawParts.push({ text: stripTagsAndDecode(quote.slice(cursor)) });
+  }
+
+  const hasLinks = rawParts.some((p) => p.url);
+  if (!hasLinks) return { text: fullText, parts: null };
+
+  // 修剪两端空白以与 fullText（即 stripTags(quote)）完全吻合
+  for (let i = 0; i < rawParts.length; i++) {
+    if (!rawParts[i].text) continue;
+    rawParts[i].text = rawParts[i].text.replace(/^\s+/, '');
+    if (rawParts[i].text) break;
+  }
+  for (let i = rawParts.length - 1; i >= 0; i--) {
+    if (!rawParts[i].text) continue;
+    rawParts[i].text = rawParts[i].text.replace(/\s+$/, '');
+    if (rawParts[i].text) break;
+  }
+  const parts = rawParts.filter((p) => p.text !== '');
+  return { text: fullText, parts };
+}
+
