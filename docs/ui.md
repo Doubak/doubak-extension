@@ -3,6 +3,10 @@
 > 草案 v0.1（2026-07-29）。补 DESIGN.md §4-K 留下的空白——那里只有四行功能表，
 > 不足以指导具体实现。本文定义**界面长什么样、说什么话**，不定义实现技术。
 
+当前多账号交互与实现边界以[实现核对记录](designs/public-and-third-party-account-archive-review.md)为准。
+本文早期线框保留设计过程；当前操作说明见面板 Help 和 README。
+头像与个人站点图标另见[新设计](designs/account-avatar-and-site-branding.md)，尚未实现。
+
 ## 0. 三个约束决定了一切
 
 **① 状态不在内存里。** MV3 的 service worker 随时会被杀；面板一关，它的

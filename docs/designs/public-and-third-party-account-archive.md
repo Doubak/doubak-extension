@@ -8,6 +8,9 @@
 
 ---
 
+当前交付范围与缺口见[实现核对](public-and-third-party-account-archive-review.md)，不以本文的提案表格作为完成清单。
+§7.1.6 的 profile 示例及头像站点链路由[头像专项设计](account-avatar-and-site-branding.md)细化，尚待实现。
+
 ## 1. 背景与核心问题抽象
 
 ### 1.1 两个 Issue 的诉求与现实场景

@@ -15,8 +15,8 @@ standard [WARC](https://iipc.github.io/warc-specifications/) files**, in your ow
 from your own IP, at your own pace.
 
 Then, without installing anything else, it turns that archive into **structured data**, a
-**[NeoDB](https://neodb.social) import package**, or a **searchable static site that works
-fully offline**.
+**[NeoDB](https://neodb.social) import package**, or a **Markdown site with local images**.
+The separate site generator builds that Markdown into searchable, offline HTML.
 
 Credentials and session cookies never leave your device. There is no server to leak them,
 because there is no server. The acceptance test is literal: **turn every server off and the
@@ -31,13 +31,36 @@ Two things an English-speaking reader should know before installing:
   strings are hard-coded Chinese, about 700 of them. The archive format, the exported
   data and the generated site are language-neutral, but operating the extension
   currently requires reading Chinese.
-- **Chromium-only.** It needs the [File System Access
-  API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API)
-  (`showDirectoryPicker`) to write archives, and the extension `offscreen` API to run
-  the crawl. Firefox and Safari have neither, so **it cannot be ported to them by
-  publishing a listing** — the capture path and the export path would both need
-  rewriting. Chrome and Edge are what it is tested on; other Chromium browsers
-  (Brave, Vivaldi, Opera) should work but are not verified.
+- **Chrome, Edge and desktop Firefox are supported.** Install from the
+  [Chrome Web Store](https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe)
+  or [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/doubak/).
+  Firefox requires version 140 or later and the dedicated Firefox package. It uses
+  a background host page and ZIP downloads; Chrome and Edge can write to a chosen folder.
+  Safari is not supported. Other browsers need separate verification.
+
+## Public archives and multiple accounts
+
+Leave the target blank (or keep only the prefilled profile URL prefix) to archive the
+logged-in account. Enter a profile URL, username or numeric UID and click **查看账号**
+("View account") to inspect another target. Query parameters in profile links are accepted.
+Public pages can be archived while logged in as an operator or anonymously.
+
+Coverage and archive lists can be filtered by account. Derived exports require selecting
+one account when several are present. A paused crawl remains bound to its original target,
+operator and scope; changing the login does not move its checkpoint to another account.
+Public observations do not imply deletion of content they cannot see.
+
+Public crawls skip subject details by default. If enabled, those details are requested
+without login credentials to avoid copying the operator's reviews into the target archive.
+Both a self archive and a third-party public archive have been checked through the offline
+parser, export adapters and site generator; this does not verify every page variant.
+
+Site titles use the account nickname, falling back to username or UID. Titled topic
+broadcasts retain their title in canonical data, Markdown and search. Avatar downloads,
+personal favicons and header logos are **planned, not implemented**; see the
+[avatar design](docs/designs/account-avatar-and-site-branding.md) and
+[implementation coverage](docs/designs/public-and-third-party-account-archive-review.md).
+
 
 ## Why this exists
 
@@ -125,7 +148,7 @@ it up like any other folder. From it, the extension's export page produces:
 
 - **Structured data** (canonical JSON) — one parse, reusable forever
 - **A NeoDB import package** — NDJSON, verified end to end against a real NeoDB instance
-- **A static site** — searchable, with stable permalinks, **fully readable offline**
+- **A Markdown site** — content and local images, ready for a static site generator
 
 Adapters for **Letterboxd** and **Goodreads** live in
 [doubak-export-adapters](https://github.com/Doubak/doubak-export-adapters), as command-line
@@ -149,7 +172,7 @@ the page, or the page itself.**
 | Images | Not included — [its README](https://github.com/doufen-org/tofu) states the backup does not contain images and must be browsed online | Captured, including your uploads and work covers |
 | Offline | Images will not load | Whole site readable, permalinks stable |
 | Export | Excel spreadsheet | Structured data, NeoDB package, searchable static site |
-| Browsers | Chromium only | **Chromium only, same as 豆伴** |
+| Browsers | Chromium | **Chrome / Edge and desktop Firefox** |
 
 Note "豆坟" and "豆伴" are different things: 豆伴 is the extension, while 豆坟 is a
 repackaged Chromium browser they ship so Windows users can install 豆伴 without the Chrome

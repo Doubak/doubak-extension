@@ -59,7 +59,7 @@ export function renderAbout() {
     ['提 issue', 'https://github.com/Doubak/doubak-extension/issues',
       '建议附带上述版本号、「日志」页末尾相关记录，以及具体操作步骤'],
     ['发邮件', 'mailto:admin@doubak.com', 'admin@doubak.com'],
-    ['帮忙测试', 'https://doubak.com/#contribute', '目前只有一个账号跑过，很多分支从没被真实数据碰过'],
+    ['帮忙测试', 'https://doubak.com/#contribute', '已验证本人及第三方公开账号，仍需要更多页面类型与异常场景的样本'],
   ];
   for (const [label, href, note] of FEEDBACK) {
     const li = document.createElement('li');
