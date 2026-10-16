@@ -567,7 +567,7 @@ export function groupJoinsPage(joins, { images = {} } = {}) {
  * @param {string} linkPrefix
  * @returns {string|null}
  */
-function actionMarkdown(parts, fallback, linkPrefix) {
+function partsMarkdown(parts, fallback, linkPrefix) {
   if (!parts?.length) return fallback ? plainText(fallback) : null;
   return parts.map((p) => {
     const label = plainText(p.text);
@@ -580,6 +580,8 @@ function actionMarkdown(parts, fallback, linkPrefix) {
     return `${lead}[${core}](${p.external ? p.href : linkPrefix + p.href})${tail}`;
   }).join('');
 }
+
+const actionMarkdown = partsMarkdown;
 
 export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../' } = {}) {
   // **出处放在时间戳下面单独一行，不做成标题本身的链接。**
@@ -720,7 +722,10 @@ export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../'
     out.push(line, '');
   }
 
-  if (b.text) out.push(plainText(b.text), '');
+  const bodyText = b.textParts?.length
+    ? partsMarkdown(b.textParts, b.text, linkPrefix)
+    : (b.text ? plainText(b.text) : null);
+  if (bodyText) out.push(bodyText, '');
   // **被截断就说出来。** 显示半截正文而不声明，站点就在替档案说假话。
   // 接得回本地长文页就给个链接（同样用 .md 相对路径，不硬编码 URL 方案）；
   // 接不上就只说被截断了——不回退到豆瓣。

@@ -352,6 +352,8 @@ function projectBroadcast(b, targets, have = { subjects: new Set(), doulists: ne
     postedAt: f.posted_at?.iso ?? null,
     postedAtRaw: f.posted_at?.raw ?? null,
     text: f.text ?? null,
+    // 正文里那几个链接，已经判好该指本地还是指站外。null = 正文没有链接。
+    textParts: resolveParts(f.text_parts ?? null, have),
     title: f.title ?? null,
     // 只有作者本人看得见的那些。**默认根本不会走到这里**（`withoutPrivate` 在
     // `generate()` 入口就筛掉了），带上它是为了 `--include-private` 那条路：
@@ -427,7 +429,7 @@ function localLongform(url) {
  * @param {{ subjects: Set<string>, doulists: Set<string>, longform: Set<string> }} have
  * @returns {{text: string, href?: string, external?: boolean}[]|null}
  */
-function resolveActionParts(parts, have) {
+function resolveParts(parts, have) {
   if (!parts) return null;
   return parts.map((p) => {
     if (!p.url) return { text: p.text };
@@ -476,6 +478,8 @@ function resolveActionParts(parts, have) {
     return { text: p.text, href: p.url, external: true };
   });
 }
+
+const resolveActionParts = resolveParts;
 
 /**
  * 广播那条豆瓣永久链接，归一化成一个**跨抓取稳定**的形状。
