@@ -2690,3 +2690,43 @@ test('topic 正文引用页面不存在：第一页成功入档并继续翻页',
   assert.deepEqual(state.gaps, []);
   assert.ok(state.high_water_ids.includes('9001'));
 });
+
+
+for (const cold of [false, true]) {
+  test(`抓取中出现账号异常页：暂停且不自动重试，${cold ? '冷' : '热'}恢复后补齐缺口`, async () => {
+    let abnormal = true;
+    const page = readFileSync(new URL('./fixtures/profile-user-abnormal.html', import.meta.url), 'utf8');
+    const normal = broadcastOnly([bcPage(1), bcPage(0)]);
+    const { runner, runStore, calls } = harness((url) => abnormal && url.includes('statuses') ? page : normal(url));
+    await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+    const result = await runner.runBatch();
+    assert.equal(result.stoppedBy, 'blocked');
+    assert.equal(runner.status().counts.awaiting_human, 1);
+    await runner.runBatch();
+    assert.equal(calls.filter((url) => url.includes('statuses')).length, 1, '异常页不能被自动反复请求');
+    const cp = await runStore.loadCheckpoint();
+    assert.equal(cp.pause_reason, 'blocked');
+    const blockedRoute = cp.routes.find((row) => row.route_key === 'broadcast.timeline');
+    assert.equal(blockedRoute.finished, false);
+    assert.ok(blockedRoute.gaps.some((gap) => gap.reason === 'blocked'));
+    abnormal = false;
+    if (cold) runner._run = null;
+    await runner.resume(cold ? cp : null);
+    for (let i = 0; i < 5; i++) { if ((await runner.runBatch()).done) break; }
+    const manifest = await runner.finish();
+    assert.equal(manifest.counts.by_verdict.blocked, 1, '保留历史异常响应');
+    const route = manifest.crawl_state.find((row) => row.route_key === 'broadcast.timeline');
+    assert.equal(route.contiguous, true);
+    assert.deepEqual(route.gaps, []);
+  });
+}
+
+
+test('账号异常页不能掩盖实际登录 UID 切换', async () => {
+  const page = readFileSync(new URL('./fixtures/profile-user-abnormal.html', import.meta.url), 'utf8')
+    .replace(/<div id="db-global-nav">[\s\S]*?<\/div>/, NAV.replaceAll('82160871', '999'));
+  const { runner } = harness(broadcastOnly([page]));
+  await runner.start({ username: 'example', onlyRoutes: ['broadcast.timeline'], includeCatalog: false });
+  assert.equal((await runner.runBatch()).stoppedBy, 'account_switched');
+  assert.equal(runner.status().counts.awaiting_human ?? 0, 0);
+});

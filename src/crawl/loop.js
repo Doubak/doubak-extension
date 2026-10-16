@@ -475,9 +475,15 @@ export class CrawlLoop {
       try { this._session.verify(res.bodyText, res.finalUrl, { anonymousCatalog }); }
       catch (err) {
         if (!(err instanceof SessionError)) throw err;
-        sessionError = err;
-        // 留存原始响应，但不能把串号页面标成 ok 让解析器摄取。
-        cls = { ...cls, verdict: 'unknown', reason: null, reasons: [...cls.reasons, err.message] };
+        // 专用账号异常页固定显示登录入口，不能凭这个错误页推断操作者已退出。
+        // 保留 blocked 才能进入等待人工的队列；目标或操作者 UID 冲突仍优先停机。
+        const errorPageNav = cls.verdict === 'blocked' && cls.reason === 'account_abnormal'
+          && ['session_expired', 'operator_session_lost'].includes(err.reason);
+        if (!errorPageNav) {
+          sessionError = err;
+          // 留存原始响应，但不能把串号页面标成 ok 让解析器摄取。
+          cls = { ...cls, verdict: 'unknown', reason: null, reasons: [...cls.reasons, err.message] };
+        }
       }
     }
     // 图片的体积分布与页面完全不是一回事，混进同一个滚动统计会把两边都毁掉。

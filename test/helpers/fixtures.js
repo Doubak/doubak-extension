@@ -173,17 +173,6 @@ export const fixtures = {
   /** 用户/条目不存在。真实档案里前代靠「页面不存在」这个字符串识别。 */
   notFoundPage: page('豆瓣', '<div class="article"><h1>页面不存在</h1></div>'),
 
-  /** 目标用户账号状态异常（用户软封锁页，HTTP 200）。校准依据：mahoo1219。 */
-  userAbnormalPage: `<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>
-该用户账号状态异常
-</title></head><body>
-<div id="db-global-nav"><a href="https://accounts.douban.com/passport/login" class="nav-login">登录/注册</a></div>
-<div id="wrapper">
-  <img src="https://asset.doubanio.com/cuphead/sns-static/common/pics/user_abnormal.png" width="122"/>
-  <li>该用户账号状态异常<br />请稍后访问……</li>
-</div></body></html>`,
-
   /** 标记列表页，标题里带声明数量。 */
   interestListPage: page(
     '我看过的影视(1157)',
