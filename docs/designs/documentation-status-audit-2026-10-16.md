@@ -1,6 +1,6 @@
 # 文档与产品说明核对（2026-10-16）
 
-本次以当前 main 的实际实现为准，核对 extension 中英文 README、Help、官网首页与隐私页，
+本次以当前 main 的实际实现为准，核对 extension 中英文 README、Help、官网首页、使用指南与隐私页，
 以及 specs / parser / site-generator / export-adapters / import-adapters README。
 历史开发日志与设计中的实测数字保留其日期语境，不把旧实验数据全部替换成新数字。
 本记录只说明上述文档审查范围，不宣称全部历史文档或完整公开账号设计均已实现。
@@ -20,6 +20,7 @@
 | 发布 | generator `bin/deploy.js`：构建并写入目录、`--dry-run` 输出清单，Git 提交 / 推送另行执行；不承诺自动全文隐私审查或完全清除第三方片段 |
 | 原始内容 | parser 归属过滤不等于 WARC 匿名化；官网 / 隐私页改为以所选目标账号为边界，不把周边社交内容说成完全不会出现在 HTML |
 | 实测覆盖 | 本人新 bundle 与第三方公开 bundle 均已有离线链路核对；官网 / Help 不再说只验证一个账号，仍注明页面类型覆盖有限 |
+| 使用指南 | 说明公开目标输入与单账号导出；删除「扩展卸载不影响内部档案」的错误保证，区分磁盘已导出文件和浏览器内部副本 |
 | 隐私页操作 | 删除扩展数据的入口是「档案」，不再指向旧「存储」标签 |
 | 原生导入 | extension README 移除「拦截跨账号归档」：允许混合账号分组导入，重复 / 冲突 / 残缺校验仍有效 |
 | CLI 边界 | parser 默认拒绝混合账号，仍有历史 `--ignore-warnings`；尚无统一 `--account`，不能与扩展单账号选择混为一谈 |
@@ -41,7 +42,7 @@ Canonical 则计划新增带来源与修订的 `profile.ndjson`，需要 schema�
 
 - Help 相关既有回归：`node --test test/ui.test.js test/ui-formats-tab.test.js`，181 通过、0 失败。
 - 官网 `python3 tools/check-links.py .`：协议、canonical 与发布版本一致性检查通过。
-- Chromium 本地预览官网、隐私页、Help，390 / 1280 px：无横向溢出、无缺图、无失效页内锚点。
+- Chromium 本地预览官网、使用指南、隐私页、Help，390 / 1280 px：无横向溢出、无缺图、无失效页内锚点。
   官网与 Help 截图已目视检查。Help 以静态 HTML 展示，JS 运行时身份栏由既有 UI 测试覆盖；
   此次未执行浏览器内真实抓取。
 - 新设计与修改过的 Markdown 本地链接检查、各仓库 `git diff --check`。
