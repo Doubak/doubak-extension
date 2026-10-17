@@ -1084,7 +1084,7 @@ export class CrawlLoop {
     if (!this._routes.has('interest.item') && item.routeKey.startsWith('interest.')) {
       // 轻量化模式沿用列表中实际出现的缩略图 URL，不猜测大图地址。
       const urls = new Set([...res.bodyText.matchAll(/<img\b[^>]*\ssrc=(["'])(https:\/\/[^"']+)\1/gi)]
-        .map((m) => m[2]).filter((url) => /^https:\/\/[^/]+\.doubanio\.com\/(?:view\/(?:subject|photo)|[blsp]pic)\//.test(url)));
+        .map((m) => m[2]).filter((url) => /^https:\/\/[^/]+\.doubanio\.com\/(?:p?view\/(?:subject|photo|drama_subject_poster)|[blsp]pic)\//.test(url)));
       for (const url of urls) this._frontier.enqueue({ url, urlKey: urlKey(url), routeKey: target.key,
         intent: target.intent, enqueuedBy: captureId, ordered: false, priority: target.priority, referer: item.url });
       return;

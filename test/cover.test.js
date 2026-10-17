@@ -60,6 +60,8 @@ const MUSIC = `<div id="mainpic">         <span class="ckd-collect">            
 const GAME = `<img src="https://img3.doubanio.com/f/shire/e49eca1517424a941871a2667a8957fd6c72d632/pics/new_menu.gif" alt="new" style="position: absolute; top: -7px; right: -13px;" />
 <div class="pic">             <a href="https://img2.doubanio.com/lpic/s34308681.jpg"><img width="115" src="https://img2.doubanio.com/lpic/s34308681.jpg" alt="莱莎的炼金工房3"></a>             <div class="th-modify"></div></div>`;
 
+const DRAMA = `<div class="pic"><a href="https://www.douban.com/location/drama/10944605/"><img src="https://img1.doubanio.com/pview/drama_subject_poster/m/public/8972fded.jpg" alt="妈妈咪呀"></a></div>`;
+
 // 没有海报的作品：豆瓣塞一张自己的占位图，旁边写着「上传海报图片」。
 const NO_POSTER = `<div id="mainpic">     <a class="nbgnbg" href="https://movie.douban.com/subject/36980405/photos?type=R" title="点击看更多海报">         <img src="https://img2.doubanio.com/cuphead/movie-static/pics/movie_default_large.png" title="点击看更多海报" alt="Paris 2024" rel="v:image" />    </a>     <p class="pl">&gt; <a href="https://movie.douban.com/subject/36980405/update_image">上传海报图片</a></p></div>`;
 
@@ -68,7 +70,7 @@ const SUBJECT_PAGE = `<html><head><title>寂静岭 (豆瓣)</title></head><body>
 <div id="wrapper"><div id="content"><h1><span property="v:itemreviewed">寂静岭</span></h1>
 ${MOVIE}<div id="interest_sectl"></div></div></div></body></html>`;
 
-describe('抽封面：四种媒介各有各的模板', () => {
+describe('抽封面：五种媒介各有各的模板', () => {
   test('书 —— #mainpic 里的 img，不是 a 上那个大图链接', () => {
     // 容器里 `<a href="...l/public/....jpg">` 排在 `<img>` 前面。取 a 的 href 会
     // 拿到大图（体积几倍），而项目的取舍是明确跳过全尺寸海报。
@@ -98,6 +100,13 @@ describe('抽封面：四种媒介各有各的模板', () => {
     const r = extractCoverImage(GAME);
     assert.equal(r.url, 'https://img2.doubanio.com/lpic/s34308681.jpg');
     assert.ok(!r.url.includes('new_menu'), '抓到了界面雪碧图');
+  });
+
+  test('舞台剧 —— .pic 容器里的 img，路径在 pview/drama_subject_poster', () => {
+    assert.deepEqual(extractCoverImage(DRAMA), {
+      url: 'https://img1.doubanio.com/pview/drama_subject_poster/m/public/8972fded.jpg',
+      reason: 'ok',
+    });
   });
 });
 
@@ -458,6 +467,105 @@ describe('整条链路：详情页 → 抽封面 → 取图 → 进 catalog 段'
     const stopped = events.find((e) => e.type === 'stopped');
     assert.equal(stopped, undefined, `因为图片里的字节停机了：${JSON.stringify(stopped)}`);
     assert.ok(index.some((e) => e.url.includes('doubanio.com')), '图片没进档案');
+  });
+});
+
+describe('轻量化模式（skip_catalog）：从标记列表页直接抽取封面', () => {
+  async function runLightweight(listHtml) {
+    const store = new MemoryFileStore();
+    const events = [];
+    let now = 0;
+
+    const pacer = new Pacer({ intervalMs: 1, jitterRatio: 0 });
+    const gate = new RequestGate({ pacer, now: () => now, sleep: async (ms) => { now += ms; } });
+
+    const calls = [];
+    const fetchImpl = async (url, init) => {
+      calls.push({ url, init });
+      const isImage = url.includes('doubanio.com');
+      const body = isImage
+        ? new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4])
+        : enc.encode(listHtml);
+      return {
+        status: 200,
+        url,
+        headers: new Headers({ 'content-type': isImage ? 'image/jpeg' : 'text/html; charset=utf-8' }),
+        arrayBuffer: async () =>
+          body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+      };
+    };
+
+    const transport = new Transport({ gate, fetchImpl, now: () => now });
+    const writer = new BundleWriter({
+      producer: TEST_PRODUCER,
+      store,
+      account: { user_id: '10001', username: 'example' },
+      now: () => new Date(1750000000000 + now),
+    });
+    const session = new SessionGuard();
+    session.preflight(listHtml);
+
+    const frontier = new Frontier();
+    const routeDefs = buildRoutes({ username: 'example', includeCatalog: false, includeCovers: true });
+    const routes = new Map(routeDefs.map((r) => [r.key, r]));
+
+    const LIST_URL = 'https://www.douban.com/location/people/example/drama/collect';
+    frontier.enqueue({
+      url: LIST_URL,
+      urlKey: LIST_URL,
+      routeKey: 'interest.drama.collect',
+      intent: 'interest.list.drama.collect',
+      ordered: false,
+    });
+
+    const loop = new CrawlLoop({
+      frontier, transport, writer, session, pacer, routes,
+      onEvent: (e) => events.push(e),
+    });
+    await loop.run({ maxCaptures: 10 });
+    const manifest = await writer.finalize();
+
+    const name = indexFilename(writer.bundleId);
+    const index = (await store.exists(name))
+      ? dec.decode(await store.read(name)).trimEnd().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+      : [];
+    return { index, events, calls, manifest };
+  }
+
+  test('舞台剧列表页中的 pview/drama_subject_poster 缩略图被抽入队列并抓取', async () => {
+    const DRAMA_LIST = `<html><head><title>示例看过的舞台剧</title></head><body>${NAV}
+<div id="db-usr-profile"><div class="info"><h1>示例</h1></div></div>
+<div id="content"><h1>示例看过的舞台剧(2)</h1>
+  <div class="article">
+    <div class="grid-16-8 clearfix">
+      <div class="article">
+        <div class="item">
+          <a title="妈妈咪呀" href="https://www.douban.com/location/drama/10944605/" class="nbg">
+            <img alt="妈妈咪呀" src="https://img9.doubanio.com/pview/drama_subject_poster/small/public/8972fded86c3674.jpg">
+          </a>
+          <span class="date">2025-07-04</span>
+        </div>
+        <div class="item">
+          <a title="另一部戏" href="https://www.douban.com/location/drama/99999999/" class="nbg">
+            <img alt="另一部戏" src="https://img1.doubanio.com/view/drama_subject_poster/small/public/abcdef123.jpg">
+          </a>
+          <span class="date">2025-07-05</span>
+        </div>
+        <img alt="用户头像" src="https://img3.doubanio.com/icon/u10001-2.jpg">
+        <img src="https://img3.doubanio.com/f/shire/something.png">
+      </div>
+    </div>
+  </div>
+</div></body></html>`;
+
+    const { index } = await runLightweight(DRAMA_LIST);
+    const covers = index.filter((e) => e.route_key === 'asset.subject_cover');
+    assert.equal(covers.length, 2, '两张舞台剧封面都应入库');
+    assert.ok(covers.some((c) => c.url === 'https://img9.doubanio.com/pview/drama_subject_poster/small/public/8972fded86c3674.jpg'));
+    assert.ok(covers.some((c) => c.url === 'https://img1.doubanio.com/view/drama_subject_poster/small/public/abcdef123.jpg'));
+    // 头像与前端雪碧图不得混入封面
+    assert.ok(!covers.some((c) => c.url.includes('/icon/')));
+    assert.ok(!covers.some((c) => c.url.includes('/f/')));
   });
 });
 
