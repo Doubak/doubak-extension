@@ -89,12 +89,9 @@ const TARGETS = {
   firefox: {
     manifest: 'manifest.firefox.json',
     suffix: '-firefox',
-    // **这两个在 Firefox 上永远走不到，带着只会让 web-ext lint 报 UNSUPPORTED_API。**
-    // host-offscreen.js 只由 `runtime/host.js` 在 `offscreen.createDocument` 存在时
-    // 动态 import，而 Firefox 上它不存在；offscreen.html 是那个文档本身。
-    // 注意 `src/offscreen/offscreen.js` **要留着**——Firefox 那条路正是靠它的
-    // `handleOp`，两个宿主共用同一份 switch。
-    drop: ['src/runtime/host-offscreen.js', 'src/offscreen/offscreen.html'],
+    // host-offscreen.js 被 host.js 静态导入，两个包都必须包含它。
+    // 它没有加载副作用；Firefox 按能力选择 host-page，不会调用 offscreen API。
+    drop: ['src/offscreen/offscreen.html'],
   },
 };
 

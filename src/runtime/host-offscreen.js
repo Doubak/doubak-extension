@@ -1,7 +1,7 @@
 /**
  * Chrome 那条路：service worker 起一个 offscreen document，Worker 起在它里面。
  *
- * **这个文件只在 Chrome 上被加载**（`host.js` 按能力动态 import 挑一个）。
+ * **两个安装包都静态加载此模块，只有 Chrome 会调用它**（`host.js` 按能力选宿主）。
  * Firefox 没有 `chrome.offscreen`，它的后台本来就是页面，见 `host-page.js`。
  *
  * 为什么抓取跑在 offscreen 里，见 `src/offscreen/offscreen.js` 开头。简版：

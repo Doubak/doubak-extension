@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { join, dirname } from 'node:path';
+import { join, dirname, posix } from 'node:path';
 
 import { toFirefox, STRICT_MIN_VERSION, GECKO_ID, AMO_CONTACT } from '../tools/make-manifest.mjs';
 
@@ -131,9 +131,25 @@ describe('Firefox 那个包带对了文件', () => {
     assert.deepEqual(onlyFirefox, [], 'Firefox 包里有 Chrome 包没有的文件');
     assert.deepEqual(
       onlyChrome.sort(),
-      ['src/offscreen/offscreen.html', 'src/runtime/host-offscreen.js'],
+      ['src/offscreen/offscreen.html'],
       'Firefox 包丢掉的文件不是预期的那几个',
     );
+  });
+
+  test('两个安装包的 JS 模块依赖均在包内，不能只验证排除清单', () => {
+    for (const files of [ff, cr]) {
+      const included = new Set(files);
+      for (const file of files.filter((f) => f.endsWith('.js'))) {
+        const source = readFileSync(join(ROOT, file), 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/(^|[^:])\/\/.*$/gm, '$1');
+        const imports = /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)['"](\.[^'"]+)['"]/g;
+        for (const [, specifier] of source.matchAll(imports)) {
+          const dependency = posix.normalize(posix.join(posix.dirname(file), specifier));
+          assert.ok(included.has(dependency), `${file} 依赖 ${dependency}，安装包却没有它`);
+        }
+      }
+    }
   });
 
   test('**`offscreen.js` 必须留着** —— Firefox 那条路正靠它', () => {

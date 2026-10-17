@@ -84,7 +84,7 @@ node tools/make-manifest.mjs                   # 重新生成 manifest.firefox.j
 
 需要 Node ≥ 20。
 
-**两个安装包，共享同一份文件清单。** 两者的差异仅存在于 `tools/package.mjs` 中 `TARGETS` 配置项所定义的三项属性：使用的 manifest 配置文件、生成包的文件名后缀，以及在 Firefox 中无需包含的两个特定文件（`host-offscreen.js` 与 `offscreen.html`）。其中 `manifest.firefox.json` 是由构建脚本**自动生成**的衍生文件，禁止手动编辑（CI 与单元测试会校验一致性并阻断不一致的修改）。这种独立生成的策略是为了防止 Firefox 意外继承 Chrome 独占的全新权限，否则可能出现扩展能够安装成功但部分功能静默失效的隐蔽缺陷。
+**两个安装包，共享同一份文件清单。** 两者的差异仅存在于 `tools/package.mjs` 中 `TARGETS` 配置项所定义的三项属性：使用的 manifest 配置文件、生成包的文件名后缀，以及在 Firefox 中无需包含的 `offscreen.html`。`host-offscreen.js` 是共享宿主入口的静态依赖，两个包均须包含；Firefox 不会调用其中的 Chrome API。其中 `manifest.firefox.json` 是由构建脚本**自动生成**的衍生文件，禁止手动编辑（CI 与单元测试会校验一致性并阻断不一致的修改）。这种独立生成的策略是为了防止 Firefox 意外继承 Chrome 独占的全新权限，否则可能出现扩展能够安装成功但部分功能静默失效的隐蔽缺陷。
 
 ### 在浏览器中安装加载
 
