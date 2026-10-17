@@ -356,3 +356,49 @@ describe('导出路径中严禁重新出现「请使用 Chrome 或 Edge」提示
     assert.match(arg, /打包成一个 zip/, '确认框里没说它会变成一个 zip');
   });
 });
+
+test('并发 ZIP 导出不能清理前一项的中转文件，失败与取消后可再导', async () => {
+  const opfs = fakeOpfs();
+  const w = fakeWindow();
+  Object.defineProperty(globalThis, 'navigator', { value: opfs, configurable: true });
+  try {
+    const { zipDestination } = await import('../src/ui/panel/destination.js');
+    const first = await zipDestination({ zipName: 'first.zip' });
+    const cleaned = opfs.removed.length;
+    await assert.rejects(zipDestination({ zipName: 'second.zip' }), /已有 ZIP 正在打包/);
+    assert.equal(opfs.removed.length, cleaned, '并发任务不得清理仍在写入的 ZIP');
+    await first.abort();
+    const second = await zipDestination({ zipName: 'second.zip' });
+    await second.finish();
+    const getDirectory = opfs.storage.getDirectory;
+    opfs.storage.getDirectory = async () => { throw new Error('quota'); };
+    await assert.rejects(zipDestination({ zipName: 'failed.zip' }), /quota/);
+    opfs.storage.getDirectory = getDirectory;
+    await (await zipDestination({ zipName: 'after-failure.zip' })).abort();
+  } finally { w.restore(); }
+});
+
+test('不同面板通过 Web Locks 共享 ZIP 排他锁', async () => {
+  const opfs = fakeOpfs();
+  let held = false;
+  opfs.locks = { request: async (name, opts, callback) => {
+    assert.equal(name, 'doubak-export-staging');
+    assert.equal(opts.ifAvailable, true);
+    if (held) return callback(null);
+    held = true;
+    try { return await callback({ name }); } finally { held = false; }
+  } };
+  const w = fakeWindow();
+  Object.defineProperty(globalThis, 'navigator', { value: opfs, configurable: true });
+  try {
+    const panelA = await import('../src/ui/panel/destination.js?panel=A');
+    const panelB = await import('../src/ui/panel/destination.js?panel=B');
+    const first = await panelA.zipDestination({ zipName: 'a.zip' });
+    const cleaned = opfs.removed.length;
+    await assert.rejects(panelB.zipDestination({ zipName: 'b.zip' }), /另一个面板/);
+    assert.equal(opfs.removed.length, cleaned);
+    await first.finish();
+    const second = await panelB.zipDestination({ zipName: 'b.zip' });
+    await second.abort();
+  } finally { w.restore(); }
+});

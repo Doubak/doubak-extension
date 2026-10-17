@@ -153,6 +153,29 @@ export function directoryDestination(dir) {
   };
 }
 
+// 档案页与派生导出页共用中转目录，跨标签页也不能互删正在写的 ZIP。
+let zipActive = false;
+async function claimZipExport() {
+  if (zipActive) throw new Error('已有 ZIP 正在打包，请等它完成后再导出。');
+  zipActive = true;
+  let releaseLock = () => {};
+  try {
+    if (navigator.locks?.request) {
+      await new Promise((resolve, reject) => {
+        navigator.locks.request('doubak-export-staging', { ifAvailable: true }, (lock) => {
+          if (!lock) { reject(new Error('另一个面板正在打包 ZIP，请等它完成后再导出。')); return; }
+          return new Promise((release) => { releaseLock = release; resolve(); });
+        }).catch(reject);
+      });
+    }
+  } catch (e) { zipActive = false; throw e; }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true; releaseLock(); zipActive = false;
+  };
+}
+
 /**
  * 一个 zip 当目的地。**先写进 OPFS，收尾时再交出去。**
  *
@@ -165,35 +188,39 @@ export function directoryDestination(dir) {
  * @returns {Promise<Destination>}
  */
 export async function zipDestination({ zipName, deflateRaw, readme }) {
-  const root = await navigator.storage.getDirectory();
-  await purgeStaging(root);
-  const dir = await root.getDirectoryHandle(STAGING_DIR, { create: true });
-  const fh = await dir.getFileHandle(zipName, { create: true });
-  const out = await fh.createWritable();
-  const writer = new ZipWriter({ write: (chunk) => out.write(chunk), deflateRaw });
+  const release = await claimZipExport();
+  try {
+    const root = await navigator.storage.getDirectory();
+    await purgeStaging(root);
+    const dir = await root.getDirectoryHandle(STAGING_DIR, { create: true });
+    const fh = await dir.getFileHandle(zipName, { create: true });
+    const out = await fh.createWritable();
+    const writer = new ZipWriter({ write: (chunk) => out.write(chunk), deflateRaw });
 
-  let closed = false;
-  const closeOnce = async () => { if (!closed) { closed = true; await out.close(); } };
+    let closed = false;
+    const closeOnce = async () => { if (!closed) { closed = true; await out.close(); } };
 
-  return {
-    kind: 'zip',
-    sinkFor: async (subdir) => zipSink(writer, subdir),
-    writerFor: async (subdir) => (rel, data) => writer.add(`${subdir}/${rel}`, data),
-    finish: async () => {
-      // 这一句放在中央目录之前：它是解压之后第一眼看到的东西，而「这是个壳子」
-      // 恰恰要在那一刻说清楚。
-      if (readme) await writer.add('先看这个.txt', new TextEncoder().encode(readme));
-      await writer.finish();
-      await closeOnce();
-      const file = await fh.getFile();
-      handOff(file, zipName);
-      return { name: zipName, bytes: file.size };
-    },
-    abort: async () => {
-      await closeOnce().catch(() => {});
-      await purgeStaging(root);
-    },
-  };
+    return {
+      kind: 'zip',
+      sinkFor: async (subdir) => zipSink(writer, subdir),
+      writerFor: async (subdir) => (rel, data) => writer.add(`${subdir}/${rel}`, data),
+      finish: async () => {
+        // 这一句放在中央目录之前：它是解压之后第一眼看到的东西，而「这是个壳子」
+        // 恰恰要在那一刻说清楚。
+        if (readme) await writer.add('先看这个.txt', new TextEncoder().encode(readme));
+        await writer.finish();
+        await closeOnce();
+        const file = await fh.getFile();
+        handOff(file, zipName);
+        release();
+        return { name: zipName, bytes: file.size };
+      },
+      abort: async () => {
+        await closeOnce().catch(() => {});
+        try { await purgeStaging(root); } finally { release(); }
+      },
+    };
+  } catch (e) { release(); throw e; }
 }
 
 /**

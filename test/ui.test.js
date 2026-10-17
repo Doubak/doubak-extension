@@ -1174,7 +1174,8 @@ describe('面板脚本', () => {
 
     const js = readPanelSourceSync();
     // 按当前打开的这一份取链，不是永远取最新那条
-    assert.match(js, /type: 'chain', bundleId: currentBundleId/);
+    assert.match(js, /const bundleId = currentBundleId/);
+    assert.match(js, /type: 'chain', bundleId \}/);
     // 分子目录，否则 manifest.json 互相覆盖
     assert.match(js, /dest\.sinkFor\(bundleDirName\(id\)\)/);
     // **单份导出也要建子目录** —— 否则往同一个下载目录导几次，早先的 manifest

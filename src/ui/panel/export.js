@@ -47,7 +47,7 @@ import { reader, currentBundleId } from './archive.js';
  */
 
 /** 整条链导出的结果：逐份说清楚，别汇总成一句「成功」。 */
-function renderChainExportResult(el, done, handed = null) {
+export function renderChainExportResult(el, done, handed = null) {
   const failed = done.filter((d) => d.error || d.result?.problems.length);
   el.className = `card tone-${failed.length ? 'error' : 'ok'}`;
   el.replaceChildren();
@@ -55,7 +55,11 @@ function renderChainExportResult(el, done, handed = null) {
   const b = document.createElement('b');
   b.textContent = failed.length
     ? `${done.length} 份中有 ${failed.length} 份没能干净导出`
-    : `${done.length} 份档案已全部导出并校验通过`;
+    : handed
+      ? `${done.length} 份档案已打包并交给下载（未回读校验）`
+      : done.every((d) => d.result?.verified)
+        ? `${done.length} 份档案已全部导出并校验通过`
+        : `${done.length} 份档案已导出，部分仅核对字节数`;
   el.append(b);
 
   const total = done.reduce((n, d) => n + (d.result?.bytes ?? 0), 0);
@@ -71,7 +75,7 @@ function renderChainExportResult(el, done, handed = null) {
     line.textContent = d.error
       ? `${d.bundleId}：失败 —— ${d.error}`
       : `${d.bundleId}：${bytes(d.result.bytes)}`
-        + (d.result.problems.length ? `，${d.result.problems.length} 处校验不通过` : '，校验通过');
+        + (d.result.problems.length ? `，${d.result.problems.length} 处校验不通过` : handed ? '，未回读校验' : d.result.verified ? '，校验通过' : '，仅核对字节数');
     el.append(line);
   }
 }
@@ -169,13 +173,28 @@ function nextStepsLine() {
   return next;
 }
 
+let archiveExportRunning = false;
+function bindExport(id, action) {
+  $(id).addEventListener('click', async () => {
+    if (archiveExportRunning) return;
+    archiveExportRunning = true;
+    try { await action(); }
+    catch (e) {
+      const el = $('export-result');
+      el.className = 'card tone-error';
+      el.textContent = `导出失败：${e.message}`;
+    } finally { archiveExportRunning = false; }
+  });
+}
+
 /** 绑事件。**由 panel.js 显式调用**，不靠 import 的副作用——那种绑定顺序看不出来。 */
 export function initExport() {
-  $('export-chain').addEventListener('click', async () => {
+  bindExport('export-chain', async () => {
     const el = $('export-result');
-    if (!currentBundleId) return;
+    const bundleId = currentBundleId;
+    if (!bundleId) return;
 
-    const r = await send({ type: 'chain', bundleId: currentBundleId });
+    const r = await send({ type: 'chain', bundleId });
     const chain = r?.ok ? (r.chain?.bundles ?? []) : [];
     if (chain.length === 0) {
       el.className = 'card tone-error';
@@ -197,7 +216,7 @@ export function initExport() {
     }
 
     const ids = chain.map((b) => b.bundleId);
-    const zipName = `doubak-archive-${currentBundleId}-整条链.zip`;
+    const zipName = `doubak-archive-${bundleId}-整条链.zip`;
     if (!confirm(
       `将导出 ${ids.length} 份档案（整条链）：\n\n${ids.join('\n')}\n\n`
       + (parent
@@ -233,7 +252,7 @@ export function initExport() {
         done.push({ bundleId: id, result: res, error: null });
         // 只在**校验通过**时记「已导出」——没验过就说导出了，等于给一个我们没资格
         // 给的保证（删除确认框会据此决定说得多重）。
-        if (res.problems.length === 0) await noteExported(id, dest.kind);
+        if (res.problems.length === 0 && dest.kind === 'directory') await noteExported(id, dest.kind);
       } catch (e) {
         // **一份失败不中断其余的。** 用户要的是尽可能多地搬走，而不是在第三份上
         // 停下、前两份还留在原地不知道成没成。
@@ -253,12 +272,18 @@ export function initExport() {
       return;
     }
 
+    // ZIP 收尾/交付成功后才能记下载记录，失败不能让删除提示误判已有副本。
+    if (dest.kind === 'zip') {
+      for (const d of done) {
+        if (!d.error && d.result?.problems.length === 0) await noteExported(d.bundleId, dest.kind);
+      }
+    }
     renderChainExportResult(el, done, handed);
     // `noteExported` 已经失效过缓存了，这里只要重画。
     await refreshOpenTab();
   });
 
-  $('export').addEventListener('click', async () => {
+  bindExport('export', async () => {
     const el = $('export-result');
     const bundleId = currentBundleId;
     if (!bundleId) return;
