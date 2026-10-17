@@ -82,7 +82,7 @@ function fakeDir(name, files = {}, subdirs = {}) {
  * @param {Record<string, object>} [opts.have]  OPFS 里已经有的
  * @param {boolean} [opts.confirmed]      确认框点确定还是取消
  */
-async function clickImport({ picked, have = {}, confirmed = true }) {
+async function clickImport({ picked, files = null, have = {}, confirmed = true }) {
   const worker = fakeOpfsWorker({ allowWrites: true, importOnly: true });
   for (const [dir, files] of Object.entries(have)) await seedBundle(worker, dir, files);
 
@@ -99,10 +99,24 @@ async function clickImport({ picked, have = {}, confirmed = true }) {
     },
     extra: {
       Worker: function FakeWorkerCtor() { return worker; },
-      window: { showDirectoryPicker: async () => picked },
+      window: files ? {} : { showDirectoryPicker: async () => picked },
       navigator: { storage: { estimate: async () => ({ usage: 0, quota: 100e9 }) } },
     },
   });
+  if (files) {
+    dom.document.body = dom.document.createElement('body');
+    const create = dom.document.createElement.bind(dom.document);
+    dom.document.createElement = (tag) => {
+      const el = create(tag);
+      if (tag === 'input') el.click = () => {
+        assert.equal(el.webkitdirectory, true);
+        assert.equal(el.multiple, true);
+        el.files = files;
+        el.dispatch('change');
+      };
+      return el;
+    };
+  }
   // 确认框：记下问了什么，然后按参数答复。**问了什么本身就是断言对象**——
   // 「将要发生什么」必须在写之前说清楚。
   Object.defineProperty(globalThis, 'confirm', {
@@ -405,4 +419,30 @@ describe('导入（从点按钮到字节落盘）', () => {
       dom.restore();
     }
   });
+});
+
+
+test('Firefox FileList 入口批量导入两个账号，并保留已有账号的档案', async () => {
+  const other = '20260804T084014Z-627045';
+  const mine = await exportedBundle();
+  const theirs = await exportedBundle(other, { userId: '2000002' });
+  const files = [];
+  for (const [id, entries] of [[ID, mine], [other, theirs]]) {
+    for (const [name, bytes] of Object.entries(entries)) {
+      const f = new File([bytes], name);
+      Object.defineProperty(f, 'webkitRelativePath', { value: `解压的备份/doubak-bundle-${id}/${name}` });
+      files.push(f);
+    }
+  }
+  const { dom, worker, asked, result } = await clickImport({ files, have: { [`doubak-bundle-${ID}`]: mine } });
+  try {
+    assert.match(result(), /1 份档案已导入/);
+    assert.match(result(), /已经有了/);
+    assert.equal(asked.length, 1);
+    for (const [id, entries] of [[ID, mine], [other, theirs]]) {
+      for (const [name, bytes] of Object.entries(entries)) {
+        assert.deepEqual(await worker.dirs.get(`doubak-bundle-${id}`).read(name), bytes);
+      }
+    }
+  } finally { dom.restore(); }
 });
