@@ -41,3 +41,61 @@ export function accountsFromSources(sources) {
   }
   return accounts;
 }
+
+/**
+ * 按指定账号 UID 过滤 sources。
+ * 保留指定账号的 bundle 以及其链条中的祖先无 manifest bundle。
+ *
+ * @param {Array<{bundleId: string, manifest: object|null}>} sources
+ * @param {string} targetUid
+ * @returns {Array<{bundleId: string, manifest: object|null}>}
+ */
+export function filterSourcesByAccount(sources, targetUid) {
+  const target = String(targetUid);
+  const matching = new Set(sources.filter((s) => String(s.manifest?.account?.user_id) === target));
+  if (matching.size === 0) return [];
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const s of matching) {
+      const prev = s.manifest?.previous_bundle_id;
+      if (prev) {
+        const parent = sources.find((other) => other.bundleId === prev && !matching.has(other));
+        if (parent && (!parent.manifest?.account || String(parent.manifest.account.user_id) === target)) {
+          matching.add(parent);
+          changed = true;
+        }
+      }
+      for (const cs of s.manifest?.crawl_state ?? []) {
+        const floor = cs.floor_from_bundle_id;
+        if (floor) {
+          const ancestor = sources.find((other) => other.bundleId === floor && !matching.has(other));
+          if (ancestor && (!ancestor.manifest?.account || String(ancestor.manifest.account.user_id) === target)) {
+            matching.add(ancestor);
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
+  return sources.filter((s) => matching.has(s));
+}
+
+/**
+ * 将 sources 按账号 UID 分组。
+ *
+ * @param {Array<{bundleId: string, manifest: object|null}>} sources
+ * @returns {Map<string, Array<{bundleId: string, manifest: object|null}>>}
+ */
+export function groupSourcesByAccount(sources) {
+  const accounts = accountsFromSources(sources);
+  const groups = new Map();
+  for (const uid of accounts.keys()) {
+    const filtered = filterSourcesByAccount(sources, uid);
+    if (filtered.length) groups.set(uid, filtered);
+  }
+  return groups;
+}
+

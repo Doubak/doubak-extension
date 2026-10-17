@@ -139,3 +139,55 @@ export function canonicalShape(out) {
     group_joins: out.group_joins?.length ? out.group_joins : (out.groupJoins ?? []),
   };
 }
+
+/**
+ * 收集 canonical 中出现的所有账号信息。
+ * @param {object} out
+ * @returns {Map<string, {user_id: string, username?: string, nickname?: string}>}
+ */
+export function accountsInCanonical(out) {
+  const accounts = new Map();
+  const check = (acc) => {
+    const uid = acc?.user_id;
+    if (uid && uid !== 'unknown' && !accounts.has(String(uid))) {
+      accounts.set(String(uid), acc);
+    }
+  };
+  for (const m of out.marks ?? []) check(m.account);
+  for (const b of out.broadcasts ?? []) check(b.account);
+  for (const l of out.longform ?? []) check(l.account);
+  for (const d of out.doulists ?? []) check(d.account);
+  for (const a of out.albums ?? []) check(a.account);
+  for (const g of out.group_topics ?? out.groupTopics ?? []) check(g.account);
+  for (const j of out.group_joins ?? out.groupJoins ?? []) check(j.account);
+  for (const p of out.profile ?? []) check(p.account);
+  return accounts;
+}
+
+/**
+ * 按指定账号 UID 过滤 canonical 记录。
+ * @param {object} out
+ * @param {string} targetUid
+ * @returns {object}
+ */
+export function filterCanonicalByAccount(out, targetUid) {
+  const target = String(targetUid);
+  const filterArr = (arr) => (arr ?? []).filter((item) => {
+    const id = item?.account?.user_id;
+    return id ? String(id) === target : true;
+  });
+
+  return {
+    ...out,
+    marks: filterArr(out.marks),
+    broadcasts: filterArr(out.broadcasts),
+    longform: filterArr(out.longform),
+    doulists: filterArr(out.doulists),
+    albums: filterArr(out.albums),
+    group_topics: filterArr(out.group_topics ?? out.groupTopics),
+    group_joins: filterArr(out.group_joins ?? out.groupJoins),
+    profile: filterArr(out.profile),
+    subjects: out.subjects ?? [],
+  };
+}
+
