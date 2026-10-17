@@ -123,8 +123,87 @@
 
 ---
 
-## 5. 结论
+## 5. 推荐的修改方案（Proposals for Multi-Account & Edge Resilience）
+
+针对本次全流程审计暴露出的「CLI 多账号防御不一致」以及「指定账号过滤缺失」两大痛点，提出以下四阶段递进式演进方案：
+
+### 5.1 阶段一：补齐 Export Adapters 的 Fail-Fast 阻断机制（即时防线）
+
+- **现状问题**：`doubak-export-adapters` 盲目读取 Canonical 目录，若用户在 `parse.js` 中使用了 `--ignore-warnings` 生成了混合 UID 的 Canonical 数据，导出器会在毫无感知的情况下导出首个命中账号的数据，或将多个账号的书影音混合写入同一个 CSV/NDJSON，污染目标第三方平台（NeoDB/Letterboxd/Goodreads）。
+- **修改方案**：
+  在 `doubak-export-adapters/src/canonical.js` 的 `loadCanonical(dir)` 中，加载记录时统一收集 `record.account?.user_id`：
+  ```javascript
+  const uniqueUids = new Set();
+  for (const mark of records.marks) {
+    if (mark.account?.user_id) uniqueUids.add(String(mark.account.user_id));
+  }
+  if (uniqueUids.size > 1 && !options.account) {
+    console.error(`✖ 输入的 canonical 目录中包含多个账号的数据（${Array.from(uniqueUids).join('、')}）。`);
+    console.error('  直接导出可能导致第三方平台（NeoDB/Letterboxd/Goodreads）数据交叉污染。');
+    console.error('  请使用 --account <uid> 指定账号，或先按账号分别生成 canonical。');
+    process.exit(1);
+  }
+  ```
+- **收益**：与 `parse.js` 和 `generate.js` 统一防御门槛，全链路阻断混合污染。
+
+### 5.2 阶段二：统一三端 CLI 的 `--account <uid>` 过滤开关（解耦目录强隔离）
+
+- **现状问题**：目前用户必须严格在文件系统层面物理分开归档包目录，一旦归档包混放在同一父目录下，CLI 工具缺乏按账号过滤解析/导出/生成的能力（均报不认识 `--account` 开关或阻断）。
+- **修改方案**：
+  1. **`doubak-data-parser`（`bin/parse.js`）**：
+     - 在 CLI 参数解析器中增加 `--account <uid>` 与 `--account=<uid>`。
+     - 在执行拓扑分析与 `parse()` 前，过滤扫描到的 `bundleDirs`：
+       ```javascript
+       if (targetAccount) {
+         bundles = bundles.filter(b => String(b.manifest.account?.user_id) === String(targetAccount));
+         if (bundles.length === 0) {
+           console.error(`✖ 未在输入目录中找到账号 ${targetAccount} 的归档包。已发现账号：${foundUids.join('、')}`);
+           process.exit(1);
+         }
+       }
+       ```
+     - 此时仅留目标账号的 bundle 序列，自然解除多账号碰撞报错。
+  2. **`doubak-export-adapters`（`bin/export.js`）**：
+     - 支持 `--account <uid>` 选项；
+     - 在 `loadCanonical` 读取各 NDJSON 时，只保留 `record.account?.user_id === targetAccount` 的记录；若不存在该账号则友好报错退出。
+  3. **`doubak-site-generator`（`bin/generate.js`）**：
+     - 将已存在的 `--account` 选项接入核心逻辑；
+     - 在读取 Canonical 数据后、调用 `resolveSiteTitle` 和构建静态文件前，先对内存中的数据集执行过滤：
+       ```javascript
+       if (options.account) {
+         canonical = filterCanonicalByAccount(canonical, options.account);
+       }
+       ```
+     - 生成站点仅包含该账号的内容与对应头像，彻底解决混合 Canonical 生成站点的死锁问题。
+
+### 5.3 阶段三：支持全自动批量分治输出（`--all-accounts`）
+
+- **场景**：离线冷备份脚本或家庭/多账号自动化流水线。
+- **修改方案**：
+  - 允许在三个工具中传入 `--all-accounts`；
+  - 工具检测到多账号时不报错退出，而是按 UID 分流，自动将产出写到子目录：
+    - Parser：`<out_dir>/<uid>/canonical/`
+    - Export Adapters：`<out_dir>/<uid>/exports/`
+    - Site Generator：`<out_dir>/<uid>/site/`
+  - 彻底将用户从手动写 Shell 循环处理多账号的工作中解放出来。
+
+### 5.4 阶段四：爬虫封面模式的防御性泛化
+
+- **现状经验**：本次发现并修复的早期舞台剧封面，因使用了豆瓣独立的 `pview/drama_subject_poster` 路径而被原本仅识别 `view/(subject|photo)` 的扩展正则漏抓。
+- **推荐方案**：
+  - 在 `doubak-extension/src/crawl/loop.js` 中，将封面识别正则由枚举式扩展为安全白名单前缀匹配：
+    ```javascript
+    // 匹配 img*.doubanio.com 下所有合法海报与封面资源路径
+    /(?:img\d*\.doubanio\.com\/(?:view\/(?:subject|photo)|pview\/[a-z_]+|[blsp]pic)\/[^"'\s\)]+)/i
+    ```
+  - 针对豆瓣未来可能出现的其他媒介专属前缀（如音乐海报、播客封面等）形成长效免疫。
+
+---
+
+## 6. 结论
 
 1. **舞台剧封面修复验证完备**：爬虫端新增路径规则（`pview/drama_subject_poster`）已补全单元测试，下游解析器与站点生成器对现有缺失包与未来完整包均有完善的兼容与优雅降级机制。
 2. **端到端流水线稳健**：两份真实数据在解析、导出（NeoDB/Letterboxd/Goodreads）以及静态站点生成上全部畅通。
 3. **多账号边界保护严格**：数据解析器与静态站点生成器均严格落实了 Fail-Fast 保护铁律，有效防止用户意外混淆多个账号的数据。
+4. **演进路径清晰明确**：通过补齐 Export Adapters 的 Fail-Fast 与推进统一 `--account` 过滤参数，能够彻底打通多账号场景下的全自动化归档体验。
+
