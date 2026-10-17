@@ -207,3 +207,39 @@
 3. **多账号边界保护严格**：数据解析器与静态站点生成器均严格落实了 Fail-Fast 保护铁律，有效防止用户意外混淆多个账号的数据。
 4. **演进路径清晰明确**：通过补齐 Export Adapters 的 Fail-Fast 与推进统一 `--account` 过滤参数，能够彻底打通多账号场景下的全自动化归档体验。
 
+---
+
+## 7. 改造落地与真实数据验证结果（2026-10-17 实施完成）
+
+### 7.1 实现与改动汇总
+
+1. **Stage 1 (Fail-Fast 对齐)**：
+   - `doubak-export-adapters`（`src/canonical.js`、`bin/export.js`）：加入多账号识别，发现多 UID 且未显式指定过滤时，退出码 `1` 阻断，杜绝污染第三方平台。
+2. **Stage 2 (统一 `--account <uid>`)**：
+   - `doubak-data-parser`：`filterSourcesByAccount` 沿 `previous_bundle_id` 与 `floor_from_bundle_id` 自动溯源保留链条中的无清单祖先包；
+   - `doubak-export-adapters`：`filterCanonicalByAccount` 纯内存过滤 records 并安全导出；
+   - `doubak-site-generator`：按 UID 过滤 records、头像与原始图片索引。
+3. **Stage 3 (`--all-accounts` 批量分流与全链路子目录感知)**：
+   - `doubak-site-generator`：`indexImages` 升级为 `walk(dir)` 深度递归，带 `realpathSync` 环路保护、忽略 `.git`/`node_modules`、命中 `index-*.ndjson` 止步不读内部 WARC 段；
+   - `doubak-export-adapters` & `doubak-site-generator`：引入 `findCanonicalDirs` 自动探查子目录中的 canonical 存档；
+   - 三大 CLI 统一支持 `--all-accounts` 自动向 `<out_dir>/<uid>/` 分治产出。
+4. **测试覆盖**：
+   - 全项目 2,123 个单元测试全部通过（2,122 pass, 1 skipped, 0 fail）。
+
+### 7.2 真实混合归档（`exports/` + `exports_3rd/`）端到端大考实测
+
+| 测试环节与场景 | 执行命令 | 实测指标与运行结果 | 状态 |
+|---|---|---|---|
+| **Parser 混合阻断** | `parse.js <mixedDir> <out>` | 扫描 74 个段（879 MB）、32,078 条捕获；精准拦截混合账号 `154611037` 与 `82160871`；退出码 `1`，零磁盘写入。 | ✅ PASS |
+| **Parser 单账号隔离** | `parse.js ... --account 154611037` | 仅提取三岐闻 3 份档案（439ms），产出标记 448 条、广播 461 条、长文 2 篇、豆列 2 份、小组 4 个，零串号。 | ✅ PASS |
+| **Parser 深度子目录隔离** | `parse.js ... --account 82160871` | 穿透 `20260806/` 嵌套子目录，合并 34 份档案（19s），产出标记 2,992 条、广播 3,470 条、长文 6 篇、相册 1 个、小组 34 个。 | ✅ PASS |
+| **Parser 批量分流** | `parse.js ... --all-accounts` | 识别两账号，自动分流解析至 `canonical_all/82160871/` 与 `canonical_all/154611037/`。 | ✅ PASS |
+| **Export 混合阻断** | `export.js <mixedCanonical> <out>` | `findCanonicalDirs` 发现多个子目录，退出码 `1` 阻断并提示防污染。 | ✅ PASS |
+| **Export 单账号导出** | `export.js ... --account 154611037` | 锁定三岐闻子目录，成功导出 NeoDB（标记 448、历史 385）、Letterboxd（417 未知进 check）与 Goodreads（30 本）。 | ✅ PASS |
+| **Export 批量分流** | `export.js ... --all-accounts` | 分流导出至 `exports/82160871/` 与 `exports/154611037/`，各自含完整平台导入包。 | ✅ PASS |
+| **Site Gen 混合阻断** | `generate.js <mixed> <bundles> <out>` | 识别多子目录与混合 UID，退出码 `1` 阻断拒绝混合生成。 | ✅ PASS |
+| **Site Gen 单账号+深度图片** | `generate.js ... --account 82160871` | 递归检索出 `20260806/` 全部图片，生成 3,182 页、提取 covers 2,964 张与 uploads 168 张，站名头像无误。 | ✅ PASS |
+| **Site Gen 批量分流** | `generate.js ... --all-accounts` | 批量构建，在 `site_all/82160871/` 与 `site_all/154611037/` 生成两个主题完整、头像独立的静态站点。 | ✅ PASS |
+| **Flat 混合数据容灾** | 单目录手工合并的混合 NDJSON 文件测试 | 记录级过滤依然 100% 生效，无数据穿透。 | ✅ PASS |
+
+
