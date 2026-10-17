@@ -17,6 +17,8 @@
 
 ## 多账号与公开归档
 
+Firefox 打包、账号切换及导入导出实测见[兼容性核对](docs/designs/firefox-multi-account-audit-2026-10-18.md)。
+
 设计逐项覆盖与尚未实现的部分见[实现核对记录](docs/designs/public-and-third-party-account-archive-review.md)。
 
 概览页留空即可备份当前登录账号；输入豆瓣主页 HTTPS 网址、用户名或数字 UID 后点击

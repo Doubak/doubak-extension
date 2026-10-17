@@ -1,5 +1,9 @@
 # Firefox 支持：第 0 步的实测
 
+> 2026-10-18 更新：见[多账号、导入导出及打包核对](designs/firefox-multi-account-audit-2026-10-18.md)。
+> 当前 Firefox 包必须保留 `host-offscreen.js` 静态依赖；以下 2026-09-09 的“排除该文件”和
+> lint 警告数量为当时记录，不再描述当前构建。
+
 跟踪 issue：[`Doubak/doubak-extension#11`](https://github.com/Doubak/doubak-extension/issues/11)。
 
 这一页记录的是**实测数据与事实**，而非计划。计划在别处；这里每一行都有明确的是/否，

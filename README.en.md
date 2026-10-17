@@ -60,8 +60,9 @@ Both a self archive and a third-party public archive have been checked through t
 parser, export adapters and site generator; this does not verify every page variant.
 
 Site titles use the account nickname, falling back to username or UID. Titled topic
-broadcasts retain their title in canonical data, Markdown and search. Avatar downloads,
-personal favicons and header logos are **planned, not implemented**; see the
+broadcasts retain their title in canonical data, Markdown and search. Target account avatars
+are archived and included in Markdown exports; the Hugo generator creates local favicons
+and header images, with the previous green logo as fallback. See the
 [avatar design](docs/designs/account-avatar-and-site-branding.md) and
 [implementation coverage](docs/designs/public-and-third-party-account-archive-review.md).
 
