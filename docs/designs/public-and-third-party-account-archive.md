@@ -1403,11 +1403,11 @@ target_user [公开]
 1. **单个 Bundle 与 Bundle 链条导出**：
    - 导出原始 WARC Bundle 或 Bundle 链属于容器层操作，天然以单 Bundle 或同一 UID 的增量链为单位，不受多账号影响。
 2. **派生格式导出（NeoDB NDJSON、CSV、Markdown）**：
-   - 若本地 OPFS 中仅存有 1 个账号：静默绑定该账号，直接展示各格式导出卡片，零多余点击；
+   - 若本地 OPFS 中仅存有 1 个账号：自动绑定并展示该账号，无需额外选择；目录与外层 ZIP 保留原名（如 `doubak-markdown/`、`doubak-markdown.zip`），不追加 UID；
    - 若本地 OPFS 中存有 >1 个账号（例如既有我的账号备份，又有导入或抓取的第三方公开备份）：
      - 页面顶部必须展示显式的单选【账号选择器】；
      - 用户必须明确选择其中一个账号后，下方各个导出选项才被激活；
-     - 导出的所有文件名、内部元数据均严格绑定该目标用户的数字 UID（如 `neodb-235807474.zip`），绝不混杂其他账号数据。
+     - 导出目录与外层 ZIP 名追加所选 UID（如 `doubak-neodb-235807474/`、`doubak-neodb-235807474.zip`）；内部文件名保持目标格式约定（如 `neodb-ndjson-import.zip`、`marks.ndjson`），记录归属与内容仅来自所选账号。
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -1602,8 +1602,10 @@ target_user [公开]
 #### 7.1.5 多账号 Canonical 存储拓扑（Multi-Account Partitioning）
 - 解析器 CLI 工具增加对多账号的支持：
   ```bash
-  # 默认在目标账号专属目录下输出 Canonical
-  node bin/parse.js input_bundles/ --account 1234567 --out canonical/1234567/
+  # 只解析指定账号，直接写入指定目录，不自动追加 UID
+  node bin/parse.js input_bundles/ canonical/ --account 1234567
+  # 批量分流多个账号时，写入 canonical/<uid>/
+  node bin/parse.js input_bundles/ canonical/ --all-accounts
   ```
 - 每一条输出记录的顶层对象均带上 `account: { user_id, username, nickname }`，确保多账号数据无论在分目录存放还是在单一目录下按行存储时，都具备唯一自解释性与用户可读性。
 
@@ -1667,11 +1669,11 @@ targets/neodb-ndjson.js  targets/*.js           instructions.js
   - 若标记因匿名公开模式缺少标签（`tags` 为 omitted），适配器**坚决不输出 `TagMember`**。NeoDB 导入器在没有看到 `TagMember` 时不会改变目标条目的现有标签，杜绝抹掉用户在 NeoDB 上已有的标签体系。
 
 #### 7.2.3 CSV 适配器（Letterboxd / Goodreads）
-- CSV 适配器为每位第三方账号生成专属的 CSV 清单（如 `1234567-letterboxd.csv`）。
+- CSV 适配器按账号隔离数据，保留各目标格式的文件名；批量多账号导出通过 `<输出目录>/<uid>/` 区分，不给每个 CSV 文件追加 UID。
 - 在导出报告中明确告知用户：“该归档为第三方公开归档，不含未公开标记及私人短评。”
 
 #### 7.2.4 Markdown 导出器
-- 为每个账号创建独立目录树：`markdown_export/<user_id>/`。
+- 单账号或 CLI `--account <uid>` 直接使用指定输出目录；CLI `--all-accounts` 分流多个账号时才使用 `<输出目录>/<uid>/`。扩展的目录及 ZIP 命名见 §6.4.1。
 - 将公开长评、公开日记与影视书影音标记结构化输出为前置 YAML 元数据的 Markdown 文档，适合 Obsidian、Logseq 等本地知识库直接导入。
 
 ---
@@ -1701,11 +1703,11 @@ targets/neodb-ndjson.js  targets/*.js           instructions.js
 - **单账号专属站点（默认模式）**：
   ```bash
   # 针对指定账号生成专属独立站点
-  node bin/generate.js --canonical canonical/ --account 1234567 --out site/1234567/
+  node bin/generate.js canonical/ input_bundles/ site/ --account 1234567
   ```
-  若 Canonical 目录内仅有单一账号，则 `--account` 可省略，自动锁定该账号。
-- **多账号索引门户（Hub Portal，显式声明）**：
-  当用户显式传递 `--all-accounts` 时，站点生成器支持在顶层生成多账号索引 Portal，各账号作为子路径独立存放（如 `/users/1234567/`），保持各账号之间相互隔离。
+  若 Canonical 目录内仅有单一账号，则 `--account` 可省略，自动锁定该账号。单账号及显式 `--account` 均直接写入指定输出目录，不自动追加 UID。
+- **多账号批量生成（`--all-accounts`）**：
+  多个账号分别写入 `<产出目录>/<uid>/`，每个目录是独立站点；没有额外的 `users/` 或 `site/` 层。顶层索引门户尚未实现。单个 Canonical 目录只有一个账号时仍直接使用指定产出目录。
 
 #### 7.3.2 档案作者身份与动态站点命名（Profile Attribution & Dynamic Site Titling）
 - **核心诉求与命名规范**：

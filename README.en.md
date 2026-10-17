@@ -46,7 +46,11 @@ logged-in account. Enter a profile URL, username or numeric UID and click **æŸ¥ç
 Public pages can be archived while logged in as an operator or anonymously.
 
 Coverage and archive lists can be filtered by account. Derived exports require selecting
-one account when several are present. A paused crawl remains bound to its original target,
+one account when several are present. A single-account library keeps the original output
+names (for example, `doubak-markdown/` and `doubak-markdown.zip`); exports from a
+multi-account library append the selected UID to the directory and ZIP names
+(for example, `doubak-markdown-154611037/`). Internal filenames stay unchanged.
+A paused crawl remains bound to its original target,
 operator and scope; changing the login does not move its checkpoint to another account.
 Public observations do not imply deletion of content they cannot see.
 

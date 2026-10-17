@@ -182,9 +182,8 @@
 - **修改方案**：
   - 允许在三个工具中传入 `--all-accounts`；
   - 工具检测到多账号时不报错退出，而是按 UID 分流，自动将产出写到子目录：
-    - Parser：`<out_dir>/<uid>/canonical/`
-    - Export Adapters：`<out_dir>/<uid>/exports/`
-    - Site Generator：`<out_dir>/<uid>/site/`
+    - Parser、Export Adapters、Site Generator：均为 `<out_dir>/<uid>/`，不额外添加 `canonical/`、`exports/` 或 `site/` 层。
+  - 单账号及显式 `--account <uid>` 直接使用指定输出目录，不自动追加 UID；单个输入数据集只有一个账号时，`--all-accounts` 也保留原目录布局。
   - 彻底将用户从手动写 Shell 循环处理多账号的工作中解放出来。
 
 ### 5.4 阶段四：爬虫封面模式的防御性泛化
