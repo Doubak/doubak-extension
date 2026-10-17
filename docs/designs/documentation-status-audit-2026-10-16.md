@@ -1,3 +1,5 @@
+> 后续更新：2026-10-17 头像功能已在 main 实现，当前状态见 [头像实现核对](account-avatar-implementation-review.md)。下文保留 10 月 16 日审计时的历史结论。
+
 # 文档与产品说明核对（2026-10-16）
 
 本次以当前 main 的实际实现为准，核对 extension 中英文 README、Help、官网首页、使用指南与隐私页，

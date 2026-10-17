@@ -1,6 +1,6 @@
 # 账号头像归档与个人站点图标
 
-状态：待实现的设计，2026-10-16。本文不代表当前版本已经支持头像下载或 favicon。
+状态：已在 main 实现，2026-10-17；不代表商店安装包已更新。验收结果见 [实现核对](account-avatar-implementation-review.md)。
 适用仓库：data-specs → data-parser / extension → site-generator；export-adapters 只需兼容新增记录。
 
 承接[公开与多账号归档设计](public-and-third-party-account-archive.md) §7.1.6、§7.3：
@@ -37,7 +37,9 @@
 需要同时有其他身份依据才能接受不带 UID 的默认头像。
 
 只接受实际页面给出的 HTTPS 豆瓣图片地址，协议相对地址按 HTTPS 解析；
-使用现有图片域白名单并逐跳检查重定向，拒绝外站、非 HTTPS、凭据 URL、data/blob URL。
+使用现有图片域白名单，拒绝外站、非 HTTPS、凭据 URL、data/blob URL。
+实现选择拒绝所有头像重定向（fetch `redirect: error`）：浏览器的 manual 重定向不暴露
+Location，follow 又无法逐跳拦截；拒绝跳转比只检查最终 URL 更能守住域边界。
 不把 `/u…` 猜成 `/up…`，不穷举大图地址。原始页面和请求 URL 如实保留。
 已确认的默认占位头像不下载；结构不认识属于未知，不等于用户删除了头像。
 
@@ -54,7 +56,7 @@
 | 段 | `assets-*`，不随可丢弃的作品 `catalog-*` 清理 |
 | parent_capture_id | 直接指向本次已保存、身份匹配的 `profile.overview` capture |
 | 归属 | manifest / checkpoint 的目标 UID；不建立独立的操作者资源 |
-| 调度 | 一次主页观测最多一个实际头像请求；普通图片队列、全局节奏与暂停机制 |
+| 调度 | 一次主页观测最多派生一个头像任务（网络重试沿用原策略）；普通图片队列、全局节奏与暂停机制 |
 
 每个新 bundle 都重新请求主页里当前的头像，即使 URL 在旧 bundle 中已成功抓过；
 头像 URL 可能复用，**不能套用「同 URL 图片永不改变」的跳过规则**。
@@ -101,7 +103,7 @@ manifest 必填字段均不变。当前通用 schema 可以装下这些数据，
 - `revisions` 沿用 `parser_version`、首次 / 末次观测、`fields`、字段 `digests`、`observations`。
 - 第一版 `fields` 只有 `username`、`nickname`、`avatar_url`（字段类型为 string 或 null，
   不使用空串代替缺失）；昵称等只从身份块读取。顶层 `account` 继续符合现有通用身份约定。
-- `observations` 指向原主页 capture，带现有 scope / `omitted_fields` 证据。
+- `observations` 指向原主页 capture，通过 bundle ID 回指原 crawl_scope，并带 `omitted_fields` 证据。
   资源二进制不进 canonical；头像字节的身份由 bundle 的 capture ID 与 payload digest 表达。
 - URL 相同但字节变化不伪造一次 `avatar_url` 字段编辑；同一修订保留新的主页观测，
   下游按最新观测对应的头像 capture 选择字节。
@@ -126,13 +128,15 @@ profile 与其他记录一样按观测时间排序、同版本字段摘要合并
 如果 profile 与其他 canonical 记录 UID 不同，整个站点生成在写入前拒绝；只有 profile
 而没有标记 / 广播的账号也应能生成有名称的空内容主页。
 
-在共享 `image-index.js` 新增账号头像解析接口，而非两个宿主各自猜 URL：
+在共享 `avatar.js` 提供独立的账号头像解析接口，而非两个宿主各自猜 URL：
 
 1. 选出 profile 最近一次有明确头像字段证据的观测。缺失新证据可保留上一观测，
    但时间仍标为旧的观测时间；明确默认头像则显示文字，不退回旧自定义头像。
 2. 沿该主页 capture 的 parent 边找 `asset.account_avatar`，检查目标 UID、URL、成功 verdict。
    只按 URL 相同、目录先后或当前登录账号都不足以匹配。
-3. 同一父观测有重试时，选最新可读成功 capture；字节须通过摘要与图片解码校验。
+3. 同一父观测有重试时，选最新可读成功 capture；原图须通过摘要、MIME、容器与尺寸校验；
+   完整像素解码由 Hugo 统一完成，解码失败时只保留文字站名。Markdown-only sidecar 的
+   `ok` 表示上述字节检查通过，不能冒充已完成完整像素解码。
 4. 最新明确头像 URL 缺图时降级文字并报告 missing / unreadable，不静默把更旧头像称为当前头像。
    第一版不跨父观测回退字节，即使 URL 一样；宁可明确缺图，也不遮蔽同 URL 换图。
 
@@ -190,5 +194,5 @@ sample 只在用户安排重新生成时应用此能力；设计 / 验证过程�
   所有资源本地存在，离线零外部请求，明暗主题与窄屏可读，没有重复 h1 / 无障碍名字。
 - 真实本人和第三方 bundle 的匿名化最小夹具：不提交原始 Cookie、访问令牌或私人页面。
 
-本轮只交付设计和现状文案校准。以上阶段全部完成并通过验收前，README / 官网 / Help
-都必须写「头像归档与个人图标待实现」，不能将主页 HTML 已保存等同于头像原图已归档。
+实现与测试覆盖逐项记录在 [实现核对](account-avatar-implementation-review.md)。
+README / 官网 / Help 区分 main 与已发布安装包，旧主页 HTML 仍不等于已归档头像字节。

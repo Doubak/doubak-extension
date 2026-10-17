@@ -1,6 +1,6 @@
 # 公开与多账号归档：实现覆盖核对
 
-核对日期：2026-10-15。对应 extension PR #23、specs PR #5、parser PR #8、site-generator PR #5。
+核对日期：2026-10-15；头像后续更新：2026-10-17。对应 extension PR #23、specs PR #5、parser PR #8、site-generator PR #5。
 依据：[设计正文](public-and-third-party-account-archive.md)。这是实现验收记录，不能代替设计全文。
 
 ## 本轮界面约定
@@ -37,7 +37,7 @@
 | §6.5 原生 bundle 导入 | 一次扫描按 UID 展示，多账号一次确认；保留重复/冲突检测、新文件限制及回滚 | 已实现；沿用原有扁平 OPFS bundle 目录，以元数据分组，**未迁移**至 `archives/<uid>/...` |
 | §7.0、§7.1.5、§7.2、§7.3.1 CLI 多账号 | 扩展先筛选单 UID；站点生成器已有混合账号拒绝；parser CLI 仍有历史 `--ignore-warnings` | **未完成统一契约**：各 CLI 尚无统一 `--account`；未实现多账号 Canonical/站点目录分区；export-adapters 尚未新增此处要求的统一预检 |
 | §7.1.3 广播作者 | 既有提取器按目标 UID 严格筛掉他人广播 | 防串号已存在；未新增 `action: reshare` / `original_author` 完整转播模型 |
-| §7.1.6 结构化主页 | 原始主页已保存；账号昵称进入 manifest/canonical account | **未实现** `extract-profile.js`、`profile.ndjson` 的头像、简介、地点等新结构；[头像专项设计](account-avatar-and-site-branding.md)已补齐资源与站点契约 |
+| §7.1.6 结构化主页 | `extract-profile.js`、canonical/1.3 `profile.ndjson` 及目标头像归档 / 站点图标已实现 | 昵称、域名、头像有修订与来源；简介、地点、加入日期仍待实现。见[头像验收](account-avatar-implementation-review.md) |
 | §7.4 第三方适配器 | 此轮涉及扩展的原生 bundle 导入；未修改历史第三方转换器 | **未实现**该转换器的新公开 scope 注入/fidelity 契约 |
 | §7.5 联动与真实验证 | 29 个 vendor 文件与当前兄弟分支逐字节一致，spec 常量/Firefox manifest 新鲜度通过 | 本地联动通过；CI 对照兄弟 main，须依依赖顺序合并后重跑；未进行当前豆瓣线上账号抓取演练 |
 
