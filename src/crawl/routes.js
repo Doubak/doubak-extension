@@ -468,6 +468,12 @@ export function buildRoutes({
     note: '用户发布的小组话题正文；由 group.publish 派生',
   });
 
+  routes.push({
+    key: 'asset.account_avatar', intent: 'asset.image.account_avatar', kind: 'assets',
+    surface: 'asset', priority: PRIORITY.IMAGES, source: 'archive', enumeration: 'bounded',
+    safetyNet: 'contiguity', ordered: false, note: '目标账号头像；由 profile.overview 派生',
+  });
+
   // 加入的小组图标：由 group.joins 派生。
   routes.push({
     key: 'asset.group_icon',

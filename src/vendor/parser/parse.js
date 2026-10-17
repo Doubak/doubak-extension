@@ -14,6 +14,7 @@
  * 增量解析可以后来再加，那是缓存优化，不是语义。
  */
 
+import { extractProfile } from './extract-profile.js';
 import { extractMarks } from './extract.js';
 import { extractBroadcasts } from './extract-broadcast.js';
 import { topology, assertSingleAccount } from './topology.js';
@@ -73,8 +74,8 @@ import {
 // 0.15.2：支持不带 <p> 的广播与转发附言正文抽取，剔除尾随转发卡片与私密/注销占位符。
 // 0.15.3：保留 topic 广播的独立标题和原页链接。
 // 0.15.4：广播多出 text_parts —— 正文里那几个链接（话题、@豆友、站外链接、作品名…）。
-export const PARSER_VERSION = 'doubak-data-parser/0.15.4';
-export const CANONICAL_VERSION = 'canonical/1.2';
+export const PARSER_VERSION = 'doubak-data-parser/0.16.0';
+export const CANONICAL_VERSION = 'canonical/1.3';
 
 /** 路线状态词 → canonical 的封闭词表。 */
 const STATUS = { collect: 'done', do: 'doing', wish: 'wish' };
@@ -220,6 +221,7 @@ export async function parse(sources, opts = {}) {
   const groupPublishTopics = new Map();
   /** @type {Map<string, object>} 小组 ID → 用户加入的小组记录 */
   const groupJoins = new Map();
+  const profiles = new Map();
   /**
    * `medium:id` → 从详情页补来的字段。
    *
@@ -320,6 +322,10 @@ export async function parse(sources, opts = {}) {
         continue;
       }
 
+      if (row.intent === 'profile.overview') {
+        if (row.verdict === 'ok' && row.surface === 'html') work.push({ src, row, kind: 'profile', auth: 'none' });
+        continue;
+      }
       const isBroadcast = row.intent === 'broadcast.timeline';
       const lfKind = row.intent === 'note.item' ? 'note' : row.intent === 'review.item' ? 'review' : null;
       const isDetail = row.intent === 'interest.item';
@@ -505,7 +511,7 @@ export async function parse(sources, opts = {}) {
   }
 
   throwIfAborted(opts.signal);
-  work.sort((a, b) => (a.row.observed_at < b.row.observed_at ? -1 : 1));
+  work.sort((a, b) => ((Date.parse(a.row.observed_at) || 0) - (Date.parse(b.row.observed_at) || 0)) || (a.row.capture_id ?? '').localeCompare(b.row.capture_id ?? ''));
 
   // **详情页必须全部先读完。**
   //
@@ -556,6 +562,26 @@ export async function parse(sources, opts = {}) {
       surface: row.surface ?? 'html',
     };
 
+    if (kind === 'profile') {
+      // Unlike adoption for marks, profile ownership requires this source's own evidence.
+      const account = src.manifest?.account;
+      const profile = extractProfile(html, row.url, account?.user_id);
+      if (profile) {
+        let rec = profiles.get(profile.userId);
+        if (!rec) {
+          rec = { canonical_version: CANONICAL_VERSION, identity_layer: 'upstream_id',
+            upstream_id: profile.userId, account: canonicalAccount(accountOf(src)), url: profile.url, revisions: [] };
+          profiles.set(profile.userId, rec);
+        }
+        rec.url = profile.url;
+        const prior = rec.revisions.at(-1)?.fields ?? {};
+        const omitted = ['username', 'nickname', 'avatar_url'].filter(k => !Object.hasOwn(profile.fields, k));
+        const fields = { ...prior, ...profile.fields };
+        appendRevision(rec.revisions, { fields, digests: digestAll(fields), parserVersion,
+          observation: { ...observationBase, ...(omitted.length ? { omitted_fields: omitted } : {}) } });
+      }
+      continue;
+    }
     if (kind === 'detail') {
       // **详情页只补充，不创建。** 作品记录的来源是列表页（那才是「我标记过它」
       // 的凭据）；一张详情页单独存在时，我们并不知道用户是否标记过它。
@@ -849,6 +875,7 @@ export async function parse(sources, opts = {}) {
 
   return {
     topology: topo,
+    profile: [...profiles.values()],
     doulists: [...doulists.values()],
     marks: [...marks.values()],
     subjects: [...subjects.values()],

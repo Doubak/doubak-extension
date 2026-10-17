@@ -26,7 +26,7 @@ function nonblank(value) {
  */
 export function resolveSiteTitle(canonical, explicitTitle = null, manifestAccounts = []) {
   const profiles = Array.isArray(canonical?.profile) ? canonical.profile : [canonical?.profile];
-  const accounts = [...profiles.map((p) => p?.account ?? p), canonical?.account, ...manifestAccounts];
+  const accounts = [...profiles.map((p) => p?.revisions ? { ...p.account, ...p.revisions.at(-1)?.fields } : (p?.account ?? p)), canonical?.account, ...manifestAccounts];
   for (const type of RECORD_TYPES) {
     for (const record of canonical?.[type] ?? []) accounts.push(record?.account);
   }

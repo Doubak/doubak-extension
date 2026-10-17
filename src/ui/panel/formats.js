@@ -55,6 +55,7 @@
  * 百分比是同一个道理。
  */
 
+import { avatarNotice } from '../../vendor/site-generator/avatar.js';
 import {
   $, bytes as fmtBytes, getOpfsWorker, scanBundleDirs,
 } from './shared.js';
@@ -236,13 +237,13 @@ export const FORMATS = {
     build: (data) => buildCanonical(data),
     summary: (r) => [
       `标记 ${r.marks} 条（共 ${r.revisions} 次观测）`,
-      `作品 ${r.subjects} · 广播 ${r.broadcasts}`,
+      `作品 ${r.subjects} · 广播 ${r.broadcasts} · 账号资料 ${r.profile ?? 0}`,
       `日记与评论 ${r.longform} · 豆列 ${r.doulists}`,
       (r.albums || r.groupTopics || r.groupJoins)
         ? `相册 ${r.albums ?? 0} · 小组话题 ${r.groupTopics ?? 0} · 加入的小组 ${r.groupJoins ?? 0}`
         : null,
     ].filter(Boolean),
-    next: '这八个 NDJSON 文件可作为下游工具的输入，支持直接用 jq 读取，或供导出适配器与站点生成器使用。',
+    next: '这九个 NDJSON 文件可作为下游工具的输入，支持直接用 jq 读取，或供导出适配器与站点生成器使用。',
   },
   markdown: {
     button: 'export-markdown',
@@ -262,6 +263,7 @@ export const FORMATS = {
       `搜索索引 ${r.searchRows} 条`,
       // **「还指着豆瓣」与「缺了」不是一回事，必须分开说。** 前者页面上有图，
       // 但要豆瓣还活着才看得见——那正是这个项目存在的理由要消掉的前提。
+      avatarNotice(r.avatar),
       r.remote.length ? `⚠ ${r.remote.length} 张图没导出成本地，页面上仍然指向豆瓣` : null,
       r.missing.length ? `⚠ ${r.missing.length} 张图档案里没有` : null,
     ].filter(Boolean),
@@ -474,13 +476,14 @@ function showResult(format, built, data, bundles, handed = null) {
   // 而空在哪儿要等他传到 NeoDB、看到「导入 0 条」才知道——**失败发生在别人的
   // 服务器上，离原因最远的地方**。
   //
-  // 判据是「八类全空」，不是「标记为 0」：只抓了广播、或者只有几篇日记的档案，
+  // 判据是「九类全空」，不是「标记为 0」：只抓了广播、或者只有几篇日记的档案，
   // 都是完全正当的导出。
   const records = data.marks.length + data.subjects.length + data.broadcasts.length
     + data.longform.length + data.doulists.length
     + (data.albums ?? []).length
     + (data.groupTopics ?? data.group_topics ?? []).length
-    + (data.groupJoins ?? data.group_joins ?? []).length;
+    + (data.groupJoins ?? data.group_joins ?? []).length
+    + (data.profile ?? []).length;
   const empty = records === 0;
 
   el.className = `card tone-${empty ? 'warn' : 'ok'}`;

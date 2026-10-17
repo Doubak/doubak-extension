@@ -340,7 +340,7 @@ export function renderReadme(bundleId) {
   manifest.json      本次抓取的清单：抓了谁、产出哪些文件、走到了哪里。
   index-*.ndjson     每行一条抓取记录（JSON）。用 jq 即可查阅，无需专门工具。
   data-*.warc.gz     网页与接口响应，标准 WARC 格式。
-  assets-*.warc.gz   你自己上传的图片。
+  assets-*.warc.gz   目标账号上传的图片与账号头像。
   catalog-*.warc.gz  作品条目详情页与封面图等目录数据。删掉它不影响你自己写的内容，
                      但会失去离线重新生成完整网站的能力。
   checkpoint.json    仅在抓取未完成时存在，用于续抓。
@@ -377,7 +377,7 @@ Files
   index-*.ndjson     One JSON object per line, one line per capture. Readable
                      with \`jq\`; no special tooling required.
   data-*.warc.gz     Pages and API responses, standard WARC format.
-  assets-*.warc.gz   Images you uploaded yourself.
+  assets-*.warc.gz   Images uploaded by the target account and its avatar.
   catalog-*.warc.gz  Catalogue data: work detail pages and cover images. Deleting
                      these does not touch anything you wrote, but you lose the
                      ability to regenerate a full site offline.

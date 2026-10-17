@@ -14,10 +14,10 @@
  * |---|---|---|---|
  * | 作品详情页 | `interest.item` | 评分、短评数、又名都会变 | 跳过，可选重抓 |
  * | 长文正文 | `note.item` / `review.item` / `group.item` | 日记、影评与发起的讨论正文**可编辑** | 跳过，可选重抓 |
- * | 图 | `asset.*` | **什么都拿不到** | 永远跳过 |
+ * | 附图与封面 | `asset.*`（不含账号头像） | 复用既有内容地址 | 跳过 |
+ * | 账号头像 | `asset.account_avatar` | 同 URL 可能换字节 | 每个新 bundle 重抓 |
  *
- * 第三档不是一个选项。图片地址是内容地址：换了图会得到一个新的 `p…jpg`，而不是
- * 同一个地址下换一份字节。所以重抓一张已有的图，拿回来的必然是同一批字节。
+ * 附图与封面沿用成功 URL 的跳过策略；头像必须排除，不能把内容地址假设推广到头像。
  *
  * 它一直漏在外面，是因为 `asset.status_photo` 从广播页**派生**：增量必须重读最新
  * 那几页广播（不然发现不了新条目），于是那几页上的图每趟都被重新派生一遍，而派生
@@ -76,9 +76,9 @@ export function addKnownCaptures(acc, indexRows) {
     if (route === SUBJECT_ROUTE) acc.subjects.add(key);
     else if (LONGFORM_ROUTES.has(route)) acc.longform.set(key, route);
     // `asset.status_photo`、`asset.longform_embed`、`asset.subject_cover` 都在这儿。
-    // 判据是路线前缀而不是一张写死的名单：将来新增一条 `asset.*`，它会自动落进
+    // 判据是路线前缀而不是一张写死的名单：除了会复用 URL 的账号头像，其他 `asset.*` 自动落进
     // 「抓过就不再抓」——而那个默认对图片是对的。
-    else if (route.startsWith('asset.')) acc.assets.add(key);
+    else if (route.startsWith('asset.') && route !== 'asset.account_avatar') acc.assets.add(key);
   }
   return acc;
 }

@@ -511,11 +511,17 @@ describe('空档案', () => {
     assert.match(js, /文件已经写出去了，只是内容是空的/, '没说清文件确实写了');
   });
 
-  test('**判据是「五类全空」，不是「标记为 0」**', async () => {
+  test('**判据是「九类全空」，不是「标记为 0」**', async () => {
     // 只抓了广播、或者只有几篇日记的档案，都是完全正当的导出。
     // 拿 marks.length === 0 当判据会把它们一起误报成空。
     const js = await read('src/ui/panel/formats.js');
     const m = /const records = ([^;]+);/.exec(js);
+    const count = new Function('data', `return (${m[1]});`);
+    const old = { marks: [], subjects: [], broadcasts: [], longform: [], doulists: [] };
+    assert.equal(count(old), 0, '旧输入允许缺少新增记录类型');
+    for (const type of ['marks', 'subjects', 'broadcasts', 'longform', 'doulists', 'albums', 'groupTopics', 'groupJoins', 'profile']) {
+      assert.equal(count({ ...old, [type]: [{}] }), 1, `${type} 单独存在不该被报为空档案`);
+    }
     assert.ok(m, '找不到那个合计');
     for (const kind of ['marks', 'subjects', 'broadcasts', 'longform', 'doulists']) {
       assert.match(m[1], new RegExp(`data\\.${kind}\\.length`), `合计里漏了 ${kind}`);

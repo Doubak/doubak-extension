@@ -6,7 +6,7 @@
  *
  * ## 三种产出的关系
  *
- *     canonical   —— 上游的那份结构化数据，八个 ndjson。喂给命令行的下游工具。
+ *     canonical   —— 上游的那份结构化数据，九个 ndjson。喂给命令行的下游工具。
  *     neodb       —— canonical → NeoDB 的 NDJSON 归档 zip，直接上传。
  *     markdown    —— canonical → 投影 → 一棵 Markdown 树 + 图片，交给任何 SSG。
  *
@@ -22,7 +22,7 @@ import { buildPages } from '../vendor/site-generator/pages.js';
 import { resolveSiteTitle } from '../vendor/site-generator/site-title.js';
 import { accountsFromSources } from '../vendor/parser/account.js';
 import { canonicalFiles } from './run.js';
-import { indexImages, exportImages, reallyMissing } from './images.js';
+import { indexImages, exportImages, exportAvatar, reallyMissing } from './images.js';
 import { withoutPrivate } from '../vendor/site-generator/private.js';
 
 const enc = new TextEncoder();
@@ -61,7 +61,7 @@ export async function deflateRaw(bytes) {
 }
 
 /**
- * canonical 八件套，外加一份说明。
+ * canonical 九件套，外加一份说明。
  *
  * @param {object} data
  * @returns {Promise<{files: {name: string, bytes: Uint8Array}[], report: object}>}
@@ -80,6 +80,7 @@ export async function buildCanonical(data) {
       albums: (data.albums ?? []).length,
       groupTopics: (data.groupTopics ?? []).length,
       groupJoins: (data.groupJoins ?? []).length,
+      profile: (data.profile ?? []).length,
       revisions: data.marks.reduce((n, m) => n + (m.revisions?.length ?? 0), 0),
     },
   };
@@ -171,6 +172,7 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
     onProgress: (done, total) => onImageProgress?.({ done, total }),
   });
 
+  const avatar = await exportAvatar({ canonical: data, sources, write });
   const built = buildPages(p, { images: img.paths, coverBySubject: img.bySubject, siteTitle });
 
   // 按作品 id 找到的不算缺，占位图也不算缺。判定在 image-index.js 里，与站点
@@ -183,6 +185,7 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
     files: built.files.map(([name, text]) => ({ name, bytes: enc.encode(text) })),
     report: {
       ...built.stats,
+      avatar,
       images: img.written,
       missing: img.missing.filter((u) => reallyMissing(u, covered)),
       remote: built.remote,
@@ -208,8 +211,9 @@ function canonicalReadme(data) {
     `  albums.ndjson        ${n(data.albums)} 个相册`,
     `  group_topics.ndjson  ${n(data.groupTopics ?? data.group_topics)} 篇小组讨论`,
     `  group_joins.ndjson   ${n(data.groupJoins ?? data.group_joins)} 个加入的小组`,
+    `  profile.ndjson       ${n(data.profile)} 份账号资料（昵称与头像来源）`,
     '',
-    '每条记录带着 revisions —— 同一件事被观测到几次就有几条，各自带摘要与',
+    '每条记录带着 revisions —— 字段变化时新增修订，每次观测保留来源；修订带摘要与',
     '指回 WARC 的 capture_ids。**只比较同一个 parser_version 的修订**，',
     '否则修好一个抽取 bug 会让所有记录同时看起来被编辑过。',
     '',

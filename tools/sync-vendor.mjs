@@ -95,6 +95,7 @@ export const SOURCES = [
       'extract-doulist.js',
       'extract-album.js',
       'extract-group.js',
+      'extract-profile.js',
       'extract-subject.js',
       'sha256.js',
       'digest.js',
@@ -140,6 +141,8 @@ export const SOURCES = [
       'pages.js',
       'site-title.js',
       'image-index.js',
+      'avatar.js',
+      'avatar-image.js',
     ],
   },
 ];

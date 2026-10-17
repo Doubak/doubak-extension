@@ -17,6 +17,8 @@
  * `read(name, offset, length)` 是真正的区间读，只取那几十 KB。
  */
 
+import { sha256Bytes } from '../vendor/parser/sha256.js';
+import { selectAvatar, avatarOutput, avatarMetadataText } from '../vendor/site-generator/avatar.js';
 import { gunzip } from '../core/warc.js';
 import {
   buildImageIndex, fileNameFor, subdirFor, reallyMissing,
@@ -45,7 +47,11 @@ export async function imageBytes(hit) {
   const raw = await hit.host.readRaw(hit.row);
   const headEnd = findSep(raw, 0);
   if (headEnd < 0) throw new Error(`${hit.row.capture_id}: WARC 记录结构不完整`);
-  const block = raw.subarray(headEnd + 4);
+  const length = /^Content-Length: (\d+)$/mi.exec(new TextDecoder().decode(raw.subarray(0, headEnd)))?.[1];
+  if (length === undefined || headEnd + 4 + Number(length) > raw.length) {
+    throw new Error(`${hit.row.capture_id}: WARC Content-Length 无效`);
+  }
+  const block = raw.subarray(headEnd + 4, headEnd + 4 + Number(length));
   const bodyAt = findSep(block, 0);
   return bodyAt < 0 ? block : block.subarray(bodyAt + 4);
 }
@@ -112,4 +118,21 @@ export async function exportImages({ index, wanted, wantedBySubject, write, onPr
   }
 
   return { paths, bySubject, written, missing };
+}
+
+/** Same selection, byte check and sidecar as the filesystem host. */
+export async function exportAvatar({ canonical, sources, write }) {
+  const selection = selectAvatar(canonical, sources.map(host => ({ host, rows: host.index, account: host.manifest?.account })));
+  let metadata = selection.metadata;
+  for (const hit of selection.hits) {
+    let bytes;
+    try {
+      bytes = await imageBytes(hit);
+      metadata = avatarOutput(selection, hit, bytes, sha256Bytes(bytes));
+    } catch { continue; }
+    await write(`static/${metadata.avatar}`, bytes);
+    break;
+  }
+  await write('site-profile.json', new TextEncoder().encode(avatarMetadataText(metadata)));
+  return metadata;
 }

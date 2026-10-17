@@ -22,6 +22,8 @@
  * 请求频率上限也更低。
  */
 
+import { BundleReader } from '../bundle/bundle-reader.js';
+import { avatarQueueKey } from './avatar.js';
 import { BundleWriter } from '../bundle/bundle-writer.js';
 import { CrawlLoop } from './loop.js';
 import { Frontier } from './frontier.js';
@@ -811,6 +813,10 @@ export class CrawlRunner {
     // 队列从 checkpoint 里的未完成条目重建；已完成的不在里面——那是 index
     // 的职责，重复记录会带来两个可能不一致的真相来源。
     const frontier = new Frontier();
+    const avatarReader = new BundleReader({ store, bundleId: pointer.bundleId });
+    const avatarRows = routes.has('asset.account_avatar') ? await avatarReader.index() : [];
+    frontier.markCaptured(avatarRows.filter(r => r.route_key === 'asset.account_avatar' && r.verdict === 'ok')
+      .map(r => avatarQueueKey(r.url, r.parent_capture_id)));
 
     // ── 补回「checkpoint 还没见过的那几条捕获」派生出来的活
     //
@@ -849,7 +855,7 @@ export class CrawlRunner {
         url: it.url,
         // **要归一化。** 抓取循环入队时用的是 `urlKey(url)`，而 index 里存的也是
         // 归一化后的 `url_key`——恢复时直接拿原始 URL 当键，去重就跨不过这条边界。
-        urlKey: urlKey(it.url),
+        urlKey: it.route_key === 'asset.account_avatar' ? avatarQueueKey(it.url, it.enqueued_by) : urlKey(it.url),
         routeKey: it.route_key,
         intent: it.intent,
         enqueuedBy: it.enqueued_by ?? null,
@@ -950,6 +956,16 @@ export class CrawlRunner {
       // 而它可能一次都没被打断过。规范 §7.1。
       savedStates: Object.fromEntries((cp.routes ?? []).map((r) => [r.route_key, r])),
     });
+
+    // A crash after writing the profile but before enqueue/checkpoint must not lose
+    // its avatar. Re-derive from stored bytes, preserving the original parent ID.
+    const profileRow = avatarRows.filter(r => r.route_key === 'profile.overview'
+      && r.surface === 'html' && r.verdict === 'ok').at(-1);
+    if (profileRow) {
+      const saved = await avatarReader.readEntry(profileRow);
+      loop.enqueueAccountAvatar({ routeKey: 'profile.overview', url: profileRow.url },
+        { bodyText: saved.bodyText, finalUrl: profileRow.final_url ?? profileRow.url }, profileRow.capture_id);
+    }
 
     this._run = {
       bundleId: pointer.bundleId, dir: pointer.dir, store, writer, frontier, loop, pacer, routes, session, runContext,

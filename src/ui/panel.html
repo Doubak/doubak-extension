@@ -327,7 +327,7 @@
         <div class="format-card" id="format-canonical" role="tabpanel"
              aria-labelledby="subtab-canonical" hidden>
           <p class="muted small">
-            八个 NDJSON 文件（这套格式叫 <b>canonical</b>），每行一条 JSON，<code>jq</code> 直接能读。
+            九个 NDJSON 文件（这套格式叫 <b>canonical</b>），每行一条 JSON，<code>jq</code> 直接能读。
             这是所有下游工具的输入，也是十年后拿着这个文件夹的人最容易读懂的那一份。
           </p>
           <pre class="tree">doubak-canonical/
@@ -502,7 +502,7 @@
       <ol class="steps" id="downstream-steps">
         <li>
           <b>解析：档案 → 结构化数据。</b>
-          产出八个 NDJSON 文件（标记、作品、广播、长文、豆列、相册、小组话题、加入小组），可直接用
+          产出九个 NDJSON 文件（标记、作品、广播、长文、豆列、相册、小组话题、加入小组、账号资料），可直接用
           <code>jq</code> 查询。该步骤是纯函数且不联网，如结果有误，重新运行即可。
         </li>
         <li>
@@ -608,12 +608,12 @@
           <tr><td><b>导出 · 导到 NeoDB</b></td><td>产出 <code>doubak-neodb/</code>：一个可直接上传的 zip，
             外加几份说明用的旁注（旁注<b>不要</b>上传）。含标记、评分、短评、标签、长文、豆列，
             以及由广播还原的<b>状态变化史</b>——那段历史豆瓣自己已经不显示了。</td></tr>
-          <tr><td><b>导出 · 结构化数据</b></td><td>产出 <code>doubak-canonical/</code>：八个 NDJSON，
+          <tr><td><b>导出 · 结构化数据</b></td><td>产出 <code>doubak-canonical/</code>：九个 NDJSON，
             每行一条 JSON。这是所有下游工具的输入，用 <code>jq</code> 可直接查询。</td></tr>
           <tr><td><b>导出 · Markdown 站点</b></td><td>产出 <code>doubak-markdown/</code>：
             <code>content/</code> 是带 YAML 头的 Markdown，<code>static/</code> 是图片与搜索索引。
             首页站名优先使用「&lt;昵称&gt;的豆瓣存档」，旧档案依次回退到个人域名、数字 UID。
-            带标题的 topic 广播会保留标题并进入站点搜索。账号头像下载及用作站点图标尚未实现。
+            带标题的 topic 广播会保留标题并进入站点搜索。目标头像随主页归档，Markdown 导出包含本地头像；Hugo 可生成站点图标和页眉头像。旧档案缺图时保留文字站名。
             交给 Hugo／Astro／Eleventy／Jekyll 均可。<b>图片一并导出</b>，因此离线也能看。</td></tr>
         </tbody>
       </table>
@@ -638,7 +638,7 @@
             <td>广播<b>发布后不可编辑</b>，已抓取的内容不会再发生变化。</td></tr>
           <tr><td><b>图片</b>（你上传的、作品封面）</td><td><b>一律跳过</b></td>
             <td>现有附图与封面路线按成功抓取的 URL 跳过，默认复用已有字节。该类别<b>没有</b>「重新抓取」选项。
-              这一策略不代表所有图片 URL 永远不变，也不适用于尚待实现的账号头像。如需重建一份自足的档案，请使用「全量抓取」。</td></tr>
+              这一策略不代表所有图片 URL 永远不变，也不适用于账号头像：每个新档案都会重新下载当前头像。如需重建一份自足的档案，请使用「全量抓取」。</td></tr>
         </tbody>
       </table>
       <div class="hint">

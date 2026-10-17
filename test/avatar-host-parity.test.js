@@ -1,0 +1,46 @@
+import assert from 'node:assert/strict';
+import { mkdirSync, writeFileSync, readFileSync, mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { test } from 'node:test';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { BundleWriter } from '../src/bundle/bundle-writer.js';
+import { MemoryFileStore } from '../src/storage/file-store.js';
+import { OpfsBundleSource } from '../src/pipeline/opfs-bundle-source.js';
+import { parse as browserParse } from '../src/vendor/parser/parse.js';
+import { buildMarkdown } from '../src/pipeline/targets.js';
+import { canonicalFiles, withCanonicalShape } from '../src/pipeline/run.js';
+import { TEST_PRODUCER } from './helpers/producer.js';
+const available=existsSync(new URL('../../doubak-data-parser/src/parse.js',import.meta.url)) && existsSync(new URL('../../doubak-site-generator/src/generate.js',import.meta.url));
+if(process.env.CI) assert.ok(available,'CI must check out the parser and site generator');
+test('avatar: filesystem and browser hosts emit identical canonical, Markdown, image bytes and sidecar', {skip:!available},async t=>{
+const { parse }=await import('../../doubak-data-parser/src/parse.js');
+const { openAll }=await import('../../doubak-data-parser/src/bundle-source.js');
+const { generate }=await import('../../doubak-site-generator/src/generate.js');
+const { releaseSegments }=await import('../../doubak-site-generator/src/images.js');
+t.after(releaseSegments);
+const root=mkdtempSync(join(tmpdir(),'doubak-avatar-parity-')),sources=[];
+t.after(()=>rmSync(root,{recursive:true,force:true}));
+const account={user_id:'123',username:'example',nickname:'Example'};
+const profileUrl='https://www.douban.com/people/example/',avatarUrl='https://img3.doubanio.com/icon/up123-1.png';
+for(const [day,ext] of [['01','png'],['02','gif']]) {
+ const store=new MemoryFileStore(),bundleId=`202610${day}T000000Z-aaaaaa`,at=`2026-10-${day}T00:00:00Z`;
+ const writer=new BundleWriter({store,producer:TEST_PRODUCER,account,bundleId,now:()=>new Date(at)});
+ const common={captureFidelity:'decoded_body+observed_headers',httpStatus:200,verdict:'ok',observedAt:at};
+ const html=`<html><head><title>Example</title></head><body><div id="db-usr-profile"><div class="pic"><a href="${profileUrl}"><img src="${avatarUrl}"></a></div><div class="info"><h1>Example</h1></div></div></body></html>`;
+ const parent=await writer.writeCapture({...common,url:profileUrl,intent:'profile.overview',routeKey:'profile.overview',surface:'html',body:new TextEncoder().encode(html),headers:[['Content-Type','text/html']],contentType:'text/html'});
+ const body=readFileSync(new URL(`../../doubak-site-generator/test/fixtures/avatar.${ext}`,import.meta.url)),mime=`image/${ext}`;
+ await writer.writeCapture({...common,url:avatarUrl,intent:'asset.image.account_avatar',routeKey:'asset.account_avatar',surface:'asset',kind:'assets',body,headers:[['Content-Type',mime]],contentType:mime,parentCaptureId:parent.captureId});
+ await writer.finalize();const manifest=JSON.parse(new TextDecoder().decode(await store.read('manifest.json')));
+ const src=await OpfsBundleSource.open({store,entry:{bundleId:writer.bundleId,manifest}});sources.push(src);
+ const dir=join(root,'bundles',writer.bundleId);mkdirSync(dir,{recursive:true});for(const [name,bytes] of store._files)writeFileSync(join(dir,name),bytes);
+}
+const cli=await parse(openAll(join(root,'bundles'))),browser=await browserParse(sources);
+assert.deepEqual(cli,browser);assert.equal(cli.profile[0].revisions.length,1);assert.equal(cli.profile[0].revisions[0].observations.length,2);
+const canonical=join(root,'canonical');mkdirSync(canonical,{recursive:true});for(const f of canonicalFiles(cli))writeFileSync(join(canonical,f.name),f.text);
+const site=join(root,'site');const report=generate({canonical:cli,bundlesDir:join(root,'bundles'),outDir:site,themeDir:fileURLToPath(new URL('../../doubak-site-generator/theme/hugo',import.meta.url))});
+assert.equal(report.avatar.ext,'gif');
+const files=new Map(),md=await buildMarkdown(withCanonicalShape(browser),{sources,write:async(n,b)=>files.set(n,b)});for(const f of md.files)files.set(f.name,f.bytes);
+for(const [name,bytes] of files)assert.deepEqual(readFileSync(join(site,name)),Buffer.from(bytes),name);
+assert.equal(files.size,md.files.length+2);
+});

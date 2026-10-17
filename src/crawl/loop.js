@@ -39,6 +39,9 @@ import {
   extractDetailLinks,
   extractPagination,
 } from './classifier.js';
+import { extractProfile, avatarUrl } from '../vendor/parser/extract-profile.js';
+import { inspectAvatar } from '../vendor/site-generator/avatar-image.js';
+import { avatarQueueKey } from './avatar.js';
 import { SessionError } from './session.js';
 import { TransportError } from './errors.js';
 import { PermissionError } from './permissions.js';
@@ -415,6 +418,7 @@ export class CrawlLoop {
     const route = this._routes.get(item.routeKey) ?? {};
     const profile = profileForRoute(item.routeKey);
     // 每次取页重新按运行范围判断，旧 checkpoint 排队的作品页也不能继承 Cookie。
+    const accountAvatar = item.routeKey === 'asset.account_avatar';
     const anonymousCatalog = this._session.visibility === 'public' && route.kind === 'catalog';
 
     // **只要为这条路线发过一次请求，它就必须出现在完整性证据里。**
@@ -434,7 +438,8 @@ export class CrawlLoop {
         // 条目自带的优先：派生出来的条目（封面图）各有各的来源页。
         referer: item.referer ?? route.referer,
         withCk: route.surface === 'api',
-        credentials: anonymousCatalog ? 'omit' : 'include',
+        credentials: anonymousCatalog || accountAvatar ? 'omit' : 'include',
+        rejectRedirects: accountAvatar,
         minimumIntervalMs: anonymousCatalog ? 5000 : 0,
       });
     } catch (err) {
@@ -456,6 +461,14 @@ export class CrawlLoop {
         body: res.body,
         bodyText: res.bodyText,
       });
+      if (accountAvatar && ['ok', 'gone', 'soft404'].includes(cls.verdict)) {
+        try {
+          if (cls.verdict !== 'ok' || !avatarUrl(res.finalUrl)) throw new Error('头像响应或地址无效');
+          inspectAvatar(res.body, contentType);
+        } catch (err) {
+          cls = { verdict: null, reasons: [String(err.message)], itemCount: null };
+        }
+      }
     } else if (profile) {
       cls = classifyResponse({
         finalUrl: res.finalUrl,
@@ -741,6 +754,7 @@ export class CrawlLoop {
       this._enqueueStatusPhotos(item, res, written.captureId);
       this._enqueueAlbumPhotos(item, res, written.captureId);
       this._enqueueGroupIcons(item, res, written.captureId);
+      this.enqueueAccountAvatar(item, res, written.captureId);
 
       // **单页路线抓到那一页就是走完了，当场标掉。**
       //
@@ -1209,6 +1223,19 @@ export class CrawlLoop {
     if (enqueued > 0) {
       this._emit({ type: 'photos_enqueued', count: enqueued, from: item.url });
     }
+  }
+
+  /** Also called on cold resume using the archived profile, without refetching it. */
+  enqueueAccountAvatar(item, res, captureId) {
+    const target = this._routes.get('asset.account_avatar');
+    if (item.routeKey !== 'profile.overview' || !target) return;
+    const profile = extractProfile(res.bodyText, res.finalUrl ?? item.url, this._session.account.userId);
+    const url = profile?.fields.avatar_url;
+    if (!url) return;
+    this._frontier.enqueue({
+      url, urlKey: avatarQueueKey(url, captureId), routeKey: target.key, intent: target.intent,
+      enqueuedBy: captureId, ordered: false, priority: target.priority, gatedBy: null, referer: item.url,
+    });
   }
 
   /**

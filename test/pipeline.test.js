@@ -202,18 +202,18 @@ describe('解析整个库', () => {
 });
 
 describe('三种产出', () => {
-  test('canonical：八个 ndjson，名字与命令行那边认的一致', async () => {
+  test('canonical：九个 ndjson，名字与命令行那边认的一致', async () => {
     const { data } = await run([await writeBundle()]);
     const { files, report } = await buildCanonical(data);
     const names = files.map((f) => f.name);
-    // 名字对不上就白导了 —— 下游 `loadCanonical` 按这八个名字找。
-    for (const n of ['marks', 'subjects', 'broadcasts', 'longform', 'doulists', 'albums', 'group_topics', 'group_joins']) {
+    // 名字对不上就白导了 —— 下游 `loadCanonical` 按这九个名字找。
+    for (const n of ['marks', 'subjects', 'broadcasts', 'longform', 'doulists', 'albums', 'group_topics', 'group_joins', 'profile']) {
       assert.ok(names.includes(`${n}.ndjson`), `少了 ${n}.ndjson`);
     }
     assert.equal(report.marks, 2);
 
     // 空的那几类也要有文件：「没有豆列/相册/小组」与「这个版本不解析它们」是两件事。
-    for (const n of ['doulists', 'albums', 'group_topics', 'group_joins']) {
+    for (const n of ['doulists', 'albums', 'group_topics', 'group_joins', 'profile']) {
       const f = files.find((item) => item.name === `${n}.ndjson`);
       assert.ok(f, `${n}.ndjson 不能因为是空的就不写`);
     }
@@ -294,7 +294,8 @@ describe('三种产出', () => {
     // 这份档案里没有图片捕获，所以一张也写不出来——但**不能因此报「缺」**：
     // 缺的判定要把占位图与「按作品 id 已找到」排除掉。
     assert.equal(report.images, 0);
-    assert.equal(written.size, 0);
+    assert.deepEqual([...written.keys()], ['site-profile.json']);
+    assert.equal(JSON.parse(dec.decode(written.get('site-profile.json'))).status, 'unobserved');
     assert.ok(Array.isArray(report.remote));
   });
 

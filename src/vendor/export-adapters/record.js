@@ -134,7 +134,7 @@ export function canonicalShape(out) {
     reMarkedSuperseded: merged.superseded,
     subjectOf: (mark) => byKey.get(`${mark.medium}:${mark.subject?.id}`) ?? null,
     multiRevisionMarks: merged.marks.filter((m) => (m.revisions?.length ?? 0) > 1).length,
-    account: merged.marks[0]?.account ?? out.doulists?.[0]?.account ?? out.albums?.[0]?.account ?? out.group_topics?.[0]?.account ?? out.groupTopics?.[0]?.account ?? null,
+    account: merged.marks[0]?.account ?? out.doulists?.[0]?.account ?? out.albums?.[0]?.account ?? out.group_topics?.[0]?.account ?? out.groupTopics?.[0]?.account ?? out.profile?.[0]?.account ?? null,
     group_topics: out.group_topics?.length ? out.group_topics : (out.groupTopics ?? []),
     group_joins: out.group_joins?.length ? out.group_joins : (out.groupJoins ?? []),
   };

@@ -166,14 +166,15 @@ export class Transport {
    * @param {object} [opts]
    * @param {string} [opts.referer]  会被 DNR 规则改写成真正的 Referer
    * @param {boolean} [opts.withCk]  是否自动拼上 ck 令牌
+   * @param {boolean} [opts.rejectRedirects] 头像拒绝跳转，浏览器无法安全逐跳检查 Location。
    * @param {'include'|'omit'} [opts.credentials]  目录请求可明确禁用登录凭据
    * @param {number} [opts.minimumIntervalMs]  此请求的最小间隔，仍受全局退避约束
    * @param {boolean} [opts.followRedirects]  只影响**手动**跟随（注入的 fetch 替身
    *   会给出可读的 302）。真实浏览器里跳转由浏览器跟，这个开关管不着——
-   *   `redirect` 一律是 `follow`。
+   *   `redirect` 默认为 `follow`；头像可用 rejectRedirects 明确拒绝跳转。
    * @returns {Promise<FetchOutcome>}
    */
-  async fetch(url, { referer, withCk = false, followRedirects = true, credentials = 'include', minimumIntervalMs = 0 } = {}) {
+  async fetch(url, { referer, withCk = false, followRedirects = true, credentials = 'include', minimumIntervalMs = 0, rejectRedirects = false } = {}) {
     if (!['include', 'omit'].includes(credentials)) throw new Error('不支持的 credentials');
     if (credentials === 'omit' && (withCk || new URL(url).searchParams.has('ck'))) {
       throw new Error('无登录凭据的请求不能携带 ck');
@@ -212,10 +213,10 @@ export class Transport {
               credentials,
               // 不复用浏览器里可能含登录者收藏/短评的缓存页。
               ...(credentials === 'omit' ? { cache: 'no-store' } : {}),
-              // **一律 follow。** `manual` 在浏览器里给的是 opaqueredirect：
+              // 普通页面用 follow，头像用 error；manual 在浏览器里给的是 opaqueredirect：
               // status 0、url 空、header 列表全空，读不到 Location，跟不了。
               // 见文件开头。
-              redirect: 'follow',
+              redirect: rejectRedirects ? 'error' : 'follow',
             },
             {
               timeoutMs: this._timeoutMs,
@@ -251,7 +252,7 @@ export class Transport {
 
       const location = headerOf(response, 'location');
       const isRedirect = response.status >= 300 && response.status < 400 && location;
-      if (!followRedirects || !isRedirect) break;
+      if (rejectRedirects || !followRedirects || !isRedirect) break;
 
       const next = new URL(location, currentUrl).toString();
       redirectChain.push(currentUrl);
