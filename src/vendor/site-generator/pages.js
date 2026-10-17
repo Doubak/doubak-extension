@@ -19,6 +19,7 @@
  * 从文件系统来的还是从 OPFS 来的。
  */
 
+import { withAlbumThumbnails } from './image-index.js';
 import { groupMarks } from './projection.js';
 import {
   markPage, longformPage, markPath, longformPath, doulistPage, doulistPath, verb,
@@ -57,7 +58,7 @@ const MEDIUM_NAMES = {
  *   `files` 是 [相对路径, 文本]；`remote` 是最后仍然指向 doubanio 的图。
  */
 export function buildPages(p, { images = {}, coverBySubject = {}, siteTitle = null } = {}) {
-  const paths = images;
+  const paths = withAlbumThumbnails(images, p.albums);
 
   const files = [];
 

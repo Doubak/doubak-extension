@@ -18,6 +18,7 @@ import { zip } from '../vendor/export-adapters/zip.js';
 import { buildNeodbNdjson } from '../vendor/export-adapters/targets/neodb-ndjson.js';
 import { instructions } from '../vendor/export-adapters/instructions.js';
 import { project } from '../vendor/site-generator/projection.js';
+import { withAlbumThumbnails } from '../vendor/site-generator/image-index.js';
 import { buildPages } from '../vendor/site-generator/pages.js';
 import { resolveSiteTitle } from '../vendor/site-generator/site-title.js';
 import { accountsFromSources } from '../vendor/parser/account.js';
@@ -172,8 +173,9 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
     onProgress: (done, total) => onImageProgress?.({ done, total }),
   });
 
+  const paths = withAlbumThumbnails(img.paths, p.albums);
   const avatar = await exportAvatar({ canonical: data, sources, write });
-  const built = buildPages(p, { images: img.paths, coverBySubject: img.bySubject, siteTitle });
+  const built = buildPages(p, { images: paths, coverBySubject: img.bySubject, siteTitle });
 
   // 按作品 id 找到的不算缺，占位图也不算缺。判定在 image-index.js 里，与站点
   // 生成器同一份——一条永远存在的假告警会让真的那条也被忽略。
@@ -187,7 +189,7 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
       ...built.stats,
       avatar,
       images: img.written,
-      missing: img.missing.filter((u) => reallyMissing(u, covered)),
+      missing: img.missing.filter((u) => reallyMissing(u, covered) && !paths[u]),
       remote: built.remote,
     },
   };

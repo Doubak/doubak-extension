@@ -112,3 +112,17 @@ export function buildImageIndex(bundles) {
 export function reallyMissing(url, coveredUrls) {
   return !coveredUrls.has(url) && !/\/(cuphead|f)\//.test(url);
 }
+
+/** A missing album thumbnail can use the archived original of that same photo.
+ * Never reverse this fallback: a thumbnail does not replace an original download.
+ * Keep the caller's map unchanged and preserve separately archived thumbnails.
+ */
+export function withAlbumThumbnails(images, albums = []) {
+  const paths = { ...images };
+  for (const album of albums) for (const photo of album.photos ?? []) {
+    if (photo.thumbnailUrl && !paths[photo.thumbnailUrl] && paths[photo.imageUrl]) {
+      paths[photo.thumbnailUrl] = paths[photo.imageUrl];
+    }
+  }
+  return paths;
+}
