@@ -451,7 +451,7 @@ describe('库里混了两个账号', () => {
     // 命令行的 --ignore-warnings 还在，给「确实是同一个人的两个号」用。
     const js = await read('src/ui/panel/formats.js');
     assert.ok(!js.includes('ignoreWarnings: true'), '面板上不该有「照样合并」这条路');
-    assert.match(js, /entriesFor\(all\)/, '导出必须走按账号筛过的那批');
+    assert.match(js, /entriesFor\(all, selectedAccount\)/, '导出必须走按账号筛过的那批');
   });
 });
 

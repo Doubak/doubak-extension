@@ -92,7 +92,7 @@ function throwIfAborted(signal) {
   throw e;
 }
 
-/** 选中要导哪个账号（`user_id`）。库里只有一个账号时是 null。 */
+/** 选中要导哪个账号（`user_id`）。单账号也记录 UID，防止扫描期间切换归属。 */
 let account = null;
 let needsAccountSelection = false;
 
@@ -140,13 +140,16 @@ export function groupByAccount(entries) {
  * 多账号只导所选 UID；未知归属只允许沿用单账号库的历史摄取规则。
  * 有明确目标但尚未收尾的档案须先收尾，原始档案始终可单独带走。
  */
-export function entriesFor(all) {
+export function entriesFor(all, selectedAccount = account) {
   const { groups, unattributed } = groupByAccount(all);
+  if (selectedAccount && !groups.some((g) => g.userId === selectedAccount)) {
+    throw new Error('所选账号的档案已不在库中，请重新选择导出账号。');
+  }
   if (groups.length <= 1) {
     if (all.some((e) => !e.manifest && e.runContext)) throw new Error('目标档案尚未收尾，请先完成或中止抓取后再导出派生格式。原始档案可随时在「档案」页导出。');
     return all;
   }
-  const pick = groups.find((g) => g.userId === account);
+  const pick = groups.find((g) => g.userId === selectedAccount);
   if (!pick) throw new Error('请先选择要导出的账号。');
   if (pick.entries.some((e) => !e.manifest && e.runContext)) throw new Error('目标档案尚未收尾，请先完成或中止抓取。');
   return pick.entries;
@@ -326,8 +329,26 @@ function setBusy(on, exceptId = null) {
 
 /** @param {string} kind */
 async function runExport(kind) {
+  if (running) return;
+  // 在任何异步扫描/选择目录之前锁定任务与账号。
+  running = kind;
+  const selectedAccount = account;
+  setBusy(true, FORMATS[kind].button);
+  try {
+    await performExport(kind, selectedAccount);
+  } catch (e) {
+    const el = $('formats-result');
+    el.className = 'card tone-error';
+    el.textContent = `导出失败：${e.message}`;
+  } finally {
+    running = null;
+    aborter = null;
+    setBusy(false);
+  }
+}
+
+async function performExport(kind, selectedAccount) {
   const base = FORMATS[kind];
-  const format = { ...base, dir: account ? `${base.dir}-${account}` : base.dir };
   const el = $('formats-result');
 
   const all = await scanBundleDirs();
@@ -338,8 +359,11 @@ async function runExport(kind) {
   }
   // 混了账号时只导选中的那个。见文件头「库里混了两个账号」。
   let entries;
-  try { entries = entriesFor(all); }
+  try { entries = entriesFor(all, selectedAccount); }
   catch (err) { el.className = 'card tone-error'; el.textContent = err.message; return; }
+
+  const suffix = groupByAccount(all).groups.length > 1 ? selectedAccount : null;
+  const format = { ...base, dir: suffix ? `${base.dir}-${suffix}` : base.dir };
 
   /** @type {FileSystemDirectoryHandle | null} */
   let picked = null;
@@ -353,7 +377,6 @@ async function runExport(kind) {
 
   /** @type {import('./destination.js').Destination | null} */
   let dest = null;
-  running = kind;
   // 一次只跑一个（见文件头第②条），所以「正在跑的那次」也只有一个。
   aborter = new AbortController();
   setBusy(true, format.button);
@@ -459,10 +482,6 @@ async function runExport(kind) {
         + '而它里面又是别人的记录。到「档案」页把那几份挑出来删掉（或先导出来另存），再试一次。';
       el.append(how);
     }
-  } finally {
-    running = null;
-    aborter = null;
-    setBusy(false);
   }
 }
 
@@ -630,7 +649,7 @@ export async function loadFormats() {
   }
   const { groups, unattributed } = groupByAccount(entries);
   if (!groups.length) { account = null; needsAccountSelection = false; setBusy(Boolean(running)); return; }
-  if (groups.length === 1) account = null;
+  if (groups.length === 1) account = groups[0].userId;
 
   // 库发生变化后只保留仍在库中的选择；多账号绝不暗选第一项。
   if (!groups.some((g) => g.userId === account)) account = null;
@@ -659,7 +678,7 @@ export async function loadFormats() {
     b.setAttribute('aria-pressed', String(groups.length === 1 || g.userId === account));
     b.addEventListener('click', () => {
       if (running) return;
-      account = groups.length === 1 ? null : g.userId;
+      account = g.userId;
       needsAccountSelection = false;
       setBusy(false);
       for (const other of row.querySelectorAll('button')) {

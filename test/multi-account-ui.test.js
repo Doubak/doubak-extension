@@ -383,3 +383,55 @@ for (const cold of [false, true]) {
     } finally { dom.restore(); }
   });
 }
+
+test('所选账号消失后，不能把剩下唯一账号当成导出目标', async () => {
+  const dom = await panel();
+  try {
+    const formats = await import('../src/ui/panel/formats.js');
+    await formats.loadFormats();
+    dom.byId.get('formats-accounts').querySelectorAll('button')
+      .find((b) => b.textContent.includes('UID 222')).dispatch('click');
+    const remaining = [{ bundleId: 'a', manifest: { account: { user_id: '111' } } }];
+    assert.throws(() => formats.entriesFor(remaining), /重新选择导出账号/);
+    assert.throws(() => formats.entriesFor([{ bundleId: 'orphan', manifest: null }]), /重新选择导出账号/);
+    assert.deepEqual(formats.entriesFor(remaining, '111'), remaining);
+  } finally { dom.restore(); }
+});
+
+test('单账号也锁定 UID，但不影响单账号导出目录命名', async () => {
+  const dom = await panel({ bundles: false, extraSources: [], extraBundles: [
+    ['doubak-bundle-20261001T000000Z-aaaaaa', {
+      'manifest.json': JSON.stringify({ account: { user_id: '111' } }),
+      'index-20261001T000000Z-aaaaaa.ndjson': '',
+    }],
+  ] });
+  try {
+    const formats = await import('../src/ui/panel/formats.js');
+    await formats.loadFormats();
+    assert.throws(() => formats.entriesFor([{ bundleId: 'b', manifest: { account: { user_id: '222' } } }]), /重新选择导出账号/);
+  } finally { dom.restore(); }
+});
+
+test('扫描和文件夹选择期间重复点击不启动第二项，也不能切换导出账号', async () => {
+  const dom = await panel();
+  let cancel;
+  let pickers = 0;
+  try {
+    const formats = await import('../src/ui/panel/formats.js');
+    await formats.loadFormats();
+    const buttons = dom.byId.get('formats-accounts').querySelectorAll('button');
+    buttons.find((b) => b.textContent.includes('UID 222')).dispatch('click');
+    window.showDirectoryPicker = () => { pickers++; return new Promise((_, reject) => { cancel = reject; }); };
+    dom.byId.get('export-canonical').dispatch('click');
+    dom.byId.get('export-markdown').dispatch('click');
+    buttons.find((b) => b.textContent.includes('UID 111')).dispatch('click');
+    assert.equal(dom.byId.get('export-canonical').disabled, true);
+    await settle();
+    assert.equal(pickers, 1);
+    const entries = await (await import('../src/ui/panel/shared.js')).scanBundleDirs();
+    assert.equal(formats.entriesFor(entries)[0].manifest.account.user_id, '222');
+    cancel(new Error('cancelled'));
+    await settle();
+    assert.equal(dom.byId.get('export-canonical').disabled, false);
+  } finally { cancel?.(new Error('cancelled')); dom.restore(); }
+});
