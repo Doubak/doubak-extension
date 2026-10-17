@@ -165,6 +165,19 @@ export const fixtures = {
 <html><head><title>豆瓣</title></head>
 <body><p>有异常请求，请输入验证码后继续</p><img src="/captcha?id=xxx"></body></html>`,
 
+  /** 豆瓣客户端算力证明（PoW）挑战页。 */
+  powChallengePage: `<!DOCTYPE html>
+<html><head><title>豆瓣</title></head>
+<body>
+  <p class="loading">载入中 ...</p>
+  <form name="sec" id="sec" method="POST" action="/c">
+    <input type="hidden" id="tok" name="tok" value="1792280920@testtok" />
+    <input type="hidden" id="cha" name="cha" value="testchallenge12345" />
+    <input type="hidden" id="sol" name="sol" value="" />
+    <input type="hidden" id="red" name="red" value="https://movie.douban.com/subject/37134598/" />
+  </form>
+</body></html>`,
+
   /** 无验证码的纯封锁页。 */
   blockedPage: `<!DOCTYPE html>
 <html><head><title>豆瓣</title></head>

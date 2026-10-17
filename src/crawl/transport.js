@@ -74,6 +74,7 @@ import {
 } from './fidelity.js';
 import { fetchWithTimeout, DEFAULT_TIMEOUT_MS } from './errors.js';
 import { permissionErrorIfLost } from './permissions.js';
+import { isPowChallenge, extractPowChallenge, solvePowChallenge } from './pow.js';
 
 /** 豆瓣自家的短链域名。只记短链等于在档案里留一个死指针。 */
 const SHORTLINK_HOSTS = new Set(['douc.cc']);
@@ -174,7 +175,7 @@ export class Transport {
    *   `redirect` 默认为 `follow`；头像可用 rejectRedirects 明确拒绝跳转。
    * @returns {Promise<FetchOutcome>}
    */
-  async fetch(url, { referer, withCk = false, followRedirects = true, credentials = 'include', minimumIntervalMs = 0, rejectRedirects = false } = {}) {
+  async fetch(url, { referer, withCk = false, followRedirects = true, credentials = 'include', minimumIntervalMs = 0, rejectRedirects = false, _powRetried = false } = {}) {
     if (!['include', 'omit'].includes(credentials)) throw new Error('不支持的 credentials');
     if (credentials === 'omit' && (withCk || new URL(url).searchParams.has('ck'))) {
       throw new Error('无登录凭据的请求不能携带 ck');
@@ -260,8 +261,7 @@ export class Transport {
     }
 
     const body = new Uint8Array(buf);
-
-    return {
+    const outcome = {
       requestedUrl,
       // response.url 在某些实现下为空，退回到我们自己跟踪的 currentUrl
       finalUrl: response.url || currentUrl,
@@ -273,6 +273,58 @@ export class Transport {
       fidelity: this._fidelity,
       elapsedMs: this._now() - startedAt,
     };
+
+    // 豆瓣客户端算力证明（PoW）挑战自动求解与凭据续期。
+    // 单次请求最多只尝试一次，避免在风控升级为验证码或硬封禁时陷入重试循环。
+    if (!_powRetried && isPowChallenge(outcome.finalUrl, outcome.bodyText)) {
+      const challenge = extractPowChallenge(outcome.bodyText);
+      if (challenge) {
+        try {
+          const sol = await solvePowChallenge(challenge.cha, challenge.difficulty);
+          const postBody = new URLSearchParams({
+            tok: challenge.tok,
+            cha: challenge.cha,
+            sol: String(sol),
+            red: challenge.red || requestedUrl,
+          });
+          const postUrl = new URL('/c', outcome.finalUrl).toString();
+          await this._gate.run(() => fetchWithTimeout(
+            this._fetch,
+            postUrl,
+            {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/x-www-form-urlencoded',
+                ...(referer ? { 'X-Override-Referer': referer } : {}),
+              },
+              body: postBody.toString(),
+              credentials,
+              redirect: 'follow',
+            },
+            {
+              timeoutMs: this._timeoutMs,
+              externalSignal: this._signal,
+              readBody: (res) => res.arrayBuffer(),
+            },
+          ), { minimumIntervalMs });
+
+          return await this.fetch(url, {
+            referer,
+            withCk,
+            followRedirects,
+            credentials,
+            minimumIntervalMs,
+            rejectRedirects,
+            _powRetried: true,
+          });
+        } catch {
+          // 提交或求解失败时返回原始结果，由分类器接管
+          return outcome;
+        }
+      }
+    }
+
+    return outcome;
   }
 
   /**
