@@ -109,3 +109,20 @@ Chromium 使用模拟豆瓣响应，实际 service worker/offscreen/OPFS 链路�
 修复后同一 Chromium 操作链的两条请求都返回 count=1，正常收尾并清除运行指针；
 冷启动直接显示失败分页的重试入口。新增 6 项回归验证并发合并、身份验证失败、无断点、
 持久化字段与分页约束、冷启动失败清单及轮询/重复点击；全量 2075 通过、0 失败、1 个既有跳过。
+
+## 2026-10-17：轻量化归档模式下舞台剧封面图漏抓修复
+
+用户审查公开归档（`exports_3rd`）时发现舞台剧封面图未抓取入库。
+复核 `doubak-bundle-20261017T032803Z-8fe1a5` 确认：
+列表页 HTML（`#000058`，`https://www.douban.com/location/people/154611037/drama/collect`）包含 `<img alt="妈妈咪呀" src="https://img9.doubanio.com/pview/drama_subject_poster/small/public/8972fded86c3674.jpg">`，但 WARC 及 index 中均无该封面。
+
+原因排查：
+在公开或跳过目录的轻量化抓取模式下（`skip_catalog: true`），扩展不抓取 `interest.item` 详情页，
+而是由 `CrawlLoop._enqueueCover` 从标记列表页中直接抽取缩略图 URL。
+原提取正则仅匹配 `/(?:view\/(?:subject|photo)|[blsp]pic)\//`，漏掉了舞台剧使用的 `pview/drama_subject_poster/`（及可能的 `view/drama_subject_poster/`）路径，导致舞台剧封面被过滤掉，未入队下载。
+
+修复措施：
+1. 扩展 `src/crawl/loop.js` 中的图片路径过滤正则为：
+   `/^https:\/\/[^/]+\.doubanio\.com\/(?:p?view\/(?:subject|photo|drama_subject_poster)|[blsp]pic)\//`
+2. 在 `test/cover.test.js` 中补充舞台剧详情页 `extractCoverImage` 单测与轻量化模式下列表页提取 `pview/drama_subject_poster` 缩略图入队并抓取的端到端单测。
+
