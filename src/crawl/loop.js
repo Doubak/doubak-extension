@@ -440,7 +440,8 @@ export class CrawlLoop {
         withCk: route.surface === 'api',
         credentials: anonymousCatalog || accountAvatar ? 'omit' : 'include',
         rejectRedirects: accountAvatar,
-        minimumIntervalMs: anonymousCatalog ? 5000 : 0,
+        // 静态资源（封面、头像、附图等）承载于 doubanio CDN，不适用于豆瓣主站动态目录详情页的 5 秒防刷限制
+        minimumIntervalMs: anonymousCatalog && route.surface !== 'asset' ? 5000 : 0,
       });
     } catch (err) {
       return await this._handleTransportError(item, err);
