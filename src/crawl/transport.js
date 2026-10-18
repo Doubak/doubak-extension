@@ -286,13 +286,11 @@ export class Transport {
       const challenge = extractPowChallenge(outcome.bodyText);
       if (challenge) {
         debugLog('检测到 PoW 挑战 (sec.douban.com/c): cha=%s, difficulty=%d', challenge.cha, challenge.difficulty);
-        console.log(`[doubak/pow] 检测到 PoW 挑战: difficulty=${challenge.difficulty}, cha=${challenge.cha}`);
         try {
           const t0 = this._now();
           const sol = await solvePowChallenge(challenge.cha, challenge.difficulty);
           const solveMs = this._now() - t0;
           debugLog('PoW 求解成功: sol=%s, 耗时=%dms', sol, solveMs);
-          console.log(`[doubak/pow] PoW 求解成功: sol=${sol}, 耗时=${solveMs}ms`);
 
           const postBody = new URLSearchParams({
             tok: challenge.tok,
@@ -303,7 +301,6 @@ export class Transport {
           const postUrl = new URL('/c', outcome.finalUrl).toString();
 
           debugLog('向 %s 提交 PoW 验证 (credentials: include)...', postUrl);
-          console.log(`[doubak/pow] 正在提交 PoW 验证结果到 ${postUrl}...`);
 
           const { result: postOutcome } = await this._gate.run(() => fetchWithTimeout(
             this._fetch,
@@ -327,54 +324,51 @@ export class Transport {
           ), { minimumIntervalMs });
 
           debugLog('PoW 提交响应: status=%d, url=%s', postOutcome.response.status, postOutcome.response.url);
-          console.log(`[doubak/pow] PoW 提交响应状态: ${postOutcome.response.status}, 最终URL: ${postOutcome.response.url}`);
 
-          // 若浏览器已跟随 302 重定向并成功直接抵达目标页面（HTTP 200 且不再是 challenge 页面）
+          // Preserve the actual POST response, including error bodies and Retry-After.
+          // A second GET is allowed only for a readable success redirect to the
+          // original target (test/non-browser transports); browsers follow it already.
           const postFinalUrl = postOutcome.response.url || postUrl;
           const postBuf = postOutcome.body ? new Uint8Array(postOutcome.body) : new Uint8Array();
-          const postBodyText = new TextDecoder('utf-8', { fatal: false }).decode(postBuf);
-
-          if (postOutcome.response.status === 200 && !isPowChallenge(postFinalUrl, postBodyText) && !postFinalUrl.includes('sec.douban.com')) {
-            debugLog('PoW 提交后跟随重定向直接抵达目标页面: %s', postFinalUrl);
-            console.log(`[doubak/pow] PoW 提交后直接成功获取目标页: ${postFinalUrl}`);
-            return {
-              requestedUrl,
-              finalUrl: postFinalUrl,
-              redirectChain: [...redirectChain, postUrl, postFinalUrl],
-              status: postOutcome.response.status,
-              headers: headerPairs(postOutcome.response),
-              body: postBuf,
-              bodyText: postBodyText,
-              fidelity: this._fidelity,
-              elapsedMs: this._now() - startedAt,
-              powSolved: true,
-            };
+          const result = {
+            requestedUrl,
+            finalUrl: postFinalUrl,
+            redirectChain: [...redirectChain, postUrl, ...(postFinalUrl === postUrl ? [] : [postFinalUrl])],
+            status: postOutcome.response.status,
+            headers: headerPairs(postOutcome.response),
+            body: postBuf,
+            bodyText: new TextDecoder('utf-8', { fatal: false }).decode(postBuf),
+            fidelity: this._fidelity,
+            elapsedMs: this._now() - startedAt,
+          };
+          const location = headerOf(postOutcome.response, 'location');
+          let returnsToTarget = false;
+          try { returnsToTarget = location && new URL(location, postFinalUrl).href === new URL(requestedUrl).href; }
+          catch { /* Invalid Location is preserved as evidence, never followed. */ }
+          if ([302, 303].includes(result.status) && returnsToTarget && followRedirects) {
+            const retriedOutcome = await this.fetch(url, {
+              referer, withCk, followRedirects, credentials, minimumIntervalMs,
+              rejectRedirects, _powRetried: true,
+            });
+            retriedOutcome.redirectChain = [...result.redirectChain, ...retriedOutcome.redirectChain];
+            retriedOutcome.elapsedMs = this._now() - startedAt;
+            if (retriedOutcome.status === 200 && new URL(retriedOutcome.finalUrl).href === new URL(requestedUrl).href
+              && !isPowChallenge(retriedOutcome.finalUrl, retriedOutcome.bodyText)) {
+              retriedOutcome.powSolved = true;
+            }
+            return retriedOutcome;
           }
-
-          // 否则（例如测试替身未自动重定向，或者 POST 返回了 302/200 后需要重新 GET 目标页面）
-          debugLog('PoW 凭据已写入 Cookie，重试抓取原 URL: %s', url);
-          console.log(`[doubak/pow] 正在带新凭据重试原请求: ${url}`);
-          const retriedOutcome = await this.fetch(url, {
-            referer,
-            withCk,
-            followRedirects,
-            credentials: 'include', // 重试必须带 include 凭据以携带 dbsawcv1
-            minimumIntervalMs,
-            rejectRedirects,
-            _powRetried: true,
-          });
-          if (!isPowChallenge(retriedOutcome.finalUrl, retriedOutcome.bodyText) && !retriedOutcome.finalUrl.includes('sec.douban.com')) {
-            retriedOutcome.powSolved = true;
-          }
-          return retriedOutcome;
+          if (result.status === 200 && new URL(postFinalUrl).href === new URL(requestedUrl).href
+            && !isPowChallenge(postFinalUrl, result.bodyText)) result.powSolved = true;
+          return result;
         } catch (err) {
-          debugLog('PoW 求解或提交失败: %s', err.message);
-          console.warn('[doubak/pow] PoW 求解或提交异常:', err);
-          return outcome;
+          // Cancellation, network failures and lost permissions retain their normal
+          // handling. Returning the initial challenge here would hide the failure.
+          const permErr = await permissionErrorIfLost({ permissions: this._permissions });
+          throw permErr ?? err;
         }
       } else {
         debugLog('检测到 PoW 挑战页面，但未能解析出 cha/tok 参数');
-        console.warn('[doubak/pow] 未能从挑战页 HTML 提取 cha/tok 参数');
       }
     }
 

@@ -344,6 +344,32 @@ test('无凭据请求的每一跳都 omit/no-store，不能偷偷加 ck', async 
 });
 
 describe('豆瓣 PoW 算力挑战自动求解与凭据续期', () => {
+  for (const post of [
+    { status: 429, headers: { 'retry-after': '3600' }, body: '请求过于频繁，请稍后再试' },
+    { status: 403, body: '禁止访问' },
+    { status: 503, body: 'Service unavailable' },
+    { status: 200, body: '<h1>请输入验证码</h1>' },
+    { status: 302, headers: { location: 'https://sec.douban.com/b' }, body: '升级验证' },
+  ]) {
+    test(`PoW POST ${post.status} / ${post.body} 保留原响应，不盲目 GET`, async () => {
+      const pow = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form><script>difficulty=1</script>';
+      const { transport, calls } = makeTransport({ http: fakeHttp([
+        { status: 200, url: 'https://sec.douban.com/c', body: pow },
+        { ...post, url: 'https://sec.douban.com/c' },
+      ]) });
+      const result = await transport.fetch('https://movie.douban.com/subject/1/');
+      assert.equal(calls.length, 2);
+      assert.equal(result.status, post.status);
+      assert.equal(result.bodyText, post.body);
+      assert.equal(new TextDecoder().decode(result.body), post.body);
+      assert.equal(result.finalUrl, 'https://sec.douban.com/c');
+      assert.equal(result.powSolved, undefined);
+      for (const [key, value] of Object.entries(post.headers ?? {})) {
+        assert.equal(new Map(result.headers).get(key), value);
+      }
+    });
+  }
+
   for (const opts of [{ credentials: 'omit' }, { rejectRedirects: true }]) {
     test(`PoW 不能放宽请求策略 ${JSON.stringify(opts)}`, async () => {
       const body = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form>';
