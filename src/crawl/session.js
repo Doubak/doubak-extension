@@ -359,9 +359,13 @@ export class SessionGuard {
    * 所以能比就比 ID，比不了就比用户名与昵称。
    *
    * @param {string} html
+   * @param {string} [url]
+   * @param {object} [opts]
+   * @param {boolean} [opts.anonymousCatalog]
+   * @param {boolean} [opts.powSolved]  是否通过客户端算力证明（PoW）换取凭证获得
    * @throws {SessionError}
    */
-  verify(html, url, { anonymousCatalog = false } = {}) {
+  verify(html, url, { anonymousCatalog = false, powSolved = false } = {}) {
     if (!this._account) throw new Error('尚未 preflight，不能复核');
 
     // 作品、日记正文和图片没有 people 路径；用户路线不能跳到另一账号。
@@ -381,8 +385,14 @@ export class SessionGuard {
     const state = detectLoginState(html);
     // 公开目录请求刻意不带 Cookie；它的退出登录导航不代表操作者退出了登录。
     // 仅对这一跳豁免会话检查，不能改变任务绑定或放宽下一张目标账号页面。
+    //
+    // 若该页面系经 PoW 客户端算力证明自动换取凭据获得（powSolved = true），
+    // 浏览器统一 Cookie Jar 会同时附带当前登录操作者的会话，因此页面顶部会有操作者导航条；
+    // 解析器对作品详情仅从 #info 提取客观元数据，不会摄取操作者标记，因此允许通过。
     if (anonymousCatalog && this._visibility === 'public') {
-      if (state === 'logged_in') throw new SessionError('operator_switched', '无登录凭据的作品目录请求返回了登录者页面，已停止以免混入个人内容。');
+      if (!powSolved && state === 'logged_in') {
+        throw new SessionError('operator_switched', '无登录凭据的作品目录请求返回了登录者页面，已停止以免混入个人内容。');
+      }
       return;
     }
     if (this._visibility === 'public') {

@@ -124,6 +124,7 @@ export function classifyTransportError(err, { timedOut = false, url } = {}) {
  * @returns {Promise<{response: Response, body: any}>}  没给 `readBody` 时 `body` 是 null
  */
 export async function fetchWithTimeout(fetchImpl, url, init, { timeoutMs, externalSignal, readBody }) {
+  if (externalSignal?.aborted) throw classifyTransportError(namedAbort(), { url });
   const controller = new AbortController();
   let timedOut = false;
   /** @type {any} */

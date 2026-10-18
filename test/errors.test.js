@@ -174,11 +174,13 @@ describe('超时：没有它，一个挂住的连接会永远卡住队列', () =
   test('已经中止的信号立即生效', async () => {
     const controller = new AbortController();
     controller.abort();
-    const hang = () => new Promise(() => {});
+    let calls = 0;
+    const hang = () => { calls++; return new Promise(() => {}); };
     await assert.rejects(
       () => fetchWithTimeout(hang, 'https://x/', {}, { timeoutMs: 60_000, externalSignal: controller.signal }),
       /中止/,
     );
+    assert.equal(calls, 0, '不能在请求闸门等待期间取消之后再发请求');
   });
 
   test('signal 被传给底层 fetch', async () => {

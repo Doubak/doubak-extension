@@ -342,3 +342,221 @@ test('无凭据请求的每一跳都 omit/no-store，不能偷偷加 ck', async 
   await assert.rejects(() => transport.fetch('https://www.douban.com/x?ck=token', { credentials: 'omit' }), /ck/);
   assert.equal(calls.length, 2);
 });
+
+describe('豆瓣 PoW 算力挑战自动求解与凭据续期', () => {
+  for (const status of [403, 429, 503]) {
+    test(`HTTP ${status} 即使包含 PoW 表单也不得触发自动提交`, async () => {
+      const body = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form>';
+      const { transport, calls } = makeTransport({ http: fakeHttp([
+        { status, url: 'https://sec.douban.com/c', body, headers: { 'retry-after': '3600' } },
+      ]) });
+      const result = await transport.fetch('https://movie.douban.com/subject/1/');
+      assert.equal(calls.length, 1);
+      assert.equal(result.status, status);
+      assert.equal(new Map(result.headers).get('retry-after'), '3600');
+      assert.equal(result.bodyText, body);
+    });
+  }
+
+  test('求解中取消不提交 POST，也不把取消吞成挑战响应', async (t) => {
+    const controller = new AbortController();
+    let digests = 0;
+    t.mock.method(globalThis.crypto.subtle, 'digest', async () => {
+      digests++;
+      controller.abort();
+      return new Uint8Array(64).fill(255).buffer;
+    });
+    const body = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form>';
+    const { transport, calls } = makeTransport({ transport: { signal: controller.signal },
+      http: fakeHttp([{ status: 200, url: 'https://sec.douban.com/c', body }]) });
+    await assert.rejects(transport.fetch('https://movie.douban.com/subject/1/'), { name: 'AbortError' });
+    assert.equal(digests, 1);
+    assert.equal(calls.length, 1);
+  });
+
+  test('求解预算耗尽保存原挑战供人工处理，不提交或重试', async (t) => {
+    t.mock.method(globalThis.crypto.subtle, 'digest', () => new Promise(() => {}));
+    const body = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form>';
+    const { transport, calls } = makeTransport({ transport: { timeoutMs: 10 },
+      http: fakeHttp([{ status: 200, url: 'https://sec.douban.com/c', body }]) });
+    const result = await transport.fetch('https://movie.douban.com/subject/1/');
+    assert.equal(result.bodyText, body);
+    assert.equal(result.powSolved, undefined);
+    assert.equal(calls.length, 1);
+  });
+
+  test('等待 POST 时取消按中止传播', async () => {
+    const controller = new AbortController();
+    const body = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form><script>difficulty=1</script>';
+    const http = fakeHttp([{ status: 200, url: 'https://sec.douban.com/c', body }]);
+    let requests = 0;
+    const { transport } = makeTransport({ transport: { signal: controller.signal,
+      fetchImpl: async (url, init) => {
+        requests++;
+        if (requests === 1) return http.fetchImpl(url, init);
+        controller.abort();
+        return new Promise(() => {});
+      } } });
+    await assert.rejects(transport.fetch('https://movie.douban.com/subject/1/'), { kind: 'aborted' });
+    assert.equal(requests, 2);
+  });
+
+  for (const post of [
+    { status: 429, headers: { 'retry-after': '3600' }, body: '请求过于频繁，请稍后再试' },
+    { status: 403, body: '禁止访问' },
+    { status: 503, body: 'Service unavailable' },
+    { status: 200, body: '<h1>请输入验证码</h1>' },
+    { status: 302, headers: { location: 'https://sec.douban.com/b' }, body: '升级验证' },
+  ]) {
+    test(`PoW POST ${post.status} / ${post.body} 保留原响应，不盲目 GET`, async () => {
+      const pow = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form><script>difficulty=1</script>';
+      const { transport, calls } = makeTransport({ http: fakeHttp([
+        { status: 200, url: 'https://sec.douban.com/c', body: pow },
+        { ...post, url: 'https://sec.douban.com/c' },
+      ]) });
+      const result = await transport.fetch('https://movie.douban.com/subject/1/');
+      assert.equal(calls.length, 2);
+      assert.equal(result.status, post.status);
+      assert.equal(result.bodyText, post.body);
+      assert.equal(new TextDecoder().decode(result.body), post.body);
+      assert.equal(result.finalUrl, 'https://sec.douban.com/c');
+      assert.equal(result.powSolved, undefined);
+      for (const [key, value] of Object.entries(post.headers ?? {})) {
+        assert.equal(new Map(result.headers).get(key), value);
+      }
+    });
+  }
+
+  test('rejectRedirects 请求遇到 PoW 表单时不放宽跳转策略', async () => {
+    const body = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form>';
+    const { transport, calls } = makeTransport({ http: fakeHttp([
+      { status: 200, url: 'https://sec.douban.com/c', body },
+    ]) });
+    const result = await transport.fetch('https://movie.douban.com/subject/1/', { rejectRedirects: true });
+    assert.equal(calls.length, 1);
+    assert.equal(result.bodyText, body);
+    assert.equal(result.powSolved, undefined);
+    assert.equal(calls[0].init.redirect, 'error');
+  });
+
+  test('落地页为 sec.douban.com/c 时自动计算 PoW 并重试原请求（credentials: omit 自动升级以换取通行 Cookie）', async () => {
+    const powPage = `<!DOCTYPE html><html><body>
+      <form id="sec" action="/c" method="POST">
+        <input name="tok" value="token123">
+        <input name="cha" value="challenge456">
+        <input name="red" value="https://movie.douban.com/subject/37134598/">
+      </form>
+      <script>difficulty = 2;</script>
+    </body></html>`;
+
+    const { transport, calls } = makeTransport({
+      http: fakeHttp([
+        // 第 1 次：原请求（指定 credentials: 'omit'）被重定向到了 sec.douban.com/c
+        {
+          status: 200,
+          url: 'https://sec.douban.com/c?r=https%3A%2F%2Fmovie.douban.com%2Fsubject%2F37134598%2F',
+          body: powPage,
+        },
+        // 第 2 次：自动发送 POST /c 提交算力解
+        {
+          status: 302,
+          url: 'https://sec.douban.com/c',
+          headers: { location: 'https://movie.douban.com/subject/37134598/' },
+        },
+        // 第 3 次：自动重新发起原请求，拿到正常页面
+        {
+          status: 200,
+          url: 'https://movie.douban.com/subject/37134598/',
+          body: '<html><head><title>正常作品页</title></head></html>',
+        },
+      ]),
+    });
+
+    const res = await transport.fetch('https://movie.douban.com/subject/37134598/', {
+      credentials: 'omit',
+    });
+    assert.equal(calls.length, 3);
+
+    // 核对第 1 次调用：请求原地址，初始使用 omit
+    assert.equal(calls[0].url, 'https://movie.douban.com/subject/37134598/');
+    assert.equal(calls[0].init.credentials, 'omit');
+
+    // 核对第 2 次调用：POST /c 提交算出的 sol、tok、cha、red，credentials 必须为 include 以接收 dbsawcv1
+    assert.equal(calls[1].url, 'https://sec.douban.com/c');
+    assert.equal(calls[1].init.method, 'POST');
+    assert.equal(calls[1].init.credentials, 'include');
+    assert.equal(calls[1].init.headers['X-Override-Referer'], undefined, '切勿发送 X-Override-Referer 以免触发 OPTIONS 预检');
+    assert.match(calls[1].init.body, /tok=token123/);
+    assert.match(calls[1].init.body, /cha=challenge456/);
+    assert.match(calls[1].init.body, /sol=\d+/);
+    assert.match(calls[1].init.body, /red=https%3A%2F%2Fmovie\.douban\.com%2Fsubject%2F37134598%2F/);
+
+    // 核对第 3 次调用：重放原请求，credentials 必须为 include 以携带 dbsawcv1
+    assert.equal(calls[2].url, 'https://movie.douban.com/subject/37134598/');
+    assert.equal(calls[2].init.credentials, 'include');
+    assert.equal(res.status, 200);
+    assert.equal(res.powSolved, true);
+    assert.match(res.bodyText, /正常作品页/);
+  });
+
+  test('POST /c 自动跟随 302 重定向直接到达目标页时直接返回', async () => {
+    const powPage = `<!DOCTYPE html><html><body>
+      <form id="sec" action="/c" method="POST">
+        <input name="tok" value="token123">
+        <input name="cha" value="challenge456">
+      </form>
+      <script>difficulty = 1;</script>
+    </body></html>`;
+
+    const { transport, calls } = makeTransport({
+      http: fakeHttp([
+        // 第 1 次：原请求被拦截到 sec
+        {
+          status: 200,
+          url: 'https://sec.douban.com/c?r=https%3A%2F%2Fmovie.douban.com%2Fsubject%2F37134598%2F',
+          body: powPage,
+        },
+        // 第 2 次：POST /c 在浏览器 follow 模式下直接重定向到了目标页 200
+        {
+          status: 200,
+          url: 'https://movie.douban.com/subject/37134598/',
+          body: '<html><head><title>直接重定向获得作品页</title></head></html>',
+        },
+      ]),
+    });
+
+    const res = await transport.fetch('https://movie.douban.com/subject/37134598/');
+    assert.equal(calls.length, 2);
+    assert.equal(res.status, 200);
+    assert.equal(res.finalUrl, 'https://movie.douban.com/subject/37134598/');
+    assert.equal(res.powSolved, true);
+    assert.match(res.bodyText, /直接重定向获得作品页/);
+  });
+
+  test('PoW 求解后仍被拦截时不无限循环，至多尝试一次', async () => {
+    const powPage = `<!DOCTYPE html><html><body>
+      <form id="sec" action="/c" method="POST">
+        <input name="tok" value="token123">
+        <input name="cha" value="challenge456">
+      </form>
+      <script>difficulty = 1;</script>
+    </body></html>`;
+
+    const { transport, calls } = makeTransport({
+      http: fakeHttp([
+        // 第 1 次：返回 PoW
+        { status: 200, url: 'https://sec.douban.com/c', body: powPage },
+        // 第 2 次：POST /c
+        { status: 302, url: 'https://sec.douban.com/c', headers: { location: 'https://movie.douban.com/subject/1/' } },
+        // 第 3 次：再次返回 PoW（例如风控升级为验证码或硬拦）
+        { status: 200, url: 'https://sec.douban.com/c', body: powPage },
+      ]),
+    });
+
+    const res = await transport.fetch('https://movie.douban.com/subject/1/');
+    // 只重试了一次（1: GET, 2: POST /c, 3: GET 重放），第 3 次依然遇到时不继续死循环
+    assert.equal(calls.length, 3);
+    assert.equal(res.finalUrl, 'https://sec.douban.com/c');
+    assert.equal(res.powSolved, undefined);
+  });
+});

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { CrawlRunner } from '../src/crawl/runner.js';
 import { RunStore } from '../src/crawl/run-store.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
@@ -13,7 +14,7 @@ const profile = (target, actor) => `<html>${nav(actor)}<div id="db-usr-profile">
 const urls = ['https://movie.douban.com/subject/123/', 'https://book.douban.com/subject/123/',
   'https://music.douban.com/subject/123/', 'https://www.douban.com/game/123/', 'https://www.douban.com/location/drama/123/'];
 
-function harness({ target = '111', actor = '222', contaminated = false } = {}) {
+function harness({ target = '111', actor = '222', contaminated = false, pow = false } = {}) {
   const dirs = new Map(), calls = [];
   const openBundle = async dir => { if (!dirs.has(dir)) dirs.set(dir, new MemoryFileStore()); return dirs.get(dir); };
   const runStore = new RunStore({ kv: new MemoryKvStore(), openBundle });
@@ -23,6 +24,16 @@ function harness({ target = '111', actor = '222', contaminated = false } = {}) {
       pacerOptions: { intervalMs: 1, jitterRatio: 0 }, batchSize: 20,
       fetchImpl: async (url, init) => {
         calls.push({ url, init, at: now });
+        if (pow && urls.includes(url)) {
+          const body = readFileSync(new URL('./fixtures/sec-pow.html', import.meta.url), 'utf8');
+          return { status: 200, url: 'https://sec.douban.com/c', headers: new Headers(),
+            arrayBuffer: async () => new TextEncoder().encode(body).buffer };
+        }
+        if (pow && init.method === 'POST') {
+          const body = `<html>${nav(actor)}<div id="info">PRIVATE-OPERATOR-REVIEW</div></html>`;
+          return { status: 200, url: urls[0], headers: new Headers(),
+            arrayBuffer: async () => new TextEncoder().encode(body).buffer };
+        }
         const catalog = urls.includes(url);
         const body = catalog ? `<html>${nav(contaminated || init.credentials !== 'omit' ? actor : null)}<div id="info">目录</div></html>` : profile(target, actor);
         return { status: 200, url, headers: new Headers({ 'content-type': 'text/html' }), arrayBuffer: async () => new TextEncoder().encode(body).buffer };
@@ -95,4 +106,42 @@ test('匿名目录豁免只作用于该响应，下一账号页仍拒绝操作�
   assert.throws(() => session.verify(profile('111', null), 'https://www.douban.com/people/111/'), { reason: 'operator_session_lost' });
   assert.throws(() => session.verify(profile('111', '333'), 'https://www.douban.com/people/111/'), { reason: 'operator_switched' });
   assert.doesNotThrow(() => session.verify(profile('111', '222'), 'https://www.douban.com/people/111/'));
+});
+
+for (const cold of [false, true]) {
+  test(`公开目录 PoW ${cold ? '冷恢复' : '首次抓取'}：自动求解 PoW 并成功捕获详情，安全隔离仅摄取客观元数据`, async () => {
+    const h = harness({ pow: true });
+    let r = h.makeRunner();
+    await r.start({ targetInput: '111', targetUserId: '111', operatorUserId: '222',
+      onlyRoutes: ['interest.item'], includeCatalog: true });
+    r._run.frontier.enqueue({ url: urls[0], urlKey: urls[0], routeKey: 'interest.item', intent: 'interest.item', ordered: false });
+    if (cold) {
+      await r.pause();
+      const cp = await h.runStore.loadCheckpoint();
+      r = h.makeRunner();
+      await r.resume(cp);
+    }
+    await r.runBatch();
+    assert.equal(r.status().stoppedBy, null);
+    assert.equal(h.calls.filter(c => c.init.method === 'POST').length, 1);
+    const catalog = h.calls.filter(c => urls.includes(c.url));
+    assert.equal(catalog.length, 1);
+    assert.equal(catalog[0].init.credentials, 'omit');
+    assert.equal(catalog[0].init.cache, 'no-store');
+    const manifest = await r.abort();
+    const reader = new BundleReader({ store: [...h.dirs.values()][0], bundleId: manifest.bundle_id });
+    const row = (await reader.index()).find(row => row.intent === 'interest.item');
+    assert.equal(row.verdict, 'ok');
+    const capture = await reader.readEntry(row);
+    assert.match(capture.bodyText, /PRIVATE-OPERATOR-REVIEW/);
+    assert.match(row.note, /通过客户端算力证明（PoW）获取/);
+  });
+}
+
+test('未标记 powSolved 的匿名目录请求仍严禁操作者登录态混入', () => {
+  const session = new SessionGuard({ visibility: 'public', operatorMode: 'authenticated', operatorUserId: '222' });
+  session.bindTarget({ userId: '111', username: '111' });
+  assert.throws(() => session.verify(nav('222'), urls[0], { anonymousCatalog: true, powSolved: false }),
+    { reason: 'operator_switched' });
+  assert.doesNotThrow(() => session.verify(nav('222'), urls[0], { anonymousCatalog: true, powSolved: true }));
 });

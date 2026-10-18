@@ -33,6 +33,8 @@
  * 停下，不得当作 ok。「大概没事」是这套系统里最危险的一句话。
  */
 
+import { isPowChallenge } from './pow.js';
+
 /** 豆瓣的风控域名。跳到这里就是被拦了。 */
 const SEC_HOST = 'sec.douban.com';
 
@@ -181,9 +183,10 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   }
   if (host === SEC_HOST || host.endsWith(`.${SEC_HOST}`)) {
     reasons.push(`跳转到风控域名 ${host}`);
-    // 带验证码的是可由人解决的挑战；否则按封锁处理，两者都不得自动重试。
+    // 带验证码或算力表单的是可解的挑战；否则按封锁处理，两者都不得自动重试。
+    const isChallenge = MARKERS.captcha.test(bodyText) || isPowChallenge(finalUrl, bodyText);
     return {
-      verdict: MARKERS.captcha.test(bodyText) ? 'challenge' : 'blocked',
+      verdict: isChallenge ? 'challenge' : 'blocked',
       reasons,
       itemCount,
     };

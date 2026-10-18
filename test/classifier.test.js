@@ -60,6 +60,15 @@ describe('风控', () => {
     assert.ok(r.reasons.some((x) => x.includes('sec.douban.com')));
   });
 
+  test('跳转到 sec.douban.com/c 且为 PoW 算力表单 → challenge', () => {
+    const r = classify({
+      finalUrl: 'https://sec.douban.com/c?r=https%3A%2F%2Fmovie.douban.com%2Fsubject%2F37134598%2F',
+      bodyText: fixtures.powChallengePage,
+    });
+    assert.equal(r.verdict, 'challenge');
+    assert.ok(r.reasons.some((x) => x.includes('sec.douban.com')));
+  });
+
   test('跳转到风控域名但没有验证码 → blocked', () => {
     const r = classify({
       finalUrl: 'https://sec.douban.com/b?r=x',

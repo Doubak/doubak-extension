@@ -74,6 +74,10 @@ import {
 } from './fidelity.js';
 import { fetchWithTimeout, DEFAULT_TIMEOUT_MS } from './errors.js';
 import { permissionErrorIfLost } from './permissions.js';
+import { isPowChallenge, extractPowChallenge, solvePowChallenge, PowBudgetError } from './pow.js';
+import { makeDebugLog } from '../core/debug-log.js';
+
+const debugLog = makeDebugLog('[doubak/transport]');
 
 /** 豆瓣自家的短链域名。只记短链等于在档案里留一个死指针。 */
 const SHORTLINK_HOSTS = new Set(['douc.cc']);
@@ -174,7 +178,7 @@ export class Transport {
    *   `redirect` 默认为 `follow`；头像可用 rejectRedirects 明确拒绝跳转。
    * @returns {Promise<FetchOutcome>}
    */
-  async fetch(url, { referer, withCk = false, followRedirects = true, credentials = 'include', minimumIntervalMs = 0, rejectRedirects = false } = {}) {
+  async fetch(url, { referer, withCk = false, followRedirects = true, credentials = 'include', minimumIntervalMs = 0, rejectRedirects = false, _powRetried = false } = {}) {
     if (!['include', 'omit'].includes(credentials)) throw new Error('不支持的 credentials');
     if (credentials === 'omit' && (withCk || new URL(url).searchParams.has('ck'))) {
       throw new Error('无登录凭据的请求不能携带 ck');
@@ -260,8 +264,7 @@ export class Transport {
     }
 
     const body = new Uint8Array(buf);
-
-    return {
+    const outcome = {
       requestedUrl,
       // response.url 在某些实现下为空，退回到我们自己跟踪的 currentUrl
       finalUrl: response.url || currentUrl,
@@ -273,6 +276,117 @@ export class Transport {
       fidelity: this._fidelity,
       elapsedMs: this._now() - startedAt,
     };
+
+    // 豆瓣客户端算力证明（PoW）挑战自动求解与凭据续期。
+    // 单次请求最多只尝试一次，避免在风控升级为验证码或硬封禁时陷入重试循环。
+    //
+    // ## 关于匿名目录请求（credentials: 'omit'）的凭据升级说明：
+    // 公开模式下的目录请求（如作品详情页 interest.item）初始按 'omit' 发起，以尽可能减少操作者评价噪音。
+    // 但豆瓣安全中心在对部分作品页面进行风控时，会 302 重定向到 sec.douban.com/c 的 PoW 验证页。
+    // 验证成功后豆瓣下发全站通行 Cookie（dbsawcv1）。依据 W3C Fetch 规范，'omit' 会丢弃 Set-Cookie 并在发请求时禁带 Cookie；
+    // 因此为了能够通过算力验证并拿到目标页面，POST /c 与随后的重试必须携带 'include' 凭据。
+    // 解析器对作品详情仅从 #info 提取客观元数据，不会摄取操作者评价或标记；而 rejectRedirects 策略（如头像防跳转）依然保留。
+    if (!_powRetried && outcome.status === 200 && !rejectRedirects
+      && isPowChallenge(outcome.finalUrl, outcome.bodyText)) {
+      const challenge = extractPowChallenge(outcome.bodyText);
+      if (challenge) {
+        debugLog('检测到 PoW 挑战 (sec.douban.com/c): cha=%s, difficulty=%d', challenge.cha, challenge.difficulty);
+        try {
+          const t0 = this._now();
+          const sol = await solvePowChallenge(challenge.cha, challenge.difficulty, globalThis.crypto, {
+            signal: this._signal, timeoutMs: this._timeoutMs,
+          });
+          const solveMs = this._now() - t0;
+          debugLog('PoW 求解成功: sol=%s, 耗时=%dms', sol, solveMs);
+
+          const postBody = new URLSearchParams({
+            tok: challenge.tok,
+            cha: challenge.cha,
+            sol: String(sol),
+            red: challenge.red || requestedUrl,
+          });
+          const postUrl = new URL('/c', outcome.finalUrl).toString();
+
+          debugLog('向 %s 提交 PoW 验证 (credentials: include)...', postUrl);
+
+          const { result: postOutcome } = await this._gate.run(() => fetchWithTimeout(
+            this._fetch,
+            postUrl,
+            {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/x-www-form-urlencoded',
+                // 注意：切勿添加 'X-Override-Referer' 等非简单请求头，否则会触发跨域 OPTIONS 预检，
+                // sec.douban.com 对 OPTIONS 返回 403 导致提交失败！
+              },
+              body: postBody.toString(),
+              credentials: 'include', // 必须 include，浏览器才能存储 Set-Cookie: dbsawcv1
+              redirect: 'follow',
+            },
+            {
+              timeoutMs: this._timeoutMs,
+              externalSignal: this._signal,
+              readBody: (res) => res.arrayBuffer(),
+            },
+          ), { minimumIntervalMs });
+
+          debugLog('PoW 提交响应: status=%d, url=%s', postOutcome.response.status, postOutcome.response.url);
+
+          // Preserve the actual POST response, including error bodies and Retry-After.
+          // A second GET is allowed only for a readable success redirect to the
+          // original target (test/non-browser transports); browsers follow it already.
+          const postFinalUrl = postOutcome.response.url || postUrl;
+          const postBuf = postOutcome.body ? new Uint8Array(postOutcome.body) : new Uint8Array();
+          const result = {
+            requestedUrl,
+            finalUrl: postFinalUrl,
+            redirectChain: [...redirectChain, postUrl, ...(postFinalUrl === postUrl ? [] : [postFinalUrl])],
+            status: postOutcome.response.status,
+            headers: headerPairs(postOutcome.response),
+            body: postBuf,
+            bodyText: new TextDecoder('utf-8', { fatal: false }).decode(postBuf),
+            fidelity: this._fidelity,
+            elapsedMs: this._now() - startedAt,
+          };
+          const location = headerOf(postOutcome.response, 'location');
+          let returnsToTarget = false;
+          try { returnsToTarget = location && new URL(location, postFinalUrl).href === new URL(requestedUrl).href; }
+          catch { /* Invalid Location is preserved as evidence, never followed. */ }
+          if ([302, 303].includes(result.status) && returnsToTarget && followRedirects) {
+            const retriedOutcome = await this.fetch(url, {
+              referer, withCk, followRedirects,
+              credentials: 'include', // 重试必须带 include 凭据以携带刚写入的 dbsawcv1 通行 Cookie
+              minimumIntervalMs,
+              rejectRedirects, _powRetried: true,
+            });
+            retriedOutcome.redirectChain = [...result.redirectChain, ...retriedOutcome.redirectChain];
+            retriedOutcome.elapsedMs = this._now() - startedAt;
+            if (retriedOutcome.status === 200 && new URL(retriedOutcome.finalUrl).href === new URL(requestedUrl).href
+              && !isPowChallenge(retriedOutcome.finalUrl, retriedOutcome.bodyText)) {
+              retriedOutcome.powSolved = true;
+            }
+            return retriedOutcome;
+          }
+          if (result.status === 200 && new URL(postFinalUrl).href === new URL(requestedUrl).href
+            && !isPowChallenge(postFinalUrl, result.bodyText)) result.powSolved = true;
+          return result;
+        } catch (err) {
+          if (err instanceof PowBudgetError) {
+            debugLog('PoW 求解预算耗尽，保留挑战页并等待人工处理');
+            return outcome;
+          }
+          if (this._signal?.aborted || err.name === 'AbortError' || err.kind === 'aborted') throw err;
+          // Cancellation, network failures and lost permissions retain their normal
+          // handling. Returning the initial challenge here would hide the failure.
+          const permErr = await permissionErrorIfLost({ permissions: this._permissions });
+          throw permErr ?? err;
+        }
+      } else {
+        debugLog('检测到 PoW 挑战页面，但未能解析出 cha/tok 参数');
+      }
+    }
+
+    return outcome;
   }
 
   /**
