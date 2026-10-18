@@ -146,6 +146,9 @@ export function formatEntry(e, at) {
   };
 }
 
+/** 串行化写入队列，避免无 await 的高频并发写入产生读写竞态相互覆盖。 */
+let appendQueue = Promise.resolve();
+
 /**
  * 追加一条。满了就丢最老的。
  *
@@ -155,16 +158,21 @@ export function formatEntry(e, at) {
  * @param {string} [opts.at]
  * @param {number} [opts.max]
  */
-export async function appendEvent(kv, e, { at = new Date().toISOString(), max } = {}) {
-  if (!shouldLog(e)) return;
-  const fetchy = isFetchEvent(e);
-  const key = fetchy ? FETCH_LOG_KEY : LOG_KEY;
-  const cap = max ?? (fetchy ? MAX_FETCH_ENTRIES : MAX_ENTRIES);
+export function appendEvent(kv, e, { at = new Date().toISOString(), max } = {}) {
+  const op = async () => {
+    if (!shouldLog(e)) return;
+    const fetchy = isFetchEvent(e);
+    const key = fetchy ? FETCH_LOG_KEY : LOG_KEY;
+    const cap = max ?? (fetchy ? MAX_FETCH_ENTRIES : MAX_ENTRIES);
 
-  const prev = /** @type {object[]} */ ((await kv.get(key)) ?? []);
-  const next = [...prev, formatEntry(e, at)];
-  // 从头切，保留最近的 cap 条
-  await kv.set(key, next.length > cap ? next.slice(next.length - cap) : next);
+    const prev = /** @type {object[]} */ ((await kv.get(key)) ?? []);
+    const next = [...prev, formatEntry(e, at)];
+    // 从头切，保留最近的 cap 条
+    await kv.set(key, next.length > cap ? next.slice(next.length - cap) : next);
+  };
+
+  appendQueue = appendQueue.then(op, op);
+  return appendQueue;
 }
 
 /**

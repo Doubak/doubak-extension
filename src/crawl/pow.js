@@ -111,12 +111,28 @@ export async function sha512Hex(string, cryptoImpl = globalThis.crypto) {
  * @returns {Promise<number>}
  */
 export async function solvePowChallenge(cha, difficulty = 4, cryptoImpl = globalThis.crypto) {
-  const targetPrefix = '0'.repeat(difficulty);
+  const subtle = cryptoImpl?.subtle;
+  if (!subtle?.digest) throw new Error('当前环境缺少 crypto.subtle.digest 支持');
+
+  const encoder = new TextEncoder();
+  const fullBytes = Math.floor(difficulty / 2);
+  const odd = difficulty % 2 !== 0;
+
   let nonce = 0;
   while (true) {
     nonce += 1;
-    const hash = await sha512Hex(cha + nonce, cryptoImpl);
-    if (hash.startsWith(targetPrefix)) {
+    const buf = encoder.encode(cha + nonce);
+    const digest = await subtle.digest('SHA-512', buf);
+    const bytes = new Uint8Array(digest);
+
+    let match = true;
+    for (let i = 0; i < fullBytes; i++) {
+      if (bytes[i] !== 0) {
+        match = false;
+        break;
+      }
+    }
+    if (match && (!odd || bytes[fullBytes] <= 0x0f)) {
       return nonce;
     }
   }

@@ -485,7 +485,12 @@ export class CrawlLoop {
 
     let sessionError = null;
     if (route.surface !== 'asset') {
-      try { this._session.verify(res.bodyText, res.finalUrl, { anonymousCatalog }); }
+      try {
+        this._session.verify(res.bodyText, res.finalUrl, {
+          anonymousCatalog: anonymousCatalog && !res.powSolved,
+          powSolved: Boolean(res.powSolved),
+        });
+      }
       catch (err) {
         if (!(err instanceof SessionError)) throw err;
         // 专用账号异常页固定显示登录入口，不能凭这个错误页推断操作者已退出。
@@ -635,7 +640,7 @@ export class CrawlLoop {
         // 0 是「数过了，是空的」——而空页正是翻页终点的正常形态。
         itemCount: profile ? cls.itemCount : null,
         itemTimeRange: itemTimeRange(items.times),
-        note: [anonymousCatalog ? '公开目录请求：不携带登录凭据，不复用浏览器缓存。' : null,
+        note: [res.powSolved ? '通过客户端算力证明（PoW）获取。' : (anonymousCatalog ? '公开目录请求：不携带登录凭据，不复用浏览器缓存。' : null),
           cls.verdict === null ? `判不出来：${cls.reasons.join('；')}` : null,
           sessionError?.message].filter(Boolean).join('；') || undefined,
       });

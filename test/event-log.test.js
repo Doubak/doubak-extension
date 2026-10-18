@@ -271,6 +271,20 @@ describe('存得住、有上限、最新在前', () => {
   test('没写过就读，返回空数组而不是抛', async () => {
     assert.deepEqual(await readLog(new MemoryKvStore()), []);
   });
+
+  test('并发无 await 追加不会相互覆盖丢失事件', async () => {
+    const kv = new MemoryKvStore();
+    // 模拟风控停机时连续同步触发的 4 个事件
+    const p1 = appendEvent(kv, { type: 'capture', routeKey: 'interest.item', verdict: 'challenge', url: 'https://sec.douban.com/c' }, { at: '2026-10-18T00:00:01Z' });
+    const p2 = appendEvent(kv, { type: 'awaiting_human', reason: 'challenge' }, { at: '2026-10-18T00:00:02Z' });
+    const p3 = appendEvent(kv, { type: 'stopped', reason: 'challenge', url: 'https://movie.douban.com/subject/1' }, { at: '2026-10-18T00:00:03Z' });
+    const p4 = appendEvent(kv, { type: 'paused', reason: 'challenge' }, { at: '2026-10-18T00:00:04Z' });
+
+    await Promise.all([p1, p2, p3, p4]);
+    const rows = await readLog(kv);
+    const types = rows.map((r) => r.type);
+    assert.deepEqual(types, ['paused', 'stopped', 'awaiting_human', 'capture']);
+  });
 });
 
 describe('导出文本', () => {

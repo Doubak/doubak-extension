@@ -75,6 +75,9 @@ import {
 import { fetchWithTimeout, DEFAULT_TIMEOUT_MS } from './errors.js';
 import { permissionErrorIfLost } from './permissions.js';
 import { isPowChallenge, extractPowChallenge, solvePowChallenge } from './pow.js';
+import { makeDebugLog } from '../core/debug-log.js';
+
+const debugLog = makeDebugLog('[doubak/transport]');
 
 /** 豆瓣自家的短链域名。只记短链等于在档案里留一个死指针。 */
 const SHORTLINK_HOSTS = new Set(['douc.cc']);
@@ -279,8 +282,15 @@ export class Transport {
     if (!_powRetried && isPowChallenge(outcome.finalUrl, outcome.bodyText)) {
       const challenge = extractPowChallenge(outcome.bodyText);
       if (challenge) {
+        debugLog('检测到 PoW 挑战 (sec.douban.com/c): cha=%s, difficulty=%d', challenge.cha, challenge.difficulty);
+        console.log(`[doubak/pow] 检测到 PoW 挑战: difficulty=${challenge.difficulty}, cha=${challenge.cha}`);
         try {
+          const t0 = this._now();
           const sol = await solvePowChallenge(challenge.cha, challenge.difficulty);
+          const solveMs = this._now() - t0;
+          debugLog('PoW 求解成功: sol=%s, 耗时=%dms', sol, solveMs);
+          console.log(`[doubak/pow] PoW 求解成功: sol=${sol}, 耗时=${solveMs}ms`);
+
           const postBody = new URLSearchParams({
             tok: challenge.tok,
             cha: challenge.cha,
@@ -288,17 +298,22 @@ export class Transport {
             red: challenge.red || requestedUrl,
           });
           const postUrl = new URL('/c', outcome.finalUrl).toString();
-          await this._gate.run(() => fetchWithTimeout(
+
+          debugLog('向 %s 提交 PoW 验证 (credentials: include)...', postUrl);
+          console.log(`[doubak/pow] 正在提交 PoW 验证结果到 ${postUrl}...`);
+
+          const { result: postOutcome } = await this._gate.run(() => fetchWithTimeout(
             this._fetch,
             postUrl,
             {
               method: 'POST',
               headers: {
                 'content-type': 'application/x-www-form-urlencoded',
-                ...(referer ? { 'X-Override-Referer': referer } : {}),
+                // 注意：切勿添加 'X-Override-Referer' 等非简单请求头，否则会触发跨域 OPTIONS 预检，
+                // sec.douban.com 对 OPTIONS 返回 403 导致提交失败！
               },
               body: postBody.toString(),
-              credentials,
+              credentials: 'include', // 必须 include，浏览器才能存储 Set-Cookie: dbsawcv1
               redirect: 'follow',
             },
             {
@@ -308,19 +323,55 @@ export class Transport {
             },
           ), { minimumIntervalMs });
 
-          return await this.fetch(url, {
+          debugLog('PoW 提交响应: status=%d, url=%s', postOutcome.response.status, postOutcome.response.url);
+          console.log(`[doubak/pow] PoW 提交响应状态: ${postOutcome.response.status}, 最终URL: ${postOutcome.response.url}`);
+
+          // 若浏览器已跟随 302 重定向并成功直接抵达目标页面（HTTP 200 且不再是 challenge 页面）
+          const postFinalUrl = postOutcome.response.url || postUrl;
+          const postBuf = postOutcome.body ? new Uint8Array(postOutcome.body) : new Uint8Array();
+          const postBodyText = new TextDecoder('utf-8', { fatal: false }).decode(postBuf);
+
+          if (postOutcome.response.status === 200 && !isPowChallenge(postFinalUrl, postBodyText) && !postFinalUrl.includes('sec.douban.com')) {
+            debugLog('PoW 提交后跟随重定向直接抵达目标页面: %s', postFinalUrl);
+            console.log(`[doubak/pow] PoW 提交后直接成功获取目标页: ${postFinalUrl}`);
+            return {
+              requestedUrl,
+              finalUrl: postFinalUrl,
+              redirectChain: [...redirectChain, postUrl, postFinalUrl],
+              status: postOutcome.response.status,
+              headers: headerPairs(postOutcome.response),
+              body: postBuf,
+              bodyText: postBodyText,
+              fidelity: this._fidelity,
+              elapsedMs: this._now() - startedAt,
+              powSolved: true,
+            };
+          }
+
+          // 否则（例如测试替身未自动重定向，或者 POST 返回了 302/200 后需要重新 GET 目标页面）
+          debugLog('PoW 凭据已写入 Cookie，重试抓取原 URL: %s', url);
+          console.log(`[doubak/pow] 正在带新凭据重试原请求: ${url}`);
+          const retriedOutcome = await this.fetch(url, {
             referer,
             withCk,
             followRedirects,
-            credentials,
+            credentials: 'include', // 重试必须带 include 凭据以携带 dbsawcv1
             minimumIntervalMs,
             rejectRedirects,
             _powRetried: true,
           });
-        } catch {
-          // 提交或求解失败时返回原始结果，由分类器接管
+          if (!isPowChallenge(retriedOutcome.finalUrl, retriedOutcome.bodyText) && !retriedOutcome.finalUrl.includes('sec.douban.com')) {
+            retriedOutcome.powSolved = true;
+          }
+          return retriedOutcome;
+        } catch (err) {
+          debugLog('PoW 求解或提交失败: %s', err.message);
+          console.warn('[doubak/pow] PoW 求解或提交异常:', err);
           return outcome;
         }
+      } else {
+        debugLog('检测到 PoW 挑战页面，但未能解析出 cha/tok 参数');
+        console.warn('[doubak/pow] 未能从挑战页 HTML 提取 cha/tok 参数');
       }
     }
 
