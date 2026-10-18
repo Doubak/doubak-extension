@@ -271,12 +271,21 @@ export class RequestGate {
    *
    * @template T
    * @param {() => Promise<T>} fn
-   * @param {{minimumIntervalMs?: number}} [opts]
+   * @param {object} [opts]
+   * @param {number} [opts.minimumIntervalMs]  此请求的最小间隔底线
+   * @param {number} [opts.delayMultiplier]    延迟倍率（例如 CDN 静态资源可设为 1/3）
    * @returns {Promise<{result: T, waitedMs: number}>}
    */
-  async run(fn, { minimumIntervalMs = 0 } = {}) {
+  async run(fn, { minimumIntervalMs = 0, delayMultiplier = 1 } = {}) {
+    if (!(delayMultiplier > 0)) throw new Error(`delayMultiplier 必须为正数: ${delayMultiplier}`);
     const run = this._tail.then(async () => {
-      const target = Math.max(this._pacer.nextDelayMs(), minimumIntervalMs);
+      // 延迟倍率：例如针对 CDN 静态资源允许以更高频率拉取（倍率 1/3）。
+      // 抖动与退避自然继承自 nextDelayMs()，全局退避时 CDN 也会等比降速；
+      // 若指定了 minimumIntervalMs 底线，同样依倍率等比缩放。
+      const rawDelay = this._pacer.nextDelayMs();
+      const delay = delayMultiplier === 1 ? rawDelay : Math.round(rawDelay * delayMultiplier);
+      const minInterval = delayMultiplier === 1 ? minimumIntervalMs : Math.round(minimumIntervalMs * delayMultiplier);
+      const target = Math.max(delay, minInterval);
       const wait =
         this._lastFinishedAt === null
           ? 0

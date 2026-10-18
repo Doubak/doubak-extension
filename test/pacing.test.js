@@ -299,3 +299,48 @@ test('目录最小间隔保留全局串行队列及更慢的退避', async () =>
   pacer.slowDown();
   assert.equal((await gate.run(async () => now, { minimumIntervalMs: 5000 })).waitedMs, 6000);
 });
+
+describe('延迟倍率 delayMultiplier', () => {
+  test('按倍率等比缩短等待时间，且后续主站请求仍等满完整间隔', async () => {
+    let now = 0;
+    const pacer = new Pacer({ intervalMs: 3000, jitterRatio: 0 });
+    const gate = new RequestGate({ pacer, now: () => now, sleep: async ms => { now += ms; } });
+
+    // 第 1 发：首发不等待
+    await gate.run(async () => {});
+    assert.equal(now, 0);
+
+    // 第 2 发：设置 1/3 倍率（如 CDN 图片请求），应等待 3000 * (1/3) = 1000ms
+    const r2 = await gate.run(async () => now, { delayMultiplier: 1 / 3 });
+    assert.equal(r2.waitedMs, 1000);
+    assert.equal(now, 1000);
+
+    // 第 3 发：再次 1/3 倍率，应继续等待 1000ms
+    const r3 = await gate.run(async () => now, { delayMultiplier: 1 / 3 });
+    assert.equal(r3.waitedMs, 1000);
+    assert.equal(now, 2000);
+
+    // 第 4 发：切回主站请求（默认倍率 1），必须从上一发结束算起等满全额 3000ms
+    const r4 = await gate.run(async () => now);
+    assert.equal(r4.waitedMs, 3000);
+    assert.equal(now, 5000);
+  });
+
+  test('退避降速时 delayMultiplier 等比缩放', async () => {
+    let now = 0;
+    const pacer = new Pacer({ intervalMs: 1000, jitterRatio: 0 });
+    const gate = new RequestGate({ pacer, now: () => now, sleep: async ms => { now += ms; } });
+
+    await gate.run(async () => {});
+    pacer.slowDown(); // 降速到 2000ms
+    const r = await gate.run(async () => now, { delayMultiplier: 1 / 3 });
+    assert.equal(r.waitedMs, 667, '2000ms * 1/3 四舍五入为 667ms');
+  });
+
+  test('非正数倍率抛出异常', async () => {
+    const pacer = new Pacer({ intervalMs: 1000 });
+    const gate = new RequestGate({ pacer });
+    await assert.rejects(() => gate.run(async () => {}, { delayMultiplier: 0 }), /必须为正数/);
+    await assert.rejects(() => gate.run(async () => {}, { delayMultiplier: -1 }), /必须为正数/);
+  });
+});

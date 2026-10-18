@@ -86,6 +86,19 @@ const SHORTLINK_HOSTS = new Set(['douc.cc']);
 const MAX_REDIRECTS = 5;
 
 /**
+ * 豆瓣 CDN 域名匹配。
+ * 覆盖 img1/img2/img3/img9/qnmob3/img-fm 等所有 doubanio 静态资源分发节点。
+ */
+export const DOUBANIO_CDN_PATTERN = /^https?:\/\/(?:[a-z0-9-]+\.)*doubanio\.com\//i;
+
+/**
+ * 豆瓣 CDN 静态资源请求的默认延迟倍率（1/3，即频率为原来的 3 倍）。
+ * 静态资源（封面、头像、附图等）由 CDN 边缘节点承载，无动态业务逻辑与 WAF 限制，
+ * 采用更高的抓取频率以加快备份进度；切回主站页面请求时依然严格等满全额基础间隔。
+ */
+export const DOUBANIO_DELAY_MULTIPLIER = 1 / 3;
+
+/**
  * `ck` 是 Rexxar 接口的 CSRF 令牌，跟着会话走，要当查询参数拼进 URL。
  *
  * @param {string} url
@@ -173,12 +186,13 @@ export class Transport {
    * @param {boolean} [opts.rejectRedirects] 头像拒绝跳转，浏览器无法安全逐跳检查 Location。
    * @param {'include'|'omit'} [opts.credentials]  目录请求可明确禁用登录凭据
    * @param {number} [opts.minimumIntervalMs]  此请求的最小间隔，仍受全局退避约束
+   * @param {number} [opts.delayMultiplier]    延迟倍率。未指定时若目标为 doubanio CDN 自动采用 1/3
    * @param {boolean} [opts.followRedirects]  只影响**手动**跟随（注入的 fetch 替身
    *   会给出可读的 302）。真实浏览器里跳转由浏览器跟，这个开关管不着——
    *   `redirect` 默认为 `follow`；头像可用 rejectRedirects 明确拒绝跳转。
    * @returns {Promise<FetchOutcome>}
    */
-  async fetch(url, { referer, withCk = false, followRedirects = true, credentials = 'include', minimumIntervalMs = 0, rejectRedirects = false, _powRetried = false } = {}) {
+  async fetch(url, { referer, withCk = false, followRedirects = true, credentials = 'include', minimumIntervalMs = 0, delayMultiplier, rejectRedirects = false, _powRetried = false } = {}) {
     if (!['include', 'omit'].includes(credentials)) throw new Error('不支持的 credentials');
     if (credentials === 'omit' && (withCk || new URL(url).searchParams.has('ck'))) {
       throw new Error('无登录凭据的请求不能携带 ck');
@@ -204,6 +218,9 @@ export class Transport {
       // 必须有超时：挂住的连接会永远卡住队列，而监管层只会看到「还在跑」，
       // 永远不来干预——那是一种静默的失败，比响亮地报错糟糕得多。
       const hopUrl = currentUrl;
+      const isCdn = DOUBANIO_CDN_PATTERN.test(hopUrl);
+      const hopMultiplier = delayMultiplier ?? (isCdn ? DOUBANIO_DELAY_MULTIPLIER : 1);
+
       /** @type {{result: {response: Response, body: ArrayBuffer}}} */
       let hopResult;
       try {
@@ -230,7 +247,7 @@ export class Transport {
               // 的 finally 里就已经撤了。实测卡死过 8494 秒，见 errors.js。
               readBody: (res) => res.arrayBuffer(),
             },
-          ), { minimumIntervalMs },
+          ), { minimumIntervalMs, delayMultiplier: hopMultiplier },
         );
       } catch (err) {
         // 站点权限被撤之后，fetch 抛的是 `TypeError`——**和网络故障一模一样**。
@@ -356,7 +373,7 @@ export class Transport {
             const retriedOutcome = await this.fetch(url, {
               referer, withCk, followRedirects,
               credentials: 'include', // 重试必须带 include 凭据以携带刚写入的 dbsawcv1 通行 Cookie
-              minimumIntervalMs,
+              minimumIntervalMs, delayMultiplier,
               rejectRedirects, _powRetried: true,
             });
             retriedOutcome.redirectChain = [...result.redirectChain, ...retriedOutcome.redirectChain];

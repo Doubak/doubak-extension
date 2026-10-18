@@ -560,3 +560,62 @@ describe('豆瓣 PoW 算力挑战自动求解与凭据续期', () => {
     assert.equal(res.powSolved, undefined);
   });
 });
+
+describe('CDN 静态资源请求延迟倍率', () => {
+  test('*.doubanio.com 静态资源请求自动采用 1/3 延迟倍率', async () => {
+    let now = 0;
+    const slept = [];
+    const pacer = new Pacer({ intervalMs: 3000, jitterRatio: 0 });
+    const gate = new RequestGate({
+      pacer,
+      now: () => now,
+      sleep: async (ms) => {
+        slept.push(ms);
+        now += ms;
+      },
+    });
+
+    const http = fakeHttp([
+      { status: 200, body: 'html1' },
+      { status: 200, body: 'img1' },
+      { status: 200, body: 'img2' },
+      { status: 200, body: 'html2' },
+    ]);
+    const transport = new Transport({ gate, fetchImpl: http.fetchImpl, now: () => now });
+
+    // 1. 主站 HTML：首发不等待
+    await transport.fetch('https://movie.douban.com/subject/1/');
+    // 2. doubanio 图片：自动采用 1/3 倍率，等 3000 * 1/3 = 1000ms
+    await transport.fetch('https://img3.doubanio.com/view/photo/s_ratio_poster/public/p1.jpg');
+    // 3. doubanio 另一图片节点：继续 1/3 倍率，等 1000ms
+    await transport.fetch('https://qnmob3.doubanio.com/view/photo/large/public/p2.jpg');
+    // 4. 切回主站 HTML：倍率恢复为 1，从上一条结束算起等满全额 3000ms
+    await transport.fetch('https://movie.douban.com/subject/2/');
+
+    assert.deepEqual(slept, [1000, 1000, 3000]);
+  });
+
+  test('显式传入 delayMultiplier 优先于自动判定', async () => {
+    let now = 0;
+    const slept = [];
+    const pacer = new Pacer({ intervalMs: 1000, jitterRatio: 0 });
+    const gate = new RequestGate({
+      pacer,
+      now: () => now,
+      sleep: async (ms) => {
+        slept.push(ms);
+        now += ms;
+      },
+    });
+    const http = fakeHttp([
+      { status: 200, body: 'img' },
+      { status: 200, body: 'img2' },
+    ]);
+    const transport = new Transport({ gate, fetchImpl: http.fetchImpl, now: () => now });
+
+    await transport.fetch('https://img1.doubanio.com/view/p.jpg');
+    // 显式指定 delayMultiplier: 0.5 覆盖默认的 1/3
+    await transport.fetch('https://img1.doubanio.com/view/p2.jpg', { delayMultiplier: 0.5 });
+    assert.deepEqual(slept, [500]);
+  });
+});
