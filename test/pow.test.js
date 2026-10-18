@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { isPowChallenge, extractPowChallenge, sha512Hex, solvePowChallenge } from '../src/crawl/pow.js';
+import { isPowChallenge, extractPowChallenge, sha512Hex, solvePowChallenge, PowBudgetError } from '../src/crawl/pow.js';
 import { classifyResponse, ROUTE_PROFILES } from '../src/crawl/classifier.js';
 import { fixtures } from './helpers/fixtures.js';
 
@@ -87,6 +87,53 @@ describe('PoW 参数提取 (extractPowChallenge)', () => {
 });
 
 describe('SHA-512 计算与 PoW 求解', () => {
+  test('已取消时不计算任何摘要', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    await assert.rejects(solvePowChallenge('seed', 4, { subtle: { digest: async () => { calls++; } } },
+      { signal: controller.signal }), { name: 'AbortError' });
+    assert.equal(calls, 0);
+  });
+
+  test('计算中取消会立即返回；挂起的 digest 恢复也不继续计算', async () => {
+    const controller = new AbortController();
+    let calls = 0, release;
+    const pending = solvePowChallenge('seed', 4, { subtle: { digest: () => {
+      calls++;
+      return new Promise(resolve => { release = resolve; });
+    } } }, { signal: controller.signal });
+    controller.abort();
+    await assert.rejects(pending, { name: 'AbortError' });
+    release(new Uint8Array(64).fill(255).buffer);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 1);
+  });
+
+  test('单次 digest 挂住也受时间预算约束', async () => {
+    await assert.rejects(solvePowChallenge('seed', 4,
+      { subtle: { digest: () => new Promise(() => {}) } }, { timeoutMs: 10 }), PowBudgetError);
+  });
+
+  test('高难度达到尝试次数上限后停止', async () => {
+    let calls = 0;
+    await assert.rejects(solvePowChallenge('seed', 8, { subtle: { digest: async () => {
+      calls++; return new Uint8Array(64).fill(255).buffer;
+    } } }, { maxAttempts: 3 }), PowBudgetError);
+    assert.equal(calls, 3);
+  });
+
+  test('同步完成的摘要也让出事件循环，暂停事件不会被饿死', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const pending = solvePowChallenge('seed', 8, { subtle: { digest: async () => {
+      calls++; return new Uint8Array(64).fill(255).buffer;
+    } } }, { signal: controller.signal, maxAttempts: 10_000 });
+    setTimeout(() => controller.abort(), 0);
+    await assert.rejects(pending, { name: 'AbortError' });
+    assert.ok(calls < 10_000);
+  });
+
   test('真实挑战在原始难度下求解，使用独立 SHA-512 实现核验', async () => {
     const { cha, difficulty } = extractPowChallenge(realPowPage);
     const nonce = await solvePowChallenge(cha, difficulty);

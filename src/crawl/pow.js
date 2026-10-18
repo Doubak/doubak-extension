@@ -16,7 +16,7 @@
  *
  * 本模块负责：
  * 1. 准确识别 `sec.douban.com/c` 的 PoW 表单挑战；
- * 2. 提取挑战参数并使用 Web Crypto 原生 `crypto.subtle` 快速求解（通常只需 50~150ms）；
+ * 2. 提取挑战参数并使用 Web Crypto 原生 `crypto.subtle` 在有限预算内求解；
  * 3. 供 Transport 层自动换取通行凭据，或供分类器识别为 `challenge` 而非 `blocked`。
  */
 
@@ -102,38 +102,70 @@ export async function sha512Hex(string, cryptoImpl = globalThis.crypto) {
   return hex;
 }
 
+/** Budget exhaustion leaves the captured challenge awaiting human intervention. */
+export class PowBudgetError extends Error {
+  constructor() {
+    super('PoW 求解超过时间或计算预算');
+    this.name = 'PowBudgetError';
+  }
+}
+
 /**
- * 求解 PoW 挑战，返回满足前导零条件的 nonce。
- *
- * @param {string} cha challenge 字符串
- * @param {number} [difficulty] 前导零个数，默认 4
+ * 求解 PoW 挑战。保留原来的前三个参数，第四个参数配置取消与预算。
+ * @param {string} cha
+ * @param {number} [difficulty]
  * @param {Crypto} [cryptoImpl]
+ * @param {object} [opts]
+ * @param {AbortSignal} [opts.signal]
+ * @param {number} [opts.timeoutMs]
+ * @param {number} [opts.maxAttempts]
  * @returns {Promise<number>}
  */
-export async function solvePowChallenge(cha, difficulty = 4, cryptoImpl = globalThis.crypto) {
+export async function solvePowChallenge(cha, difficulty = 4, cryptoImpl = globalThis.crypto,
+  { signal, timeoutMs = 30_000, maxAttempts = 2_000_000 } = {}) {
+  if (signal?.aborted) throw new DOMException('PoW 求解已取消', 'AbortError');
+  if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 8) throw new RangeError('不支持的 PoW 难度');
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isSafeInteger(maxAttempts) || maxAttempts <= 0) {
+    throw new RangeError('PoW 预算必须是有限正数');
+  }
   const subtle = cryptoImpl?.subtle;
   if (!subtle?.digest) throw new Error('当前环境缺少 crypto.subtle.digest 支持');
-
   const encoder = new TextEncoder();
   const fullBytes = Math.floor(difficulty / 2);
   const odd = difficulty % 2 !== 0;
-
-  let nonce = 0;
-  while (true) {
-    nonce += 1;
-    const buf = encoder.encode(cha + nonce);
-    const digest = await subtle.digest('SHA-512', buf);
-    const bytes = new Uint8Array(digest);
-
-    let match = true;
-    for (let i = 0; i < fullBytes; i++) {
-      if (bytes[i] !== 0) {
-        match = false;
-        break;
+  let stopped = false;
+  let timer;
+  let onAbort;
+  const interruption = new Promise((_, reject) => {
+    onAbort = () => { stopped = true; reject(new DOMException('PoW 求解已取消', 'AbortError')); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    timer = setTimeout(() => { stopped = true; reject(new PowBudgetError()); }, timeoutMs);
+  });
+  const compute = async () => {
+    for (let nonce = 1; nonce <= maxAttempts; nonce++) {
+      if (stopped) throw new DOMException('PoW 求解已停止', 'AbortError');
+      const digest = await subtle.digest('SHA-512', encoder.encode(cha + nonce));
+      // A native digest cannot be cancelled. Never schedule another after stopping.
+      if (stopped) throw new DOMException('PoW 求解已停止', 'AbortError');
+      const bytes = new Uint8Array(digest);
+      let match = true;
+      for (let i = 0; i < fullBytes; i++) {
+        if (bytes[i] !== 0) { match = false; break; }
       }
+      if (match && (!odd || bytes[fullBytes] <= 0x0f)) return nonce;
+      // Yield even if an implementation resolves digests as microtasks, so pause
+      // messages and the deadline timer can run instead of starving the event loop.
+      if (nonce % 256 === 0) await new Promise(resolve => setTimeout(resolve, 0));
     }
-    if (match && (!odd || bytes[fullBytes] <= 0x0f)) {
-      return nonce;
-    }
+    throw new PowBudgetError();
+  };
+  try {
+    // Race covers a stalled digest as well as the loop. compute observes stopped
+    // when a pending native digest eventually returns; it cannot resume hashing.
+    return await Promise.race([compute(), interruption]);
+  } finally {
+    stopped = true;
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
   }
 }

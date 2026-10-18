@@ -74,7 +74,7 @@ import {
 } from './fidelity.js';
 import { fetchWithTimeout, DEFAULT_TIMEOUT_MS } from './errors.js';
 import { permissionErrorIfLost } from './permissions.js';
-import { isPowChallenge, extractPowChallenge, solvePowChallenge } from './pow.js';
+import { isPowChallenge, extractPowChallenge, solvePowChallenge, PowBudgetError } from './pow.js';
 import { makeDebugLog } from '../core/debug-log.js';
 
 const debugLog = makeDebugLog('[doubak/transport]');
@@ -288,7 +288,9 @@ export class Transport {
         debugLog('检测到 PoW 挑战 (sec.douban.com/c): cha=%s, difficulty=%d', challenge.cha, challenge.difficulty);
         try {
           const t0 = this._now();
-          const sol = await solvePowChallenge(challenge.cha, challenge.difficulty);
+          const sol = await solvePowChallenge(challenge.cha, challenge.difficulty, globalThis.crypto, {
+            signal: this._signal, timeoutMs: this._timeoutMs,
+          });
           const solveMs = this._now() - t0;
           debugLog('PoW 求解成功: sol=%s, 耗时=%dms', sol, solveMs);
 
@@ -362,6 +364,11 @@ export class Transport {
             && !isPowChallenge(postFinalUrl, result.bodyText)) result.powSolved = true;
           return result;
         } catch (err) {
+          if (err instanceof PowBudgetError) {
+            debugLog('PoW 求解预算耗尽，保留挑战页并等待人工处理');
+            return outcome;
+          }
+          if (this._signal?.aborted || err.name === 'AbortError' || err.kind === 'aborted') throw err;
           // Cancellation, network failures and lost permissions retain their normal
           // handling. Returning the initial challenge here would hide the failure.
           const permErr = await permissionErrorIfLost({ permissions: this._permissions });

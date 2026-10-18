@@ -344,6 +344,49 @@ test('无凭据请求的每一跳都 omit/no-store，不能偷偷加 ck', async 
 });
 
 describe('豆瓣 PoW 算力挑战自动求解与凭据续期', () => {
+  test('求解中取消不提交 POST，也不把取消吞成挑战响应', async (t) => {
+    const controller = new AbortController();
+    let digests = 0;
+    t.mock.method(globalThis.crypto.subtle, 'digest', async () => {
+      digests++;
+      controller.abort();
+      return new Uint8Array(64).fill(255).buffer;
+    });
+    const body = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form>';
+    const { transport, calls } = makeTransport({ transport: { signal: controller.signal },
+      http: fakeHttp([{ status: 200, url: 'https://sec.douban.com/c', body }]) });
+    await assert.rejects(transport.fetch('https://movie.douban.com/subject/1/'), { name: 'AbortError' });
+    assert.equal(digests, 1);
+    assert.equal(calls.length, 1);
+  });
+
+  test('求解预算耗尽保存原挑战供人工处理，不提交或重试', async (t) => {
+    t.mock.method(globalThis.crypto.subtle, 'digest', () => new Promise(() => {}));
+    const body = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form>';
+    const { transport, calls } = makeTransport({ transport: { timeoutMs: 10 },
+      http: fakeHttp([{ status: 200, url: 'https://sec.douban.com/c', body }]) });
+    const result = await transport.fetch('https://movie.douban.com/subject/1/');
+    assert.equal(result.bodyText, body);
+    assert.equal(result.powSolved, undefined);
+    assert.equal(calls.length, 1);
+  });
+
+  test('等待 POST 时取消按中止传播', async () => {
+    const controller = new AbortController();
+    const body = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form><script>difficulty=1</script>';
+    const http = fakeHttp([{ status: 200, url: 'https://sec.douban.com/c', body }]);
+    let requests = 0;
+    const { transport } = makeTransport({ transport: { signal: controller.signal,
+      fetchImpl: async (url, init) => {
+        requests++;
+        if (requests === 1) return http.fetchImpl(url, init);
+        controller.abort();
+        return new Promise(() => {});
+      } } });
+    await assert.rejects(transport.fetch('https://movie.douban.com/subject/1/'), { kind: 'aborted' });
+    assert.equal(requests, 2);
+  });
+
   for (const post of [
     { status: 429, headers: { 'retry-after': '3600' }, body: '请求过于频繁，请稍后再试' },
     { status: 403, body: '禁止访问' },
