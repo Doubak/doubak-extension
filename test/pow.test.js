@@ -1,8 +1,16 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { isPowChallenge, extractPowChallenge, sha512Hex, solvePowChallenge } from '../src/crawl/pow.js';
+import { classifyResponse, ROUTE_PROFILES } from '../src/crawl/classifier.js';
 import { fixtures } from './helpers/fixtures.js';
+
+// Issue #29: downloads/豆瓣.html. Only the short-lived tok was replaced;
+// the original markup, challenge and browser script are preserved. This fixture
+// is mandatory: missing files and failed assertions must fail CI, not be swallowed.
+const realPowPage = readFileSync(new URL('./fixtures/sec-pow.html', import.meta.url), 'utf-8');
+const realPowUrl = 'https://sec.douban.com/c?r=https%3A%2F%2Fmovie.douban.com%2Fsubject%2F37134598%2F';
 
 describe('PoW 算力挑战识别 (isPowChallenge)', () => {
   test('识别标准的 sec.douban.com/c 算力表单', () => {
@@ -13,12 +21,19 @@ describe('PoW 算力挑战识别 (isPowChallenge)', () => {
   });
 
   test('识别真实 dump 的豆瓣 PoW 页面', () => {
-    try {
-      const dump = readFileSync(new URL('../../downloads/豆瓣.html', import.meta.url), 'utf-8');
-      assert.equal(isPowChallenge('https://sec.douban.com/c?r=https%3A%2F%2Fmovie.douban.com%2Fsubject%2F37134598%2F', dump), true);
-    } catch {
-      // 允许在没有外部 dump 文件的环境中跳过真实文件读取
-    }
+    assert.equal(isPowChallenge(realPowUrl, realPowPage), true);
+  });
+
+  test('真实载入中页面没有验证码提示，仍分类为 challenge 而非 blocked', () => {
+    assert.match(realPowPage, /载入中/);
+    assert.doesNotMatch(realPowPage, /验证码/);
+    const result = classifyResponse({
+      finalUrl: realPowUrl,
+      status: 200,
+      bodyText: realPowPage,
+      route: ROUTE_PROFILES['broadcast.timeline'],
+    });
+    assert.equal(result.verdict, 'challenge');
   });
 
   test('非 sec.douban.com 域名不判定为 PoW 挑战', () => {
@@ -39,6 +54,15 @@ describe('PoW 算力挑战识别 (isPowChallenge)', () => {
 });
 
 describe('PoW 参数提取 (extractPowChallenge)', () => {
+  test('保留真实表单参数，并从内联函数的默认参数读取难度', () => {
+    assert.deepEqual(extractPowChallenge(realPowPage), {
+      tok: 'fixture-token-not-valid',
+      cha: '7c76d757c7cef3b398720c1dd03885ffd33c67dea5d34129df398fd30ae774a26d627418729f8ebe83103de39d2e093f65a70ff4365ffc97e3ac9ef6a6a33bc6',
+      red: 'https://movie.douban.com/subject/37134598/',
+      difficulty: 4,
+    });
+  });
+
   test('从表单正确提取 tok, cha, red 与 difficulty', () => {
     const extracted = extractPowChallenge(fixtures.powChallengePage);
     assert.deepEqual(extracted, {
@@ -63,6 +87,17 @@ describe('PoW 参数提取 (extractPowChallenge)', () => {
 });
 
 describe('SHA-512 计算与 PoW 求解', () => {
+  test('真实挑战在原始难度下求解，使用独立 SHA-512 实现核验', async () => {
+    const { cha, difficulty } = extractPowChallenge(realPowPage);
+    const nonce = await solvePowChallenge(cha, difficulty);
+    // Independently derived with node:crypto, starting at 1 as the page does.
+    assert.equal(nonce, 279267);
+    assert.equal(
+      createHash('sha512').update(cha + nonce).digest('hex'),
+      '0000523118876f15e6d14bf294acc9c7689ca80010fd9d20b281811eb39a53e3d0525e51254ca176b5244119d68f279543154de106172fbcf12b81ea1dde95db',
+    );
+  });
+
   test('sha512Hex 输出已知向量', async () => {
     const emptyHash = await sha512Hex('');
     assert.equal(
