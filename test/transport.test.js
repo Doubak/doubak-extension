@@ -344,7 +344,26 @@ test('无凭据请求的每一跳都 omit/no-store，不能偷偷加 ck', async 
 });
 
 describe('豆瓣 PoW 算力挑战自动求解与凭据续期', () => {
-  test('落地页为 sec.douban.com/c 时自动计算 PoW 并重试原请求（凭据自动切换为 include）', async () => {
+  for (const opts of [{ credentials: 'omit' }, { rejectRedirects: true }]) {
+    test(`PoW 不能放宽请求策略 ${JSON.stringify(opts)}`, async () => {
+      const body = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form>';
+      const { transport, calls } = makeTransport({ http: fakeHttp([
+        { status: 200, url: 'https://sec.douban.com/c', body },
+      ]) });
+      const result = await transport.fetch('https://movie.douban.com/subject/1/', opts);
+      assert.equal(calls.length, 1, '不得发送带登录 Cookie 的 POST 或重放');
+      assert.equal(result.bodyText, body);
+      assert.equal(result.powSolved, undefined);
+      if (opts.credentials === 'omit') {
+        assert.equal(calls[0].init.credentials, 'omit');
+        assert.equal(calls[0].init.cache, 'no-store');
+      } else {
+        assert.equal(calls[0].init.redirect, 'error');
+      }
+    });
+  }
+
+  test('落地页为 sec.douban.com/c 时自动计算 PoW 并重试原请求（保留 include）', async () => {
     const powPage = `<!DOCTYPE html><html><body>
       <form id="sec" action="/c" method="POST">
         <input name="tok" value="token123">
@@ -356,7 +375,7 @@ describe('豆瓣 PoW 算力挑战自动求解与凭据续期', () => {
 
     const { transport, calls } = makeTransport({
       http: fakeHttp([
-        // 第 1 次：原请求（即使指定了 credentials: 'omit'）被重定向到了 sec.douban.com/c
+        // 第 1 次：原登录请求被重定向到了 sec.douban.com/c
         {
           status: 200,
           url: 'https://sec.douban.com/c?r=https%3A%2F%2Fmovie.douban.com%2Fsubject%2F37134598%2F',
@@ -378,13 +397,13 @@ describe('豆瓣 PoW 算力挑战自动求解与凭据续期', () => {
     });
 
     const res = await transport.fetch('https://movie.douban.com/subject/37134598/', {
-      credentials: 'omit',
+      credentials: 'include',
     });
     assert.equal(calls.length, 3);
 
-    // 核对第 1 次调用：请求原地址，初始使用 omit
+    // 核对第 1 次调用：请求原地址，初始使用 include
     assert.equal(calls[0].url, 'https://movie.douban.com/subject/37134598/');
-    assert.equal(calls[0].init.credentials, 'omit');
+    assert.equal(calls[0].init.credentials, 'include');
 
     // 核对第 2 次调用：POST /c 提交算出的 sol、tok、cha、red，且 credentials 必须为 include 以接收 dbsawcv1
     assert.equal(calls[1].url, 'https://sec.douban.com/c');

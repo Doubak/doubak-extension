@@ -361,7 +361,7 @@ export class SessionGuard {
    * @param {string} html
    * @throws {SessionError}
    */
-  verify(html, url, { anonymousCatalog = false, powSolved = false } = {}) {
+  verify(html, url, { anonymousCatalog = false } = {}) {
     if (!this._account) throw new Error('尚未 preflight，不能复核');
 
     // 作品、日记正文和图片没有 people 路径；用户路线不能跳到另一账号。
@@ -381,9 +381,8 @@ export class SessionGuard {
     const state = detectLoginState(html);
     // 公开目录请求刻意不带 Cookie；它的退出登录导航不代表操作者退出了登录。
     // 仅对这一跳豁免会话检查，不能改变任务绑定或放宽下一张目标账号页面。
-    // 若该页面经历过 PoW 求解并下发/携带凭据，则豁免登录态检查（因豆瓣强制要求凭据才能响应 200）。
     if (anonymousCatalog && this._visibility === 'public') {
-      if (!powSolved && state === 'logged_in') throw new SessionError('operator_switched', '无登录凭据的作品目录请求返回了登录者页面，已停止以免混入个人内容。');
+      if (state === 'logged_in') throw new SessionError('operator_switched', '无登录凭据的作品目录请求返回了登录者页面，已停止以免混入个人内容。');
       return;
     }
     if (this._visibility === 'public') {

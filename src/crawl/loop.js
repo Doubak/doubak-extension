@@ -487,8 +487,7 @@ export class CrawlLoop {
     if (route.surface !== 'asset') {
       try {
         this._session.verify(res.bodyText, res.finalUrl, {
-          anonymousCatalog: anonymousCatalog && !res.powSolved,
-          powSolved: Boolean(res.powSolved),
+          anonymousCatalog,
         });
       }
       catch (err) {

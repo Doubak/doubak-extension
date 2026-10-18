@@ -279,7 +279,10 @@ export class Transport {
 
     // 豆瓣客户端算力证明（PoW）挑战自动求解与凭据续期。
     // 单次请求最多只尝试一次，避免在风控升级为验证码或硬封禁时陷入重试循环。
-    if (!_powRetried && isPowChallenge(outcome.finalUrl, outcome.bodyText)) {
+    // Clearance cookies cannot be separated from login cookies by fetch().
+    // Keep anonymous catalog/asset requests anonymous and preserve redirect policy.
+    if (!_powRetried && credentials === 'include' && !rejectRedirects
+      && isPowChallenge(outcome.finalUrl, outcome.bodyText)) {
       const challenge = extractPowChallenge(outcome.bodyText);
       if (challenge) {
         debugLog('检测到 PoW 挑战 (sec.douban.com/c): cha=%s, difficulty=%d', challenge.cha, challenge.difficulty);
