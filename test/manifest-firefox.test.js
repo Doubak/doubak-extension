@@ -107,11 +107,11 @@ describe('那三处差异各自说得出理由', () => {
   test('声明「什么都不收集」，而这正是版本下限的来源', () => {
     const g = firefox.browser_specific_settings.gecko;
     assert.deepEqual(g.data_collection_permissions, { required: ['none'] });
-    // 这个字段要 Firefox 140。声明了它却把下限写在 140 以下的话，
-    // web-ext lint 会报 KEY_FIREFOX_UNSUPPORTED_BY_MIN_VERSION，而 AMO 会看见。
+    // 这个字段桌面端要 Firefox 140，Android 端要 142。声明了它却把下限写在 142 以下的话，
+    // web-ext lint 会报 KEY_FIREFOX_ANDROID_UNSUPPORTED_BY_MIN_VERSION，而 AMO 会看见。
     assert.ok(
-      Number.parseInt(g.strict_min_version, 10) >= 140,
-      `声明了 data_collection_permissions 就必须 ≥140，现在是 ${g.strict_min_version}`,
+      Number.parseInt(g.strict_min_version, 10) >= 142,
+      `声明了 data_collection_permissions 就必须 ≥142，现在是 ${g.strict_min_version}`,
     );
     assert.equal(g.strict_min_version, STRICT_MIN_VERSION);
   });

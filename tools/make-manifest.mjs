@@ -21,15 +21,16 @@
  * | `permissions` | 去掉 `offscreen`：Firefox 没有这个 API，而事件页本来就能直接起专用 Worker（实测，见 docs/firefox.md） |
  * | `browser_specific_settings.gecko` | AMO 要 id；`strict_min_version` 见下 |
  *
- * ## 版本下限 140，而决定它的不是我们用的 API
+ * ## 版本下限 142，而决定它的不是我们用的 API
  *
  * 我们真正用到的东西下限都很低：OPFS 111、`background.type` 112、DNR 那四项 113。
- * 把线抬到 140 的是两条**别的**：
+ * 把线抬到 142 的是两条**别的**：
  *
- * - `data_collection_permissions` 要 **140**，而 `web-ext lint` 说它「对所有新的
- *   Firefox 扩展都是必需的」。这个扩展的答案恰好是 `{"required": ["none"]}`——
- *   凭据与数据一个字节都不离开设备，而 Firefox 现在正好有一个正式字段能声明它。
- * - `runtime.getContexts` 要 **127**（`src/ui/notify.js` 在用），被 140 顺带覆盖。
+ * - `data_collection_permissions` 桌面端要 140，而 Firefox for Android 要 **142**。
+ *   低于 142 时 `web-ext lint` 会报 `KEY_FIREFOX_ANDROID_UNSUPPORTED_BY_MIN_VERSION`。
+ *   这个扩展的答案恰好是 `{"required": ["none"]}`——凭据与数据一个字节都不离开设备，
+ *   而 Firefox 现在正好有一个正式字段能声明它。
+ * - `runtime.getContexts` 要 **127**（`src/ui/notify.js` 在用），被 142 顺带覆盖。
  *
  * 用法：`node tools/make-manifest.mjs`（写文件）或 `--check`（只核对，CI 用）。
  */
@@ -87,8 +88,8 @@ export const GECKO_ID = 'doubak@doubak.com';
  */
 export const AMO_CONTACT = 'admin@doubak.com';
 
-/** 见文件开头：决定它的是 data_collection_permissions（140），不是我们用的 API。 */
-export const STRICT_MIN_VERSION = '140.0';
+/** 见文件开头：决定它的是 data_collection_permissions（Android 端要求 142），不是我们用的 API。 */
+export const STRICT_MIN_VERSION = '142.0';
 
 /**
  * Chrome 的 manifest → Firefox 的 manifest。**纯函数**，测试直接调它。
