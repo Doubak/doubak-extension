@@ -54,13 +54,14 @@ A paused crawl remains bound to its original target,
 operator and scope; changing the login does not move its checkpoint to another account.
 Public observations do not imply deletion of content they cannot see.
 
-Public crawls skip subject details by default. If enabled, those details are requested
+Public crawls skip subject details by default. If enabled, those details are initially requested
 without login credentials to avoid copying the operator's reviews into the target archive.
-Anonymous requests encountering a proof-of-work (PoW) challenge save it and pause;
-they never switch to login credentials. Requests already using credentials may solve
-one challenge, with cancellation and a default budget of 30 seconds or two million
-attempts. Exhausting that budget pauses for manual handling. Rejected submissions
-retain the actual response instead of blindly retrying the target URL.
+If a request encounters a proof-of-work (PoW) challenge, it automatically solves it to acquire
+the clearance cookie (dbsawcv1) and complete retrieval; the parser strictly limits detail extraction
+to objective metadata (#info) and never ingests personal reviews.
+PoW solving supports cancellation with a default budget of 30 seconds or two million attempts.
+Exhausting that budget pauses for manual handling. Rejected submissions retain the actual response
+instead of blindly retrying the target URL.
 Both a self archive and a third-party public archive have been checked through the offline
 parser, export adapters and site generator; this does not verify every page variant.
 

@@ -279,9 +279,14 @@ export class Transport {
 
     // 豆瓣客户端算力证明（PoW）挑战自动求解与凭据续期。
     // 单次请求最多只尝试一次，避免在风控升级为验证码或硬封禁时陷入重试循环。
-    // Clearance cookies cannot be separated from login cookies by fetch().
-    // Keep anonymous catalog/asset requests anonymous and preserve redirect policy.
-    if (!_powRetried && outcome.status === 200 && credentials === 'include' && !rejectRedirects
+    //
+    // ## 关于匿名目录请求（credentials: 'omit'）的凭据升级说明：
+    // 公开模式下的目录请求（如作品详情页 interest.item）初始按 'omit' 发起，以尽可能减少操作者评价噪音。
+    // 但豆瓣安全中心在对部分作品页面进行风控时，会 302 重定向到 sec.douban.com/c 的 PoW 验证页。
+    // 验证成功后豆瓣下发全站通行 Cookie（dbsawcv1）。依据 W3C Fetch 规范，'omit' 会丢弃 Set-Cookie 并在发请求时禁带 Cookie；
+    // 因此为了能够通过算力验证并拿到目标页面，POST /c 与随后的重试必须携带 'include' 凭据。
+    // 解析器对作品详情仅从 #info 提取客观元数据，不会摄取操作者评价或标记；而 rejectRedirects 策略（如头像防跳转）依然保留。
+    if (!_powRetried && outcome.status === 200 && !rejectRedirects
       && isPowChallenge(outcome.finalUrl, outcome.bodyText)) {
       const challenge = extractPowChallenge(outcome.bodyText);
       if (challenge) {
@@ -349,7 +354,9 @@ export class Transport {
           catch { /* Invalid Location is preserved as evidence, never followed. */ }
           if ([302, 303].includes(result.status) && returnsToTarget && followRedirects) {
             const retriedOutcome = await this.fetch(url, {
-              referer, withCk, followRedirects, credentials, minimumIntervalMs,
+              referer, withCk, followRedirects,
+              credentials: 'include', // 重试必须带 include 凭据以携带刚写入的 dbsawcv1 通行 Cookie
+              minimumIntervalMs,
               rejectRedirects, _powRetried: true,
             });
             retriedOutcome.redirectChain = [...result.redirectChain, ...retriedOutcome.redirectChain];

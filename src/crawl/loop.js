@@ -488,6 +488,7 @@ export class CrawlLoop {
       try {
         this._session.verify(res.bodyText, res.finalUrl, {
           anonymousCatalog,
+          powSolved: Boolean(res.powSolved),
         });
       }
       catch (err) {

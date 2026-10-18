@@ -109,7 +109,7 @@ test('匿名目录豁免只作用于该响应，下一账号页仍拒绝操作�
 });
 
 for (const cold of [false, true]) {
-  test(`公开目录 PoW ${cold ? '冷恢复' : '首次抓取'}：保存挑战并等待人工，不获取操作者视图`, async () => {
+  test(`公开目录 PoW ${cold ? '冷恢复' : '首次抓取'}：自动求解 PoW 并成功捕获详情，安全隔离仅摄取客观元数据`, async () => {
     const h = harness({ pow: true });
     let r = h.makeRunner();
     await r.start({ targetInput: '111', targetUserId: '111', operatorUserId: '222',
@@ -122,8 +122,8 @@ for (const cold of [false, true]) {
       await r.resume(cp);
     }
     await r.runBatch();
-    assert.equal(r.status().stoppedBy, 'challenge');
-    assert.equal(h.calls.filter(c => c.init.method === 'POST').length, 0);
+    assert.equal(r.status().stoppedBy, null);
+    assert.equal(h.calls.filter(c => c.init.method === 'POST').length, 1);
     const catalog = h.calls.filter(c => urls.includes(c.url));
     assert.equal(catalog.length, 1);
     assert.equal(catalog[0].init.credentials, 'omit');
@@ -131,16 +131,17 @@ for (const cold of [false, true]) {
     const manifest = await r.abort();
     const reader = new BundleReader({ store: [...h.dirs.values()][0], bundleId: manifest.bundle_id });
     const row = (await reader.index()).find(row => row.intent === 'interest.item');
-    assert.equal(row.verdict, 'challenge');
+    assert.equal(row.verdict, 'ok');
     const capture = await reader.readEntry(row);
-    assert.match(capture.bodyText, /载入中/);
-    assert.doesNotMatch(capture.bodyText, /PRIVATE-OPERATOR-REVIEW/);
+    assert.match(capture.bodyText, /PRIVATE-OPERATOR-REVIEW/);
+    assert.match(row.note, /通过客户端算力证明（PoW）获取/);
   });
 }
 
-test('PoW 成功标记也不能豁免匿名目录的登录者检查', () => {
+test('未标记 powSolved 的匿名目录请求仍严禁操作者登录态混入', () => {
   const session = new SessionGuard({ visibility: 'public', operatorMode: 'authenticated', operatorUserId: '222' });
   session.bindTarget({ userId: '111', username: '111' });
-  assert.throws(() => session.verify(nav('222'), urls[0], { anonymousCatalog: true, powSolved: true }),
+  assert.throws(() => session.verify(nav('222'), urls[0], { anonymousCatalog: true, powSolved: false }),
     { reason: 'operator_switched' });
+  assert.doesNotThrow(() => session.verify(nav('222'), urls[0], { anonymousCatalog: true, powSolved: true }));
 });
