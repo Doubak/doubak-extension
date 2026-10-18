@@ -56,6 +56,11 @@ Public observations do not imply deletion of content they cannot see.
 
 Public crawls skip subject details by default. If enabled, those details are requested
 without login credentials to avoid copying the operator's reviews into the target archive.
+Anonymous requests encountering a proof-of-work (PoW) challenge save it and pause;
+they never switch to login credentials. Requests already using credentials may solve
+one challenge, with cancellation and a default budget of 30 seconds or two million
+attempts. Exhausting that budget pauses for manual handling. Rejected submissions
+retain the actual response instead of blindly retrying the target URL.
 Both a self archive and a third-party public archive have been checked through the offline
 parser, export adapters and site generator; this does not verify every page variant.
 

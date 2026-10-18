@@ -344,6 +344,20 @@ test('无凭据请求的每一跳都 omit/no-store，不能偷偷加 ck', async 
 });
 
 describe('豆瓣 PoW 算力挑战自动求解与凭据续期', () => {
+  for (const status of [403, 429, 503]) {
+    test(`HTTP ${status} 即使包含 PoW 表单也不得触发自动提交`, async () => {
+      const body = '<form id="sec" action="/c"><input name="tok" value="x"><input name="cha" value="y"></form>';
+      const { transport, calls } = makeTransport({ http: fakeHttp([
+        { status, url: 'https://sec.douban.com/c', body, headers: { 'retry-after': '3600' } },
+      ]) });
+      const result = await transport.fetch('https://movie.douban.com/subject/1/');
+      assert.equal(calls.length, 1);
+      assert.equal(result.status, status);
+      assert.equal(new Map(result.headers).get('retry-after'), '3600');
+      assert.equal(result.bodyText, body);
+    });
+  }
+
   test('求解中取消不提交 POST，也不把取消吞成挑战响应', async (t) => {
     const controller = new AbortController();
     let digests = 0;
