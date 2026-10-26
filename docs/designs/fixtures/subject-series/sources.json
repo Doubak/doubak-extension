@@ -1,0 +1,198 @@
+[
+  {
+    "file": "film-before.html",
+    "source_url": "https://movie.douban.com/subject/36848001/",
+    "bundle_id": "20260731T051333Z-786e5c",
+    "capture_id": "20260731T051333Z-786e5c#001226",
+    "observed_at": "2026-07-31T17:19:40+10:00",
+    "verdict": "ok",
+    "excerpt_sha256": "bdac6b2e3af86a7ec6ce8e74fbed37f35d8372b1d254c5c895993205b8186c9a",
+    "expected": {
+      "subject_id": "36848001",
+      "series_url": "https://movie.douban.com/series/ECGUB25UQ",
+      "claimed_total": 4,
+      "other_ids": [
+        "1304585",
+        "1308819",
+        "3868141"
+      ]
+    }
+  },
+  {
+    "file": "film-after.html",
+    "source_url": "https://movie.douban.com/subject/36848001/",
+    "bundle_id": "20260903T232811Z-b3c2b6",
+    "capture_id": "20260903T232811Z-b3c2b6#001388",
+    "observed_at": "2026-09-04T10:58:51+10:00",
+    "verdict": "ok",
+    "excerpt_sha256": "f1f41ee4cd146579f960d2bd7be1fac4c1c3a140fa98bb405ea1c59e9c7661f4",
+    "expected": {
+      "subject_id": "36848001",
+      "series_url": "https://movie.douban.com/series/ECGUB25UQ",
+      "claimed_total": 5,
+      "other_ids": [
+        "1304585",
+        "1308819",
+        "3868141",
+        "35309929"
+      ]
+    }
+  },
+  {
+    "file": "tv-many-members.html",
+    "source_url": "https://movie.douban.com/subject/36653963/",
+    "bundle_id": "20260731T051333Z-786e5c",
+    "capture_id": "20260731T051333Z-786e5c#001269",
+    "observed_at": "2026-07-31T17:22:20+10:00",
+    "verdict": "ok",
+    "excerpt_sha256": "51cd866b08196daab6316766ef21cca9d6adafc685418862d3f42f7f2caa704e",
+    "expected": {
+      "subject_id": "36653963",
+      "series_url": "https://movie.douban.com/series/ECWQJTKQY",
+      "claimed_total": 11,
+      "other_ids": [
+        "7054120",
+        "11502153",
+        "25966044",
+        "26898192",
+        "30161936",
+        "35901863",
+        "38193329",
+        "25964630",
+        "30414462",
+        "33460998"
+      ]
+    }
+  },
+  {
+    "file": "no-series.html",
+    "source_url": "https://movie.douban.com/subject/37007685/",
+    "bundle_id": "20260731T051333Z-786e5c",
+    "capture_id": "20260731T051333Z-786e5c#001169",
+    "observed_at": "2026-07-31T17:16:06+10:00",
+    "verdict": "ok",
+    "excerpt_sha256": "576ace97af19e2b45aa92c883f112586ba727539e675c4e7e7af98976571233f",
+    "expected": {
+      "subject_id": "37007685",
+      "series_url": "",
+      "claimed_total": 0,
+      "other_ids": []
+    }
+  },
+  {
+    "file": "singleton-series.html",
+    "source_url": "https://movie.douban.com/subject/34802334/",
+    "bundle_id": "20260731T051333Z-786e5c",
+    "capture_id": "20260731T051333Z-786e5c#001202",
+    "observed_at": "2026-07-31T17:18:18+10:00",
+    "verdict": "ok",
+    "excerpt_sha256": "4c8c04ab7fb2f85018e03dab1d85c79a76a271a16fb6aeb98d2f68c3e0862c0f",
+    "expected": {
+      "subject_id": "34802334",
+      "series_url": "https://movie.douban.com/series/ECH4UDM7A",
+      "claimed_total": 1,
+      "other_ids": []
+    }
+  },
+  {
+    "file": "members-before-removal.html",
+    "source_url": "https://movie.douban.com/subject/26642033/",
+    "bundle_id": "20260731T051333Z-786e5c",
+    "capture_id": "20260731T051333Z-786e5c#001563",
+    "observed_at": "2026-07-31T17:42:58+10:00",
+    "verdict": "ok",
+    "excerpt_sha256": "1c89c5bf9cfe6da27567b0f9d05031aa199a56e81ca5b14e9a023a95147dda9c",
+    "expected": {
+      "subject_id": "26642033",
+      "series_url": "https://movie.douban.com/series/EC6QLTVQY",
+      "claimed_total": 20,
+      "other_ids": [
+        "11624706",
+        "36962219",
+        "26990133",
+        "26990129",
+        "26992011",
+        "26655894",
+        "26655898",
+        "26655897",
+        "26771972",
+        "27052381",
+        "34613690",
+        "34857388",
+        "34857396",
+        "30279960",
+        "30396337",
+        "34962387",
+        "35262486",
+        "35594866",
+        "36089075"
+      ]
+    }
+  },
+  {
+    "file": "members-after-removal.html",
+    "source_url": "https://movie.douban.com/subject/26642033/",
+    "bundle_id": "20260807T083529Z-0fb09c",
+    "capture_id": "20260807T083529Z-0fb09c#001183",
+    "observed_at": "2026-08-07T19:57:54+10:00",
+    "verdict": "ok",
+    "excerpt_sha256": "986defaca7f715c9a5016fb823d91f7cb4f26b9c836a1e2f257a79b92a1ea191",
+    "expected": {
+      "subject_id": "26642033",
+      "series_url": "https://movie.douban.com/series/EC6QLTVQY",
+      "claimed_total": 15,
+      "other_ids": [
+        "11624706",
+        "36962219",
+        "26655894",
+        "26655898",
+        "26655897",
+        "26771972",
+        "27052381",
+        "34613690",
+        "30279960",
+        "30396337",
+        "34962387",
+        "35262486",
+        "35594866",
+        "36089075"
+      ]
+    }
+  },
+  {
+    "file": "order-before.html",
+    "source_url": "https://movie.douban.com/subject/1297359/",
+    "bundle_id": "20260731T051333Z-786e5c",
+    "capture_id": "20260731T051333Z-786e5c#002446",
+    "observed_at": "2026-07-31T18:39:25+10:00",
+    "verdict": "ok",
+    "excerpt_sha256": "1cef15b4df0fe160e9cbc84afd43709360c861aea0e0865a4168f07662495298",
+    "expected": {
+      "subject_id": "1297359",
+      "series_url": "https://movie.douban.com/series/EC7YZQKZA",
+      "claimed_total": 3,
+      "other_ids": [
+        "26582781",
+        "37344544"
+      ]
+    }
+  },
+  {
+    "file": "order-after.html",
+    "source_url": "https://movie.douban.com/subject/1297359/",
+    "bundle_id": "20260807T083529Z-0fb09c",
+    "capture_id": "20260807T083529Z-0fb09c#002065",
+    "observed_at": "2026-08-07T20:56:14+10:00",
+    "verdict": "ok",
+    "excerpt_sha256": "9edbf74d207ff179a837013a9ab0df38b46b14d4842f6dead20fe2f3270468b8",
+    "expected": {
+      "subject_id": "1297359",
+      "series_url": "https://movie.douban.com/series/EC7YZQKZA",
+      "claimed_total": 3,
+      "other_ids": [
+        "37344544",
+        "26582781"
+      ]
+    }
+  }
+]
