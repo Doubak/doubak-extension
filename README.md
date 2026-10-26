@@ -72,6 +72,7 @@ Markdown 导出含本地头像与站点资料；Hugo 生成 favicon 和页眉图
 - **[docs/ui.md](docs/ui.md)** —— 界面交互设计：信息反馈、准确进度呈现与反虚假设计
 - **[docs/permissions.md](docs/permissions.md)** —— 权限审计：权限声明、最小必要原则以及各执行上下文的 API 映射表
 - **[docs/release.md](docs/release.md)** —— 发布流程与版本号管理的注意事项
+- **[同系列作品设计](docs/designs/subject-series-and-site-navigation.md)** —— 目录快照、历史兼容与站内导航的设计提案（尚未实现）
 - 档案格式规范定义详见独立仓库：[`doubak-data-specs`](https://github.com/Doubak/doubak-data-specs)
 
 ## 开发
