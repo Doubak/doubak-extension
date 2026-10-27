@@ -113,7 +113,7 @@ export function markPage(m, { coverPath = null } = {}) {
     douban_last_seen: m.lastSeenAt,
   };
 
-  // 正文只放用户自己写的短评。**没有短评就是空正文**，不编一句「暂无短评」——
+  // 页首只放用户自己写的短评。没有短评就省略，不编一句「暂无短评」——
   // 那会让「没写」和「写了但抓不到」在页面上长得一样。
   const body = m.comment ? `${plainText(m.comment)}\n` : '';
   return frontMatter(fm) + (body ? `\n${body}` : '') + infoSection(m) + timelineSection(m);
@@ -153,8 +153,8 @@ function infoSection(m) {
  * ## 为什么这一段值得单独存在
  *
  * 标记页上只剩**最新**那条短评——改一次覆盖一次，豆瓣不留历史。而广播是冻结的，
- * 带秒级时间戳，所以它保住了标记页上早就没有的话。实测：标记自己的修订历史只
- * 覆盖 3 条，广播里却有 342 条与当前短评不同的发言，涉及 305 个作品。
+ * 带秒级时间戳，所以它保住了标记页上早就没有的话。两种来源都要展示，包括
+ * 只有一个原页版本的作品；同日多个版本共用日期标题，不丢掉中间版本。
  *
  * ## 每一条都标出处，不只在「拿不准」的时候
  *
@@ -173,38 +173,35 @@ function infoSection(m) {
  */
 function timelineSection(m) {
   const rows = m.timeline ?? [];
-  // 什么时候这一段没有信息量：**只有一条，而且它是标记自己那条**——
-  // 正文里已经有短评，front matter 里已经有日期，再列一遍是噪音。
-  //
-  // 但只要那一条来自广播，它就带来了正文里没有的东西：**准确到秒的时间**。
-  // 标记页上只有天（`douban_marked_at_raw`），而「2026-07-19 19:18:39」这种
-  // 精度只有广播给得出——丢掉它，就等于把广播这条路线最值钱的性质扔了。
   if (rows.length === 0) return '';
-  if (rows.length === 1 && rows[0].source !== 'broadcast') return '';
 
   const out = ['', '## 说过什么', ''];
+  if (rows.some((r) => r.source === 'mark')) {
+    out.push('原页短评的日期是原页标记日期，不代表各版本的编辑时间；同日版本按首次观察时间从新到旧排列。', '');
+  }
+  let previousDate = null;
   for (const r of rows) {
-    const when = r.atRaw ?? (r.at ?? '').slice(0, 10) ?? '时间不详';
+    const date = r.atRaw || (r.at ?? '').slice(0, 10) || '时间不详';
+    const when = r.dateIsObservation ? `${date}（首次观察，原页日期不详）` : date;
     // 动作可能没有（纯发言的广播就没有）。**没有就不要留一个悬着的「·」**——
     // 那看起来像少了点什么，而其实是本来就没有。
     const act = r.source === 'broadcast'
       ? (r.action || (r.status ? verb(m.medium, r.status) : ''))
       : verb(m.medium, r.status);
-    const label = r.source === 'broadcast' ? '广播' : '标记';
-    // 时间与短评来自不同来源时要说清楚。不说的话，「广播 · 玩过」加一段短评
-    // 会被读成「那条广播里写着这句话」——而广播里其实什么都没写，那句短评
-    // 在标记页上。
-    const mixed = r.text && r.textSource && r.textSource !== r.source;
-    const what = mixed
-      ? `${act || label} · 时间来自${label}，短评来自${r.textSource === 'mark' ? '标记页' : '广播'}`
-      : (act ? `${label} · ${act}` : label);
+    const label = r.source === 'broadcast' ? '广播' : '原页短评';
+    const what = act ? `${label} · ${act}` : label;
     // **那一天给了几颗星。** 这是这一段最值钱的一列：标记页只留最新那个分
     // （改一次覆盖一次，豆瓣不留历史），而广播是冻结的。实测这份档案里有 17 部
     // 作品的分变过——那份变化史豆瓣自己都没有，只有把它逐条列出来才看得见。
     //
     // 画满五颗、空的用 ☆：只写「4 星」的话，读者得自己记住满分是几。
     const stars = r.rating ? ` · ${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}` : '';
-    out.push(`### ${when}`, '', `*${what}${stars}*`, '');
+    if (when !== previousDate) out.push(`### ${when}`, '');
+    previousDate = when;
+    out.push(`*${what}${stars}*`, '');
+    if (r.source === 'mark' && r.observedAt) {
+      out.push(`*首次观察：${plainText(r.observedAt)}*`, '');
+    }
     // 没有短评就只有这一行——**不编一句「无短评」**，那会让「没写」和
     // 「写了但抓不到」在页面上长得一样。
     if (r.text) out.push(plainText(r.text), '');

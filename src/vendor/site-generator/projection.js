@@ -202,104 +202,58 @@ function broadcastsBySubject(broadcasts, marks) {
 }
 
 /**
- * 把标记自己的修订与广播合成一条时间线，新的在上。
+ * 原页标记的全部修订与广播合成时间线，新的在上。
  *
- * **同样的话只留一次。** 实测有 10 条是用户转发自己的旧广播，正文一字不差——
- * 列两遍会让人以为他说了两次。
+ * 原页日期沿用 marked_at：编辑后它可能不变，不能当作编辑时间。不同版本不能
+ * 按「状态 + 日期」或正文合并，否则同日编辑、清空短评、改分、删后重标都会丢失。
+ * 广播独立保留自己的时间与内容，不把后来抓到的短评挂到早年的广播上。
  *
- * @param {object[]} marks 这个作品的全部标记：当前那条，加上被顶掉的（删掉再重标）
+ * @param {object[]} marks 这个作品的全部标记，包括删掉后被重标替代的记录
  * @param {object[]} fromBroadcasts
  */
 function buildTimeline(marks, fromBroadcasts) {
-  const rows = [...fromBroadcasts];
-
-  for (const r of marks.flatMap((m) => m.revisions)) {
-    const f = r.fields;
-    // 短评是空的也收——状态本身就是「什么时候」的答案。实测那三条有多个修订的
-    // 标记里，有两条正是「空短评 → 写了短评」，只看短评的话这段经过整个消失。
-    rows.push({
-      at: f.marked_at?.iso ?? r.first_observed_at,
-      atRaw: f.marked_at?.raw ?? null,
-      precision: f.marked_at?.precision ?? 'unknown',
-      // 标记页上的短评是**可变**的，这里记的是「我们某次抓取时看到的样子」。
-      source: 'mark',
-      textSource: f.comment ? 'mark' : null,
-      status: f.status,
-      action: null,
-      // 标记页上的评分是**可变**的，与广播那个「那一天给了几颗星」性质不同。
-      // 两者都收，归并时取有值的那个。
-      rating: f.rating ?? null,
-      text: f.comment,
-      truncated: false,
+  // 仅对广播去重：自我转发保留最早的相同正文、状态与评分；不同评分/状态仍保留。
+  const seenBroadcasts = new Set();
+  const rows = [...fromBroadcasts]
+    .sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''))
+    .filter((r) => {
+      if (!r.text) return true;
+      const key = JSON.stringify([r.text, r.status, r.rating]);
+      if (seenBroadcasts.has(key)) return false;
+      seenBroadcasts.add(key);
+      return true;
     });
+
+  for (const m of marks) {
+    for (const [index, r] of m.revisions.entries()) {
+      const f = r.fields;
+      // 空短评也是一个版本：从有到无、从无到有都要可见。
+      rows.push({
+        at: f.marked_at?.iso ?? r.first_observed_at,
+        atRaw: f.marked_at?.raw ?? null,
+        precision: f.marked_at?.precision ?? 'unknown',
+        source: 'mark',
+        textSource: f.comment ? 'mark' : null,
+        observedAt: r.first_observed_at,
+        dateIsObservation: !f.marked_at?.iso && !f.marked_at?.raw,
+        markId: m.upstream_id ?? '',
+        revisionIndex: index,
+        status: f.status,
+        action: null,
+        rating: f.rating ?? null,
+        text: f.comment,
+        truncated: false,
+      });
+    }
   }
 
-  // ── 同一句话只留一条，留哪一条有讲究
-  //
-  // **① 精度高的优先。** 标记只到天，而 canonical 会把它补成 `T00:00:00`；广播
-  // 到秒。单纯按时间早晚挑的话，那个补出来的 00:00:00 永远排在同一天的广播前面，
-  // 于是**留下补零的、丢掉真的**——而 partial_date.precision 这个字段存在的全部
-  // 意义就是防这件事（「补零之后它们看起来一样精确，那是假的」）。实测踩到过：
-  // 那条「能上6分我觉得都是国产好片」的秒级时间就是这样被吃掉的。
-  //
-  // **② 精度相同时留最早的。** 「吹爆京阿尼」有 2018 的原帖和 2025 的自我转发，
-  // 转发不是「又说了一遍」而是把旧的再推一次——这句话真正被说出口的时间是 2018 年。
-  // ── 同一件事只留一条。要归并两次，因为「重复」有两种形状。
-  //
-  // **① 同一次标记被记了两遍。** 一次「玩过」会同时出现在广播里（带秒，但常常
-  // 没有短评）和标记的修订里（有短评，但只到天）——同一件事，列两遍等于说他标了
-  // 两次。按「状态 + 哪一天」归并：时间取精度高的，短评取有的那个，两样都不丢。
-  //
-  // **② 同一句话被说了两遍。** 用户转发自己的旧广播，正文一字不差。按正文归并，
-  // 留最早的——转发不是「又说了一遍」，是把旧的再推一次（「吹爆京阿尼」的原帖
-  // 在 2018 年，转发在 2025 年）。
-  //
-  // 精度为什么必须参与排序：标记只到天，canonical 会补成 `T00:00:00`，永远排在
-  // 同一天的广播前面。单纯比早晚就会**留下补零的、丢掉真的**——而
-  // partial_date.precision 存在的全部意义就是防这件事。实测踩到过。
-  const RANK = { second: 0, minute: 1, hour: 2, day: 3, month: 4, year: 5, unknown: 6 };
-  const rank = (r) => RANK[r.precision] ?? 6;
-
-  /** @type {Map<string, object>} */
-  const byEvent = new Map();
-  for (const r of rows) {
-    const key = `${r.status ?? ''}@${(r.at ?? '').slice(0, 10)}`;
-    const prev = byEvent.get(key);
-    if (!prev) { byEvent.set(key, { ...r }); continue; }
-    const base = rank(r) < rank(prev) ? r : prev;
-    const withText = prev.text ? prev : (r.text ? r : null);
-    const withRating = prev.rating != null ? prev : (r.rating != null ? r : null);
-    byEvent.set(key, {
-      ...base,
-      text: withText?.text ?? null,
-      // 星数与短评一样，可能来自被丢掉的那一条：广播给了准确到秒的时间，
-      // 而分可能记在标记那一侧（或反过来）。只按 `...base` 取的话会时有时无。
-      rating: withRating?.rating ?? null,
-      truncated: prev.truncated || r.truncated,
-      // 归并之后**时间和短评可能来自不同的地方**：广播给了准确到秒的时间，
-      // 短评却在标记页上。分开记下来，页面上才能说准——否则会读成
-      // 「那条广播里写着这句话」，而广播里其实什么都没写。
-      textSource: withText?.source ?? null,
-    });
-  }
-
-  const merged = [...byEvent.values()].sort((a, b) => {
-    const p = rank(a) - rank(b);
-    if (p !== 0) return p;
-    return (a.at ?? '') < (b.at ?? '') ? -1 : 1;
-  });
-
-  const seenText = new Set();
-  const kept = merged.filter((r) => {
-    if (!r.text) return true;
-    if (seenText.has(r.text)) return false;
-    seenText.add(r.text);
-    return true;
-  });
-
-  // 归并完再按时间倒序排给页面用。
-  kept.sort((a, b) => ((a.at ?? '') < (b.at ?? '') ? 1 : -1));
-  return kept;
+  // 同一个原页日期下按首次观察时间倒序展示版本，不将观察时间冒充编辑时间。
+  // 用身份与版本序号打平手，让删后重标与同一时刻的修订也有稳定顺序。
+  rows.sort((a, b) => (b.at ?? '').localeCompare(a.at ?? '')
+    || (b.observedAt ?? '').localeCompare(a.observedAt ?? '')
+    || (a.markId ?? '').localeCompare(b.markId ?? '')
+    || (b.revisionIndex ?? 0) - (a.revisionIndex ?? 0));
+  return rows;
 }
 
 /**
