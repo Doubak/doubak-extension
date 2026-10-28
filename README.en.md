@@ -227,6 +227,7 @@ The Chinese documents are the canonical ones and go into far more depth than thi
 - [`DESIGN.md`](DESIGN.md) — scope model, crawl boundaries, three measured appendices
 - [`docs/permissions.md`](docs/permissions.md) — permission audit
 - [`docs/ui.md`](docs/ui.md) — interface design, and how progress is reported honestly
+- [`Broadcast details and replies`](docs/designs/broadcast-details-and-replies.md) — issue #26 research and proposed cross-repository changes (Chinese; not implemented)
 
 ## License
 
