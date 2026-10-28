@@ -147,63 +147,79 @@ function infoSection(m) {
   return ['', '## 作品信息', '', '| | |', '|---|---|', ...rows, ''].join('\n');
 }
 
-/**
- * 「什么时候 → 说了什么」。
- *
- * ## 为什么这一段值得单独存在
- *
- * 标记页上只剩**最新**那条短评——改一次覆盖一次，豆瓣不留历史。而广播是冻结的，
- * 带秒级时间戳，所以它保住了标记页上早就没有的话。两种来源都要展示，包括
- * 只有一个原页版本的作品；同日多个版本共用日期标题，不丢掉中间版本。
- *
- * ## 每一条都标出处，不只在「拿不准」的时候
- *
- * 因为两个来源的性质本来就不同，而这个差别是读者该知道的：
- *
- *     广播   发布即冻结，秒级 —— 「那一刻这句话就是这样」
- *     标记   可编辑，只到天   —— 「我们某次抓取时看到的样子」
- *
- * ## 不说「改过」
- *
- * 实测那 342 条里 305 条是**状态推进**（想看时说一句，看过之后又说一句），
- * 只有 15 条是同一状态下说了别的。把它们呈现成「检测到编辑」，89% 都是冤枉的
- * ——那就是档案在说假话。所以这里只按时间列出来，判断留给读者。
- *
- * @param {object} m
- */
-function timelineSection(m) {
-  const rows = m.timeline ?? [];
-  if (rows.length === 0) return '';
+/** 原页版本的日期标题；观察时间只用于排序，不冒充标记或编辑日期。 */
+function timelineDate(row) {
+  if (row.dateIsObservation) return '日期不详';
+  return row.atRaw || (row.at ?? '').slice(0, 10) || '日期不详';
+}
 
-  const out = ['', '## 说过什么', ''];
-  if (rows.some((r) => r.source === 'mark')) {
-    out.push('原页短评的日期是原页标记日期，不代表各版本的编辑时间；同日版本按首次观察时间从新到旧排列。', '');
+/**
+ * 阅读层的合并，不改投影里的证据。每条广播至多与一个原页版本共同展示，
+ * 且日期、正文、状态、评分必须一致。双方明确为空的正文也可合并，但不互补缺失字段；
+ * 截断文本或缺少日期不作为同文证据。
+ * 原页版本之间永不去重，因此 A → B → A、清空、改分与删后重标仍各有位置。
+ */
+function timelineDisplayRows(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (row.source !== 'mark') continue;
+    const day = timelineDate(row);
+    if (!groups.has(day)) groups.set(day, []);
+    groups.get(day).push(row);
   }
-  let previousDate = null;
+
+  const versions = new Map();
+  for (const group of groups.values()) {
+    // 投影已按日期及首次观察时间倒序排列；编号从最早的版本 1 开始。
+    group.forEach((row, index) => versions.set(row, group.length > 1 ? group.length - index : null));
+  }
+  const dayOf = (row) => !row.dateIsObservation
+    && ['day', 'hour', 'minute', 'second'].includes(row.precision)
+    && /^\d{4}-\d{2}-\d{2}T/.test(row.at ?? '')
+    ? row.at.slice(0, 10) : null;
+  const used = new Set();
+  const replacements = new Map();
+  const hidden = new Set();
+  // 先匹配较早的原页版本。重复写回同一句话时，不把一条旧广播重复用于多个版本。
+  for (const mark of rows.filter((r) => r.source === 'mark').reverse()) {
+    const version = versions.get(mark);
+    const day = dayOf(mark);
+    const broadcast = !mark.truncated && day
+      ? rows.find((r) => r.source === 'broadcast' && !used.has(r) && !r.truncated
+        && dayOf(r) === day && r.text === mark.text
+        && r.status === mark.status && r.rating === mark.rating)
+      : null;
+    if (!broadcast) {
+      replacements.set(mark, { ...mark, version });
+      continue;
+    }
+    used.add(broadcast);
+    // 多版本保留原页日期和版本顺序，广播的秒级时间放在来源旁；单版本沿用广播标题。
+    const position = version ? mark : broadcast;
+    hidden.add(version ? broadcast : mark);
+    replacements.set(position, { ...mark, version, broadcast });
+  }
+  return rows.filter((r) => !hidden.has(r)).map((r) => replacements.get(r) ?? r);
+}
+
+/** 最新短评在页首；底部仅展示额外历史，版本编号代替统一说明与观察时间。 */
+function timelineSection(m) {
+  const evidence = m.timeline ?? [];
+  if (evidence.length === 0 || (evidence.length === 1 && evidence[0].source === 'mark')) return '';
+  const rows = timelineDisplayRows(evidence);
+  const out = ['', '## 说过什么', ''];
   for (const r of rows) {
-    const date = r.atRaw || (r.at ?? '').slice(0, 10) || '时间不详';
-    const when = r.dateIsObservation ? `${date}（首次观察，原页日期不详）` : date;
-    // 动作可能没有（纯发言的广播就没有）。**没有就不要留一个悬着的「·」**——
-    // 那看起来像少了点什么，而其实是本来就没有。
+    const date = timelineDate(r.broadcast && !r.version ? r.broadcast : r);
+    const when = r.version ? `${date} · 版本 ${r.version}` : date;
     const act = r.source === 'broadcast'
       ? (r.action || (r.status ? verb(m.medium, r.status) : ''))
       : verb(m.medium, r.status);
-    const label = r.source === 'broadcast' ? '广播' : '原页短评';
+    const label = r.broadcast
+      ? (r.version ? `广播（${timelineDate(r.broadcast)}） & 原页短评` : '广播 & 原页短评')
+      : (r.source === 'broadcast' ? '广播' : '原页短评');
     const what = act ? `${label} · ${act}` : label;
-    // **那一天给了几颗星。** 这是这一段最值钱的一列：标记页只留最新那个分
-    // （改一次覆盖一次，豆瓣不留历史），而广播是冻结的。实测这份档案里有 17 部
-    // 作品的分变过——那份变化史豆瓣自己都没有，只有把它逐条列出来才看得见。
-    //
-    // 画满五颗、空的用 ☆：只写「4 星」的话，读者得自己记住满分是几。
     const stars = r.rating ? ` · ${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}` : '';
-    if (when !== previousDate) out.push(`### ${when}`, '');
-    previousDate = when;
-    out.push(`*${what}${stars}*`, '');
-    if (r.source === 'mark' && r.observedAt) {
-      out.push(`*首次观察：${plainText(r.observedAt)}*`, '');
-    }
-    // 没有短评就只有这一行——**不编一句「无短评」**，那会让「没写」和
-    // 「写了但抓不到」在页面上长得一样。
+    out.push(`### ${when}`, '', `*${what}${stars}*`, '');
     if (r.text) out.push(plainText(r.text), '');
     if (r.truncated) out.push('*（豆瓣在这里截断了）*', '');
   }
