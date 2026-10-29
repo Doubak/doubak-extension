@@ -1,6 +1,6 @@
 # 广播详情与回复首屏快照（issue #26）
 
-状态：设计提案，尚未实现。调查日期：2026-10-28；方案整理：2026-10-29。
+状态：首版已实现（main，尚未发布新扩展版本）。调查日期：2026-10-28；方案整理：2026-10-29；实施：2026-10-30。
 需求：[extension issue #26](https://github.com/Doubak/doubak-extension/issues/26)。
 最终范围：**方案 B 的轻量版本——本人账号可选的回复首屏原始快照**。
 本文取代此前的完整讨论归档提案；此前讨论日志、回复 Canonical 和站点讨论页的论证保留在 Git 历史中，不是本轮实施要求。
@@ -266,7 +266,7 @@ index 的 intent 明确其首屏性质，实际 URL 保留 start/count，item_co
 一次首屏成功永远不能被解释为“该根所有回复已保存”。
 
 开关是任务范围的一部分：在现有 crawl_scope 扩展中记录是否启用，并在 run context/checkpoint 中固化。
-拟议扩展字段 `broadcast_reply_snapshot: true|false`，旧档案缺失表示未声明该能力，不表示零回复。
+已登记扩展字段 `broadcast_reply_snapshot: true|false`，旧档案缺失表示未声明该能力，不表示零回复。
 字段含义、开放词表新值和兼容校验需先补 specs 文档/用例，不预设某个 bundle 版本号，
 也不能声称“完全不用改规范”。本方案无需新增 manifest 文件声明或讨论恢复 schema。
 
@@ -339,7 +339,11 @@ HTML 详情如需摄取，使用专用抽取函数处理 pubtime、动作、评�
 
 实现时同步修订 CLAUDE.md 的旧范围说明：允许用户选择保存本人广播下的首屏对话证据，
 不把它描述为全面恢复社交外围，也不提前把未实现功能写成现状。
-本轮只提交设计及文档；功能实施按“范围语义与 fixture → 抓取/恢复 → 解析隔离与兼容 → UI/文档”分步验收。
+首版已按规范、抓取核心、面板与运行范围、解析隔离及回归测试分步提交。
+HTML 详情目前仅保留原始证据，不增强 Canonical；解析器通过 `stats.rawOnlyCaptures`
+报告两种捕获的编号、intent、verdict 与首屏/HTML 范围。
+回复 JSON 没有可信导航栏，不对用户正文运行 HTML 会话检测；登录 Cookie 变化会暂停
+已开启此功能的任务，恢复仍执行原账号握手。API 错误响应沿用全局暂停机制。
 
 ## 7. 验收要求
 
@@ -372,7 +376,19 @@ HTML 详情如需摄取，使用专用抽取函数处理 pubtime、动作、评�
 
 使用实测结构的脱敏 fixture，核对实际请求集合与输出字段，不只测试配置字符串。
 相关仓库运行相应单测和回归、specs 一致性检查、vendor 同步检查，Chrome/Firefox 各验证开启、关闭与恢复。
-这不是已经实施的测试清单；本轮文档检查不代表运行时功能已验证。
+已落地的自动化验证见 `test/broadcast-snapshots.test.js`、
+`test/broadcast-snapshot-runner.test.js`、`test/public-crawl.test.js`、
+`test/multi-account-ui.test.js` 与 parser 的 `test/broadcast-raw-snapshots.test.js`。
+包括实际请求集合、WARC 导入/导出逐字节往返、页面/搜索/平台输出不变，以及列表/首屏
+已提交而 checkpoint 落后的崩溃窗口。Firefox 无头工具已检查面板布局。
+这些测试使用脱敏结构与模拟传输，不能替代真实登录会话的接口兼容性验证。
+
+2026-10-30 验证记录：扩展完整套件 2,208 通过、0 失败、1 跳过（Node 24.18 的
+DecompressionStream 行为差异）；parser 321 通过、0 失败、1 跳过（缺少既有相册/小组样本）。
+Bundle validator 含 JSON Schema 层与新增 scope 契约用例均通过。
+针对本功能的测试中 `broadcast-snapshots.js` 行覆盖率 100%、分支覆盖率 90.52%，
+`snapshot-session-change.js` 行与分支均 100%；这是指定模块口径，不是全项目覆盖率。
+两个浏览器的安装包均已在本地成功生成，没有增加 host permissions。
 
 ## 8. 尚未解决的证据与交付边界
 
@@ -380,4 +396,6 @@ HTML 详情如需摄取，使用专用抽取函数处理 pubtime、动作、评�
 首屏之外的分页和楼中楼不再是首版实施前置条件，也不能据本次单条回复样本宣称所有接口形态均支持。
 仍需浏览器实测 self 会话下首屏可访问性、分类器漂移、实际节流与崩溃恢复。
 
-本轮不修改运行时代码、schema、vendor、CLAUDE.md 或生成站点，不关闭或评论 issue。
+本轮更新 specs、extension、parser 及共享 vendor、文档和开发日志。没有新增回复模型，
+没有重建或发布样张站点，没有发布扩展版本，也没有关闭或评论 issue。
+真实登录会话的 Chrome/Firefox 抓取验证仍作为发布前人工检查，不在自动化测试通过后宣称已完成。

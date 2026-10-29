@@ -31,6 +31,7 @@ function harness({ apiStatus = 200, list = timeline } = {}) {
   const runStore = new RunStore({ kv: new MemoryKvStore(), openBundle });
   const calls = [];
   const events = [];
+  let ckReads = 0;
   const fetchImpl = async (url, init) => {
     calls.push({ url, init });
     const api = url.includes('/rexxar/');
@@ -42,9 +43,9 @@ function harness({ apiStatus = 200, list = timeline } = {}) {
       arrayBuffer: async () => bytes.buffer };
   };
   const make = () => new CrawlRunner({ producerVersion: 'test', runStore, openBundle, fetchImpl,
-    getCk: async () => 'NEVER_ATTACH', batchSize: 1, onEvent: e => events.push(e),
+    getCk: async () => { ckReads++; return 'NEVER_ATTACH'; }, batchSize: 1, onEvent: e => events.push(e),
     pacerOptions: { intervalMs: 1, jitterRatio: 0 } });
-  return { runner: make(), make, runStore, openBundle, calls, events };
+  return { runner: make(), make, runStore, openBundle, calls, events, ckReads: () => ckReads };
 }
 async function drain(runner) { for (let i = 0; i < 15; i++) { const r = await runner.runBatch(); if (r.done) return r; } throw new Error('unbounded requests'); }
 const snapshotCalls = calls => calls.filter(x => /\/status\/123\/|\/rexxar\//.test(x.url));
@@ -55,6 +56,7 @@ test('captures one raw first page and independent HTML, no ck, pagination, neste
   assert.equal(snapshotCalls(h.calls).length, 2);
   const api = h.calls.find(c => c.url.includes('/rexxar/'));
   assert.equal(new URL(api.url).searchParams.get('ck'), null);
+  assert.equal(h.ckReads(), 0, 'read-only snapshot must not even read ck');
   assert.equal(api.init.credentials, 'include');
   assert.equal(new URL(api.url).searchParams.get('start'), '0');
   const store = await h.openBundle(started.dir);
