@@ -15,8 +15,22 @@ export function assertSnapshotScope(enabled, context) {
   }
 }
 
+/** Validate even restored or injected tasks before any network request. */
+export function assertSnapshotRequest(routeKey, rawUrl, account) {
+  const url = new URL(rawUrl);
+  if (url.username || url.password) throw new Error('广播快照地址不能带登录凭据');
+  if (routeKey === COMMENTS && url.origin === 'https://m.douban.com'
+    && /^\/rexxar\/api\/v2\/status\/[1-9]\d*\/comments$/.test(url.pathname)
+    && url.searchParams.get('start') === '0' && url.searchParams.get('count') === '20'
+    && [...url.searchParams].length === 2) return;
+  const detail = /^\/people\/([\w-]+)\/status\/[1-9]\d*\/$/.exec(url.pathname);
+  if (routeKey === DETAIL && url.origin === 'https://www.douban.com' && detail
+    && [account.userId, account.username].includes(detail[1])) return;
+  throw new Error('广播快照地址超出本人详情或回复首屏范围');
+}
+
 function attr(tag, name) {
-  const match = new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, 'i').exec(tag);
+  const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`, 'i').exec(tag);
   return match ? decodeEntities(match[2]) : null;
 }
 const hasClass = (tag, name) => (attr(tag, 'class') ?? '').split(/\s+/).includes(name);

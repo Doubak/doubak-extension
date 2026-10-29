@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { extractBroadcastSnapshots, snapshotTasks, snapshotBacklog, classifySnapshot, assertSnapshotScope, commentsUrl, DETAIL, COMMENTS } from '../src/crawl/broadcast-snapshots.js';
+import { extractBroadcastSnapshots, snapshotTasks, snapshotBacklog, classifySnapshot, assertSnapshotScope, assertSnapshotRequest, commentsUrl, DETAIL, COMMENTS } from '../src/crawl/broadcast-snapshots.js';
 import { buildRoutes } from '../src/crawl/routes.js';
 import { hasRouteName } from '../src/ui/route-names.js';
 import { urlKey } from '../src/core/urlkey.js';
@@ -76,4 +76,16 @@ test('detail must match root SID and owner, not quoted SID or another 200 page',
   const options = { routeKey: DETAIL, requestUrl: res.finalUrl, ownerUserId: '111' };
   assert.equal(classifySnapshot(res, options).verdict, 'ok');
   assert.equal(classifySnapshot({ ...res, bodyText: res.bodyText.replace('data-uid="111"', 'data-uid="222"') }, options).verdict, null);
+});
+
+
+test('restored tasks cannot request another root owner, later pages, ck or a foreign origin', () => {
+  assert.doesNotThrow(() => assertSnapshotRequest(COMMENTS, commentsUrl('123'), account));
+  assert.doesNotThrow(() => assertSnapshotRequest(DETAIL, tasks.items[0].url, account));
+  for (const url of [commentsUrl('123').replace('start=0', 'start=20'), commentsUrl('123') + '&ck=token',
+    commentsUrl('123').replace('m.douban.com', 'example.com'), commentsUrl('123').replace('/comments', '/likes')]) {
+    assert.throws(() => assertSnapshotRequest(COMMENTS, url, account));
+  }
+  assert.throws(() => assertSnapshotRequest(DETAIL, tasks.items[0].url.replace('/people/111/', '/people/222/'), account));
+  assert.equal(extractBroadcastSnapshots(html.replaceAll('class=', 'data-class='), opts).candidates.length, 0);
 });

@@ -1,4 +1,4 @@
-import { assertSnapshotScope, snapshotRoute } from './broadcast-snapshots.js';
+import { assertSnapshotScope, assertSnapshotRequest, snapshotRoute } from './broadcast-snapshots.js';
 /**
  * 一次抓取的编排：开始、分批推进、收尾。
  *
@@ -738,6 +738,9 @@ export class CrawlRunner {
     assertSnapshotScope(broadcastReplySnapshot, runContext);
     if (!broadcastReplySnapshot && (cp.frontier ?? []).some(it => snapshotRoute(it.route_key))) {
       throw new Error('断点包含未授权的广播回复快照任务');
+    }
+    for (const it of cp.frontier ?? []) if (snapshotRoute(it.route_key)) {
+      assertSnapshotRequest(it.route_key, it.url, runContext.account);
     }
     let restoredSnapshots = null;
     const { recoverBundle } = await import('../bundle/recovery.js');

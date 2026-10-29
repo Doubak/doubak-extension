@@ -1,4 +1,4 @@
-import { snapshotRoute, snapshotTasks, classifySnapshot, COMMENTS, DETAIL } from './broadcast-snapshots.js';
+import { snapshotRoute, snapshotTasks, classifySnapshot, assertSnapshotRequest, COMMENTS, DETAIL } from './broadcast-snapshots.js';
 /**
  * 抓取主循环：把前面各块接成一条能真正跑起来的链路。
  *
@@ -439,6 +439,7 @@ export class CrawlLoop {
     if (snapshotRoute(item.routeKey) && (!this._routes.has(item.routeKey) || this._session.visibility === 'public')) {
       throw new Error('广播回复快照不在本次已确认范围内');
     }
+    if (snapshotRoute(item.routeKey)) assertSnapshotRequest(item.routeKey, item.url, this._session.account);
     // 每次取页重新按运行范围判断，旧 checkpoint 排队的作品页也不能继承 Cookie。
     const accountAvatar = item.routeKey === 'asset.account_avatar';
     const anonymousCatalog = this._session.visibility === 'public' && route.kind === 'catalog';
