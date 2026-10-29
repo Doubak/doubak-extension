@@ -120,6 +120,7 @@ export function buildRoutes({
   includeCatalog = true,
   includeCovers = includeCatalog,
   visibility = 'self',
+  broadcastReplySnapshot = false,
 }) {
   if (!username) throw new Error('缺少 username');
   /** @type {RouteDef[]} */
@@ -177,6 +178,14 @@ export function buildRoutes({
       `https://www.douban.com/people/${enc(username)}/statuses?p=${offset}`,
     note: '发布后不可编辑、可静默删除、最时间敏感。每页条数不固定（实测 20/21/22）',
   });
+
+  if (broadcastReplySnapshot && visibility === 'self') {
+    for (const [key, surface] of [['broadcast.item', 'html'], ['broadcast.comments_snapshot', 'api']]) {
+      routes.push({ key, intent: key, kind: 'data', surface, withCk: false,
+        priority: PRIORITY.LONGFORM + 5, source: 'archive', enumeration: 'bounded',
+        safetyNet: 'contiguity', ordered: false });
+    }
+  }
 
   // ── 广播里用户自己上传的图
   //
@@ -592,7 +601,9 @@ export function buildRoutes({
  * **第 3 页就停**，而 `contiguous` 还报 true。没有样本就没有锚点，没有锚点就
  * 只能猜，而猜错在这个系统里是静默的。
  */
-export const UNRESOLVED_ROUTES = {};
+export const UNRESOLVED_ROUTES = {
+  'broadcast.topic': { source: 'no_sample', reason: '尚无正常 topic 详情样本；只记录不支持的入口，不请求。' },
+};
 
 /**
  * 明确**不支持**的分类。与 `UNRESOLVED_ROUTES` 是两回事：那边是「还没查清」，

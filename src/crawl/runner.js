@@ -1,3 +1,4 @@
+import { assertSnapshotScope, snapshotRoute } from './broadcast-snapshots.js';
 /**
  * 一次抓取的编排：开始、分批推进、收尾。
  *
@@ -303,7 +304,7 @@ export class CrawlRunner {
     onlyRoutes = null, maxCaptures = null, bypassGates = false, resolveFloors = null,
     knownSubjectUrlKeys = null, refreshSubjectUrls = null, backlogAssets = null,
     knownLongformUrlKeys = null, refreshLongform = null, knownAssetUrlKeys = null,
-    mode = null,
+    mode = null, broadcastReplySnapshot = false, resolveSnapshots = null,
     targetInput = null, targetUserId = null, operatorUserId = undefined, includeCovers,
   }) {
     if (this._run || await this._runStore.getCurrentRun()) throw new Error('已有抓取在进行中，请先继续或中止原任务');
@@ -354,6 +355,7 @@ export class CrawlRunner {
     account.visibility = runContext.visibility;
     account.operatorMode = runContext.operatorMode;
     account.operatorUserId = runContext.operatorUserId;
+    assertSnapshotScope(broadcastReplySnapshot, runContext);
     includeCatalog ??= true;
     includeCovers ??= includeCatalog;
     session.bindTarget(runContext.account);
@@ -409,7 +411,7 @@ export class CrawlRunner {
       },
       crawlScope: runContext.visibility === 'public' ? {
         visibility: 'public', operator_mode: runContext.operatorMode, operator_user_id: runContext.operatorUserId, skip_catalog: !includeCatalog,
-      } : { visibility: 'self', operator_mode: 'authenticated', skip_catalog: !includeCatalog },
+      } : { visibility: 'self', operator_mode: 'authenticated', skip_catalog: !includeCatalog, broadcast_reply_snapshot: broadcastReplySnapshot },
       producer: {
         name: 'doubak-extension',
         version: producerVersion,
@@ -418,7 +420,7 @@ export class CrawlRunner {
       now: this._now,
     });
 
-    let routeDefs = buildRoutes({ username, mediums, includeCatalog, includeCovers, visibility: runContext.visibility });
+    let routeDefs = buildRoutes({ username, mediums, includeCatalog, includeCovers, visibility: runContext.visibility, broadcastReplySnapshot });
     if (onlyRoutes?.length) {
       const want = new Set(onlyRoutes);
       routeDefs = routeDefs.filter((r) => want.has(r.key));
@@ -582,12 +584,17 @@ export class CrawlRunner {
       bypassGates,
     });
 
+    if (broadcastReplySnapshot && resolveSnapshots && mode !== CRAWL_MODES.FULL) {
+      try { loop.enqueueBroadcastSnapshots(await resolveSnapshots(account)); }
+      catch (err) { this._emit({ type: 'incremental_degraded', part: 'broadcast_snapshots', message: String(err.message) }); }
+    }
+
     this._run = {
       bundleId, dir, store, writer, frontier, loop, pacer, routes, session,
       maxCaptures, capturedSoFar: 0, previousBundleId, runContext,
     };
     runContext.options = {
-      mediums: mediums ?? null, includeCatalog, includeCovers, onlyRoutes, maxCaptures, bypassGates,
+      mediums: mediums ?? null, includeCatalog, includeCovers, onlyRoutes, maxCaptures, bypassGates, broadcastReplySnapshot,
       mode: mode ?? (floors?.size || previousBundleId ? CRAWL_MODES.INCREMENTAL : CRAWL_MODES.FULL),
       floors: floors ? [...floors] : null, floorSources: floorSources ? [...floorSources] : null, previousBundleId,
     };
@@ -727,6 +734,12 @@ export class CrawlRunner {
     const username = runContext.account.username;
     if (runContext.options) pointer = { ...pointer, ...runContext.options,
       mediums: runContext.options.mediums ?? undefined, username: runContext.account.username };
+    const broadcastReplySnapshot = runContext.options?.broadcastReplySnapshot ?? false;
+    assertSnapshotScope(broadcastReplySnapshot, runContext);
+    if (!broadcastReplySnapshot && (cp.frontier ?? []).some(it => snapshotRoute(it.route_key))) {
+      throw new Error('断点包含未授权的广播回复快照任务');
+    }
+    let restoredSnapshots = null;
     const { recoverBundle } = await import('../bundle/recovery.js');
 
     // 先把磁盘修回自洽：崩溃可能留下撕裂的段尾或半行 index。
@@ -755,10 +768,11 @@ export class CrawlRunner {
     const resolver = loadOnly ? null : resolveKnown ?? resolveFloors;
     if (resolver && (!knownSubjectUrlKeys || !knownLongformUrlKeys || !knownAssetUrlKeys)) {
       try {
-        const inc = (await resolver({ ...runContext.account, visibility: runContext.visibility, operatorMode: runContext.operatorMode, operatorUserId: runContext.operatorUserId })) ?? {};
+        const inc = (await resolver({ ...runContext.account, visibility: runContext.visibility, operatorMode: runContext.operatorMode, operatorUserId: runContext.operatorUserId, broadcastReplySnapshot })) ?? {};
         knownSubjectUrlKeys = knownSubjectUrlKeys ?? inc.knownSubjectUrlKeys;
         knownLongformUrlKeys = knownLongformUrlKeys ?? inc.knownLongformUrlKeys;
         knownAssetUrlKeys = knownAssetUrlKeys ?? inc.knownAssetUrlKeys;
+        restoredSnapshots = inc.broadcastSnapshots ?? null;
       } catch (err) {
         this._emit({ type: 'incremental_degraded', part: 'known_captures', message: String(err?.message ?? err) });
       }
@@ -779,6 +793,7 @@ export class CrawlRunner {
         visibility: runContext.visibility, operator_mode: runContext.operatorMode,
         ...(runContext.visibility === 'public' ? { operator_user_id: runContext.operatorUserId } : {}),
         skip_catalog: !(pointer.includeCatalog ?? true),
+        broadcast_reply_snapshot: broadcastReplySnapshot,
       },
       // 恢复路径以前一个字都没传 producer，全靠 BundleWriter 的默认值——也就是说
       // **崩溃恢复之后写下的每个段，`software:` 头都来自那个写死的 '0.0.1'**。
@@ -806,6 +821,7 @@ export class CrawlRunner {
       includeCatalog: pointer.includeCatalog ?? true,
       includeCovers: pointer.includeCovers ?? true,
       visibility: runContext.visibility,
+      broadcastReplySnapshot,
     });
     if (pointer.onlyRoutes?.length) routeDefs = routeDefs.filter((r) => pointer.onlyRoutes.includes(r.key));
     const routes = new Map(routeDefs.map((r) => [r.key, r]));
@@ -966,6 +982,8 @@ export class CrawlRunner {
       loop.enqueueAccountAvatar({ routeKey: 'profile.overview', url: profileRow.url },
         { bodyText: saved.bodyText, finalUrl: profileRow.final_url ?? profileRow.url }, profileRow.capture_id);
     }
+
+    loop.enqueueBroadcastSnapshots(restoredSnapshots ?? {});
 
     this._run = {
       bundleId: pointer.bundleId, dir: pointer.dir, store, writer, frontier, loop, pacer, routes, session, runContext,

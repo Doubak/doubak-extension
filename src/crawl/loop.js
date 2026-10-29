@@ -1,3 +1,4 @@
+import { snapshotRoute, snapshotTasks, classifySnapshot, COMMENTS, DETAIL } from './broadcast-snapshots.js';
 /**
  * 抓取主循环：把前面各块接成一条能真正跑起来的链路。
  *
@@ -414,9 +415,30 @@ export class CrawlLoop {
    * @param {object} item
    * @returns {Promise<'ok' | 'failed' | 'retry' | 'stop'>}
    */
+  enqueueBroadcastSnapshots({ items = [], known = [], unresolved = [] } = {}) {
+    if (!this._routes.has(COMMENTS) || this._session.visibility === 'public') return;
+    this._frontier.markCaptured(known);
+    for (const gap of unresolved) {
+      for (const key of [DETAIL, COMMENTS]) if (this._routes.has(key)) {
+        this.stateFor(key).recordGap(gap.reason, gap.url, gap.url);
+      }
+      this._emit({ type: 'broadcast_snapshot_unresolved', ...gap });
+    }
+    for (const it of items) {
+      const target = this._routes.get(it.routeKey);
+      if (!target || !snapshotRoute(it.routeKey)) continue;
+      this._frontier.enqueue({ url: it.url, urlKey: urlKey(it.url), routeKey: it.routeKey,
+        intent: target.intent, enqueuedBy: it.parentCaptureId ?? null, referer: it.referer,
+        priority: target.priority, ordered: false, gatedBy: null });
+    }
+  }
+
   async _fetchOne(item) {
     const route = this._routes.get(item.routeKey) ?? {};
     const profile = profileForRoute(item.routeKey);
+    if (snapshotRoute(item.routeKey) && (!this._routes.has(item.routeKey) || this._session.visibility === 'public')) {
+      throw new Error('广播回复快照不在本次已确认范围内');
+    }
     // 每次取页重新按运行范围判断，旧 checkpoint 排队的作品页也不能继承 Cookie。
     const accountAvatar = item.routeKey === 'asset.account_avatar';
     const anonymousCatalog = this._session.visibility === 'public' && route.kind === 'catalog';
@@ -437,7 +459,7 @@ export class CrawlLoop {
       res = await this._transport.fetch(item.url, {
         // 条目自带的优先：派生出来的条目（封面图）各有各的来源页。
         referer: item.referer ?? route.referer,
-        withCk: route.surface === 'api',
+        withCk: route.withCk ?? (route.surface === 'api'),
         credentials: anonymousCatalog || accountAvatar ? 'omit' : 'include',
         rejectRedirects: accountAvatar,
         // 静态资源（封面、头像、附图等）承载于 doubanio CDN，不适用于豆瓣主站动态目录详情页的 5 秒防刷限制
@@ -470,6 +492,8 @@ export class CrawlLoop {
           cls = { verdict: null, reasons: [String(err.message)], itemCount: null };
         }
       }
+    } else if (snapshotRoute(item.routeKey)) {
+      cls = classifySnapshot(res, { routeKey: item.routeKey, requestUrl: item.url, ownerUserId: this._session.account.userId });
     } else if (profile) {
       cls = classifyResponse({
         finalUrl: res.finalUrl,
@@ -485,7 +509,9 @@ export class CrawlLoop {
     }
 
     let sessionError = null;
-    if (route.surface !== 'asset') {
+    let jsonResponse = false;
+    if (item.routeKey === COMMENTS) { try { JSON.parse(res.bodyText); jsonResponse = true; } catch { /* HTML error page */ } }
+    if (route.surface !== 'asset' && !jsonResponse) {
       try {
         this._session.verify(res.bodyText, res.finalUrl, {
           anonymousCatalog,
@@ -639,7 +665,7 @@ export class CrawlLoop {
         cursor: item.cursor ?? null,
         // null 与 0 是两件事：null 是「这条路线没有条目概念」（个人主页），
         // 0 是「数过了，是空的」——而空页正是翻页终点的正常形态。
-        itemCount: profile ? cls.itemCount : null,
+        itemCount: profile || snapshotRoute(item.routeKey) ? cls.itemCount : null,
         itemTimeRange: itemTimeRange(items.times),
         note: [res.powSolved ? '通过客户端算力证明（PoW）获取。' : (anonymousCatalog ? '公开目录请求：不携带登录凭据，不复用浏览器缓存。' : null),
           cls.verdict === null ? `判不出来：${cls.reasons.join('；')}` : null,
@@ -758,6 +784,9 @@ export class CrawlLoop {
       this._enqueueEmbeddedImages(item, res, written.captureId);
       this._enqueueCover(item, res, written.captureId);
       this._enqueueStatusPhotos(item, res, written.captureId);
+      if (item.routeKey === 'broadcast.timeline' && this._routes.has(COMMENTS)) {
+        this.enqueueBroadcastSnapshots(snapshotTasks(res.bodyText, this._session.account, written.captureId, item.url));
+      }
       this._enqueueAlbumPhotos(item, res, written.captureId);
       this._enqueueGroupIcons(item, res, written.captureId);
       this.enqueueAccountAvatar(item, res, written.captureId);

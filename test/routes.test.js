@@ -238,7 +238,8 @@ describe('做不了的路线要写清「为什么做不了」', () => {
     // 最后一条（`interest.app`）已经有定论，挪进了 UNSUPPORTED_CATEGORIES。
     // 表空了不等于该删：下一条查不清的路线还得有地方放，而「查不清」与
     // 「上游没有了」混成一张表之后就再也分不开了。
-    assert.deepEqual(Object.keys(UNRESOLVED_ROUTES), []);
+    assert.deepEqual(Object.keys(UNRESOLVED_ROUTES), ['broadcast.topic']);
+    assert.equal(UNRESOLVED_ROUTES['broadcast.topic'].source, 'no_sample');
   });
 
   /**

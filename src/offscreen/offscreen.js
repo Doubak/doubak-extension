@@ -1,3 +1,4 @@
+import { snapshotBacklog } from '../crawl/broadcast-snapshots.js';
 /**
  * 抓取的真正执行者。
  *
@@ -239,6 +240,26 @@ async function backlogAssets(entries, ownerUserId) {
   return all;
 }
 
+// Independent of pickFloors: first opt-in must reach old lists even without a usable floor.
+async function broadcastSnapshotOptions(account, mode) {
+  if (mode === CRAWL_MODES.FULL || account.visibility === 'public') return {};
+  const entries = bundlesForAccount(await readChainEntries(), {
+    accountUserId: account.userId, accountUsername: account.username,
+    visibility: 'self', operatorMode: 'authenticated', operatorUserId: account.userId,
+  });
+  const sources = [];
+  for (const entry of entries) {
+    try {
+      const store = new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(entry.bundleId) });
+      const reader = new BundleReader({ store, bundleId: entry.bundleId });
+      sources.push({ rows: await reader.index(), readPayload: async row => (await reader.readEntry(row)).bodyText });
+    } catch (err) {
+      relayEvent({ type: 'incremental_degraded', part: 'broadcast_snapshots', message: String(err.message) });
+    }
+  }
+  return snapshotBacklog({ sources, account, mode, onWarn: relayEvent });
+}
+
 async function readChainEntries() {
   const dirs = await WorkerFileStore.listBundleDirs(getOpfsWorker());
   /** @type {import('../crawl/chain.js').ChainEntry[]} */
@@ -404,7 +425,9 @@ async function resolveKnownCaptures(account, mode = 'incremental') {
     const mine = bundlesForAccount(entries, me);
     const known = await knownCaptures(mine);
     const refresh = mode === CRAWL_MODES.REFRESH;
+    const broadcastSnapshots = account.broadcastReplySnapshot ? await broadcastSnapshotOptions(account, mode) : null;
     return {
+      broadcastSnapshots,
       knownSubjectUrlKeys: refresh ? [] : known.subjects,
       knownLongformUrlKeys: refresh ? [] : known.longform.map((x) => x.url),
       knownAssetUrlKeys: known.assets,
@@ -628,6 +651,7 @@ export async function handleOp(msg) {
             username: who.username,
             mode: msg.mode,
             resolveFloors: (account) => incrementalOptions(account, msg.mode),
+            resolveSnapshots: (account) => broadcastSnapshotOptions(account, msg.mode),
           });
         });
         return { ok: true, bundleId: started.bundleId, account: started.account };

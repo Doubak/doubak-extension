@@ -50,6 +50,8 @@ const STATUS = {
 /** 不按媒介 × 状态生成的那几条。 */
 const FIXED = {
   'broadcast.timeline': '广播',
+  'broadcast.item': '广播详情',
+  'broadcast.comments_snapshot': '广播回复首屏',
   'profile.overview': '个人主页',
   'interest.item': '作品详情页',
   'asset.subject_cover': '作品封面图',
