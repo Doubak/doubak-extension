@@ -89,3 +89,11 @@ test('restored tasks cannot request another root owner, later pages, ck or a for
   assert.throws(() => assertSnapshotRequest(DETAIL, tasks.items[0].url.replace('/people/111/', '/people/222/'), account));
   assert.equal(extractBroadcastSnapshots(html.replaceAll('class=', 'data-class='), opts).candidates.length, 0);
 });
+
+
+test('reply buttons for a note or subject discussion are outside broadcast scope, not missing snapshots', () => {
+  for (const href of ['https://www.douban.com/note/872015292/', 'https://movie.douban.com/subject/26805209/discussion/615298952/']) {
+    const card = `<div class="new-status status-wrapper" data-sid="123" data-uid="111"><div class="status-item" data-sid="123"><a class="btn-action-reply" data-count="5" href="${href}">5回应</a></div></div>`;
+    assert.deepEqual(extractBroadcastSnapshots(card, opts), { candidates: [], unresolved: [] });
+  }
+});

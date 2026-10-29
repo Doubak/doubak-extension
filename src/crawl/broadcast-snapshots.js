@@ -68,6 +68,11 @@ export function extractBroadcastSnapshots(html, { ownerUserId, username }) {
       if (!hasClass(tag, 'btn-action-reply') || !/^[1-9]\d*$/.test(attr(tag, 'data-count') ?? '')) continue;
       let url;
       try { url = new URL(attr(tag, 'href'), 'https://www.douban.com/'); } catch { continue; }
+      // Measured old cards also link to note/subject-discussion comments. Those
+      // counts describe the linked content, not replies to this broadcast SID.
+      if ((url.origin === 'https://www.douban.com' && /^\/note\/[1-9]\d*\/$/.test(url.pathname))
+        || (/^https:\/\/(?:movie|book|music)\.douban\.com$/.test(url.origin)
+          && /^\/subject\/[1-9]\d*\/discussion\/[1-9]\d*\/$/.test(url.pathname))) continue;
       const path = /^\/people\/([\w-]+)\/status\/([1-9]\d*)\/$/.exec(url.pathname);
       if (url.origin === 'https://www.douban.com' && path
         && path[2] === sid && [ownerUserId, username].includes(path[1]) && !url.username && !url.password) {
