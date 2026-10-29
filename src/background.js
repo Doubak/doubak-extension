@@ -1,3 +1,4 @@
+import { pauseSnapshotOnSessionChange } from './crawl/snapshot-session-change.js';
 /**
  * MV3 service worker 入口 —— **只做调度，不碰数据**。
  *
@@ -79,6 +80,10 @@ const sessionDetector = new SessionDetector({
 globalThis.chrome?.cookies?.onChanged?.addListener(({ cookie }) => {
   if (cookie?.name === 'dbcl2' && /(?:^|\.)douban\.com$/.test(cookie.domain.replace(/^\./, ''))) {
     sessionDetector.invalidate();
+    void pauseSnapshotOnSessionChange({
+      loadCheckpoint: () => getRunStore().loadCheckpoint(),
+      pause: () => withHost({ op: 'pause', reason: 'session_changed' }),
+    }).catch(err => debugLog('暂停回复快照失败', err));
     void chrome.runtime.sendMessage({ type: 'sessionHintsInvalidated' }).catch(() => {});
   }
 });
@@ -553,6 +558,7 @@ globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) 
           const started = await withHost({
             op: 'start',
             options: serializeScope({ ...scopeToOptions(msg?.scope),
+              broadcastReplySnapshot: msg.broadcastReplySnapshot ?? false,
               ...(msg.target ? { targetInput: msg.target.input, targetUserId: msg.target.userId,
                 operatorUserId: msg.target.operatorUserId, includeCatalog: msg.target.includeCatalog,
                 includeCovers: msg.target.includeCovers } : {}),

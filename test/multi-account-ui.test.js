@@ -435,3 +435,47 @@ test('扫描和文件夹选择期间重复点击不启动第二项，也不能�
     assert.equal(dom.byId.get('export-canonical').disabled, false);
   } finally { cancel?.(new Error('cancelled')); dom.restore(); }
 });
+
+test('回复首屏默认关闭，仅本人可选；切换模式保留，切换账号清除，重开面板关闭', async () => {
+  const dom = await panel();
+  try {
+    const box = dom.byId.get('broadcast-reply-snapshot');
+    assert.equal(box.checked, false);
+    assert.equal(box.disabled, false);
+    box.checked = true;
+    const target = await import('../src/ui/panel/target.js');
+    assert.equal(target.replySnapshotSelected(), true);
+    const { refresh } = await import('../src/ui/panel/overview.js');
+    await refresh();
+    assert.equal(box.checked, true);
+    const radios = dom.byId.get('crawl-mode').querySelectorAll('input');
+    radios[1].onchange(); await settle();
+    assert.equal(box.checked, true);
+    const input = dom.byId.get('target-account');
+    input.value = '222'; input.dispatch('input');
+    assert.equal(box.checked, false); assert.equal(box.disabled, true);
+    await target.probeTarget(); await settle();
+    assert.equal(box.disabled, true);
+    // A forged checked property cannot leak into the start request.
+    box.checked = true;
+    assert.equal(target.replySnapshotSelected(), false);
+    input.value = ''; input.dispatch('input'); await settle();
+    assert.equal(box.checked, false); assert.equal(box.disabled, false);
+  } finally { dom.restore(); }
+  const reopened = await panel();
+  try { assert.equal(reopened.byId.get('broadcast-reply-snapshot').checked, false); }
+  finally { reopened.restore(); }
+});
+
+test('继续抓取显示冻结的回复选项，面板无权改变它', async () => {
+  const dom = await panel({ status: { ok: true, runner: { active: false }, checkpoint: {
+    bundle_id: '20261001T000000Z-aaaaaa', pause_reason: 'user_paused', run_context: {
+      account: { userId: '111', username: '111' }, visibility: 'self', operatorMode: 'authenticated', operatorUserId: '111',
+      options: { broadcastReplySnapshot: true },
+    },
+  } } });
+  try {
+    const box = dom.byId.get('broadcast-reply-snapshot');
+    assert.equal(box.checked, true); assert.equal(box.disabled, true);
+  } finally { dom.restore(); }
+});

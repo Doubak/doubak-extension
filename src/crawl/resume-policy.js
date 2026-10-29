@@ -105,6 +105,7 @@ const POLICY = {
     autoResume: false, userVisible: true,
     reason: '断点与原目标或档案不一致，拒绝恢复',
   },
+  session_changed: { autoResume: false, userVisible: true, reason: '登录状态发生变化，需确认原账号后继续回复快照抓取' },
   operator_session_lost: { autoResume: false, userVisible: true, reason: '公开抓取的原操作者已退出登录，需要登录原操作者后继续' },
   operator_switched: { autoResume: false, userVisible: true, reason: '操作者身份发生变化，需要恢复原操作者后继续' },
   target_changed: { autoResume: false, userVisible: true, reason: '目标账号 UID 或域名发生变化，拒绝继续原档案' },

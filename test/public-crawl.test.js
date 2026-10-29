@@ -368,3 +368,14 @@ test('公开抓取中的账号异常页不会被错误页登录入口改判为�
   assert.equal(manifest.counts.by_verdict.blocked, 1);
   assert.equal(manifest.crawl_state[0].contiguous, true);
 });
+
+for (const mode of ['incremental', 'refresh-editable', 'full']) for (const operator of ['222', null]) {
+  test(`后台拒绝非本人回复首屏启用：${mode} / ${operator ?? 'anonymous'}`, async () => {
+    const h = harness(); h.set({ operator });
+    const r = h.makeRunner();
+    await assert.rejects(r.start({ ...options, mode, operatorUserId: operator, broadcastReplySnapshot: true }), /自己的账号/);
+    assert.equal(r.active, false);
+    assert.equal(await h.runStore.getCurrentRun(), undefined);
+    assert.ok(h.calls.every(url => !url.includes('/rexxar/') && !url.includes('/status/')));
+  });
+}

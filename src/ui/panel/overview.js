@@ -16,9 +16,10 @@ import {
 } from './shared.js';
 import { loadArchive, invalidateSummary } from './archive.js';
 import { loadCoverage } from './coverage.js';
-import { initTargetControls, updateTargetControls, targetIntent } from './target.js';
+import { initTargetControls, updateTargetControls, targetIntent, replySnapshotSelected } from './target.js';
 
 const PAUSE_COPY = {
+  session_changed: ['warn', '登录状态发生变化', '已暂停回复快照抓取。请确认仍登录本次任务的原账号后继续。', '已确认，继续'],
   operator_session_lost: ['warn', '公开抓取的操作者已退出登录', '请登录本次任务原操作者账号后继续，目标与进度均已保留。', '我登录好了，继续'],
   operator_switched: ['error', '操作者发生切换', '请恢复本次任务原操作者的登录状态后继续。目标账号不会随登录者更换。', '我切回来了，继续'],
   target_changed: ['error', '目标账号发生变化', '目标 UID 或域名发生变化。请中止原任务后重新探测并建立全量基准。', null],
@@ -202,7 +203,7 @@ export async function refresh() {
   setLastStatus(s);
   const r = s?.runner;
   const context = r?.targetAccount ? { account: r.targetAccount, visibility: r.crawlScope,
-    operatorMode: r.operatorMode, operatorUserId: r.operatorUserId } : s?.checkpoint?.run_context;
+    operatorMode: r.operatorMode, operatorUserId: r.operatorUserId, options: { broadcastReplySnapshot: r.broadcastReplySnapshot } } : s?.checkpoint?.run_context;
   updateTargetControls(context, !!(s?.checkpoint || r?.active || (s?.busyWith && s.busyWith !== '探测账号') || pendingCommand));
 
   // **一次抓取开始，就多出一个目录。**
@@ -386,7 +387,8 @@ export async function refresh() {
     pendingCommand = '开始抓取';
     refresh();
     try {
-      const r = await send({ type: 'start', mode: crawlMode, target: targetIntent(crawlMode).target });
+      const r = await send({ type: 'start', mode: crawlMode, target: targetIntent(crawlMode).target,
+        broadcastReplySnapshot: replySnapshotSelected() });
       if (!r?.ok) {
         pendingCommand = null;
         setActionError('无法开始', r?.error ?? '后台没有给出原因。');

@@ -793,7 +793,7 @@ export class CrawlRunner {
         visibility: runContext.visibility, operator_mode: runContext.operatorMode,
         ...(runContext.visibility === 'public' ? { operator_user_id: runContext.operatorUserId } : {}),
         skip_catalog: !(pointer.includeCatalog ?? true),
-        broadcast_reply_snapshot: broadcastReplySnapshot,
+        ...(runContext.visibility === 'self' ? { broadcast_reply_snapshot: broadcastReplySnapshot } : {}),
       },
       // 恢复路径以前一个字都没传 producer，全靠 BundleWriter 的默认值——也就是说
       // **崩溃恢复之后写下的每个段，`software:` 头都来自那个写死的 '0.0.1'**。
@@ -1330,6 +1330,7 @@ export class CrawlRunner {
       })),
       bundleId,
       targetAccount: { ...this._run.runContext.account },
+      broadcastReplySnapshot: this._run.runContext.options?.broadcastReplySnapshot ?? false,
       crawlScope: this._run.runContext.visibility,
       operatorMode: this._run.runContext.operatorMode,
       operatorUserId: this._run.runContext.operatorUserId,

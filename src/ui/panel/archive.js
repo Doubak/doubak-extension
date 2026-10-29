@@ -466,6 +466,9 @@ export async function openBundle(bundleId) {
               : s.crawlScope.operator_user_id ? `UID ${s.crawlScope.operator_user_id}`
                 : s.crawlScope.visibility === 'self' ? `UID ${s.account?.user_id ?? '未知'}` : '旧档案未记录'],
             ['作品详情页', s.crawlScope.skip_catalog ? '已跳过（轻量化模式）' : '包含在抓取范围中'],
+            ...(s.crawlScope.broadcast_reply_snapshot === true ? [
+              ['广播回复首屏', '已开启，仅存原始响应；首屏不表示完整讨论。可能含第三方发言和登录视角信息，不宜直接公开。'],
+            ] : []),
           ] : []),
           ['状态', STATUS_NAMES[s.status] ?? s.status],
           ['捕获条数', String(s.captures)],

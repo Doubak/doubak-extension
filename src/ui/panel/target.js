@@ -44,6 +44,26 @@ function baselineFor(target) {
   return { routes: pickFloors(entries, me).size, head: newestForAccount(entries, me) };
 }
 
+function paintReplySnapshot() {
+  const box = $('broadcast-reply-snapshot');
+  if (!box) return;
+  const own = targetValue() ? (confirmed?.visibility === 'self'
+    && confirmed.operatorMode === 'authenticated'
+    && confirmed.operatorUserId === confirmed.account.userId ? confirmed.account.userId : null)
+    : (session?.state === 'logged_in' ? session.account?.userId : null);
+  const key = own ? `${own}:${targetValue()}` : '';
+  if (box.dataset.scope !== key) box.checked = false;
+  box.dataset.scope = key;
+  box.disabled = locked || !own;
+  if (locked) box.checked = runContext?.options?.broadcastReplySnapshot === true;
+  if (!locked && !own) box.checked = false;
+}
+
+export function replySnapshotSelected() {
+  const box = $('broadcast-reply-snapshot');
+  return !!box && !box.disabled && box.checked;
+}
+
 function paintSession() {
   const account = session?.account;
   setText($('operator-session'), locked && runContext
@@ -64,7 +84,7 @@ async function detectSession(force = false) {
     if (mounted !== mountedInput) return;
     if (result?.ok) session = result.session;
   } catch { /* 提示探测失败不能阻止留空备份本人；权威握手仍会核对 */ }
-  if (typeof document !== 'undefined' && $('operator-session')) paintSession();
+  if (typeof document !== 'undefined' && $('operator-session')) { paintSession(); paintReplySnapshot(); }
 }
 
 function markSelected(uid = null) {
@@ -125,10 +145,11 @@ export async function probeTarget(expectedUid = null) {
 }
 
 export function initTargetControls(onChange) {
-  changed = onChange;
+  changed = () => { paintReplySnapshot(); onChange(); };
   const input = $('target-account');
   if (!input || mountedInput === input) return;
   mountedInput = input;
+  if ($('broadcast-reply-snapshot')) $('broadcast-reply-snapshot').checked = false;
   input.value = PROFILE_PREFIX;
   confirmed = null;
   lookupState = 'idle';
@@ -153,6 +174,7 @@ export function initTargetControls(onChange) {
   $('probe-target').addEventListener('click', () => { void probeTarget(); });
   globalThis.chrome?.runtime?.onMessage?.addListener((message) => {
     if (message.type !== 'sessionHintsInvalidated' || mountedInput !== input || locked) return;
+    session = null;
     confirmed = null;
     lookupState = 'idle';
     generation++;
@@ -217,6 +239,7 @@ export function updateTargetControls(context, isLocked) {
   runContext = context;
   if (!$('target-controls')) return;
   $('target-controls').disabled = locked;
+  paintReplySnapshot();
   paintLookup();
   paintSession();
   if (wasLocked && !locked) void detectSession(true);
