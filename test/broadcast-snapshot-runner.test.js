@@ -1,3 +1,9 @@
+import { exportBundle, fileStoreSink } from '../src/bundle/exporter.js';
+import { readBundleMeta, importBundle } from '../src/bundle/importer.js';
+import { parse } from '../src/vendor/parser/parse.js';
+import { project } from '../src/vendor/site-generator/projection.js';
+import { buildPages } from '../src/vendor/site-generator/pages.js';
+import { buildNeodbNdjson } from '../src/vendor/export-adapters/targets/neodb-ndjson.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -62,6 +68,28 @@ test('captures one raw first page and independent HTML, no ck, pagination, neste
   await h.runner.finish();
   const manifest = JSON.parse(new TextDecoder().decode(await store.read('manifest.json')));
   assert.equal(manifest.crawl_scope.broadcast_reply_snapshot, true);
+  const exported = new MemoryFileStore();
+  assert.equal((await exportBundle({ store, sink: fileStoreSink(exported) })).verified, true);
+  const meta = await readBundleMeta(exported, `doubak-bundle-${started.bundleId}`);
+  assert.deepEqual(meta.fatal, []);
+  const imported = new MemoryFileStore();
+  assert.equal((await importBundle({ source: exported, dest: imported })).verified, true);
+  assert.deepEqual(await imported.read('manifest.json'), await store.read('manifest.json'));
+  assert.ok(!(await imported.list()).some(name => /discussion|replies/.test(name)));
+  const importedReader = new BundleReader({ store: imported, bundleId: started.bundleId });
+  const importedRows = await importedReader.index();
+  assert.equal((await importedReader.readEntry(importedRows.find(r => r.route_key === COMMENTS))).bodyText, json);
+  const source = { bundleId: started.bundleId, status: 'complete', manifest,
+    crawlState: new Map(manifest.crawl_state.map(r => [r.route_key, r])), coverage: new Map(), close() {},
+    payload: async row => (await importedReader.readEntry(row)).bodyText };
+  const parsed = await parse([{ ...source, index: importedRows }]);
+  const baseline = await parse([{ ...source, index: importedRows.filter(r => ![DETAIL, COMMENTS].includes(r.intent)) }]);
+  const site = buildPages(project(parsed));
+  assert.deepEqual(site, buildPages(project(baseline)), 'pages and search must be unchanged');
+  assert.deepEqual(buildNeodbNdjson(parsed), buildNeodbNdjson(baseline), 'platform export must be unchanged');
+  assert.doesNotMatch(JSON.stringify(site), /第三方文字|楼中楼预览|u222\.jpg/);
+  assert.equal(parsed.stats.rawOnlyCaptures.length, 2);
+
   for (const r of manifest.crawl_state.filter(r => [DETAIL, COMMENTS].includes(r.route_key))) {
     assert.equal(r.enumeration, 'bounded'); assert.equal(r.advanced, false);
   }
@@ -116,3 +144,25 @@ test('legacy opt-out checkpoint cannot gain a snapshot task through resume', asy
   await assert.rejects(resumed.resume(cp), /未授权/);
   assert.equal(h.calls.length, before);
 });
+
+for (const crashPoint of ['list-written', 'api-written']) {
+  test(`crash window ${crashPoint}: committed raw bytes survive stale checkpoint without losing descendants`, async () => {
+    const h = harness(); const started = await h.runner.start({ ...options, mode: 'full' });
+    let oldCheckpoint = await h.runStore.loadCheckpoint();
+    if (crashPoint === 'list-written') {
+      await h.runner.runBatch();
+    } else {
+      for (let i = 0; i < 8 && !h.calls.some(c => /\/people\/111\/status\/123\//.test(c.url)); i++) await h.runner.runBatch();
+      oldCheckpoint = await h.runStore.loadCheckpoint();
+      await h.runner.runBatch(); // API WARC and index are committed, emulate missing checkpoint write below.
+    }
+    await h.runStore.saveCheckpoint(oldCheckpoint);
+    const resumed = h.make(); await resumed.resume(oldCheckpoint);
+    await drain(resumed);
+    assert.equal(h.calls.filter(c => c.url.includes('/rexxar/')).length, 1);
+    assert.equal(h.calls.filter(c => /\/people\/111\/status\/123\//.test(c.url)).length, 1);
+    await resumed.finish();
+    const reader = new BundleReader({ store: await h.openBundle(started.dir), bundleId: started.bundleId });
+    assert.equal((await reader.index()).filter(r => r.route_key === COMMENTS && r.verdict === 'ok').length, 1);
+  });
+}

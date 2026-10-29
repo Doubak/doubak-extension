@@ -74,7 +74,7 @@ import {
 // 0.15.2：支持不带 <p> 的广播与转发附言正文抽取，剔除尾随转发卡片与私密/注销占位符。
 // 0.15.3：保留 topic 广播的独立标题和原页链接。
 // 0.15.4：广播多出 text_parts —— 正文里那几个链接（话题、@豆友、站外链接、作品名…）。
-export const PARSER_VERSION = 'doubak-data-parser/0.16.0';
+export const PARSER_VERSION = 'doubak-data-parser/0.17.0';
 export const CANONICAL_VERSION = 'canonical/1.3';
 
 /** 路线状态词 → canonical 的封闭词表。 */
@@ -238,6 +238,8 @@ export async function parse(sources, opts = {}) {
     pages: 0,
     observations: 0,
     skipped: {},
+    // Trace raw-only evidence without reading or promoting third-party content.
+    rawOnlyCaptures: [],
     /**
      * **改一行选择器就能救回来的捕获。**
      *
@@ -322,6 +324,11 @@ export async function parse(sources, opts = {}) {
         continue;
       }
 
+      if (['broadcast.comments_snapshot', 'broadcast.item'].includes(row.intent)) {
+        stats.rawOnlyCaptures.push({ capture_id: row.capture_id, intent: row.intent, verdict: row.verdict,
+          scope: row.intent === 'broadcast.comments_snapshot' ? 'first_page_only' : 'detail_html_only' });
+        continue;
+      }
       if (row.intent === 'profile.overview') {
         if (row.verdict === 'ok' && row.surface === 'html') work.push({ src, row, kind: 'profile', auth: 'none' });
         continue;

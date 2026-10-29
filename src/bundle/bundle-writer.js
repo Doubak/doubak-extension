@@ -334,6 +334,8 @@ export function renderReadme(bundleId) {
 --------
 这是从豆瓣 (douban.com) 抓取的个人数据存档，由 doubak 生成。
 它保存的是抓取当时的原始网页与接口响应，而不只是提取出来的数据。
+原始档案可能含第三方发言和登录视角信息，并未经过公开发布过滤。
+若开启广播回复首屏快照，它仅保存一个接口首屏，不表示完整讨论。
 
 文件说明
 --------
@@ -371,6 +373,9 @@ What this is
 A personal data archive captured from douban.com by doubak. It preserves the
 original web pages and API responses as they were at capture time, not merely
 the data extracted from them.
+Raw captures may contain third-party content and signed-in information; they are
+not filtered for public publishing. An optional broadcast reply snapshot saves
+only the first API page, not a complete discussion.
 
 Files
   manifest.json      Inventory of this capture run.
