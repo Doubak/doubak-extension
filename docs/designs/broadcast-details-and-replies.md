@@ -7,7 +7,7 @@
 
 ## 1. 审查后的范围决定
 
-**仅在目标本人广播的根回复按钮明确显示有回复时，派生详情抓取。**
+**仅在目标本人广播的根回复按钮明确显示有回复时，派生详情与评论抓取；两者独立调度。**
 省略号不触发抓取，不触发永久历史重抓，也不作为 `text_truncated` 的判断依据。
 `（全文）` 的结构化链接继续沿用既有语义；本设计不增加其抓取路线。
 `book/2053249` 的详情仍显示省略文本，是本次观察事实，不推断其服务端如何存储，也不保证未来能够补全。
@@ -197,17 +197,18 @@ target.id  = 当前 status sid
 | 行为 | 增量 `incremental` | 增量＋可变内容 `refresh-editable` | 全量 `full` |
 | --- | --- | --- | --- |
 | 广播列表 | 按现有时间下界闭区间枚举 | 与增量相同 | 从头枚举至当前视角的可见终点，无历史 floor |
-| 新发现有回复的根 | 详情＋已支持的回复分页 | 同左 | 同左，不跨 bundle 跳过 |
+| 新发现有回复的根 | 并行派生详情与已支持的回复任务，实际请求仍受同一串行闸门调度 | 同左 | 同左，不跨 bundle 跳过 |
 | 旧候选尚未保存详情/回复或上次有缺口 | 从旧列表 WARC 补算，补未完成讨论 | 补抓并刷新该讨论 | 由本轮列表重新发现、重新抓取 |
 | 已完成、回复计数未变的旧讨论 | 跳过；不承诺发现同数编辑 | 所有已知讨论直接刷新，包括水位线以下的讨论 | 本轮重新发现的讨论全部重新抓取 |
 | 本轮列表发现回复计数变化 | 刷新该讨论；减少不代表删除 | 刷新 | 本轮重新抓取 |
 | 旧候选现在显示 0 回复 | 曾未完成则补抓；已完成则在观察到数量变化时刷新 | 保留已知身份，重新观察，不删除旧回复 | 保存本轮 0 的观察；仅此不会触发新详情任务 |
 | 省略号，无回复证据 | 不抓 | 不抓 | 不抓 |
-| 根详情已保存，回复需刷新 | 可重读详情以取得本次配置/访问状态，再走回复分页 | 同左 | 本轮取得新详情，不能用旧响应充当新捕获 |
+| 根详情已保存，回复需刷新 | 只请求评论 API；详情缺失或失败才单独补抓 | 同左，不随“可变内容”重抓已保存的不可变详情 | 本轮 HTML 与 API 均重新捕获，保持新基准自足 |
 | 已有资源字节 | 沿用既有资源跳过规则 | 同左 | 选择范围内需要的资源重新捕获，遵守已有不抓回复附件的边界 |
 | 历史根未出现在本轮列表 | 可依据同视角旧候选补尚未完成的讨论 | 可直接刷新同视角已知讨论 | 不注入旧候选冒充本轮发现；旧记录仍在原 bundle 中 |
 
-“增量＋可变内容”须直接排队所有已知讨论，不能只取消 URL 跳过后等待它们在新列表页出现。
+“增量＋可变内容”须直接排队所有已知讨论的评论 API，不能只取消 URL 跳过后等待它们在新列表页出现。
+详情 HTML 与评论分页各有成功集合；HTML 成功不代表回复已抓，API 成功也不代表 HTML 已存。
 回复计数不变但正文编辑、删一条再加一条，只有刷新模式或全量中被重新访问的讨论可能发现。
 普通增量的新补抓功能是填补既有缺口，不是无限轮询全部旧讨论。
 
@@ -258,8 +259,36 @@ target.id  = 当前 status sid
 | route / intent | surface | 派生来源与验证 |
 | --- | --- | --- |
 | `broadcast.item`（status profile） | html | 根回复链接；核对根 sid、作者 UID、详情框架及配置 target |
-| `broadcast.comments` | api | 正常详情的已验证读取配置；保存顶层 JSON 分页与终点证据 |
+| `broadcast.comments` | api | 经身份验证的 status 根 sid 派生已实测读取端点；无需本轮先抓详情 |
 | `broadcast.comment_replies`（暂缓启用） | api | 需非空楼中楼及分页样本验证后，才允许从实际回复 ID 派生 |
+
+已实测的 status 读取 profile 将根 sid 代入
+`https://m.douban.com/rexxar/api/v2/status/<sid>/comments`，首屏参数沿用已验证的 start/count。
+它只接受验证过 owner UID、根 sid 与 status 身份的候选；topic 的 data-aid、引用来源的 sid 和任意路径字符串
+不进入此模板。列表捕获可直接作为 HTML 与 API 两个任务的父证据，旧候选则保留原父 capture。
+详情页配置用于协议实测与解析核验，不是每次请求 API 的运行前置条件。
+
+首次发现时分别排 HTML 与 API 任务，同一全局闸门串行执行；某一任务失败不伪造另一任务失败或成功。
+但风控/登录失败仍按会话规则暂停整轮，不能借“任务解耦”继续请求另一入口。
+普通增量补缺与 refresh-editable 刷新只补缺失的 HTML；已成功详情不重复获取，评论直接从 API 起点读取。
+同一任务恢复必要时重走 API 首页以重新锚定，不依赖重新下载 HTML。
+API 协议变化时保留错误响应并报告未支持/待诊断，不自动回退成每次先抓 HTML；
+额外 HTML 诊断应是单独的显式任务。full 模式本轮重新保存两者是新基准要求，不是刷新时的冗余。
+保存 HTML 提供独立单页证据，但不承诺原站脚本在离线回放时能自动加载已归档 API。
+
+**读取路线显式声明 `withCk: false`。**现有 [`loop.js`](../../src/crawl/loop.js) 用
+`route.surface === 'api'` 传入 withCk，必须改为尊重显式路线配置，例如
+`route.withCk ?? (route.surface === 'api')`，兼容旧路线时也不能用 `||` 吞掉 false。
+`broadcast.comments` 与将来经实测启用的 comment_replies 均显式为 false；surface 描述响应面，不能充当令牌需求。
+GET URL 在构造时只允许已验证的查询参数，不能从输入链接携带 ck；无论 self、public authenticated 还是 anonymous，
+评论读取都不得附加 ck，也不调用 getCk 获取它。登录视角仍可沿用会话 Cookie，withCk=false 不等于匿名。
+
+代码事实需区分：[`withCkToken()`](../../src/crawl/transport.js) 已有 `if (!ck) return url`，
+因此当前代码不会把空值拼成 `ck=undefined`。真实问题是 API 面默认启用令牌，并且 Transport 在
+`credentials: 'omit'` 与 withCk=true 组合下直接抛错；显式 false 同时避免无关令牌和匿名调用冲突。
+匿名评论请求还须明确 credentials=omit，不能依赖“当前浏览器恰好没有 Cookie”。
+该凭据策略也约束重试与验证分支；不能在 API 风控后自动借用登录会话，把匿名任务变为 authenticated。
+既有 API 路线仍需要其原有策略，此改动不全局关闭所有 API 的 ck，也不以“GET”一词推断所有接口都不需要令牌。
 
 只解析配置中的受限数据字面量，不执行脚本或任意 URL；只访问已有样本支持的读取端点。
 `create_comment/delete_comment/react` 等写接口绝不入队。令牌只使用既有会话路径，不记入日志或 fixture。
@@ -284,43 +313,83 @@ target.id  = 当前 status sid
 [Chromium 权限升级机制](https://chromium.googlesource.com/chromium/src/+/main/extensions/docs/permissions.md)。
 此处需求可用已有权限内的直达链接满足，不承担这项新增发布成本。
 
-### 4.6 讨论覆盖必须随 bundle 保存
+### 4.6 讨论覆盖文件、提交顺序与恢复
 
-回复树不使用一个全局时间水位线。新设计增加**bundle 级讨论枚举日志**，暂名 `discussion-state.ndjson`，
-作为规范化的抓取元数据随 bundle 导出，而不是 canonical，也不是只有本机可读的队列缓存。
-文件名与 schema 在 specs 中定稿后再实现；引入新必需语义需 bump bundle minor，并更新 validator/导入导出清单。
+回复树不使用一个全局时间水位线。增加 bundle 级 `discussion-state.ndjson`，
+只记录**已被 WARC/index 确认的捕获对应的结果与分页推进**；它不是 Frontier 的持久化镜像。
+在 specs 中先定义独立 schema 与 manifest 声明，再实现生产者。拟议声明为：
 
-每个讨论任务至少记录：本轮 task ID、父候选 capture、根 sid/实际 status 资源 ID、完整视角隔离键、
-requested/effective mode、计划范围、已捕获分页 capture ID、请求游标、已见回复 ID、待展开楼中楼、
-终点证据、已知缺口和 stop reason。状态包括 not_requested、partial、complete_visible、unavailable、unknown；
-只有真实结构终点与连续分页证据能给出 complete_visible，且仅针对本轮视角和已支持范围。
-未支持的楼中楼、隐藏/折叠回复、用户限额、解析失败分别记录，不能统一抹成 0。
+```text
+manifest.discussion_state = {
+  filename: "discussion-state.ndjson",
+  sha256: <最终文件字节的摘要，采用规范既有摘要格式>,
+  line_count: <完整 NDJSON 行数>,
+  bytes: <文件字节数>
+}
+```
 
-写入顺序是响应 WARC → index → 讨论枚举日志 → checkpoint；候选任务在首次请求前也须落盘。
-run-store/frontier 是可重建的运行缓存。用户取消、预算中止、风控和部分导出时，这个日志也必须进入 bundle；
-最终 manifest 含摘要及文件引用，未收尾 bundle 则直接读取已有日志，不能等到成功 finalize 才知道缺口。
-崩溃若只有 response/index 而未写讨论状态，可从 capture 重建已抓页面；缺少明确终点时只能得到 unknown/partial。
-若仅凭原始页面就能重算候选，日志与重算结果应交叉核验，不凭日志声称保存了不存在的字节。
+启用新讨论能力的已收尾 bundle 必须声明该文件（即使为空），并记录任务范围摘要
+`manifest.discussion_run`：requested/effective mode、视角、路线/策略版本、预算、历史来源 bundle 引用、
+停止原因与尚未完成根的摘要。字段名与 schema 在 specs 定稿，引入 bundle minor；未启用或旧版本缺少字段不等于 0 回复。
+不能把文件加进 importer 的“不检查额外文件”白名单就算完成集成：
 
-不设置未经运行成本验证的固定“200 请求后视为完成”。用户设置的 maxCaptures/时间预算是停止条件，
-触及时暂停或产出部分档案，并记下尚未处理的讨论与原因；停止不会抹掉已保存内容。
-单个讨论可能很大，分页队列需轮转以免饿死其他候选；已有全局节流、退避、取消与人工风控恢复规则继续生效。
+- [`importer.js`](../../src/bundle/importer.js) 当前把未声明文件报 `undeclared_file` warning 并一起导入，
+  并非当前代码必然阻断；但这会绕开校验。须读取 manifest.discussion_state 的声明，校验缺失、字节数、行数和摘要。
+- [`exporter.js`](../../src/bundle/exporter.js) 的 `readExpectedDigests()` 当前只收 segments/index，
+  必须增加讨论文件并校验导出目的地；它不能进入排除 checkpoint 的 NOT_PART_OF_BUNDLE 集合。
+- specs 的 manifest schema、文件清单、validate.py，以及 parser/bundle reader、复制/续导/回传路径一起升级。
+  已声明却缺失、哈希不符或引用不成立要报错，不能降级成“没有回复”。
 
-`crawl_state` 与新讨论状态的职责明确分开：
+每条讨论结果引用本轮已提交 capture、其 index 提交边界与内容摘要，以及根 sid、父候选、视角、任务范围、
+真实请求游标、已见回复 ID、实际终点与缺口。捕获 verdict 可以是失败响应，但只有验证成功的内容页才推进分页。
+记录按本轮 index 提交边界单调追加，不能引用未来 capture。含父候选的跨 bundle 引用需显式声明依赖，
+父 bundle 缺失则降低可证明范围，不能假装该候选不存在。
 
-- `broadcast.timeline` 只证明列表枚举；列表连续走完可按原规则 advanced=true，即使讨论尚有缺口。
-- 详情与回复路线无全局时间下界，high_water_time/floor_time 为 null，advanced=false，不参与 pickFloors；
-  enumeration 保守为 bounded，未获得路线级连续性证据时 contiguous=false；实际逐根终点由讨论日志表达。
-  路线汇总不能把 null floor 解释为遍历了所有人的所有讨论。specs 要同步修订“完整性只由 crawl_state 表达”的旧说明，
-  不能新增日志后继续让旧校验器把回复树误当线性列表。
-- 新讨论日志逐根证明分页连续性；`advanced=false` 不要求下次把已完成讨论全部再抓，因为讨论补抓读取该日志，
-  不是复用线性列表的 floor 逻辑。
-- manifest 的 bundle/讨论汇总必须显示缺口；“列表完整”不能写成“全部回复完整”。
-- 计数下降、任意视角未出现、一次 404 都不证明回复删除。只有该回复明确的上游墓碑才记录删除状态。
+**不预写候选任务行。**候选先由已提交列表捕获（或合格历史源）重算进 Frontier，内存和本机 checkpoint
+只负责调度；未发出的请求不会被伪装成捕获结果。持久化顺序是：
 
-校验器要同时检查日志引用的 capture 存在、视角一致、终点与 missing 页不矛盾。
-把 bundle 导到另一台机器、删除 OPFS 运行缓存后，离线 parser 必须仍能区分已抓、未抓、未知与被限额中断。
-这修复的是抓取元数据的持久化约定，并不把 canonical 或运行缓存提升为原始内容证据。
+```text
+响应 WARC 写入完成 → index 完整行提交 → 对应讨论结果行提交 → checkpoint 更新
+```
+
+最后两步可落后，不能超前。新版本 recovery 的次序与处理范围如下：
+
+| 崩溃/损坏位置 | 恢复行为 |
+| --- | --- |
+| WARC 或 index 尾部未完成 | 先运行既有 recovery：index 的完整行是捕获权威，截去未确认 WARC 尾部 |
+| index 已确认，讨论行未写或尾部撕裂 | 截去讨论文件的未换行尾行；重解析已提交捕获可重建该页观察及派生工作 |
+| 讨论结果引用尚不存在的 index 后缀 | 对未收尾 bundle，只截去超出已确认提交边界的日志后缀；记录修复，重建对应任务 |
+| 索引已确认字节损坏，或日志中间引用/摘要冲突 | 报损坏并停止，不通过截断中间内容掩盖问题 |
+| 讨论行完整、checkpoint 仍旧 | 从捕获与结果重建已完成集合和后续分页，不重复制造逻辑回复 |
+
+恢复先核对 index 确认的 WARC 可读，再处理讨论日志；不能让讨论日志反向认证 WARC。
+引用校验不只看 capture 序号，还核对该提交对应的内容摘要，防止截尾后序号复用使旧状态误配新响应。
+已收尾档案的摘要不符属于损坏，不自动“修好”并重写 manifest。恢复测试须覆盖所有提交边界并验证幂等性。
+
+**没有候选预写，也必须能看见未请求的根。**离线 parser 从本轮/所声明历史列表、模式规则与已提交结果
+重算计划集合，再减去完成集合；不能把 discussion-state 文件中“有几行”当作“总共只计划抓几条”。
+收尾时 manifest.discussion_run 保存实际停止原因和 pending 摘要，并与离线重算结果交叉检查；
+这是停止后的范围记录，不是请求前预写任务日志。
+没有 manifest 的未收尾导出仍保留 index、WARC 和讨论日志完整前缀，报告“未收尾/原因未知”，
+不能承诺从从未落盘的内存状态恢复精确的限额或用户取消原因。历史依赖不在场时报告来源缺口，不能报完整。
+导出读取应与写入/恢复协调取得一致前缀，不复制一半的讨论行或拿旧 manifest 校验正在变化的文件。
+
+不设置固定“200 请求后视为完成”。预算到达时暂停或收尾为 partial；停止不会抹掉已保存内容。
+单个讨论可能很大，分页队列需轮转；全局节流、退避、取消与人工风控恢复继续生效。
+状态区分 not_requested、partial、complete_visible、unavailable、unknown；只有已验证结构终点与连续分页证据
+才给 complete_visible。隐藏/折叠、未支持楼中楼、限额、失败分别记录，计数只作观测。
+
+`crawl_state` 与讨论文件的分工：
+
+- `broadcast.timeline` 只证明列表枚举，连续走完可按原规则 advanced=true，即使讨论尚有缺口。
+- 详情/评论路线没有全局时间下界，high_water_time/floor_time 为 null，advanced=false，enumeration=bounded，
+  不参与 pickFloors。无路线级连续性证明则 contiguous=false；逐根终点由讨论结果及其 capture 证明。
+- advanced=false 不强制下次重抓所有讨论，未完成集合由逐根结果重建；“列表完整”不能写成“回复完整”。
+- specs 同步修订“完整性只由 crawl_state 表达”的旧说明，并由 validator 检查两层证据不冲突。
+- 计数下降、某视角未出现、一次 404 均不推断删除；仅明确的上游回复墓碑可记录删除状态。
+
+删除 OPFS 的运行缓存、把已收尾 bundle 及声明依赖导到另一台机器后，离线 parser 必须得到相同的内容、
+缺口与停止原因。对于未收尾档案，只承诺恢复原始字节足以证明的观察，不编造尚未持久化的状态。
 
 ### 4.7 恢复、升级和用户可见表现
 
@@ -328,7 +397,7 @@ run-store/frontier 是可重建的运行缓存。用户取消、预算中止、�
 这些字段随 bundle 任务元数据与 checkpoint 保存；不要仅靠面板当前选项或只在运行数据库里存 mode。
 恢复必须沿用原值，切换模式/目标/操作者只能结束原任务后新建；相同任务正常恢复不重复已完成页。
 崩溃窗口的派生 replay 允许受控重复，但不能永久漏掉子任务，且不能重用过期分页游标假装连续：
-需要重新锚定时，从已验证的根入口重走该未完成讨论并去重，不必重抓全部广播列表。
+需要重新锚定时，从已验证的评论 API 入口重走该未完成讨论并去重，不重抓已保存的 HTML 详情或全部广播列表。
 
 self 掉登录、public 登录操作者退出/换号、匿名任务中途变登录、目标身份变化都暂停，不能悄悄降级继续。
 正常回复关闭/不可见是内容可见性问题；账号会话失效是整轮视角问题，不能一概当作“回复已删除”。
@@ -421,8 +490,8 @@ NeoDB、Letterboxd、Goodreads 导出维持既有范围，不把别人的回复�
 
 | 仓库 | 改动 | 验证与文档 |
 | --- | --- | --- |
-| **doubak-data-specs** | 定义 bundle 讨论枚举日志、任务范围/模式和与 crawl_state 的分工；定义 status 回复 schema；补充单一 revisions 的来源与字段归一化规则 | bundle minor、schema/validator、文件清单、INGESTION/IDENTITY/FIELDS、前向兼容与离线缺口用例一起更新；不提前定义 topic 回复结构 |
-| **doubak-extension** | status 候选/详情/API 派生；按模式构造已知讨论、待补缺口与刷新队列；视角隔离；枚举日志持久化/导出/恢复；topic 范围报告 | 修改 routes/classifier/loop/backlog/runner/replay/run-store 与 offscreen 接缝；同步 crawl-modes 注释、README、DESIGN、docs/ui.md 与多语言文案；不增加 host 权限 |
+| **doubak-data-specs** | 定义 manifest.discussion_state / discussion_run、讨论结果日志、任务范围/模式和与 crawl_state 的分工；定义 status 回复 schema；补充单一 revisions 的来源与字段归一化规则 | bundle minor、schema/validator、文件清单、INGESTION/IDENTITY/FIELDS、前向兼容与离线缺口用例一起更新；不提前定义 topic 回复结构 |
+| **doubak-extension** | status 详情/API 平行派生、显式 withCk=false；按模式构造已知讨论、待补缺口与刷新队列；视角隔离；枚举日志持久化/导出/恢复；topic 范围报告 | 修改 routes/classifier/loop/backlog/runner/replay/run-store 与 offscreen 接缝，以及 bundle/importer、exporter、recovery 的声明/摘要/截尾处理；同步 crawl-modes 注释、README、DESIGN、docs/ui.md 与多语言文案；不增加 host 权限 |
 | **doubak-data-parser** | 专用 status 详情抽取并归一到现有 revisions；status 回复输出；讨论日志与 capture 的离线交叉校验；保留作者/操作者/视角来源 | CLI/portable 输出、版本号、README、真实脱敏 fixtures；输入顺序无关、重复/分叉/混合视角与旧格式兼容 |
 | **doubak-site-generator** | 消费统一字段和可选回复记录；可选本地讨论页、版本排版、公开过滤、完整性提示 | 不做列表/详情源裁决；页面、搜索、图片与数据输出统一过滤；无新字段时保持旧行为；说明两个独立发布开关 |
 | **doubak-import-adapters** | bundle 导入/回传保留新的讨论日志与任务范围；旧爬虫没有回复时不制造零回复快照 | 原始字节与源时间不变；旧源详情只有正常样本及明确 URL 才映射；未知分类保留，不联网补抓 |
@@ -489,7 +558,7 @@ NeoDB、Letterboxd、Goodreads 导出维持既有范围，不把别人的回复�
 | 刷新 | 同数编辑、旧根不在增量列表、回复计数减少 | 所有已知讨论排队；变化留存，缺失不当删除 |
 | 全量 | 移走全部旧 bundle 后解析本轮 bundle | 已捕获内容与范围报告一致，无历史字节依赖；不声称恢复已消失旧根 |
 | 恢复 | WARC/index 已写但枚举日志/checkpoint 未写时崩溃 | 重建捕获和待派生任务；无证据的终点降为 unknown，不永久漏页 |
-| 配额 | 限额中止且仍有未请求根，删除所有运行缓存再离线导出/解析 | bundle 可报告相同的 pending 根与 stop reason；不把 200 或其他阈值当完整终点 |
+| 配额 | 限额中止且仍有未请求根，收尾导出后删除所有运行缓存再离线解析 | 从源捕获和 manifest 计划摘要复原 pending 与 stop reason，不依赖预写候选行；未收尾且原因未落盘则报告 unknown |
 | 会话 | self 掉登录、public 换操作者、匿名转登录 | 暂停且保持原视角；没有新旧会话混合的完成证明 |
 | 任务 | 暂停期间改模式/范围，升级旧断点 | 不能修改原任务契约；旧范围可验证才恢复，新路线下一轮启用 |
 | canonical | 列表→详情→列表，字段等值或已证明摘要关系 | 单一 revisions，无交替假编辑；文本与 parts 一致，来源可追溯 |
@@ -497,6 +566,10 @@ NeoDB、Letterboxd、Goodreads 导出维持既有范围，不把别人的回复�
 | 回复 | 正文编辑、明确墓碑、单次不可见、父回复缺失 | 记录变化或 unknown；不虚构删除/父记录 |
 | 发布 | 包含讨论/private 开关组合，混合来源 | 页面、搜索、图片和数据导出同样过滤；public capture 不自动等于内容 public |
 | 兼容 | 旧 bundle 无讨论日志、旧 canonical、新可选回复文件 | unknown 不伪装完整；旧广播不丢；外部平台导出不增加他人内容 |
+| Bundle | 已声明日志缺失、摘要或行数不符、导出目的地字节损坏 | importer/exporter/validate.py 一致报错；不能靠额外文件白名单跳过校验 |
+| 恢复 | 请求前崩溃、index/讨论行各写一半、日志引用未来捕获、序号复用、日志中部损坏 | 无候选预写；尾部修复幂等；缺结果可重建；中部损坏不静默截断；已收尾摘要不可重写 |
+| 调度 | 首次根、仅缺 HTML、仅缺评论、评论计数变化、refresh-editable、full | 首次可派生两项；增量/刷新不重抓成功 HTML；full 重新取得两者；某项成功不代替另一项 |
+| 传输 | 三视角的评论 GET，getCk 有值/空值，旧 API 路线 | 新路线不调用 getCk、URL 无 ck；匿名 omit 不抛令牌冲突；显式 false 不被默认覆盖；旧 API 仍按原策略运行 |
 
 自动化 fixture 必须保持真实结构并脱敏；topic、非空楼中楼和多页终点不能用自造数据冒充线上协议证据。
 落实各仓库相关单测与完整回归、specs schema/一致性校验、vendor 同步检查。
