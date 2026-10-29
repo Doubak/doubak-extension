@@ -388,10 +388,10 @@ HTML 详情目前仅保留原始证据，不增强 Canonical；解析器通过 `
 已提交而 checkpoint 落后的崩溃窗口。Firefox 无头工具已检查面板布局。
 这些测试使用脱敏结构与模拟传输，不能替代真实登录会话的接口兼容性验证。
 
-2026-10-30 验证记录：扩展完整套件 2,208 通过、0 失败、1 跳过（Node 24.18 的
+2026-10-30 验证记录：扩展完整套件 2,209 通过、0 失败、1 跳过（Node 24.18 的
 DecompressionStream 行为差异）；parser 321 通过、0 失败、1 跳过（缺少既有相册/小组样本）。
 Bundle validator 含 JSON Schema 层与新增 scope 契约用例均通过。
-针对本功能的测试中 `broadcast-snapshots.js` 行覆盖率 100%、分支覆盖率约 90%，
+针对本功能的测试中 `broadcast-snapshots.js` 行覆盖率 100%、分支覆盖率 90.91%，
 `snapshot-session-change.js` 行与分支均 100%；这是指定模块口径，不是全项目覆盖率。
 两个浏览器的安装包均已在本地成功生成，没有增加 host permissions。
 
