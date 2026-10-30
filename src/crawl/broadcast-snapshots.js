@@ -53,6 +53,23 @@ export function dedupeSnapshotFrontier(items, account) {
   return out;
 }
 
+/** Tracking links to the same unsupported entry describe one gap per route. */
+export function snapshotGapKey(gap) {
+  if (gap.reason !== 'unsupported_reply_entry' || !gap.url) return null;
+  try { return `${gap.reason}:${urlKey(gap.url)}`; } catch { return null; }
+}
+
+export function dedupeSnapshotGaps(gaps) {
+  const seen = new Set();
+  return gaps.filter(gap => {
+    const key = snapshotGapKey(gap);
+    if (key === null) return true; // Preserve other errors and malformed evidence.
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function attr(tag, name) {
   const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`, 'i').exec(tag);
   return match ? decodeEntities(match[2]) : null;
@@ -107,7 +124,7 @@ export function extractBroadcastSnapshots(html, { ownerUserId, username }) {
       // Other status IDs are quoted cards, not candidates or root gaps.
     }
   }
-  return { candidates: [...candidates.values()], unresolved };
+  return { candidates: [...candidates.values()], unresolved: dedupeSnapshotGaps(unresolved) };
 }
 
 export function snapshotTasks(html, account, parentCaptureId, referer) {
@@ -190,5 +207,5 @@ export async function snapshotBacklog({ sources, account, mode, onWarn = () => {
       if (!seen.has(key)) { seen.add(key); items.push(item); }
     }
   }
-  return { items, known: [...known], unresolved };
+  return { items, known: [...known], unresolved: dedupeSnapshotGaps(unresolved) };
 }

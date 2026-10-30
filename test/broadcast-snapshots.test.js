@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { extractBroadcastSnapshots, snapshotTasks, snapshotQueueKey, dedupeSnapshotFrontier, snapshotBacklog, classifySnapshot, assertSnapshotScope, assertSnapshotRequest, commentsUrl, DETAIL, COMMENTS } from '../src/crawl/broadcast-snapshots.js';
+import { extractBroadcastSnapshots, snapshotTasks, snapshotQueueKey, dedupeSnapshotGaps, dedupeSnapshotFrontier, snapshotBacklog, classifySnapshot, assertSnapshotScope, assertSnapshotRequest, commentsUrl, DETAIL, COMMENTS } from '../src/crawl/broadcast-snapshots.js';
 import { buildRoutes } from '../src/crawl/routes.js';
 import { hasRouteName } from '../src/ui/route-names.js';
 const html = readFileSync(new URL('./fixtures/broadcast-snapshots/timeline.html', import.meta.url), 'utf8');
@@ -157,4 +157,17 @@ test('legacy duplicate checkpoint retains failed state and retry budget in eithe
   for (const entries of [[pending, failed], [failed, pending]]) {
     assert.deepEqual(dedupeSnapshotFrontier(entries, account), [failed]);
   }
+});
+
+
+test('unsupported entry gaps collapse tracking variants across lists but retain distinct entries/errors', async () => {
+  const result = await snapshotBacklog({ sources: aliasSources, account, mode: 'incremental' });
+  assert.equal(result.unresolved.length, 1);
+  const first = { reason: 'unsupported_reply_entry', url: 'https://www.douban.com/topic/987/?_spm_id=one', parentCaptureId: 'old#000001' };
+  const variant = { ...first, url: 'https://www.douban.com/topic/987/?_i=two#replies', parentCaptureId: 'other#000001' };
+  const second = { ...first, url: 'https://www.douban.com/topic/988/' };
+  const error = { reason: 'blocked', url: first.url };
+  const malformed = { reason: 'unsupported_reply_entry', url: 'not a URL' };
+  assert.deepEqual(dedupeSnapshotGaps([first, variant, second, error, malformed]), [first, second, error, malformed]);
+  assert.equal(extractBroadcastSnapshots(html + html, opts).unresolved.length, 1);
 });

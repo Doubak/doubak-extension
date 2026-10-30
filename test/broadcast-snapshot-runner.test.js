@@ -24,7 +24,7 @@ const account = { userId: '111', username: 'example' };
 const tasks = snapshotTasks(card, account, '20261001T000000Z-aaaaaa#000001', 'https://www.douban.com/people/example/statuses?p=9');
 const options = { username: 'example', mediums: [], includeCatalog: false,
   onlyRoutes: ['broadcast.timeline', DETAIL, COMMENTS], broadcastReplySnapshot: true };
-function harness({ apiStatus = 200, apiBody = json, list = timeline } = {}) {
+function harness({ apiStatus = 200, apiBody = json, list = timeline, secondList = empty } = {}) {
   const dirs = new Map();
   const openBundle = async dir => { if (!dirs.has(dir)) dirs.set(dir, new MemoryFileStore()); return dirs.get(dir); };
   const runStore = new RunStore({ kv: new MemoryKvStore(), openBundle });
@@ -35,7 +35,7 @@ function harness({ apiStatus = 200, apiBody = json, list = timeline } = {}) {
     calls.push({ url, init });
     const api = url.includes('/rexxar/');
     const body = api ? apiBody : /\/status\/123\//.test(url) ? detail
-      : /statuses\?p=1$/.test(url) ? list : url.includes('/statuses?') ? empty : profile;
+      : /statuses\?p=1$/.test(url) ? list : /statuses\?p=2$/.test(url) ? secondList : url.includes('/statuses?') ? empty : profile;
     const bytes = new TextEncoder().encode(body);
     return { url, status: api ? apiStatus : 200,
       headers: new Headers({ 'content-type': api ? 'application/json' : 'text/html' }),
@@ -192,13 +192,13 @@ const aliasCard = card.replace('/people/111/status/123/', '/people/example/statu
 const aliasTasks = snapshotTasks(aliasCard, account, '20261001T000000Z-aaaaaa#000002', tasks.items[0].referer);
 
 test('full crawl collapses discovered aliases but keeps the chosen source URL in index', async () => {
-  const h = harness({ list: `${profile}<div class="stream-items">${aliasCard}${card}</div>` });
+  const h = harness({ list: `${profile}<div class="stream-items">${aliasCard}</div>`, secondList: timeline });
   const started = await h.runner.start({ ...options, mode: 'full' });
   await drain(h.runner);
   assert.equal(snapshotCalls(h.calls).length, 2);
   const rows = await new BundleReader({ store: await h.openBundle(started.dir), bundleId: started.bundleId }).index();
   const saved = rows.find(r => r.route_key === DETAIL);
-  assert.equal(saved.url, tasks.items[0].url);
+  assert.equal(saved.url, aliasTasks.items[0].url);
   assert.match(saved.url_key, /^https:\/\//, 'archive url_key remains the versioned URL normalization');
 });
 
@@ -232,4 +232,50 @@ test('legacy pending alias cannot bypass a failed alias on resume', async () => 
   assert.equal(snapshotCalls(h.calls).length, 0);
   const failure = checkpointFailures(await h.runStore.loadCheckpoint()).find(it => it.routeKey === DETAIL);
   assert.equal(failure.attempts, 3);
+});
+
+
+const topicCard = card.replace('/people/111/status/123/', '/topic/987/');
+const topicGap = { reason: 'unsupported_reply_entry', url: 'https://www.douban.com/topic/987/?_i=old' };
+
+test('one gap per route across historical backfill, current list and old checkpoint restore', async () => {
+  const h = harness({ list: `${profile}<div class="stream-items">${topicCard}</div>` });
+  const started = await h.runner.start({ ...options,
+    resolveSnapshots: async () => ({ unresolved: [topicGap, { ...topicGap, url: 'https://www.douban.com/topic/987/?_spm_id=other' }] }),
+  });
+  await drain(h.runner);
+  assert.equal(snapshotCalls(h.calls).length, 0);
+  assert.equal(h.events.filter(e => e.type === 'broadcast_snapshot_unresolved').length, 1);
+  const cp = await h.runStore.loadCheckpoint();
+  for (const route of cp.routes.filter(r => [DETAIL, COMMENTS].includes(r.route_key))) {
+    assert.equal(route.gaps.length, 1);
+    route.gaps.push({ ...route.gaps[0] }, { ...route.gaps[0], url: 'https://www.douban.com/topic/987/?_i=duplicate' });
+  }
+  const resumed = h.make();
+  await resumed.resume(cp, { resolveKnown: async () => ({ broadcastSnapshots: { unresolved: [topicGap] } }) });
+  await drain(resumed);
+  await resumed.finish();
+  const manifest = JSON.parse(new TextDecoder().decode(await (await h.openBundle(started.dir)).read('manifest.json')));
+  const routes = manifest.crawl_state.filter(r => [DETAIL, COMMENTS].includes(r.route_key));
+  assert.equal(routes.length, 2);
+  for (const route of routes) {
+    assert.equal(route.gaps.length, 1);
+    assert.equal(route.gaps[0].reason, 'unsupported_reply_entry');
+    assert.equal(route.contiguous, false);
+    assert.equal(route.advanced, false);
+  }
+  assert.equal(h.events.filter(e => e.type === 'broadcast_snapshot_unresolved').length, 1);
+});
+
+
+test('historical success keys are restored before an unfinished checkpoint alias', async () => {
+  const h = harness({ list: empty }); await h.runner.start(options);
+  const cp = await h.runStore.loadCheckpoint();
+  cp.frontier.push({ route_key: DETAIL, intent: DETAIL, url: aliasTasks.items[0].url, state: 'pending' });
+  const resumed = h.make();
+  await resumed.resume(cp, { resolveKnown: async () => ({ broadcastSnapshots: {
+    known: [snapshotQueueKey(DETAIL, tasks.items[0].url, account)],
+  } }) });
+  await drain(resumed);
+  assert.equal(snapshotCalls(h.calls).length, 0);
 });

@@ -1,4 +1,4 @@
-import { snapshotRoute, snapshotTasks, snapshotQueueKey, classifySnapshot, assertSnapshotRequest, COMMENTS, DETAIL } from './broadcast-snapshots.js';
+import { snapshotRoute, snapshotTasks, snapshotQueueKey, snapshotGapKey, dedupeSnapshotGaps, classifySnapshot, assertSnapshotRequest, COMMENTS, DETAIL } from './broadcast-snapshots.js';
 /**
  * 抓取主循环：把前面各块接成一条能真正跑起来的链路。
  *
@@ -234,7 +234,9 @@ export class CrawlLoop {
         priorCount: this._priorCounts[routeKey] ?? 0,
       };
       const saved = this._savedStates[routeKey];
-      this._states.set(routeKey, saved ? RouteState.restore(opts, saved) : new RouteState(opts));
+      const state = saved ? RouteState.restore(opts, saved) : new RouteState(opts);
+      if (snapshotRoute(routeKey)) state.gaps = dedupeSnapshotGaps(state.gaps);
+      this._states.set(routeKey, state);
     }
     return this._states.get(routeKey);
   }
@@ -418,11 +420,16 @@ export class CrawlLoop {
   enqueueBroadcastSnapshots({ items = [], known = [], unresolved = [] } = {}) {
     if (!this._routes.has(COMMENTS) || this._session.visibility === 'public') return;
     this._frontier.markCaptured(known);
-    for (const gap of unresolved) {
+    for (const gap of dedupeSnapshotGaps(unresolved)) {
+      let added = false;
       for (const key of [DETAIL, COMMENTS]) if (this._routes.has(key)) {
-        this.stateFor(key).recordGap(gap.reason, gap.url, gap.url);
+        const state = this.stateFor(key);
+        const identity = snapshotGapKey(gap);
+        if (identity !== null && state.gaps.some(existing => snapshotGapKey(existing) === identity)) continue;
+        state.recordGap(gap.reason, gap.url, gap.url);
+        added = true;
       }
-      this._emit({ type: 'broadcast_snapshot_unresolved', ...gap });
+      if (added) this._emit({ type: 'broadcast_snapshot_unresolved', ...gap });
     }
     for (const it of items) {
       const target = this._routes.get(it.routeKey);
