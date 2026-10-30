@@ -87,7 +87,8 @@ export function refererRule() {
 /**
  * 2026-10-30: the same status comments GET returned 400 / invalid_request_1284
  * without Referer, and 200 JSON with https://www.douban.com/ (no cookies or ck).
- * Keep this separate from images: only the supported status comments endpoint,
+ * Personal-topic nested first pages also returned 200 with this site-level Referer.
+ * Keep this separate from images: only the supported comments endpoints,
  * only extension XHR. It does not authorize or initiate any additional requests.
  */
 export function commentsRefererRule() {
@@ -96,7 +97,7 @@ export function commentsRefererRule() {
     ...rule,
     id: COMMENTS_REFERER_RULE_ID,
     condition: {
-      regexFilter: '^https://m\\.douban\\.com/rexxar/api/v2/status/[1-9][0-9]*/comments\\?',
+      regexFilter: '^https://m\\.douban\\.com/rexxar/api/v2/(status|group/topic)/[1-9][0-9]*/comments\\?',
       resourceTypes: ['xmlhttprequest'],
       tabIds: [-1],
     },

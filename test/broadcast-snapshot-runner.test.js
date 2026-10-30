@@ -13,6 +13,9 @@ import { MemoryKvStore } from '../src/storage/kv-store.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { BundleReader } from '../src/bundle/bundle-reader.js';
 import { snapshotTasks, snapshotBacklog, snapshotQueueKey, DETAIL, COMMENTS } from '../src/crawl/broadcast-snapshots.js';
+const topicHtml = readFileSync(new URL('./fixtures/broadcast-snapshots/personal-topic.html', import.meta.url), 'utf8');
+const topicJson = readFileSync(new URL('./fixtures/broadcast-snapshots/personal-topic-comments.json', import.meta.url), 'utf8');
+const validTopicCard = readFileSync(new URL('./fixtures/broadcast-snapshots/personal-topic-list.html', import.meta.url), 'utf8');
 const json = readFileSync(new URL('./fixtures/broadcast-snapshots/comments.json', import.meta.url), 'utf8');
 const nav = '<li class="nav-user-account"><a href="https://www.douban.com/people/example/">主页</a></li><script>var _GLOBAL_NAV={USER_ID:"111"};</script>';
 const profile = `${nav}<div id="db-usr-profile"><h1>示例</h1></div>`;
@@ -24,7 +27,7 @@ const account = { userId: '111', username: 'example' };
 const tasks = snapshotTasks(card, account, '20261001T000000Z-aaaaaa#000001', 'https://www.douban.com/people/example/statuses?p=9');
 const options = { username: 'example', mediums: [], includeCatalog: false,
   onlyRoutes: ['broadcast.timeline', DETAIL, COMMENTS], broadcastReplySnapshot: true };
-function harness({ apiStatus = 200, apiBody = json, list = timeline, secondList = empty } = {}) {
+function harness({ apiStatus = 200, apiBody = json, list = timeline, secondList = empty, topicBody = topicHtml } = {}) {
   const dirs = new Map();
   const openBundle = async dir => { if (!dirs.has(dir)) dirs.set(dir, new MemoryFileStore()); return dirs.get(dir); };
   const runStore = new RunStore({ kv: new MemoryKvStore(), openBundle });
@@ -34,7 +37,7 @@ function harness({ apiStatus = 200, apiBody = json, list = timeline, secondList 
   const fetchImpl = async (url, init) => {
     calls.push({ url, init });
     const api = url.includes('/rexxar/');
-    const body = api ? apiBody : /\/status\/123\//.test(url) ? detail
+    const body = api ? apiBody : /\/topic\/987\//.test(url) ? topicBody : /\/status\/123\//.test(url) ? detail
       : /statuses\?p=1$/.test(url) ? list : /statuses\?p=2$/.test(url) ? secondList : url.includes('/statuses?') ? empty : profile;
     const bytes = new TextEncoder().encode(body);
     return { url, status: api ? apiStatus : 200,
@@ -278,4 +281,84 @@ test('historical success keys are restored before an unfinished checkpoint alias
   } }) });
   await drain(resumed);
   assert.equal(snapshotCalls(h.calls).length, 0);
+});
+
+
+const topicTimeline = `${profile}<div class="stream-items">${validTopicCard}</div>`;
+const validTopicTasks = snapshotTasks(validTopicCard, account, '20261001T000000Z-aaaaaa#000001', tasks.items[0].referer);
+const topicCalls = calls => calls.filter(c => /\/topic\/987\//.test(c.url));
+
+test('personal topic captures exact nested first-page bytes; downstream output stays unchanged', async () => {
+  const h = harness({ list: topicTimeline, apiBody: topicJson });
+  const started = await h.runner.start(options);
+  await drain(h.runner);
+  assert.equal(topicCalls(h.calls).length, 2);
+  assert.equal(h.ckReads(), 0);
+  assert.ok(!h.calls.some(c => /\/replies|\/op_comments|ck=/.test(c.url)));
+  const store = await h.openBundle(started.dir);
+  await h.runner.finish();
+  const exported = new MemoryFileStore();
+  assert.equal((await exportBundle({ store, sink: fileStoreSink(exported) })).verified, true);
+  const imported = new MemoryFileStore();
+  assert.equal((await importBundle({ source: exported, dest: imported })).verified, true);
+  const reader = new BundleReader({ store: imported, bundleId: started.bundleId });
+  const rows = await reader.index();
+  const saved = rows.filter(r => [DETAIL, COMMENTS].includes(r.route_key));
+  assert.equal(saved.length, 2);
+  assert.ok(saved.every(r => r.verdict === 'ok'));
+  assert.equal((await reader.readEntry(saved.find(r => r.route_key === COMMENTS))).bodyText, topicJson);
+  const manifest = await reader.manifest();
+  const source = { bundleId: started.bundleId, status: 'complete', manifest,
+    crawlState: new Map(manifest.crawl_state.map(r => [r.route_key, r])), coverage: new Map(), close() {},
+    payload: async row => (await reader.readEntry(row)).bodyText };
+  const parsed = await parse([{ ...source, index: rows }]);
+  const baseline = await parse([{ ...source, index: rows.filter(r => ![DETAIL, COMMENTS].includes(r.intent)) }]);
+  assert.deepEqual(buildPages(project(parsed)), buildPages(project(baseline)));
+  assert.deepEqual(buildNeodbNdjson(parsed), buildNeodbNdjson(baseline));
+  assert.equal(parsed.stats.rawOnlyCaptures.length, 2);
+});
+
+for (const mode of ['incremental', 'refresh-editable', 'full']) {
+  test(`personal topic actual request set for ${mode}`, async () => {
+    const h = harness({ list: topicTimeline, apiBody: topicJson });
+    await h.runner.start({ ...options, mode, resolveSnapshots: () => snapshotBacklog({ account, mode,
+      sources: [{ rows: validTopicTasks.items.map(it => ({ route_key: it.routeKey, url: it.url, verdict: 'ok' })) }] }) });
+    await drain(h.runner);
+    assert.equal(topicCalls(h.calls).length, mode === 'incremental' ? 0 : 2);
+  });
+}
+
+test('disabled topic snapshots make no detail or API requests', async () => {
+  const h = harness({ list: topicTimeline, apiBody: topicJson });
+  await h.runner.start({ ...options, broadcastReplySnapshot: false }); await drain(h.runner);
+  assert.equal(topicCalls(h.calls).length, 0);
+});
+
+test('topic capture recovery does not repeat successful leaves or keep obsolete unsupported gaps', async () => {
+  const h = harness({ list: topicTimeline, apiBody: topicJson });
+  const started = await h.runner.start(options);
+  await drain(h.runner);
+  const cp = await h.runStore.loadCheckpoint();
+  // Emulate an older checkpoint containing unsupported gaps despite committed bytes.
+  for (const route of cp.routes.filter(r => [DETAIL, COMMENTS].includes(r.route_key))) {
+    route.gaps = [{ reason: 'unsupported_reply_entry', url: 'https://www.douban.com/topic/987/?_i=old' }];
+  }
+  const resumed = h.make(); await resumed.resume(cp);
+  await drain(resumed); await resumed.finish();
+  assert.equal(topicCalls(h.calls).length, 2);
+  const reader = new BundleReader({ store: await h.openBundle(started.dir), bundleId: started.bundleId });
+  for (const route of (await reader.manifest()).crawl_state.filter(r => [DETAIL, COMMENTS].includes(r.route_key))) {
+    assert.deepEqual(route.gaps, []);
+    assert.equal(route.advanced, false, 'bounded snapshots never promise full enumeration');
+  }
+});
+
+test('topic API success does not hide a detail author mismatch', async () => {
+  const h = harness({ list: topicTimeline, apiBody: topicJson,
+    topicBody: topicHtml.replace("'author': {\"id\":\"111\"", "'author': {\"id\":\"222\"") });
+  const started = await h.runner.start(options); await drain(h.runner);
+  const reader = new BundleReader({ store: await h.openBundle(started.dir), bundleId: started.bundleId });
+  const rows = await reader.index();
+  assert.equal(rows.find(r => r.route_key === DETAIL).verdict_reason, 'detail_identity_mismatch');
+  assert.equal(rows.find(r => r.route_key === COMMENTS).verdict, 'ok');
 });

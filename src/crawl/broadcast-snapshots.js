@@ -1,4 +1,4 @@
-/** Measured status HTML / Rexxar first page, 2026-10-29. Raw evidence only. */
+/** Measured status + personal-topic HTML / Rexxar first pages. Raw evidence only. */
 import { decodeEntities } from '../vendor/parser/html-entities.js';
 import { classifyResponse, stripScriptAndStyle } from './classifier.js';
 import { urlKey } from '../core/urlkey.js';
@@ -6,6 +6,19 @@ import { urlKey } from '../core/urlkey.js';
 export const DETAIL = 'broadcast.item';
 export const COMMENTS = 'broadcast.comments_snapshot';
 export const snapshotRoute = (key) => key === DETAIL || key === COMMENTS;
+
+const TOPIC_PATH = /^\/topic\/([1-9]\d*)\/$/;
+const TOPIC_API_PATH = /^\/rexxar\/api\/v2\/group\/topic\/([1-9]\d*)\/comments$/;
+
+export function topicCommentsUrl(id) {
+  return `https://m.douban.com/rexxar/api/v2/group/topic/${id}/comments?resp_type=c_dict&topic_id=${id}&start=0&count=20&order_by=time_asc&nested=1`;
+}
+
+/** Personal-topic bodies are editable; a status snapshot is not. */
+export function editableSnapshotDetail(url) {
+  const u = new URL(url);
+  return u.origin === 'https://www.douban.com' && TOPIC_PATH.test(u.pathname);
+}
 
 export function assertSnapshotScope(enabled, context) {
   if (typeof enabled !== 'boolean') throw new Error('broadcastReplySnapshot 必须是布尔值');
@@ -23,6 +36,12 @@ export function assertSnapshotRequest(routeKey, rawUrl, account) {
     && /^\/rexxar\/api\/v2\/status\/[1-9]\d*\/comments$/.test(url.pathname)
     && url.searchParams.get('start') === '0' && url.searchParams.get('count') === '20'
     && [...url.searchParams].length === 2) return;
+  const topicApi = TOPIC_API_PATH.exec(url.pathname);
+  if (routeKey === COMMENTS && url.origin === 'https://m.douban.com' && topicApi
+    && urlKey(url.href) === urlKey(topicCommentsUrl(topicApi[1]))
+    && [...url.searchParams].length === 6) return;
+  if (routeKey === DETAIL && editableSnapshotDetail(url.href)
+    && !url.searchParams.has('ck') && new URL(urlKey(url.href)).search === '') return;
   const detail = /^\/people\/([\w-]+)\/status\/[1-9]\d*\/$/.exec(url.pathname);
   if (routeKey === DETAIL && url.origin === 'https://www.douban.com' && detail
     && [account.userId, account.username].includes(detail[1])) return;
@@ -32,7 +51,10 @@ export function assertSnapshotRequest(routeKey, rawUrl, account) {
 /** Scheduling identity only. WARC URLs and the versioned index url_key stay intact. */
 export function snapshotQueueKey(routeKey, url, account) {
   assertSnapshotRequest(routeKey, url, account);
-  const sid = /\/status\/([1-9]\d*)\//.exec(new URL(url).pathname)[1];
+  const path = new URL(url).pathname;
+  const topic = TOPIC_PATH.exec(path) ?? TOPIC_API_PATH.exec(path);
+  if (topic) return `${routeKey}:${account.userId}:topic:${topic[1]}`;
+  const sid = /\/status\/([1-9]\d*)\//.exec(path)[1];
   return `${routeKey}:${account.userId}:${sid}`;
 }
 
@@ -70,6 +92,17 @@ export function dedupeSnapshotGaps(gaps) {
   });
 }
 
+/** Heal only this route's obsolete unsupported-entry gap after a successful capture. */
+export function resolvedSnapshotGap(gap, routeKey, capturedUrl, account) {
+  if (gap.reason !== 'unsupported_reply_entry') return false;
+  try {
+    const topic = TOPIC_PATH.exec(new URL(gap.url).pathname);
+    assertSnapshotRequest(DETAIL, gap.url, account);
+    const expected = routeKey === COMMENTS && topic ? topicCommentsUrl(topic[1]) : gap.url;
+    return snapshotQueueKey(routeKey, expected, account) === snapshotQueueKey(routeKey, capturedUrl, account);
+  } catch { return false; }
+}
+
 function attr(tag, name) {
   const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`, 'i').exec(tag);
   return match ? decodeEntities(match[2]) : null;
@@ -90,6 +123,26 @@ function wrappers(html) {
     if (depth === 0) result.push({ opening, html: clean.slice(start, tags.lastIndex) });
   }
   return result;
+}
+
+/** Read the measured server-rendered configuration as data; never evaluate JS. */
+function personalTopicIdentity(html) {
+  const scripts = [...html.replace(/<!--[\s\S]*?-->/g, '').matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)]
+    .map(m => m[1]).filter(s => /^\s*var\s+_COMMENTS_CONFIG\s*=\s*\{/m.test(s));
+  if (scripts.length !== 1) return null;
+  const config = scripts[0];
+  if (!/^\s*var\s+FRODO_API_PREFIX\s*=\s*['"]https:\/\/m\.douban\.com\/rexxar['"];\s*$/m.test(config)
+    || !/^\s*['"]service['"]\s*:\s*['"]group['"],\s*$/m.test(config)
+    || !/^\s*['"]comments['"]\s*:\s*FRODO_API_PREFIX\s*\+\s*['"]\/api\/v2\/group\/topic\/:topic_id\/comments['"],\s*$/m.test(config)) return null;
+  // author is one JSON object on its own line in the successful saved page.
+  // target is a JS literal with an id first. Do not read user.id (the viewer).
+  const authors = [...config.matchAll(/^\s*['"]author['"]\s*:\s*(\{[^\r\n]*\}),\s*$/gm)];
+  const targets = [...config.matchAll(/^\s*['"]target['"]\s*:\s*\{\s*['"]id['"]\s*:\s*['"]([1-9]\d*)['"]/gm)];
+  if (authors.length !== 1 || targets.length !== 1) return null;
+  try {
+    const author = JSON.parse(authors[0][1]);
+    return /^[1-9]\d*$/.test(author.id ?? '') ? { ownerUserId: author.id, topicId: targets[0][1] } : null;
+  } catch { return null; }
 }
 
 export function commentsUrl(sid) {
@@ -115,6 +168,15 @@ export function extractBroadcastSnapshots(html, { ownerUserId, username }) {
         || (/^https:\/\/(?:movie|book|music)\.douban\.com$/.test(url.origin)
           && /^\/subject\/[1-9]\d*\/discussion\/[1-9]\d*\/$/.test(url.pathname))) continue;
       const path = /^\/people\/([\w-]+)\/status\/([1-9]\d*)\/$/.exec(url.pathname);
+      const topic = TOPIC_PATH.exec(url.pathname);
+      if (url.origin === 'https://www.douban.com' && topic && !url.username && !url.password
+        && !url.searchParams.has('ck') && new URL(urlKey(url.href)).search === ''
+        && attr(root.opening, 'data-atype') === 'topic'
+        && attr(root.opening, 'data-subtype') === 'personal'
+        && attr(root.opening, 'data-aid') === topic[1]) {
+        candidates.set(`topic:${topic[1]}`, { sid, topicId: topic[1], detailUrl: url.href, commentsUrl: topicCommentsUrl(topic[1]) });
+        continue;
+      }
       if (url.origin === 'https://www.douban.com' && path
         && path[2] === sid && [ownerUserId, username].includes(path[1]) && !url.username && !url.password) {
         candidates.set(sid, { sid, detailUrl: url.href, commentsUrl: commentsUrl(sid) });
@@ -144,6 +206,20 @@ export function classifySnapshot(res, { routeKey, requestUrl, ownerUserId }) {
   const final = new URL(res.finalUrl);
   const detailSid = /\/status\/([1-9]\d*)\/$/.exec(request.pathname)?.[1];
   if (routeKey === DETAIL) {
+    const topicId = TOPIC_PATH.exec(request.pathname)?.[1];
+    if (topicId) {
+      const cls = classifyResponse({ ...res, route: {
+        urlAnchor: /^https:\/\/www\.douban\.com\/topic\/[1-9]\d*\//,
+        frameAnchors: [/\bclass=["']personal-topic["']/, /\bid=["']topic-content["']/, /\bid=["']comments["']/],
+      } });
+      if (cls.verdict !== 'ok') return cls;
+      const identity = personalTopicIdentity(res.bodyText);
+      if (urlKey(final.href) !== urlKey(request.href)
+        || !identity || identity.topicId !== topicId || identity.ownerUserId !== ownerUserId) {
+        return fail(null, 'detail_identity_mismatch');
+      }
+      return { ...cls, itemCount: 1 };
+    }
     const cls = classifyResponse({ ...res, route: {
       urlAnchor: /^https:\/\/www\.douban\.com\/people\/[^/]+\/status\/\d+\//,
       frameAnchors: [/\bfrom-detail\b/, /\bid=["']comments["']/],
@@ -174,6 +250,7 @@ export function classifySnapshot(res, { routeKey, requestUrl, ownerUserId }) {
   }
   if (final.origin !== request.origin || final.pathname !== request.pathname
     || final.searchParams.get('start') !== '0' || final.searchParams.get('count') !== '20') return fail(null, 'url_drifted');
+  if (TOPIC_API_PATH.test(request.pathname) && urlKey(final.href) !== urlKey(request.href)) return fail(null, 'url_drifted');
   if (!data || data.start !== 0 || data.count !== 20 || !Number.isInteger(data.total) || data.total < 0
     || !Array.isArray(data.comments) || data.comments.length > 20
     || data.comments.some(c => !c || !/^\d+$/.test(String(c.id)) || typeof c.text !== 'string')) {
@@ -187,9 +264,11 @@ export async function snapshotBacklog({ sources, account, mode, onWarn = () => {
   const known = new Set();
   if (mode === 'full') return { items: [], known: [], unresolved: [] };
   for (const { rows } of sources) for (const row of rows) {
-    if (row.verdict === 'ok' && snapshotRoute(row.route_key)
-      && (row.route_key === DETAIL || mode !== 'refresh-editable')) {
-      try { known.add(snapshotQueueKey(row.route_key, row.url, account)); }
+    if (row.verdict === 'ok' && snapshotRoute(row.route_key)) {
+      try {
+        const key = snapshotQueueKey(row.route_key, row.url, account);
+        if (mode !== 'refresh-editable' || (row.route_key === DETAIL && !editableSnapshotDetail(row.url))) known.add(key);
+      }
       catch (error) { onWarn({ type: 'backlog_unreadable', captureId: row.capture_id, error: String(error) }); }
     }
   }

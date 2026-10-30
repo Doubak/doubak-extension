@@ -993,6 +993,9 @@ export class CrawlRunner {
     }
 
     loop.enqueueBroadcastSnapshots(restoredSnapshots ?? {});
+    for (const c of repair.captures ?? []) if (snapshotRoute(c.routeKey)) {
+      loop.resolveBroadcastSnapshotGaps(c.routeKey, c.url);
+    }
 
     this._run = {
       bundleId: pointer.bundleId, dir: pointer.dir, store, writer, frontier, loop, pacer, routes, session, runContext,

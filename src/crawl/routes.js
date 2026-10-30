@@ -602,7 +602,6 @@ export function buildRoutes({
  * 只能猜，而猜错在这个系统里是静默的。
  */
 export const UNRESOLVED_ROUTES = {
-  'broadcast.topic': { source: 'no_sample', reason: '尚无正常 topic 详情样本；只记录不支持的入口，不请求。' },
 };
 
 /**

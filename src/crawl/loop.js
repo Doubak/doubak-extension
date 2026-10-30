@@ -1,4 +1,4 @@
-import { snapshotRoute, snapshotTasks, snapshotQueueKey, snapshotGapKey, dedupeSnapshotGaps, classifySnapshot, assertSnapshotRequest, COMMENTS, DETAIL } from './broadcast-snapshots.js';
+import { snapshotRoute, snapshotTasks, snapshotQueueKey, snapshotGapKey, dedupeSnapshotGaps, resolvedSnapshotGap, classifySnapshot, assertSnapshotRequest, COMMENTS, DETAIL } from './broadcast-snapshots.js';
 /**
  * 抓取主循环：把前面各块接成一条能真正跑起来的链路。
  *
@@ -440,6 +440,14 @@ export class CrawlLoop {
     }
   }
 
+  resolveBroadcastSnapshotGaps(routeKey, capturedUrl) {
+    if (!snapshotRoute(routeKey) || !this._routes.has(routeKey)) return 0;
+    const state = this.stateFor(routeKey);
+    const before = state.gaps.length;
+    state.gaps = state.gaps.filter(gap => !resolvedSnapshotGap(gap, routeKey, capturedUrl, this._session.account));
+    return before - state.gaps.length;
+  }
+
   async _fetchOne(item) {
     const route = this._routes.get(item.routeKey) ?? {};
     const profile = profileForRoute(item.routeKey);
@@ -774,7 +782,8 @@ export class CrawlLoop {
       // 档案一旦封好就再也改不了。实测撞到过（2026-09-03，一张广播配图）。
       //
       // 只认完全相同的 URL：抹掉缺口是在**放宽**完整性声明，判据必须严。
-      const healed = this.stateFor(item.routeKey).resolveGap(item.url);
+      const healed = this.stateFor(item.routeKey).resolveGap(item.url)
+        + this.resolveBroadcastSnapshotGaps(item.routeKey, item.url);
       if (healed) {
         this._emit({ type: 'gap_resolved', url: item.url, routeKey: item.routeKey, count: healed });
       }

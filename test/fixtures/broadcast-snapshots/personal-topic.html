@@ -1,0 +1,43 @@
+<!-- Sanitized from Downloads/502623668.html (2026-10-30). No user text, cookies or tokens. -->
+<html><head><title>示例个人动态</title></head><body>
+<li class="nav-user-account"><a href="https://www.douban.com/people/example/">主页</a></li>
+<script>var _GLOBAL_NAV={USER_ID:"111"};</script>
+<h1 class="topic-title">示例个人动态</h1>
+<div class="personal-topic" id="topic-content">
+ <div class="article-meta"><a href="https://www.douban.com/people/example/" class="author-name">示例作者</a>
+  <div class="topic-meta"><span class="create-time">2026-10-15 21:48:00</span><span class="update-time">已编辑</span></div>
+ </div>
+ <div class="topic-content"><div class="rich-content topic-richtext"><p>示例正文。</p></div></div>
+</div>
+<div id="comments" class="comment-list"></div>
+<script type="text/javascript">
+  var FRODO_API_PREFIX = "https://m.douban.com/rexxar";
+  var _COMMENTS_CONFIG = {
+    'service': 'group',
+    'app': 'group',
+    'useCustomApi': true,
+    'customApi': {
+      'comments': FRODO_API_PREFIX + '/api/v2/group/topic/:topic_id/comments',
+      'getReplies': FRODO_API_PREFIX + '/api/v2/group/topic/comment/:comment_id/replies',
+    },
+    'start': 0,
+    'count': 20,
+    'user': {"id":"111","uid":"example"},
+    'author': {"id":"111","uid":"example"},
+    'target': {
+      'id': '987',
+      'title': "示例个人动态",
+      'is_enable_reply_comment': JSON.parse(true),
+    },
+    'options': {
+      "enable_only_author": true,
+      'only_comment_at_the_end_of_pages': false,
+    },
+    'needEscape': true
+  }
+</script>
+<script>
+ window._CONFIG = window._CONFIG || {};
+ window._CONFIG.topic = { id: "987", image_layout: "vertical", photos: [] };
+</script>
+</body></html>
