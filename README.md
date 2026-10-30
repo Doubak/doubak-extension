@@ -65,6 +65,11 @@ Markdown 导出含本地头像与站点资料；Hugo 生成 favicon 和页眉图
 旧档案仍可导出，未保存的头像不会联网补抓。见[头像设计与实现](docs/designs/account-avatar-and-site-branding.md)。
 [文档核对记录](docs/designs/documentation-status-audit-2026-10-16.md)列出本轮校准范围与能力边界。
 
+广播回复首屏请求通过现有 DNR 权限补上 Referer；若旧版出现批量
+`unexpected_status`，更新并重新加载扩展后选择「继续，并重试」。
+仅「继续」不重试失败条目；已收尾的任务可在开启同一选项的新增量中补抓。
+详见[实测修正记录](docs/designs/broadcast-details-and-replies.md)。
+
 ## 文档
 
 - **[DESIGN.md](DESIGN.md)** —— 功能规划、抓取边界模型与三份实测附录

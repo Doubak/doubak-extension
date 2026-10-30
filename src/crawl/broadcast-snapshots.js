@@ -123,7 +123,14 @@ export function classifySnapshot(res, { routeKey, requestUrl, ownerUserId }) {
     const cls = classifyResponse({ ...res, route: { frameAnchors: [/^\s*\{/] } });
     return cls.verdict === 'ok' ? fail(null, 'invalid_comments_json') : cls;
   }
-  if (res.status !== 200) return fail(null, 'unexpected_status');
+  if (res.status !== 200) {
+    // Keep the stable verdict_reason, but don't hide actionable HTTP/API evidence
+    // behind "unexpected_status" in the failure table. Never copy arbitrary text.
+    const details = [`HTTP ${res.status}`];
+    if (Number.isInteger(data?.code)) details.push(`API code ${data.code}`);
+    if (typeof data?.msg === 'string' && /^[a-z0-9_]{1,64}$/.test(data.msg)) details.push(data.msg);
+    return { ...fail(null, 'unexpected_status'), reasons: [details.join(' · ')] };
+  }
   if (final.origin !== request.origin || final.pathname !== request.pathname
     || final.searchParams.get('start') !== '0' || final.searchParams.get('count') !== '20') return fail(null, 'url_drifted');
   if (!data || data.start !== 0 || data.count !== 20 || !Number.isInteger(data.total) || data.total < 0

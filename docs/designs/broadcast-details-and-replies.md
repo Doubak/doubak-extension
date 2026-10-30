@@ -404,3 +404,34 @@ Bundle validator 含 JSON Schema 层与新增 scope 契约用例均通过。
 本轮更新 specs、extension、parser 及共享 vendor、文档和开发日志。没有新增回复模型，
 没有重建或发布样张站点，没有发布扩展版本，也没有关闭或评论 issue。
 真实登录会话的 Chrome/Firefox 抓取验证仍作为发布前人工检查，不在自动化测试通过后宣称已完成。
+
+
+### 2026-10-30 实测修正：回复 API 缺少 Referer
+
+用户报告 51 个 `broadcast.comments_snapshot` 全部 `unclassified: unexpected_status`。
+旧导出不含这些失败响应，不能据此确认全部 HTTP 状态；但从其中一个相同 URL
+（status `2181605815`，`start=0&count=20`）进行了无 Cookie、无 ck 的单变量复现：
+
+| 请求 Referer | HTTP | 响应 |
+| --- | --- | --- |
+| 无 | 400 | JSON `code: 1287`、`msg: invalid_request_1284` |
+| 对应桌面 status 详情页 | 200 | `start: 0, count: 20, total: 1` |
+| `https://www.douban.com/` | 200 | 同形状首屏 JSON |
+
+三次均无重定向。故这个可复现故障是缺请求头，不是曾修过的移动版重定向。
+`item.referer` 仅生成内部 `X-Override-Referer`，旧 DNR 规则只匹配 doubanio 图片，
+没有把回复请求的标记转成真实 Referer。这是此前模拟传输测试遗漏的浏览器边界。
+
+修正：复用现有权限，新增独立的 DNR 会话规则，固定站点级 Referer，删除内部标记头；
+只匹配 status comments 接口、`xmlhttprequest`、`tabIds: [-1]`。安装与更新时先删后加，
+不影响用户标签页，不增加抓取范围、ck、分页或自动重试。继续保留现有节流。
+分类失败仍记录 `unexpected_status`，但失败列表同时显示 HTTP 状态与有限的 API
+机器错误码；响应原文照常保存在 WARC。非分页失败文案不再把回复接口称作作品页。
+
+更新扩展并重新加载后，在当前任务选择「继续，并重试」；仅「继续」不重置失败条目。
+已经收尾的任务可用开启同一选项的新增量补抓，成功的 HTML/API 仍跳过。
+本次在线探测是无登录 HTTP 对照，不替代 Chrome/Firefox 实际扩展会话验证。
+
+修正后验证：扩展完整套件 2,212 通过、0 失败、1 个既有跳过；覆盖 DNR 的域名/路径/
+标签页边界、规则重装、HTTP 400 错误经 checkpoint 与 WARC 保留、无自动重试。
+Chrome/Firefox 本地解包目录已重新生成。

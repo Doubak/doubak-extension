@@ -25,7 +25,7 @@ const account = { userId: '111', username: 'example' };
 const tasks = snapshotTasks(card, account, '20261001T000000Z-aaaaaa#000001', 'https://www.douban.com/people/example/statuses?p=9');
 const options = { username: 'example', mediums: [], includeCatalog: false,
   onlyRoutes: ['broadcast.timeline', DETAIL, COMMENTS], broadcastReplySnapshot: true };
-function harness({ apiStatus = 200, list = timeline } = {}) {
+function harness({ apiStatus = 200, apiBody = json, list = timeline } = {}) {
   const dirs = new Map();
   const openBundle = async dir => { if (!dirs.has(dir)) dirs.set(dir, new MemoryFileStore()); return dirs.get(dir); };
   const runStore = new RunStore({ kv: new MemoryKvStore(), openBundle });
@@ -35,7 +35,7 @@ function harness({ apiStatus = 200, list = timeline } = {}) {
   const fetchImpl = async (url, init) => {
     calls.push({ url, init });
     const api = url.includes('/rexxar/');
-    const body = api ? json : /\/status\/123\//.test(url) ? detail
+    const body = api ? apiBody : /\/status\/123\//.test(url) ? detail
       : /statuses\?p=1$/.test(url) ? list : url.includes('/statuses?') ? empty : profile;
     const bytes = new TextEncoder().encode(body);
     return { url, status: api ? apiStatus : 200,
@@ -168,3 +168,23 @@ for (const crashPoint of ['list-written', 'api-written']) {
     assert.equal((await reader.index()).filter(r => r.route_key === COMMENTS && r.verdict === 'ok').length, 1);
   });
 }
+
+
+test('HTTP 400 API failure retains diagnostic codes through checkpoint and WARC', async () => {
+  const body = JSON.stringify({ request: 'GET /rexxar/v2/status/123/comments', msg: 'invalid_request_1284', code: 1287, localized_message: '' });
+  const h = harness({ apiStatus: 400, apiBody: body });
+  const started = await h.runner.start(options);
+  await drain(h.runner);
+  const cp = await h.runStore.loadCheckpoint();
+  const failure = checkpointFailures(cp).find(it => it.routeKey === COMMENTS);
+  assert.match(failure.lastError, /HTTP 400/);
+  assert.match(failure.lastError, /API code 1287/);
+  assert.match(failure.lastError, /invalid_request_1284/);
+  assert.equal(snapshotCalls(h.calls).filter(c => c.url.includes('/rexxar/')).length, 1);
+  const reader = new BundleReader({ store: await h.openBundle(started.dir), bundleId: started.bundleId });
+  const rows = await reader.index();
+  const row = rows.find(r => r.route_key === COMMENTS);
+  assert.equal(row.verdict, 'unknown');
+  assert.equal(row.verdict_reason, 'unexpected_status');
+  assert.equal((await reader.readEntry(row)).bodyText, body);
+});

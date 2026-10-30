@@ -97,3 +97,13 @@ test('reply buttons for a note or subject discussion are outside broadcast scope
     assert.deepEqual(extractBroadcastSnapshots(card, opts), { candidates: [], unresolved: [] });
   }
 });
+
+
+test('API error diagnostics do not echo arbitrary response text', () => {
+  const result = classifySnapshot({ status: 400, finalUrl: commentsUrl('123'),
+    bodyText: JSON.stringify({ code: 1287, msg: '<private user text>' }) },
+    { routeKey: COMMENTS, requestUrl: commentsUrl('123'), ownerUserId: '111' });
+  assert.equal(result.verdict, null);
+  assert.equal(result.reason, 'unexpected_status');
+  assert.deepEqual(result.reasons, ['HTTP 400 · API code 1287']);
+});
