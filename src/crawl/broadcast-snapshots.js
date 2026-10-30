@@ -29,6 +29,30 @@ export function assertSnapshotRequest(routeKey, rawUrl, account) {
   throw new Error('广播快照地址超出本人详情或回复首屏范围');
 }
 
+/** Scheduling identity only. WARC URLs and the versioned index url_key stay intact. */
+export function snapshotQueueKey(routeKey, url, account) {
+  assertSnapshotRequest(routeKey, url, account);
+  const sid = /\/status\/([1-9]\d*)\//.exec(new URL(url).pathname)[1];
+  return `${routeKey}:${account.userId}:${sid}`;
+}
+
+/** Collapse pre-fix checkpoint aliases without turning a failed task into a retry. */
+export function dedupeSnapshotFrontier(items, account) {
+  const out = [];
+  const positions = new Map();
+  const rank = { pending: 0, in_flight: 0, failed: 1, awaiting_human: 2, terminal_stop: 3 };
+  for (const item of items) {
+    if (!snapshotRoute(item.route_key)) { out.push(item); continue; }
+    const key = snapshotQueueKey(item.route_key, item.url, account);
+    if (!positions.has(key)) { positions.set(key, out.length); out.push(item); continue; }
+    const at = positions.get(key);
+    const previous = out[at];
+    const keep = (rank[item.state] ?? 0) > (rank[previous.state] ?? 0) ? item : previous;
+    out[at] = { ...keep, attempts: Math.max(previous.attempts ?? 0, item.attempts ?? 0) };
+  }
+  return out;
+}
+
 function attr(tag, name) {
   const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`, 'i').exec(tag);
   return match ? decodeEntities(match[2]) : null;
@@ -147,7 +171,10 @@ export async function snapshotBacklog({ sources, account, mode, onWarn = () => {
   if (mode === 'full') return { items: [], known: [], unresolved: [] };
   for (const { rows } of sources) for (const row of rows) {
     if (row.verdict === 'ok' && snapshotRoute(row.route_key)
-      && (row.route_key === DETAIL || mode !== 'refresh-editable')) known.add(urlKey(row.url));
+      && (row.route_key === DETAIL || mode !== 'refresh-editable')) {
+      try { known.add(snapshotQueueKey(row.route_key, row.url, account)); }
+      catch (error) { onWarn({ type: 'backlog_unreadable', captureId: row.capture_id, error: String(error) }); }
+    }
   }
   const seen = new Set(known);
   const items = [];
@@ -158,8 +185,9 @@ export async function snapshotBacklog({ sources, account, mode, onWarn = () => {
     try { parsed = snapshotTasks(await readPayload(row), account, row.capture_id, row.url); }
     catch (error) { onWarn({ type: 'backlog_unreadable', captureId: row.capture_id, error: String(error) }); continue; }
     unresolved.push(...parsed.unresolved.map(x => ({ ...x, parentCaptureId: row.capture_id })));
-    for (const item of parsed.items) if (!seen.has(urlKey(item.url))) {
-      seen.add(urlKey(item.url)); items.push(item);
+    for (const item of parsed.items) {
+      const key = snapshotQueueKey(item.routeKey, item.url, account);
+      if (!seen.has(key)) { seen.add(key); items.push(item); }
     }
   }
   return { items, known: [...known], unresolved };

@@ -1,4 +1,4 @@
-import { assertSnapshotScope, assertSnapshotRequest, snapshotRoute } from './broadcast-snapshots.js';
+import { assertSnapshotScope, assertSnapshotRequest, snapshotRoute, snapshotQueueKey, dedupeSnapshotFrontier } from './broadcast-snapshots.js';
 /**
  * 一次抓取的编排：开始、分批推进、收尾。
  *
@@ -856,6 +856,11 @@ export class CrawlRunner {
     // 要重抓的那几条**不能**进去重集合——进去了它们就再也入不了队，这个修法整个
     // 失效（而且失效得悄无声息，因为 `enqueue` 返回 false 没人看）。
     frontier.markCaptured((repair.capturedUrlKeys ?? []).filter((k) => !replayKeys.has(k)));
+    // Old indices use URL keys, while the snapshot queue now uses owner + SID.
+    // Recover successes before restoring unfinished aliases (including full mode).
+    frontier.markCaptured((repair.captures ?? []).filter(c => snapshotRoute(c.routeKey))
+      .map(c => snapshotQueueKey(c.routeKey, c.url, runContext.account)));
+    frontier.markCaptured(restoredSnapshots?.known ?? []);
     if (knownSubjectUrlKeys?.length) {
       frontier.markCaptured(knownSubjectUrlKeys);
       this._emit({ type: 'subjects_skipped', count: knownSubjectUrlKeys.length });
@@ -868,13 +873,14 @@ export class CrawlRunner {
       frontier.markCaptured(knownAssetUrlKeys);
       this._emit({ type: 'assets_skipped', count: knownAssetUrlKeys.length });
     }
-    for (const it of cp.frontier ?? []) {
+    for (const it of dedupeSnapshotFrontier(cp.frontier ?? [], runContext.account)) {
       const def = routes.get(it.route_key);
       frontier.enqueue({
         url: it.url,
         // **要归一化。** 抓取循环入队时用的是 `urlKey(url)`，而 index 里存的也是
         // 归一化后的 `url_key`——恢复时直接拿原始 URL 当键，去重就跨不过这条边界。
-        urlKey: it.route_key === 'asset.account_avatar' ? avatarQueueKey(it.url, it.enqueued_by) : urlKey(it.url),
+        urlKey: snapshotRoute(it.route_key) ? snapshotQueueKey(it.route_key, it.url, runContext.account)
+          : it.route_key === 'asset.account_avatar' ? avatarQueueKey(it.url, it.enqueued_by) : urlKey(it.url),
         routeKey: it.route_key,
         intent: it.intent,
         enqueuedBy: it.enqueued_by ?? null,

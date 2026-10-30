@@ -1,4 +1,4 @@
-import { snapshotRoute, snapshotTasks, classifySnapshot, assertSnapshotRequest, COMMENTS, DETAIL } from './broadcast-snapshots.js';
+import { snapshotRoute, snapshotTasks, snapshotQueueKey, classifySnapshot, assertSnapshotRequest, COMMENTS, DETAIL } from './broadcast-snapshots.js';
 /**
  * 抓取主循环：把前面各块接成一条能真正跑起来的链路。
  *
@@ -427,7 +427,7 @@ export class CrawlLoop {
     for (const it of items) {
       const target = this._routes.get(it.routeKey);
       if (!target || !snapshotRoute(it.routeKey)) continue;
-      this._frontier.enqueue({ url: it.url, urlKey: urlKey(it.url), routeKey: it.routeKey,
+      this._frontier.enqueue({ url: it.url, urlKey: snapshotQueueKey(it.routeKey, it.url, this._session.account), routeKey: it.routeKey,
         intent: target.intent, enqueuedBy: it.parentCaptureId ?? null, referer: it.referer,
         priority: target.priority, ordered: false, gatedBy: null });
     }

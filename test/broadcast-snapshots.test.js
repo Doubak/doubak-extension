@@ -1,10 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { extractBroadcastSnapshots, snapshotTasks, snapshotBacklog, classifySnapshot, assertSnapshotScope, assertSnapshotRequest, commentsUrl, DETAIL, COMMENTS } from '../src/crawl/broadcast-snapshots.js';
+import { extractBroadcastSnapshots, snapshotTasks, snapshotQueueKey, dedupeSnapshotFrontier, snapshotBacklog, classifySnapshot, assertSnapshotScope, assertSnapshotRequest, commentsUrl, DETAIL, COMMENTS } from '../src/crawl/broadcast-snapshots.js';
 import { buildRoutes } from '../src/crawl/routes.js';
 import { hasRouteName } from '../src/ui/route-names.js';
-import { urlKey } from '../src/core/urlkey.js';
 const html = readFileSync(new URL('./fixtures/broadcast-snapshots/timeline.html', import.meta.url), 'utf8');
 const json = readFileSync(new URL('./fixtures/broadcast-snapshots/comments.json', import.meta.url), 'utf8');
 const account = { userId: '111', username: 'example' };
@@ -53,7 +52,7 @@ test('default off; backlog before any watermark, independent failures and proven
   const result = await snapshotBacklog({ sources: [{ rows: [row, haveDetail, failed], readPayload: async () => html }], account, mode: 'incremental' });
   assert.deepEqual(result.items.map(i => i.routeKey), [COMMENTS]);
   assert.equal(result.items[0].parentCaptureId, row.capture_id);
-  assert.deepEqual(result.known, [urlKey(haveDetail.url)]);
+  assert.deepEqual(result.known, [snapshotQueueKey(DETAIL, haveDetail.url, account)]);
 });
 
 test('strict API response, no full-discussion inference and no text-based safety flags', () => {
@@ -106,4 +105,56 @@ test('API error diagnostics do not echo arbitrary response text', () => {
   assert.equal(result.verdict, null);
   assert.equal(result.reason, 'unexpected_status');
   assert.deepEqual(result.reasons, ['HTTP 400 · API code 1287']);
+});
+
+const aliasHtml = html.replaceAll('/people/111/status/123/', '/people/example/status/123/?_spm_id=old');
+const aliasSources = [
+  { rows: [row], readPayload: async () => html },
+  { rows: [{ ...row, capture_id: 'older#000001' }], readPayload: async () => aliasHtml },
+];
+
+test('historical UID/username aliases schedule one detail and one API without rewriting source URLs', async () => {
+  for (const sources of [aliasSources, [...aliasSources].reverse()]) {
+    const result = await snapshotBacklog({ sources, account, mode: 'incremental' });
+    assert.deepEqual(result.items.map(i => i.routeKey), [DETAIL, COMMENTS]);
+    assert.equal(result.items[0].parentCaptureId, sources[0].rows[0].capture_id);
+    assert.equal(result.items[0].url, sources[0] === aliasSources[0]
+      ? tasks.items[0].url : 'https://www.douban.com/people/example/status/123/?_spm_id=old');
+  }
+});
+
+for (const savedAlias of ['111', 'example']) for (const mode of ['incremental', 'refresh-editable', 'full']) {
+  test(`saved ${savedAlias} detail suppresses both aliases in ${mode}`, async () => {
+    const saved = [
+      { route_key: DETAIL, url: `https://www.douban.com/people/${savedAlias}/status/123/?_i=old`, verdict: 'ok' },
+      { route_key: COMMENTS, url: commentsUrl('123'), verdict: 'ok' },
+    ];
+    const result = await snapshotBacklog({ sources: [...aliasSources, { rows: saved }], account, mode });
+    assert.deepEqual(result.items.map(i => i.routeKey), mode === 'refresh-editable' ? [COMMENTS] : []);
+    assert.equal(result.known.length, mode === 'full' ? 0 : mode === 'incremental' ? 2 : 1);
+  });
+}
+
+test('identity keys separate SID, owner and route; foreign aliases cannot suppress own captures', async () => {
+  assert.equal(snapshotQueueKey(DETAIL, tasks.items[0].url, account),
+    snapshotQueueKey(DETAIL, 'https://www.douban.com/people/example/status/123/?_i=x#replies', account));
+  assert.notEqual(snapshotQueueKey(DETAIL, tasks.items[0].url, account), snapshotQueueKey(COMMENTS, commentsUrl('123'), account));
+  assert.notEqual(snapshotQueueKey(COMMENTS, commentsUrl('123'), account), snapshotQueueKey(COMMENTS, commentsUrl('456'), account));
+  assert.notEqual(snapshotQueueKey(COMMENTS, commentsUrl('123'), account), snapshotQueueKey(COMMENTS, commentsUrl('123'), { userId: '222' }));
+  const warnings = [];
+  const result = await snapshotBacklog({ sources: [...aliasSources, { rows: [
+    { route_key: DETAIL, url: 'https://www.douban.com/people/222/status/123/', verdict: 'ok' },
+    { route_key: DETAIL, url: tasks.items[0].url, verdict: 'unknown' },
+  ] }], account, mode: 'incremental', onWarn: w => warnings.push(w) });
+  assert.equal(result.items.length, 2);
+  assert.equal(result.known.length, 0);
+  assert.equal(warnings.length, 1);
+});
+
+test('legacy duplicate checkpoint retains failed state and retry budget in either ordering', () => {
+  const pending = { route_key: DETAIL, url: tasks.items[0].url, state: 'pending', attempts: 0 };
+  const failed = { ...pending, url: 'https://www.douban.com/people/example/status/123/', state: 'failed', attempts: 3, last_error: 'unclassified' };
+  for (const entries of [[pending, failed], [failed, pending]]) {
+    assert.deepEqual(dedupeSnapshotFrontier(entries, account), [failed]);
+  }
 });

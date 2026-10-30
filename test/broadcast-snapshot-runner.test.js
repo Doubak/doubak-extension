@@ -12,8 +12,7 @@ import { RunStore, checkpointFailures } from '../src/crawl/run-store.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { BundleReader } from '../src/bundle/bundle-reader.js';
-import { snapshotTasks, DETAIL, COMMENTS } from '../src/crawl/broadcast-snapshots.js';
-import { urlKey } from '../src/core/urlkey.js';
+import { snapshotTasks, snapshotBacklog, snapshotQueueKey, DETAIL, COMMENTS } from '../src/crawl/broadcast-snapshots.js';
 const json = readFileSync(new URL('./fixtures/broadcast-snapshots/comments.json', import.meta.url), 'utf8');
 const nav = '<li class="nav-user-account"><a href="https://www.douban.com/people/example/">主页</a></li><script>var _GLOBAL_NAV={USER_ID:"111"};</script>';
 const profile = `${nav}<div id="db-usr-profile"><h1>示例</h1></div>`;
@@ -111,7 +110,7 @@ test('off means no requests or historical scan, full ignores historical resolver
 test('historical backlog without floors: API refresh does not re-read successful detail HTML', async () => {
   const h = harness({ list: empty });
   await h.runner.start({ ...options, mode: 'refresh-editable', resolveFloors: async () => ({}),
-    resolveSnapshots: async () => ({ items: [tasks.items[1]], known: [urlKey(tasks.items[0].url)] }) });
+    resolveSnapshots: async () => ({ items: [tasks.items[1]], known: [snapshotQueueKey(DETAIL, tasks.items[0].url, account)] }) });
   await drain(h.runner);
   assert.deepEqual(snapshotCalls(h.calls).map(c => new URL(c.url).pathname), ['/rexxar/api/v2/status/123/comments']);
 });
@@ -187,4 +186,50 @@ test('HTTP 400 API failure retains diagnostic codes through checkpoint and WARC'
   assert.equal(row.verdict, 'unknown');
   assert.equal(row.verdict_reason, 'unexpected_status');
   assert.equal((await reader.readEntry(row)).bodyText, body);
+});
+
+const aliasCard = card.replace('/people/111/status/123/', '/people/example/status/123/?_spm_id=old');
+const aliasTasks = snapshotTasks(aliasCard, account, '20261001T000000Z-aaaaaa#000002', tasks.items[0].referer);
+
+test('full crawl collapses discovered aliases but keeps the chosen source URL in index', async () => {
+  const h = harness({ list: `${profile}<div class="stream-items">${aliasCard}${card}</div>` });
+  const started = await h.runner.start({ ...options, mode: 'full' });
+  await drain(h.runner);
+  assert.equal(snapshotCalls(h.calls).length, 2);
+  const rows = await new BundleReader({ store: await h.openBundle(started.dir), bundleId: started.bundleId }).index();
+  const saved = rows.find(r => r.route_key === DETAIL);
+  assert.equal(saved.url, tasks.items[0].url);
+  assert.match(saved.url_key, /^https:\/\//, 'archive url_key remains the versioned URL normalization');
+});
+
+test('historical success suppresses aliases discovered on the current list', async () => {
+  const h = harness({ list: `${profile}<div class="stream-items">${aliasCard}</div>` });
+  await h.runner.start({ ...options, resolveSnapshots: () => snapshotBacklog({ account, mode: 'incremental',
+    sources: [{ rows: tasks.items.map(it => ({ route_key: it.routeKey, url: it.url, verdict: 'ok' })) }] }) });
+  await drain(h.runner);
+  assert.equal(snapshotCalls(h.calls).length, 0);
+});
+
+test('old checkpoint alias is suppressed by a committed detail even without historical resolver', async () => {
+  const h = harness(); await h.runner.start({ ...options, mode: 'full' });
+  for (let n = 0; n < 8 && !h.calls.some(c => /\/people\/111\/status\/123\//.test(c.url)); n++) await h.runner.runBatch();
+  const cp = await h.runStore.loadCheckpoint();
+  cp.frontier.push({ route_key: DETAIL, intent: DETAIL, url: aliasTasks.items[0].url, state: 'pending', attempts: 0 });
+  const resumed = h.make(); await resumed.resume(cp);
+  await drain(resumed);
+  assert.equal(h.calls.filter(c => /\/people\/[^/]+\/status\/123\//.test(c.url)).length, 1);
+});
+
+test('legacy pending alias cannot bypass a failed alias on resume', async () => {
+  const h = harness({ list: empty }); await h.runner.start(options);
+  const cp = await h.runStore.loadCheckpoint();
+  cp.frontier.push(
+    { route_key: DETAIL, intent: DETAIL, url: tasks.items[0].url, state: 'pending', attempts: 0 },
+    { route_key: DETAIL, intent: DETAIL, url: aliasTasks.items[0].url, state: 'failed', attempts: 3, last_error: 'unclassified' },
+  );
+  const resumed = h.make(); await resumed.resume(cp);
+  await drain(resumed);
+  assert.equal(snapshotCalls(h.calls).length, 0);
+  const failure = checkpointFailures(await h.runStore.loadCheckpoint()).find(it => it.routeKey === DETAIL);
+  assert.equal(failure.attempts, 3);
 });
