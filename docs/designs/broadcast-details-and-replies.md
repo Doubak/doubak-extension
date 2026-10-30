@@ -1,6 +1,6 @@
 # 广播详情与回复首屏快照（issue #26）
 
-状态：首版已实现（main，尚未发布新扩展版本）。调查日期：2026-10-28；方案整理：2026-10-29；实施：2026-10-30。
+状态：status 与 personal topic 首屏均已实现（main，尚未发布新扩展版本）。调查日期：2026-10-28；方案整理：2026-10-29；实施：2026-10-30。
 需求：[extension issue #26](https://github.com/Doubak/doubak-extension/issues/26)。
 最终范围：**方案 B 的轻量版本——本人账号可选的回复首屏原始快照**。
 本文取代此前的完整讨论归档提案；此前讨论日志、回复 Canonical 和站点讨论页的论证保留在 Git 历史中，不是本轮实施要求。
@@ -34,7 +34,9 @@
 原始 WARC 也不能被描述成经过公开过滤的站点产物。
 
 省略号不触发抓取、不作为截断判断；显式 `（全文）` 链接沿用已有处理。
-topic 继续待调研，douc.cc 不新增权限或解析路线。首版不引入 `discussion-state.ndjson`、
+已有正常 HTML 与首屏响应的 personal topic 纳入同一开关；只认本人根卡片的
+`data-atype=topic`、`data-subtype=personal` 和与 href 一致的 data-aid。小组讨论不因此纳入。
+douc.cc 不新增权限或解析路线。首版不引入 `discussion-state.ndjson`、
 `broadcast_replies.ndjson`、`detail_revisions` 或“包含讨论”展示开关。
 这些能力如需恢复，要重新提出需求与设计，不能以“未来兼容”为由现在预留一整套实现。
 
@@ -212,7 +214,7 @@ UI 禁用不是唯一防线：runner 构造路线前校验选项，public 请求
 | 新发现有回复的本人根 | HTML 详情与 API 首屏独立入队 | 同左 | 同左，不用跨 bundle 成功缓存 |
 | 历史候选没有成功首屏 | 从同账号 self 的旧列表离线补算并补抓 | 同左 | 只处理本轮重新发现的候选 |
 | 已成功首屏 | 跳过，即使已知计数变化也不主动刷新；不承诺发现回复编辑 | 所有已知合格首屏重新请求，包括列表水位线以下候选 | 本轮重新发现的候选重新请求 |
-| 已成功 HTML，首屏需要补抓或刷新 | 只请求首屏；HTML 缺失/失败才单独补抓 | 同左，不把不可变详情列入可变内容重抓 | 本轮重新保存 HTML 与首屏，保持新基准自足 |
+| 已成功 HTML，首屏需要补抓或刷新 | 只请求首屏；HTML 缺失/失败才单独补抓 | 跳过不可变 status HTML；personal topic 正文可编辑，重新保存其 HTML | 本轮重新保存 HTML 与首屏，保持新基准自足 |
 | 曾有回复、现在计数为 0 | 不抹掉原快照；未成功的历史候选仍可补抓 | 刷新已知首屏，保留实际空结果及历史字节 | 保存本轮列表的 0；不单独触发新的回复快照 |
 | 已存首屏内显示还有后续页或楼中楼 | 不补分页 | 只刷新首屏，不扩展范围 | 仍只请求首屏 |
 | 省略号或仅有引用来源回复 | 不触发 | 不触发 | 不触发 |
@@ -227,23 +229,26 @@ HTML 和首屏分别记录是否成功，不能互相代替。首屏“成功”
 
 ### 4.3 候选、API 与网络边界
 
-纯函数抽取本人根 sid、实际 status 详情 href、经验证的回复计数与父 capture。
+纯函数抽取本人根 sid、实际详情 href、经验证的回复计数与父 capture；personal topic 另核对根的 data-aid。
 只接受 owner UID 匹配的根回复按钮正数，排除引用、删除按钮、作品简介和“更多转发”。
-计数缺失为 unknown，不能当 0，也不猜测有回复。候选有 topic 链接时保留列表证据并报告待支持，
-不能将 data-aid 当成 status sid 或根据 403 页面编写 parser。
+计数缺失为 unknown，不能当 0，也不猜测有回复。personal topic 必须同时匹配根类型、
+个人子类型与 href 中的 topic ID；不匹配则报告未支持。不能将 data-aid 当成 status sid。
+此支持基于正常登录 HTML 与已成功的 JSON，之前仅有 403 的调查不构成实现依据。
 
-拟议路线：
+已实现路线：
 
 | route / intent | 数据面 | 本轮请求范围 |
 | --- | --- | --- |
-| broadcast.item | html | 已验证的 status 独立详情页，首次捕获或补失败；沿用已有 intent |
-| broadcast.comments_snapshot | api | 已验证 status sid 对应的评论首屏，固定 start=0、count=20；不跟随 next 或 replies |
+| broadcast.item | html | 已验证 status / personal topic 独立详情；首次捕获或补失败，刷新模式另刷新可编辑 topic；沿用已有 intent |
+| broadcast.comments_snapshot | api | 已验证 status sid 或 personal topic aid 对应的评论首屏，固定 start=0、count=20；topic 另固定 nested=1、order_by=time_asc；不跟随 next 或 replies |
 
 第二个名称利用开放 intent 词表明确“首屏快照”语义；实现时在 specs 词表和摄取说明中登记，
 不能复用一个暗示全量枚举的名称却不说明限制。这里只承诺接口当时返回的首屏，不保证其排序固定、
 返回 20 条或包含某个指定朋友的发言。数量少也不推断完整，接口端的隐藏/折叠规则仍可能影响结果。
 
 对已验证 status profile，端点为 `https://m.douban.com/rexxar/api/v2/status/<sid>/comments`。
+personal topic 使用 `/rexxar/api/v2/group/topic/<aid>/comments`；额外参数为
+`resp_type=c_dict&topic_id=<aid>&order_by=time_asc&nested=1`，不复制 ck。
 列表可直接作为 HTML/API 两个任务的父捕获，API 不依赖本轮先取得详情；实际请求仍通过现有串行闸门。
 首次保存 HTML 提供独立单页证据，不承诺原站脚本在离线回放中能自动加载评论。
 API 错误或版本变化保留响应并报告失败，不自动改为遍历其他接口或反复抓 HTML 来探测。
@@ -259,7 +264,7 @@ HTML 与 API 独立成功不意味着可绕过风控；任何会话失效、挑�
 
 2026-10-30 用 1,118 张已归档的成功广播列表补核了候选提取：51 个唯一 status 根符合条件；
 另见 3 个作品讨论入口、1 个日记入口及 1 个 topic 入口。日记/作品讨论的回应计数属于其
-链接目标，不授予广播 sid 回复抓取资格，属于范围外而非缺口；topic 仍报告待支持。
+链接目标，不授予广播 sid 回复抓取资格，属于范围外而非缺口；personal topic 按已测身份结构支持，其余不匹配的 topic 仍报告待支持。
 此次核对只读取本地 WARC，没有重新向豆瓣请求页面。
 
 ### 4.4 原始存储、恢复与范围说明
@@ -357,7 +362,7 @@ HTML 详情目前仅保留原始证据，不增强 Canonical；解析器通过 `
 | 用例 | 预期 |
 | --- | --- |
 | 增量 × self A | 开关关则无新路线；开启后抓新候选、补未成功首屏，跳过已成功 HTML/API |
-| 刷新 × self A | 开关开启后直接刷新所有已知合格首屏；不重抓成功 HTML、不翻页 |
+| 刷新 × self A | 刷新所有已知合格首屏及可编辑 topic HTML；不重抓成功 status HTML、不翻页 |
 | 全量 × self A | 开关开启后从本轮列表发现候选，新抓 HTML 与一个首屏，不借旧字节 |
 | 增量 × 登录 A 抓 B | 仅原有 public 增量；无首屏 API 或本功能新增详情请求 |
 | 刷新 × 登录 A 抓 B | 仅刷新原有范围；不给 B 的讨论建候选，即使本地已有别人导入的快照 |
@@ -369,9 +374,9 @@ HTML 详情目前仅保留原始证据，不增强 Canonical；解析器通过 `
 ### 7.2 关键回归与交付检查
 
 - 身份：输入自己 UID 正确得到 self；配置 user/author 不同不误归属；public 注入启用参数被拒绝。
-- 范围：本人根 1 回复、引用内 155 回复时只派生本人根；省略号、未知计数、topic、短链不扩大请求集合。
+- 范围：本人根 1 回复、引用内 155 回复时只派生本人根；省略号、未知计数、非 personal topic、小组讨论、短链不扩大请求集合。
 - 首屏：接口显示还有后续页或内嵌 replies，也只保存该响应；无 next、楼中楼、作者主页或附件请求。
-- 模式：普通增量已成功首屏不因计数变化自动刷新；刷新模式只刷新 API；full 新捕获两者；开关关闭不补旧任务。
+- 模式：普通增量已成功首屏不因计数变化自动刷新；刷新模式刷新 API 与 personal topic HTML，跳过成功 status HTML；full 新捕获两者；开关关闭不补旧任务。
 - 传输：新路线显式 false 不被默认覆盖，不调用 getCk、不拼 ck；旧 API 策略保持；错误与风控沿用既有处理。
 - 恢复：列表已提交/子任务未 checkpoint、首屏 index 已写/checkpoint 未写、预算中止、旧任务升级，均无静默永久漏抓或范围漂移。
 - 离线：移走运行缓存后仍能读取原始首屏和已持久化缺口；缺历史来源则报告依赖缺口；未收尾精确原因未知不编造。
@@ -397,7 +402,8 @@ Bundle validator 含 JSON Schema 层与新增 scope 契约用例均通过。
 
 ## 8. 尚未解决的证据与交付边界
 
-已验证 status 详情、一个评论首屏、作者隔离与 pubtime 版式。topic 正常页面未取得，继续待调研。
+已验证 status 详情与评论首屏；现也取得 personal topic 正常 HTML、作者/目标 ID 与 nested 首屏响应。
+topic 的实际扩展抓取仍须用下一份导出验证，尚不宣称所有 topic 类型都支持。
 首屏之外的分页和楼中楼不再是首版实施前置条件，也不能据本次单条回复样本宣称所有接口形态均支持。
 仍需浏览器实测 self 会话下首屏可访问性、分类器漂移、实际节流与崩溃恢复。
 
@@ -472,7 +478,7 @@ status 路径，再用于候选、历史成功项和恢复队列去重。HTML �
 本轮完整扩展测试 2,228 通过、0 失败、1 个既有跳过；UI 文案更新后相关 139 个测试通过。
 共享 vendor 一致性与网站链接检查通过，Chrome/Firefox 解包目录已重新生成。
 
-### topic 下一步所需证据（2026-10-30）
+### topic 待证据阶段记录（2026-10-30，现已取得下述样本）
 
 对本例 `https://www.douban.com/topic/502623668/` 再次进行一次无登录 GET，返回 HTTP 403，
 标题“没有访问权限”，正文明确“请登录后重试”。未取得正常正文、评论配置或评论响应。
@@ -480,7 +486,7 @@ status 路径，再用于候选、历史成功项和恢复队列去重。HTML �
 `broadcast.topic` 继续留在 `UNRESOLVED_ROUTES`，用户已有的“芃芃的广播.html”是 status 页，
 不能替代 topic 样本。
 
-需要由能正常访问该页的登录浏览器提供以下本地文件，方可继续实施：
+当时请求以下证据；随后收到的 HTML、请求参数与 JSON 见下一节：
 
 1. 正常打开上述 topic 后保存的 HTML；需保留根容器、作者/目标 ID、标题、时间、
    评论容器和相关脚本配置，个人正文可脱敏。若页面仍是拒绝访问页，应按实际结果记录。
@@ -492,3 +498,42 @@ status 路径，再用于候选、历史成功项和恢复队列去重。HTML �
 再确定首屏端点、参数、响应错误形态和 Referer 要求。只有样本证明身份、访问范围与接口
 契约后，才添加脱敏 fixtures、路由/分类器与相应测试；仍维持 self-only、显式开启、
 首屏原始快照、不分页、不抓来源作者或附件的范围。
+
+
+### personal topic 样本落实与实现（2026-10-30）
+
+用户提供 `/home/mewx/downloads/502623668.html`（29,030 字节）及浏览器首屏 JSON 和请求 URL。
+正常 HTML 显示 `personal-topic#topic-content`、`.topic-title`、`.create-time` 与“已编辑”，
+评论容器依旧为空。`_COMMENTS_CONFIG.service=group`、`author.id=82160871`、
+`target.id=502623668`；它复用 group/topic 接口，并不意味着要抓小组讨论。
+列表根 SID 为 `9871051745`，data-aid 为 `502623668`，data-subtype 为 `personal`。
+作者取 `author.id`，不能用表示登录者的 `user.id` 替代。
+
+页面声明端点 `/api/v2/group/topic/:topic_id/comments`。只带 start/count 的无登录探测返回
+HTTP 200、total=2，两条平铺；浏览器实际使用的非凭据参数是：
+
+```text
+resp_type=c_dict&topic_id=502623668&start=0&count=20&order_by=time_asc&nested=1
+```
+
+以这些参数、站点级 Referer、无 Cookie/ck 再取一次，返回 HTTP 200、total=1：
+一条顶层评论，内嵌一条作者回复，与用户提供的形状一致。实现固定这些首屏参数，
+不因 `total_replies` 或 `next_reply_start` 派生新任务；`popular_comments`、`ref_comment`、
+`replies` 都只随原 JSON 保留。原始账户资料与会话信息不复制进仓库，测试使用脱敏结构。
+
+实现沿用 `broadcast.item` 和 `broadcast.comments_snapshot`，没有新增 Canonical 类型。
+调度键新增 topic 身份域 `(route, owner UID, topic, aid)`，防止 aid 恰好等于某个 status SID 时串项。
+详情分类器检查 personal 根结构、原始请求/最终 URL、声明的 API、author.id 和 target.id；
+只读取服务端脚本中的数据字面量，不执行脚本。请求前校验精确首屏参数，拒绝 ck、
+其他 tab、分页或楼中楼地址；DNR 仅增加同主机 group/topic comments 路径，不增加权限。
+
+个人 topic 明确可编辑，因此模式表作了必要细化：普通增量仍跳过成功 HTML/API；
+refresh-editable 刷新已知 topic HTML 和回复首屏，status HTML 保持成功后跳过；
+full 只抓当前列表派生项。旧断点的未支持 topic 缺口只在对应 HTML 或 API 实际成功后消除，
+两条路线独立处理；崩溃恢复可从本轮成功 index 重建，不改动已收尾旧档案的缺口。
+
+对当前真实历史档案离线复算：普通增量只新增本例 1 张 topic HTML + 1 个 nested API 首屏，
+未支持入口为 0，已成功的 51 个 status 不重抓。`test/broadcast-personal-topic.test.js`
+与 runner 集成测试覆盖严格身份、无分页、原样导出/导入、下游输出不变、三个模式、
+恢复后不重抓与旧缺口消除。完整扩展测试 2,244 通过、0 失败、1 个既有跳过。
+这是正常样本与 API 实测加自动化验证；仍需实际扩展导出来验证浏览器中的 topic 抓取。
