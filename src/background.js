@@ -340,7 +340,7 @@ globalThis.chrome?.action?.onClicked?.addListener(async () => {
 });
 
 /**
- * 给图片请求补上 Referer 的规则。
+ * 给图片与广播回复首屏请求补上 Referer 的规则。
  *
  * **每次 worker 醒来都装一遍。** 它是会话规则（活不过浏览器重启），而 service
  * worker 本来就会被反复叫醒；装规则是幂等的（先删后加），所以宁可多装。

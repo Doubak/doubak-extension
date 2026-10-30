@@ -49,6 +49,7 @@
 
 /** 规则 ID。固定值，方便每次启动时先删后加，避免重复堆积。 */
 export const REFERER_RULE_ID = 1;
+export const COMMENTS_REFERER_RULE_ID = 3; // 2 belongs to the desktop UA rule.
 
 /** 图片域。与 manifest 的 host_permissions 一致。 */
 export const IMAGE_HOST_FILTER = '||doubanio.com';
@@ -84,6 +85,25 @@ export function refererRule() {
 }
 
 /**
+ * 2026-10-30: the same status comments GET returned 400 / invalid_request_1284
+ * without Referer, and 200 JSON with https://www.douban.com/ (no cookies or ck).
+ * Keep this separate from images: only the supported status comments endpoint,
+ * only extension XHR. It does not authorize or initiate any additional requests.
+ */
+export function commentsRefererRule() {
+  const rule = refererRule();
+  return {
+    ...rule,
+    id: COMMENTS_REFERER_RULE_ID,
+    condition: {
+      regexFilter: '^https://m\\.douban\\.com/rexxar/api/v2/status/[1-9][0-9]*/comments\\?',
+      resourceTypes: ['xmlhttprequest'],
+      tabIds: [-1],
+    },
+  };
+}
+
+/**
  * 装上规则。**每次 service worker 启动都要调**——会话规则活不过浏览器重启，
  * 而 service worker 本来就会被反复叫醒，正好是个合适的挂载点。
  *
@@ -99,20 +119,20 @@ export async function installRefererRule({ dnr, onError } = {}) {
   const api = dnr ?? globalThis.chrome?.declarativeNetRequest;
   if (!api?.updateSessionRules) {
     onError?.(
-      '浏览器没有提供 declarativeNetRequest.updateSessionRules，无法为图片请求补上 Referer。' +
-        '豆瓣图片域有防盗链，没有 Referer 会一律返回 418，封面图将一张都抓不到。',
+      '浏览器没有提供 declarativeNetRequest.updateSessionRules，无法为图片与广播回复首屏补上 Referer。' +
+        '图片可能返回 418，回复接口可能返回 HTTP 400。',
     );
     return false;
   }
   try {
     await api.updateSessionRules({
       // 先删后加：service worker 会被反复叫醒，不先删会撞「规则 ID 已存在」。
-      removeRuleIds: [REFERER_RULE_ID],
-      addRules: [refererRule()],
+      removeRuleIds: [REFERER_RULE_ID, COMMENTS_REFERER_RULE_ID],
+      addRules: [refererRule(), commentsRefererRule()],
     });
     return true;
   } catch (err) {
-    onError?.('为图片请求补 Referer 的规则没装上，封面图会全部返回 418。', err);
+    onError?.('Referer 规则没装上，图片可能返回 418，广播回复首屏可能返回 HTTP 400。', err);
     return false;
   }
 }

@@ -16,6 +16,8 @@ import { readFileSync } from 'node:fs';
 
 import {
   refererRule,
+  commentsRefererRule,
+  COMMENTS_REFERER_RULE_ID,
   installRefererRule,
   REFERER_RULE_ID,
   REFERER_VALUE,
@@ -61,7 +63,8 @@ describe('装规则', () => {
       dnr: { updateSessionRules: async (x) => { calls.push(x); } },
     });
     assert.equal(ok, true);
-    assert.deepEqual(calls[0].removeRuleIds, [REFERER_RULE_ID]);
+    assert.deepEqual(calls[0].removeRuleIds, [REFERER_RULE_ID, COMMENTS_REFERER_RULE_ID]);
+    assert.deepEqual(calls[0].addRules, [refererRule(), commentsRefererRule()]);
     assert.equal(calls[0].addRules[0].id, REFERER_RULE_ID);
   });
 
@@ -108,4 +111,21 @@ describe('接线', () => {
     // 读到这些 URL 的。但值必须是个真站点，不能是编出来的。
     assert.equal(REFERER_VALUE, 'https://www.douban.com/');
   });
+});
+
+
+test('comments Referer rule is limited to extension status-comments XHR, without new permissions', () => {
+  const rule = commentsRefererRule();
+  assert.deepEqual(rule.condition.tabIds, [-1]);
+  assert.deepEqual(rule.condition.resourceTypes, ['xmlhttprequest']);
+  assert.deepEqual(rule.action, refererRule().action);
+  const pattern = new RegExp(rule.condition.regexFilter);
+  assert.ok(pattern.test('https://m.douban.com/rexxar/api/v2/status/2181605815/comments?start=0&count=20'));
+  for (const url of [
+    'https://m.douban.com/rexxar/api/v2/status/123/likes?start=0',
+    'https://m.douban.com/rexxar/api/v2/topic/123/comments?start=0',
+    'https://m.douban.com/rexxar/api/v2/status/123/comments/456/replies?start=0',
+    'https://m.douban.com.example.org/rexxar/api/v2/status/123/comments?start=0',
+    'https://www.douban.com/people/111/status/123/',
+  ]) assert.equal(pattern.test(url), false, url);
 });
