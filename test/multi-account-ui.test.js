@@ -134,6 +134,57 @@ test('冷断点显示原目标与原操作者，锁定输入；继续消息不�
   } finally { dom.restore(); }
 });
 
+test('任务终止解锁后若操作者已变化，静默刷新过期的确认快照，不把终止前的操作者带进下一次开始（issue #32）', async () => {
+  const dom = await panel({ bundles: false });
+  try {
+    let sessionAccount = null;
+    let probeCount = 0;
+    let statusRunner = { active: false };
+    const original = dom.chrome.runtime.sendMessage;
+    dom.chrome.runtime.sendMessage = (msg, cb) => {
+      if (msg.type === 'detectSession') {
+        return cb({ ok: true, session: sessionAccount
+          ? { state: 'logged_in', account: sessionAccount } : { state: 'logged_out', account: null } });
+      }
+      if (msg.type === 'probeTarget') {
+        probeCount++;
+        return cb({ ok: true, target: { account: { userId: '222', username: '222', displayName: '目标昵称' },
+          visibility: 'public', operatorMode: sessionAccount ? 'authenticated' : 'anonymous',
+          operatorUserId: sessionAccount?.userId ?? null } });
+      }
+      if (msg.type === 'status') return cb({ ok: true, runner: statusRunner, checkpoint: null });
+      return original(msg, cb);
+    };
+
+    const target = await import('../src/ui/panel/target.js');
+    const input = dom.byId.get('target-account');
+    input.value = '222'; input.dispatch('input');
+    // 未登录时查看账号：确认快照记下 operatorUserId: null（匿名公开视图）。
+    dom.byId.get('probe-target').dispatch('click'); await settle();
+    assert.equal(probeCount, 1);
+    assert.equal(target.targetIntent().target.operatorUserId, null);
+
+    // 一次匿名公开抓取开始并被安全停止（锁定面板）。
+    statusRunner = { active: true, stopped: true, stoppedBy: 'operator_switched',
+      targetAccount: { userId: '222', username: '222' } };
+    await dom.tick();
+    assert.equal(dom.byId.get('target-controls').disabled, true);
+
+    // 抓取期间用户登录了豆瓣。面板锁定中，sessionHintsInvalidated 广播本会被丢弃，
+    // 这里直接模拟「广播丢了」的后果：会话已经变了，面板还不知道。
+    sessionAccount = { userId: '333', displayName: '登录账号' };
+
+    // 用户点击「终止抓取」：任务结束，面板解锁。
+    statusRunner = { active: false };
+    await dom.tick();
+    await settle();
+
+    // 不需要用户手动点「重新查看」：解锁时应已静默刷新确认快照。
+    assert.equal(probeCount, 2);
+    assert.equal(target.targetIntent().target.operatorUserId, '333');
+  } finally { dom.restore(); }
+});
+
 test('多账号导出必须选择；未知归属不跟着其他账号混入派生数据', async () => {
   const dom = await panel();
   try {
