@@ -233,6 +233,26 @@ async function loadAccounts() {
   }
 }
 
+/**
+ * 解锁瞬间（任务终止/完成）重新核对会话。
+ *
+ * 面板锁定期间，`sessionHintsInvalidated` 广播被监听器直接丢弃（见上面的
+ * `onMessage`），`confirmed` 快照也就没有机会跟着失效——解锁后它仍是锁定前
+ * 探测到的操作者。此时若直接按这份快照提交 `start`，传出去的操作者字段
+ * 就是「已经终止的旧任务」留下的痕迹，跟现场状态无关。
+ *
+ * 无论是广播被丢弃，还是单纯没有广播（比如后台节流），这里强制 `detectSession`
+ * 都能拿到当下真实的登录状态；比对发现操作者变了，就复用「查看账号」那套
+ * 探测流程静默刷新一次，让预览与提交的 payload 对得上现场。
+ */
+async function refreshStaleConfirmed() {
+  await detectSession(true);
+  const liveOperatorId = session?.state === 'logged_in' ? (session.account?.userId ?? null) : null;
+  if (confirmed && targetValue() === confirmed.input && liveOperatorId !== confirmed.operatorUserId) {
+    void probeTarget(confirmed.account.userId);
+  }
+}
+
 export function updateTargetControls(context, isLocked) {
   const wasLocked = locked;
   locked = isLocked;
@@ -242,7 +262,7 @@ export function updateTargetControls(context, isLocked) {
   paintReplySnapshot();
   paintLookup();
   paintSession();
-  if (wasLocked && !locked) void detectSession(true);
+  if (wasLocked && !locked) void refreshStaleConfirmed();
   if (!locked) void loadAccounts();
   for (const input of $('crawl-mode').querySelectorAll('input')) input.disabled = locked;
   const run = $('run-identity');

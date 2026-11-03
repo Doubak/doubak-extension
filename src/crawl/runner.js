@@ -305,7 +305,7 @@ export class CrawlRunner {
     knownSubjectUrlKeys = null, refreshSubjectUrls = null, backlogAssets = null,
     knownLongformUrlKeys = null, refreshLongform = null, knownAssetUrlKeys = null,
     mode = null, broadcastReplySnapshot = false, resolveSnapshots = null,
-    targetInput = null, targetUserId = null, operatorUserId = undefined, includeCovers,
+    targetInput = null, targetUserId = null, includeCovers,
   }) {
     if (this._run || await this._runStore.getCurrentRun()) throw new Error('已有抓取在进行中，请先继续或中止原任务');
 
@@ -314,6 +314,13 @@ export class CrawlRunner {
     const transport = new Transport({ gate, fetchImpl: this._fetchImpl, getCk: this._getCk });
 
     // ── 开工前的身份确认。取不到数字 ID 就不能开始。
+    //
+    // `start` 开的是一条全新的生命周期，只认目标账号（`targetUserId`，防止输错或
+    // 目标被抢注），操作者是谁完全以这一刻探测到的现场状态为准——不接受调用方
+    // 传入历史操作者。界面上缓存的那份「探测快照」可能是终止旧任务之前留下的，
+    // 拿它来跟现在比较只会把「旧任务的操作者」当成「新任务的前提」，而新任务
+    // 根本没有前提。严格的操作者绑定是 `resume`（断点恢复）的事，见 `_verifyRun`
+    // 与 `SessionGuard`：那里延续的是已经写进档案的归属，必须原样核对。
     let session = new SessionGuard();
     let runContext;
     let probe;
@@ -321,7 +328,7 @@ export class CrawlRunner {
       const slug = normalizeTarget(targetInput);
       this._gate.setPacer(new Pacer({ intervalMs: 3000, ...this._pacerOptions }));
       probe = await transport.fetch(`https://www.douban.com/people/${encodeURIComponent(slug)}/`);
-      runContext = inspectTarget(probe, slug, { targetUserId, operatorUserId });
+      runContext = inspectTarget(probe, slug, { targetUserId });
       username = runContext.account.username;
       session = new SessionGuard({ targetAccount: runContext.account, ...runContext });
       if (runContext.visibility === 'public') {
@@ -333,7 +340,7 @@ export class CrawlRunner {
     } else {
       probe = await transport.fetch(`https://www.douban.com/people/${encodeURIComponent(username)}/`);
       if (/\/icon\/up?[1-9]\d*[-.]|\/feed\/people\/[1-9]\d*\//.test(probe.bodyText)) {
-        runContext = inspectTarget(probe, username, { targetUserId, operatorUserId });
+        runContext = inspectTarget(probe, username, { targetUserId });
         if (runContext.visibility !== 'self') throw new SessionError('account_switched', '目标不是当前登录账号，请重新查看账号。');
         username = runContext.account.username;
       }

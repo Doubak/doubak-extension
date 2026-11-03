@@ -136,6 +136,25 @@ for (const cold of [false, true]) {
   });
 }
 
+test('终止旧抓取后未重新查看账号直接开始全量：start 不被调用方传入的过期 operatorUserId 误报 operator_switched（issue #32）', async () => {
+  const h = harness();
+  h.set({ operator: null }); // 旧任务开始前尚未登录（匿名公开抓取）
+  const a = h.makeRunner();
+  await a.start({ ...options, operatorUserId: null });
+  await a.abort(); // 用户点击「终止抓取」：任务彻底结束，释放运行锁
+  // 抓取途中登录了豆瓣；旧任务随后被终止——界面上缓存的「探测快照」仍是
+  // 终止前那份（operatorUserId: null），但现场已经是登录状态。
+  h.set({ operator: '222' });
+  const b = h.makeRunner();
+  // 点击「开始抓取」时，即便调用方（界面）仍然带着旧快照里过期的
+  // operatorUserId: null，新的生命周期也必须以现场探测到的操作者为准，
+  // 不能被这个历史值误判为 operator_switched 并拦住。
+  await b.start({ ...options, operatorUserId: null });
+  const manifest = await b.abort();
+  assert.equal(manifest.account.user_id, '111');
+  assert.deepEqual(manifest.crawl_scope, { visibility: 'public', operator_mode: 'authenticated', operator_user_id: '222', skip_catalog: true });
+});
+
 test('匿名公开断点不能恢复成登录视图，恢复原匿名状态后继续', async () => {
   const h = harness(); h.set({ operator: null });
   const a = h.makeRunner();
