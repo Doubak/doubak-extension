@@ -11,6 +11,7 @@ let lookupState = 'idle';
 let session = null;
 let groups = [];
 let generation = 0;
+let refreshing = null;
 let locked = false;
 let runContext = null;
 let changed = () => {};
@@ -25,13 +26,16 @@ const setText = (element, value) => { if (element.textContent !== value) element
 
 function paintLookup() {
   const hasTarget = Boolean(targetValue());
+  const busy = refreshing !== null || lookupState === 'loading';
   const button = $('probe-target');
   button.hidden = !hasTarget;
-  button.disabled = locked || !hasTarget || lookupState === 'loading';
-  for (const chip of $('target-accounts').querySelectorAll('button')) chip.disabled = locked || lookupState === 'loading';
-  setText(button, { idle: '查看账号', loading: '正在查看…', ready: '重新查看', error: '重试查看' }[lookupState]);
+  button.disabled = locked || !hasTarget || busy;
+  for (const chip of $('target-accounts').querySelectorAll('button')) chip.disabled = locked || busy;
+  setText(button, refreshing !== null ? '正在核对…'
+    : { idle: '查看账号', loading: '正在查看…', ready: '重新查看', error: '重试查看' }[lookupState]);
   setText($('target-help'), !hasTarget
     ? '留空或只保留网址前缀，直接点击「开始抓取」备份已登录账号。'
+    : refreshing !== null ? '正在核对登录状态与备份范围，请稍候。'
     : lookupState === 'ready'
       ? '核对下方账号和备份选项，再点击「开始抓取」。'
       : '先查看昵称和可备份范围，确认后再开始抓取。也可以按 Enter 查看。');
@@ -54,7 +58,7 @@ function paintReplySnapshot() {
   const key = own ? `${own}:${targetValue()}` : '';
   if (box.dataset.scope !== key) box.checked = false;
   box.dataset.scope = key;
-  box.disabled = locked || !own;
+  box.disabled = locked || refreshing !== null || !own;
   if (locked) box.checked = runContext?.options?.broadcastReplySnapshot === true;
   if (!locked && !own) box.checked = false;
 }
@@ -79,12 +83,14 @@ function paintSession() {
 
 async function detectSession(force = false) {
   const mounted = mountedInput;
+  let live = null;
   try {
     const result = await send({ type: 'detectSession', force });
     if (mounted !== mountedInput) return;
-    if (result?.ok) session = result.session;
+    if (result?.ok) session = live = result.session;
   } catch { /* 提示探测失败不能阻止留空备份本人；权威握手仍会核对 */ }
   if (typeof document !== 'undefined' && $('operator-session')) { paintSession(); paintReplySnapshot(); }
+  return live;
 }
 
 function markSelected(uid = null) {
@@ -95,7 +101,7 @@ function markSelected(uid = null) {
 }
 
 function renderConfirmedPreview() {
-  if (!confirmed) return;
+  if (!confirmed || refreshing !== null) return;
   const { account, visibility, operatorMode, operatorUserId } = confirmed;
   const local = groups.find((g) => g.userId === account.userId);
   const baseline = baselineFor(confirmed);
@@ -111,7 +117,7 @@ function renderConfirmedPreview() {
 
 export async function probeTarget(expectedUid = null) {
   const value = targetValue();
-  if (locked || !value.trim() || lookupState === 'loading') return;
+  if (locked || !value.trim() || refreshing !== null || lookupState === 'loading') return;
   const token = ++generation;
   confirmed = null;
   lookupState = 'loading';
@@ -154,11 +160,13 @@ export function initTargetControls(onChange) {
   confirmed = null;
   lookupState = 'idle';
   session = null;
+  refreshing = null;
   groups = [];
   lastScan = null;
   generation++;
   $('target-account').addEventListener('input', () => {
     generation++;
+    refreshing = null;
     confirmed = null;
     lookupState = 'idle';
     markSelected();
@@ -175,6 +183,7 @@ export function initTargetControls(onChange) {
   globalThis.chrome?.runtime?.onMessage?.addListener((message) => {
     if (message.type !== 'sessionHintsInvalidated' || mountedInput !== input || locked) return;
     session = null;
+    refreshing = null;
     confirmed = null;
     lookupState = 'idle';
     generation++;
@@ -211,7 +220,7 @@ async function loadAccounts() {
       button.dataset.uid = group.userId;
       button.setAttribute('aria-selected', 'false');
       button.addEventListener('click', () => {
-        if (locked || lookupState === 'loading') return;
+        if (locked || refreshing !== null || lookupState === 'loading') return;
         $('target-account').value = group.userId;
         markSelected(group.userId);
         void probeTarget(group.userId);
@@ -241,15 +250,40 @@ async function loadAccounts() {
  * 探测到的操作者。此时若直接按这份快照提交 `start`，传出去的操作者字段
  * 就是「已经终止的旧任务」留下的痕迹，跟现场状态无关。
  *
- * 无论是广播被丢弃，还是单纯没有广播（比如后台节流），这里强制 `detectSession`
- * 都能拿到当下真实的登录状态；比对发现操作者变了，就复用「查看账号」那套
- * 探测流程静默刷新一次，让预览与提交的 payload 对得上现场。
+ * 核对期间旧快照不可提交。会话发生变化或无法核实时，等待目标探测完成后再
+ * 开放开始按钮；编辑输入、会话失效或重新挂载会使这次异步核对过期。
  */
 async function refreshStaleConfirmed() {
-  await detectSession(true);
-  const liveOperatorId = session?.state === 'logged_in' ? (session.account?.userId ?? null) : null;
-  if (confirmed && targetValue() === confirmed.input && liveOperatorId !== confirmed.operatorUserId) {
-    void probeTarget(confirmed.account.userId);
+  const previous = confirmed;
+  if (!previous || targetValue() !== previous.input) {
+    await detectSession(true);
+    return;
+  }
+  const token = ++generation;
+  refreshing = token;
+  const preview = $('target-preview');
+  preview.className = 'card tone-busy';
+  preview.textContent = '正在核对登录状态与备份范围…';
+  paintLookup();
+  changed();
+  try {
+    const live = await detectSession(true);
+    if (token !== generation || locked) return;
+    const known = live?.state === 'logged_out' || (live?.state === 'logged_in' && live.account?.userId);
+    const liveOperatorId = live?.state === 'logged_in' ? live.account?.userId : null;
+    if (!known || liveOperatorId !== previous.operatorUserId) {
+      // probeTarget synchronously clears confirmed and enters loading before its
+      // first await, so no usable stale intent exists between these two phases.
+      refreshing = null;
+      await probeTarget(previous.account.userId);
+    }
+  } finally {
+    if (refreshing === token) {
+      refreshing = null;
+      paintLookup();
+      renderConfirmedPreview();
+      changed();
+    }
   }
 }
 
@@ -273,6 +307,7 @@ export function updateTargetControls(context, isLocked) {
 export function targetIntent(mode) {
   const input = targetValue();
   if (!input) return { ready: true, label: '开始抓取', target: null };
+  if (refreshing !== null) return { ready: false, label: '正在核对登录状态…', target: null };
   if (!confirmed || confirmed.input.trim() !== input) return { ready: false,
     label: lookupState === 'loading' ? '正在查看账号…' : '查看账号后即可开始抓取', target: null };
   const { account, visibility, operatorUserId } = confirmed;
