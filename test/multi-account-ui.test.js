@@ -185,6 +185,149 @@ test('任务终止解锁后若操作者已变化，静默刷新过期的确认�
   } finally { dom.restore(); }
 });
 
+// Hold the two network replies separately: instant callbacks hide the interval
+// where Start used to submit the previous operator's scope.
+async function delayedUnlock(beforeOperator) {
+  const dom = await panel({ bundles: false });
+  const target = await import('../src/ui/panel/target.js');
+  let statusRunner = { active: false };
+  let hold = false;
+  let sessionReply, probeReply;
+  const probes = [], starts = [];
+  const targetResult = (operator, uid = '222') => ({ ok: true, target: {
+    account: { userId: uid, username: uid, displayName: `目标 ${uid}` },
+    visibility: operator === uid ? 'self' : 'public',
+    operatorMode: operator ? 'authenticated' : 'anonymous', operatorUserId: operator,
+  } });
+  const original = dom.chrome.runtime.sendMessage;
+  dom.chrome.runtime.sendMessage = (msg, cb) => {
+    if (msg.type === 'detectSession') {
+      if (hold) { sessionReply = cb; return; }
+      return cb({ ok: true, session: beforeOperator
+        ? { state: 'logged_in', account: { userId: beforeOperator } }
+        : { state: 'logged_out', account: null } });
+    }
+    if (msg.type === 'probeTarget') {
+      probes.push(msg);
+      if (hold) { probeReply = cb; return; }
+      return cb(targetResult(beforeOperator));
+    }
+    if (msg.type === 'status') return cb({ ok: true, runner: statusRunner, checkpoint: null });
+    if (msg.type === 'start') {
+      starts.push(msg);
+      statusRunner = { active: true };
+      return cb({ ok: true });
+    }
+    return original(msg, cb);
+  };
+  const input = dom.byId.get('target-account');
+  input.value = '222'; input.dispatch('input');
+  dom.byId.get('probe-target').dispatch('click'); await settle();
+  const oldClick = dom.byId.get('actions').querySelector('button').onclick;
+  statusRunner = { active: true, stopped: true, stoppedBy: 'operator_switched',
+    targetAccount: { userId: '222', username: '222' }, broadcastReplySnapshot: beforeOperator === '222' };
+  await dom.tick();
+  hold = true;
+  statusRunner = { active: false };
+  await dom.tick();
+  assert.ok(sessionReply, 'unlock must start the session check');
+  return { dom, target, input, probes, starts, oldClick, targetResult,
+    session: async (result) => { const cb = sessionReply; sessionReply = null; cb(result); await settle(); },
+    probe: async (result) => { assert.ok(probeReply); const cb = probeReply; probeReply = null; cb(result); await settle(); },
+    async close() {
+      // Invalidate before resolving leftovers, including after a failed assertion.
+      input.value = ''; input.dispatch('input');
+      sessionReply?.({ ok: false, error: 'test cleanup' });
+      probeReply?.({ ok: false, error: 'test cleanup' });
+      await settle();
+      dom.restore();
+    },
+  };
+}
+
+for (const [before, after] of [[null, '222'], ['222', null], ['222', '333']]) {
+  test(`解锁后 ${before ?? '匿名'} → ${after ?? '匿名'}：两阶段核对完成前不能开始，之后提交新范围`, async () => {
+    const h = await delayedUnlock(before);
+    try {
+      const button = () => h.dom.byId.get('actions').querySelector('button');
+      assert.equal(button().disabled, true);
+      assert.equal(h.target.targetIntent().ready, false);
+      await h.oldClick(); // An already-queued click must not turn null into "back up self".
+      assert.equal(h.starts.length, 0);
+      await h.session({ ok: true, session: after
+        ? { state: 'logged_in', account: { userId: after } }
+        : { state: 'logged_out', account: null } });
+      assert.equal(h.probes.length, 2);
+      assert.equal(h.probes[1].targetUserId, '222');
+      assert.equal(button().disabled, true, 'Start must also wait for probeTarget');
+      await h.oldClick();
+      assert.equal(h.starts.length, 0);
+      await h.probe(h.targetResult(after));
+      assert.equal(button().disabled, false);
+      assert.equal(h.dom.byId.get('public-options').hidden, after === '222');
+      await button().onclick();
+      assert.equal(h.starts.length, 1);
+      assert.deepEqual(h.starts[0].target, { input: '222', userId: '222', operatorUserId: after,
+        includeCatalog: after === '222', includeCovers: true });
+      assert.equal(h.starts[0].broadcastReplySnapshot, false, 'changed scope must clear the old self-only option');
+    } finally { await h.close(); }
+  });
+}
+
+test('解锁核对操作者未变化时保留本人选项，不额外探测目标', async () => {
+  const h = await delayedUnlock('222');
+  try {
+    assert.equal(h.target.targetIntent().ready, false);
+    await h.session({ ok: true, session: { state: 'logged_in', account: { userId: '222' } } });
+    assert.equal(h.probes.length, 1);
+    assert.equal(h.target.targetIntent().ready, true);
+    assert.equal(h.dom.byId.get('broadcast-reply-snapshot').checked, true);
+    assert.equal(h.dom.byId.get('broadcast-reply-snapshot').disabled, false);
+    await h.dom.byId.get('actions').querySelector('button').onclick();
+    assert.equal(h.starts[0].broadcastReplySnapshot, true);
+  } finally { await h.close(); }
+});
+
+for (const result of [{ ok: false, error: '会话探测失败' }, { ok: true, session: { state: 'unknown' } }]) {
+  test(`会话核对 ${result.ok ? '未知' : '失败'} 不复用旧快照；目标探测失败后只能重试`, async () => {
+    const h = await delayedUnlock('222');
+    try {
+      await h.session(result);
+      assert.equal(h.probes.length, 2, 'failed hints require an authoritative target probe');
+      assert.equal(h.target.targetIntent().ready, false);
+      await h.probe({ ok: false, error: '目标探测失败' });
+      assert.equal(h.target.targetIntent().ready, false);
+      assert.equal(h.dom.byId.get('actions').querySelector('button').disabled, true);
+      assert.match(h.dom.byId.get('target-preview').textContent, /目标探测失败/);
+      await h.oldClick();
+      assert.equal(h.starts.length, 0);
+      h.dom.byId.get('probe-target').dispatch('click');
+      await h.probe(h.targetResult('333'));
+      assert.equal(h.target.targetIntent().ready, true);
+      assert.equal(h.target.targetIntent().target.operatorUserId, '333');
+    } finally { await h.close(); }
+  });
+}
+
+for (const phase of ['session', 'probe']) {
+  test(`在 ${phase} 核对期间编辑目标，迟到响应不能恢复旧目标或清除新确认`, async () => {
+    const h = await delayedUnlock(null);
+    try {
+      if (phase === 'probe') await h.session({ ok: true, session: { state: 'logged_in', account: { userId: '222' } } });
+      h.input.value = '333'; h.input.dispatch('input');
+      if (phase === 'probe') await h.probe(h.targetResult('222'));
+      assert.equal(h.target.targetIntent().ready, false);
+      h.dom.byId.get('probe-target').dispatch('click');
+      await h.probe(h.targetResult('222', '333'));
+      if (phase === 'session') await h.session({ ok: true, session: { state: 'logged_in', account: { userId: '222' } } });
+      assert.equal(h.input.value, '333');
+      assert.equal(h.target.targetIntent().target.userId, '333');
+      assert.equal(h.target.targetIntent().ready, true);
+      assert.equal(h.probes.length, phase === 'probe' ? 3 : 2);
+    } finally { await h.close(); }
+  });
+}
+
 test('多账号导出必须选择；未知归属不跟着其他账号混入派生数据', async () => {
   const dom = await panel();
   try {

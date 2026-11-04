@@ -381,14 +381,19 @@ export async function refresh() {
   renderCrawlMode();
   const intent = targetIntent(crawlMode);
   setActions([[intent.label, async () => {
+    // A queued click may belong to the previous enabled button. Recheck before
+    // locking the controls; an unready target is not a request to back up self.
+    const currentIntent = targetIntent(crawlMode);
+    if (!currentIntent.ready) return;
+    const broadcastReplySnapshot = replySnapshotSelected();
     // `pendingCommand` 只是**开口那一小段**的兜底：从点下去到 offscreen 真正拿到
     // 锁之间（可能还要先把 offscreen 建起来），后端还报不出 `busyWith`。
     // 一旦它报得出来，就以它为准——见上面 `busy` 那一行。
     pendingCommand = '开始抓取';
     refresh();
     try {
-      const r = await send({ type: 'start', mode: crawlMode, target: targetIntent(crawlMode).target,
-        broadcastReplySnapshot: replySnapshotSelected() });
+      const r = await send({ type: 'start', mode: crawlMode, target: currentIntent.target,
+        broadcastReplySnapshot });
       if (!r?.ok) {
         pendingCommand = null;
         setActionError('无法开始', r?.error ?? '后台没有给出原因。');
