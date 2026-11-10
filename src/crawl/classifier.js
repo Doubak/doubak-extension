@@ -96,6 +96,20 @@ export function isAbnormalAccountPage(html) {
     && /<img\b[^>]*\ssrc\s*=\s*(["'])[^"']*\/user_abnormal\.png(?:\?[^"']*)?\1/i.test(markup);
 }
 
+/** #34 的已登录影评错误页；仅识别有真实样本的模板，不把任意 403 当作局部失败。 */
+function isReviewPermissionDenied({ finalUrl, status, bodyText, route }) {
+  if (!route.permissionDeniedPage || ![200, 403].includes(status)) return false;
+  const url = new URL(finalUrl); // 调用前已校验 URL。
+  if (url.origin !== 'https://movie.douban.com' || !/^\/review\/[1-9]\d*\/$/.test(url.pathname)) return false;
+  const markup = stripScriptAndStyle(bodyText);
+  if (!DEFAULT_USER_NAV.test(markup) || MARKERS.abnormalRequest.test(markup)
+    || /请登录|captcha/i.test(markup)
+    || route.anyFrameAnchors?.some(re => re.test(markup))) return false;
+  return /<title\b[^>]*>\s*没有访问权限\s*<\/title>/i.test(markup)
+    && /<img\b[^>]*\ssrc\s*=\s*(["'])[^"']*\/douban_error\.gif(?:\?[^"']*)?\1/i.test(markup)
+    && /<li\b[^>]*>\s*你没有权限访问这个页面。\s*<\/li>/i.test(markup);
+}
+
 /**
  * 一条路线的判定描述。
  *
@@ -110,6 +124,7 @@ export function isAbnormalAccountPage(html) {
  *   才是判定依据。
  * @property {RegExp} [itemAnchor]    单个条目的标志。只用于计数，不参与判定。
  * @property {RegExp} [userNav]       导航栏中登录状态的标志。
+ * @property {boolean} [permissionDeniedPage] 允许识别已有真实样本的资源权限错误模板。
  */
 
 /**
@@ -196,6 +211,11 @@ export function classifyResponse({ finalUrl, status, bodyText, route, sizeStats 
   if (MARKERS.loginTitle.test(bodyText)) {
     reasons.push('标题是「登录豆瓣」——会话已失效');
     return { verdict: 'login', reasons, itemCount };
+  }
+
+  if (isReviewPermissionDenied({ finalUrl, status, bodyText, route })) {
+    reasons.push('豆瓣影评错误页明确显示没有访问权限；正文未取得。权限未改变时重试无效，可保留缺口后收尾。');
+    return { verdict: 'denied', reasons, itemCount };
   }
 
   // ── 3. HTTP 层面的明确信号
@@ -796,6 +816,7 @@ export const ROUTE_PROFILES = {
    * 路径不认 host，框架标志也只要求中一个。
    */
   'review.item': {
+    permissionDeniedPage: true,
     urlAnchor: /\/review\/\d+/,
     anyFrameAnchors: [
       /class="review-content/,

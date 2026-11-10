@@ -175,6 +175,7 @@ export const VERDICT_NAMES = {
   login: '未登录',
   gone: '已不存在',
   soft404: '页面不存在',
+  denied: '无权访问',
 };
 
 /**

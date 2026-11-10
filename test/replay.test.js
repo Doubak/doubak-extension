@@ -19,10 +19,6 @@ import { RunStore } from '../src/crawl/run-store.js';
 import { MemoryKvStore } from '../src/storage/kv-store.js';
 import { MemoryFileStore } from '../src/storage/file-store.js';
 import { indexFilename } from '../src/core/ids.js';
-import { Frontier } from '../src/crawl/frontier.js';
-import { buildCheckpoint } from '../src/crawl/run-store.js';
-import { Pacer } from '../src/crawl/pacing.js';
-import { readFileSync } from 'node:fs';
 import { TEST_PRODUCER_VERSION } from './helpers/producer.js';
 
 const enc = new TextEncoder();
@@ -158,13 +154,13 @@ function harness(batchSize, { imageStatus = 200 } = {}) {
       arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
     };
   };
-  const runner = new CrawlRunner({ producerVersion: TEST_PRODUCER_VERSION,
+  const makeRunner = () => new CrawlRunner({ producerVersion: TEST_PRODUCER_VERSION,
     runStore, openBundle, fetchImpl, batchSize,
     now: () => new Date('2026-08-01T10:15:00Z'),
     pacerOptions: { intervalMs: 1, jitterRatio: 0 },
     onEvent: (e) => events.push(e),
   });
-  return { runner, runStore, dirs, events, calls };
+  return { runner: makeRunner(), makeRunner, runStore, dirs, events, calls };
 }
 
 const SCOPE = {
@@ -222,25 +218,18 @@ describe('checkpoint 必须记下「我见过到哪一条」', () => {
 });
 
 describe('失败的原因必须挺过一次恢复', () => {
-  test('checkpoint 存了 last_error，恢复之后还在', () => {
-    // 失败条目**恰恰是最需要跨越恢复留存的东西**：它们会一直躺在队列里等人处理，
-    // 而人来看它们的时候往往已经隔了一次重启。
-    //
-    // 真实症状：139 个抓不下来的封面，前 123 个（恢复之前失败的）原因全没了，
-    // 界面上那一列整列是「—」，于是「为什么抓不下来」在界面上无解。
-    const f = new Frontier();
-    f.enqueue({ url: 'https://img1.doubanio.com/x.jpg', urlKey: 'k', routeKey: 'asset.subject_cover', intent: 'i', ordered: false });
-    f.settle(f.next(), null, ['Content-Type 不是图片：text/plain']);
-
-    const cp = JSON.parse(JSON.stringify(buildCheckpoint({
-      bundleId: '20260801T000000Z-aaaaaa', frontier: f, pacer: new Pacer({}),
-      routes: new Map(), lastCaptureId: null, pauseReason: 'user_paused',
-    })));
-    assert.match(cp.frontier[0].last_error, /text\/plain/, 'checkpoint 里丢了失败原因');
-
-    // 读回来那一侧是白名单，漏一个字段不会报错，只会静默地少一样东西。
-    const src = readFileSync(new URL('../src/crawl/runner.js', import.meta.url), 'utf-8');
-    assert.match(src, /lastError: it\.last_error/, 'resume() 没把 last_error 读回来');
+  test('checkpoint 存了 last_error，恢复之后还在', async () => {
+    const h = harness(50, { imageStatus: 500 });
+    await h.runner.start(SCOPE);
+    await drain(h.runner);
+    const before = h.runner.status().failures;
+    assert.equal(before.length, SUBJECT_IDS.length);
+    assert.ok(before.every(item => item.lastError.includes('500')));
+    const cp = await h.runStore.loadCheckpoint();
+    assert.ok(cp.frontier.filter(item => item.state === 'failed').every(item => item.last_error.includes('500')));
+    const restored = h.makeRunner();
+    await restored.resume(cp);
+    assert.deepEqual(restored.status().failures, before, '真实冷恢复必须保留原因、次数和条目身份');
   });
 });
 

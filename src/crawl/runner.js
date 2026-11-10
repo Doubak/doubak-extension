@@ -839,9 +839,18 @@ export class CrawlRunner {
     // 队列从 checkpoint 里的未完成条目重建；已完成的不在里面——那是 index
     // 的职责，重复记录会带来两个可能不一致的真相来源。
     const frontier = new Frontier();
-    const avatarReader = new BundleReader({ store, bundleId: pointer.bundleId });
-    const avatarRows = routes.has('asset.account_avatar') ? await avatarReader.index() : [];
-    frontier.markCaptured(avatarRows.filter(r => r.route_key === 'asset.account_avatar' && r.verdict === 'ok')
+    const restoredReader = new BundleReader({ store, bundleId: pointer.bundleId });
+    const restoredRows = await restoredReader.index();
+    // 捕获已提交、checkpoint 尚未写入时崩溃：不能把已知权限失败恢复成 pending。
+    // 仅恢复 checkpoint 之后的新事实；显式重试已经保存为 pending 的条目仍可重试。
+    const checkpointSeq = cp.last_capture_id ? parseCaptureId(cp.last_capture_id).seq : 0;
+    const afterCheckpoint = new Map();
+    for (const row of restoredRows) {
+      if (parseCaptureId(row.capture_id).seq > checkpointSeq) afterCheckpoint.set(`${row.route_key}:${row.url_key}`, row);
+    }
+    const deniedAfterCheckpoint = [...afterCheckpoint.values()].filter(row => row.verdict === 'denied' && routes.has(row.route_key));
+    const deniedKeys = new Set(deniedAfterCheckpoint.map(row => `${row.route_key}:${row.url_key}`));
+    frontier.markCaptured(restoredRows.filter(r => r.route_key === 'asset.account_avatar' && r.verdict === 'ok')
       .map(r => avatarQueueKey(r.url, r.parent_capture_id)));
 
     // ── 补回「checkpoint 还没见过的那几条捕获」派生出来的活
@@ -903,7 +912,8 @@ export class CrawlRunner {
         //
         // 现在失败就是失败，重试**只能由人触发**（面板上的按钮 → `retryFailed()`）。
         // 那也让失败真的能被看见，而不是在下一次恢复里被抹掉。
-        state: it.state === 'in_flight' ? 'pending' : (it.state ?? 'pending'),
+        state: deniedKeys.has(`${it.route_key}:${urlKey(it.url)}`) ? 'failed'
+          : it.state === 'in_flight' ? 'pending' : (it.state ?? 'pending'),
         attempts: it.attempts ?? 0,
         // 游标：少了它，下一页会从第 1 页重新算（见 buildCheckpoint 里的说明）。
         // 旧 checkpoint 没记这个字段，所以要能从 URL 反推——不然一份升级前写下的
@@ -914,8 +924,15 @@ export class CrawlRunner {
         referer: it.referer ?? null,
         // 失败原因同理：失败条目会一直躺在队列里等人处理，而人来看的时候往往
         // 已经隔了一次重启。丢了它，界面上那一列整列变成「—」。
-        lastError: it.last_error ?? undefined,
+        lastError: deniedKeys.has(`${it.route_key}:${urlKey(it.url)}`)
+          ? 'access_denied：已保存的响应明确拒绝访问；权限未改变时重试无效。' : it.last_error ?? undefined,
       });
+    }
+    for (const row of deniedAfterCheckpoint) {
+      const def = routes.get(row.route_key);
+      frontier.enqueue({ url: row.url, urlKey: row.url_key, routeKey: row.route_key, intent: row.intent,
+        ordered: def.ordered ?? Boolean(def.pagination), state: 'failed', attempts: 1,
+        lastError: 'access_denied：已保存的响应明确拒绝访问；权限未改变时重试无效。' });
     }
     // 重抓那几条，好让它们的派生重来一遍。
     //
@@ -988,13 +1005,17 @@ export class CrawlRunner {
       // 而它可能一次都没被打断过。规范 §7.1。
       savedStates: Object.fromEntries((cp.routes ?? []).map((r) => [r.route_key, r])),
     });
+    for (const row of deniedAfterCheckpoint) {
+      const state = loop.stateFor(row.route_key);
+      if (!state.gaps.some(gap => gap.url === row.url)) state.recordGap('access_denied', row.url, row.url);
+    }
 
     // A crash after writing the profile but before enqueue/checkpoint must not lose
     // its avatar. Re-derive from stored bytes, preserving the original parent ID.
-    const profileRow = avatarRows.filter(r => r.route_key === 'profile.overview'
+    const profileRow = restoredRows.filter(r => r.route_key === 'profile.overview'
       && r.surface === 'html' && r.verdict === 'ok').at(-1);
-    if (profileRow) {
-      const saved = await avatarReader.readEntry(profileRow);
+    if (profileRow && routes.has('asset.account_avatar')) {
+      const saved = await restoredReader.readEntry(profileRow);
       loop.enqueueAccountAvatar({ routeKey: 'profile.overview', url: profileRow.url },
         { bodyText: saved.bodyText, finalUrl: profileRow.final_url ?? profileRow.url }, profileRow.capture_id);
     }

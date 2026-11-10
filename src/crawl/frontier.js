@@ -101,6 +101,10 @@ export function transitionFor(verdict) {
       // 上限更低，撞限流的风险更高。
       return { state: 'terminal_stop', retryable: false, stopRun: true, reason: 'session_expired' };
 
+    case 'denied':
+      // 资源级权限拒绝：留作内容缺口；叶子失败不阻塞其他条目，也不自动重试。
+      return { state: 'failed', retryable: false, stopRun: false, reason: 'access_denied' };
+
     case null:
       // 判不出来 = 失败。「大概没事」是这套系统里最危险的一句话。
       return { state: 'failed', retryable: false, stopRun: false, reason: 'unclassified' };

@@ -87,7 +87,7 @@ describe('词表内容', () => {
     // 一百次也一样，该做的是改抽取器。
     assert.deepEqual(
       [...constants.VERDICTS].sort(),
-      ['blocked', 'challenge', 'gone', 'login', 'ok', 'soft404', 'unknown'],
+      ['blocked', 'challenge', 'denied', 'gone', 'login', 'ok', 'soft404', 'unknown'],
     );
   });
 

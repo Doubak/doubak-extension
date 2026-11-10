@@ -685,6 +685,7 @@ export class CrawlLoop {
         itemTimeRange: itemTimeRange(items.times),
         note: [res.powSolved ? '通过客户端算力证明（PoW）获取。' : (anonymousCatalog ? '公开目录请求：不携带登录凭据，不复用浏览器缓存。' : null),
           cls.verdict === null ? `判不出来：${cls.reasons.join('；')}` : null,
+          cls.verdict === 'denied' ? cls.reasons.join('；') : null,
           sessionError?.message].filter(Boolean).join('；') || undefined,
       });
     } catch (err) {

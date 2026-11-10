@@ -136,7 +136,7 @@ export function isRecalibratable(row) {
  * 具体就是这一行。漏了它，症状是一堆看不懂的告警，而不是错数据——失败方向是对的。
  */
 export const KNOWN_VERDICTS = new Set([
-  'ok', 'blocked', 'challenge', 'login', 'gone', 'soft404', 'unknown',
+  'ok', 'blocked', 'challenge', 'login', 'gone', 'soft404', 'unknown', 'denied',
 ]);
 
 /** @param {object} row */
