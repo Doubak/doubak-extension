@@ -914,7 +914,8 @@ export class CrawlRunner {
         // 那也让失败真的能被看见，而不是在下一次恢复里被抹掉。
         state: deniedKeys.has(`${it.route_key}:${urlKey(it.url)}`) ? 'failed'
           : it.state === 'in_flight' ? 'pending' : (it.state ?? 'pending'),
-        attempts: it.attempts ?? 0,
+        attempts: deniedKeys.has(`${it.route_key}:${urlKey(it.url)}`)
+          ? Math.max(1, it.attempts ?? 0) : it.attempts ?? 0,
         // 游标：少了它，下一页会从第 1 页重新算（见 buildCheckpoint 里的说明）。
         // 旧 checkpoint 没记这个字段，所以要能从 URL 反推——不然一份升级前写下的
         // 半成品档案一恢复就从头重抓。
@@ -1008,6 +1009,13 @@ export class CrawlRunner {
     for (const row of deniedAfterCheckpoint) {
       const state = loop.stateFor(row.route_key);
       if (!state.gaps.some(gap => gap.url === row.url)) state.recordGap('access_denied', row.url, row.url);
+    }
+    // 显式重试已成功但尚未更新 checkpoint：原始失败捕获保留，当前缺口应被成功事实消除。
+    // 只处理同路线同 URL 的最新响应，不能拿较早的成功掩盖后来的权限拒绝。
+    for (const row of afterCheckpoint.values()) {
+      if (row.verdict !== 'ok' || !routes.has(row.route_key)) continue;
+      const state = loop.stateFor(row.route_key);
+      if (state.gaps.some(gap => gap.url === row.url && gap.reason === 'access_denied')) state.resolveGap(row.url);
     }
 
     // A crash after writing the profile but before enqueue/checkpoint must not lose

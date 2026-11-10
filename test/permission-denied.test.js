@@ -11,6 +11,12 @@ import { TEST_PRODUCER_VERSION } from './helpers/producer.js';
 import { indexFilename } from '../src/core/ids.js';
 import { verdictName } from '../src/ui/panel/shared.js';
 import { Frontier } from '../src/crawl/frontier.js';
+import { exportBundle, fileStoreSink } from '../src/bundle/exporter.js';
+import { importBundle, readBundleMeta } from '../src/bundle/importer.js';
+import { parse } from '../src/vendor/parser/parse.js';
+import { project } from '../src/vendor/site-generator/projection.js';
+import { buildPages } from '../src/vendor/site-generator/pages.js';
+import { buildNeodbNdjson } from '../src/vendor/export-adapters/targets/neodb-ndjson.js';
 
 const html = readFileSync(new URL('./fixtures/review-permission-denied.html', import.meta.url), 'utf8');
 const url = 'https://movie.douban.com/review/7575457/';
@@ -72,8 +78,10 @@ test('denied 只释放独立条目；有序分页依然不能越过缺口', () =
 const nav = '<li class="nav-user-account">操作者</li><script>window._GLOBAL_NAV={USER_ID:"222"};</script>';
 const profile = `<html><title>目标</title>${nav}<div id="db-usr-profile"><div class="pic"><img src="https://img1.doubanio.com/icon/up111-1.jpg"></div><div class="info"><h1>目标</h1></div></div></html>`;
 const nextUrl = 'https://movie.douban.com/review/1234567/';
-const review = `<html>${nav}<div class="review-content">可访问影评</div></html>`;
-function harness(status = 403) {
+const review = `<html>${nav}<h1><span property="v:summary">可访问影评</span></h1>
+<div class="main-bd" id="review-1234567-content"><div id="link-report-1234567">
+<div class="review-content" data-url="${nextUrl}">可访问的影评正文</div></div></div></html>`;
+function harness(status = 403, { errorBody, errorFinalUrl } = {}) {
   const dirs = new Map(), calls = [];
   let allowed = false;
   const openBundle = async dir => {
@@ -90,9 +98,10 @@ function harness(status = 403) {
         const items = request.endsWith('start=0') ? [url, nextUrl].map((u, i) => `<div class="main review-item" id="${i + 1}"><h2><a href="${u}">影评</a></h2><span class="main-meta">2026-11-01</span></div>`).join('') : '';
         body = `<html>${nav}<h1>评论(2)</h1><div class="review-list">${items}</div></html>`;
       } else if (request === url && !allowed) {
-        body = html.replace('USER_ID: "REDACTED_UID"', 'USER_ID: "222"'); code = status;
-      } else if (request === url || request === nextUrl) body = review;
-      return { status: code, url: request, headers: new Headers({ 'content-type': 'text/html' }),
+        body = errorBody ?? html.replace('USER_ID: "REDACTED_UID"', 'USER_ID: "222"'); code = status;
+      } else if (request === url || request === nextUrl) body = review.replaceAll('1234567', /review\/(\d+)/.exec(request)[1]);
+      return { status: code, url: request === url && !allowed ? errorFinalUrl ?? request : request,
+        headers: new Headers({ 'content-type': 'text/html' }),
         arrayBuffer: async () => new TextEncoder().encode(body).buffer };
     },
   });
@@ -149,6 +158,8 @@ for (const missing of [false, true]) test(`denied 已写入但未记入 checkpoi
   if (missing) before.frontier = before.frontier.filter(item => item.url !== url);
   runner = h.makeRunner();
   await runner.resume(before);
+  assert.equal(runner.status().failures.find(item => item.url === url).attempts, 1,
+    '响应已经保存，不能仍显示尝试过 0 次');
   await until(runner, batch => batch.done);
   assert.equal(h.calls.filter(u => u === url).length, 1);
   const manifest = await runner.finish('complete', { acceptLeafGaps: true });
@@ -191,4 +202,79 @@ test('权限恢复后的显式重试可成功，并清除此 URL 的缺口', asy
   const manifest = await runner.finish();
   assert.equal(h.calls.filter(u => u === url).length, 2);
   assert.ok(!manifest.crawl_state.find(s => s.route_key === 'review.item').gaps.some(g => g.url === url));
+});
+
+test('权限恢复的成功响应已提交、checkpoint 未更新：不重抓，清除旧权限缺口', async () => {
+  const h = harness(); let runner = h.makeRunner();
+  await start(runner); await until(runner, batch => batch.done);
+  h.allow();
+  await runner.retryFailed();
+  const before = await h.runStore.loadCheckpoint();
+  assert.ok(before.routes.some(route => route.gaps.some(gap => gap.url === url)));
+  await runner.runBatch();
+  runner = h.makeRunner(); await runner.resume(before);
+  await until(runner, batch => batch.done);
+  assert.equal(h.calls.filter(u => u === url).length, 2, '已提交成功响应不能再请求');
+  const manifest = await runner.finish();
+  assert.ok(!manifest.crawl_state.find(route => route.route_key === 'review.item').gaps.some(gap => gap.url === url),
+    '成功事实必须消除旧 checkpoint 中该 URL 的权限缺口');
+  assert.equal(manifest.counts.by_verdict.denied, 1, '旧失败捕获仍须保留');
+});
+
+for (const scenario of [
+  { name: '普通 403', status: 403, errorBody: '<html>Forbidden</html>', verdict: 'blocked' },
+  { name: 'HTTP 429', status: 429, verdict: 'blocked' },
+  { name: 'HTTP 418', status: 418, verdict: 'blocked' },
+  { name: '风控域', status: 200, errorFinalUrl: 'https://sec.douban.com/', verdict: 'blocked' },
+  { name: '验证码', status: 200, errorBody: '<html>请输入验证码</html>', verdict: 'challenge' },
+]) test(`${scenario.name} 在实际抓取链路仍停机、降速，禁止继续其他影评或带缺口收尾`, async () => {
+  const h = harness(scenario.status, scenario); const runner = h.makeRunner();
+  await start(runner);
+  const batch = await until(runner, () => h.calls.includes(url));
+  assert.equal(batch.stoppedBy, scenario.verdict);
+  assert.ok(!h.calls.includes(nextUrl));
+  const cp = await h.runStore.loadCheckpoint();
+  assert.equal(cp.frontier.find(item => item.url === url).state, 'awaiting_human');
+  assert.equal(cp.rate_state.backoff_level, 1);
+  await runner.runBatch();
+  assert.equal(h.calls.filter(u => u === url).length, 1, '不自动重试');
+  await assert.rejects(runner.finish('complete', { acceptLeafGaps: true }), /软封锁/);
+});
+
+test('权限页上的操作者切换仍须停止全场，不能被局部失败处理掩盖', async () => {
+  const h = harness(403, { errorBody: html.replace('USER_ID: "REDACTED_UID"', 'USER_ID: "333"') });
+  const runner = h.makeRunner(); await start(runner);
+  const batch = await until(runner, () => h.calls.includes(url));
+  assert.equal(batch.stoppedBy, 'operator_switched');
+  assert.ok(!h.calls.includes(nextUrl));
+});
+
+test('含 denied 的真实产出可原样导出再导入，解析和网站不会混入错误页', async () => {
+  const h = harness(); const runner = h.makeRunner();
+  await start(runner); await until(runner, batch => batch.done);
+  const manifest = await runner.finish('complete', { acceptLeafGaps: true });
+  const store = [...h.dirs.values()][0];
+  const exported = new MemoryFileStore(), imported = new MemoryFileStore();
+  assert.equal((await exportBundle({ store, sink: fileStoreSink(exported) })).verified, true);
+  assert.deepEqual((await readBundleMeta(exported, `doubak-bundle-${manifest.bundle_id}`)).fatal, []);
+  assert.equal((await importBundle({ source: exported, dest: imported })).verified, true);
+  for (const name of await store.list()) assert.deepEqual(await imported.read(name), await store.read(name), name);
+  const reader = new BundleReader({ store: imported, bundleId: manifest.bundle_id });
+  const rows = await reader.index();
+  const source = { manifest, bundleId: manifest.bundle_id, status: manifest.status,
+    crawlState: new Map(manifest.crawl_state.map(route => [route.route_key, route])),
+    coverage: new Map(), close() {},
+    payload: async row => {
+      assert.notEqual(row.verdict, 'denied', '拒绝页不应被内容解析器读取');
+      return (await reader.readEntry(row)).bodyText;
+    } };
+  const result = await parse([{ ...source, index: rows }]);
+  const baseline = await parse([{ ...source, index: rows.filter(row => row.verdict !== 'denied') }]);
+  assert.equal(result.longform.length, 1, '不能以空输出冒充解析成功');
+  assert.deepEqual(result.longform, baseline.longform);
+  assert.equal(result.stats.skipped['verdict:denied'], 1);
+  assert.deepEqual(result.warnings, baseline.warnings);
+  assert.deepEqual(buildPages(project(result)), buildPages(project(baseline)));
+  assert.deepEqual(buildNeodbNdjson(result), buildNeodbNdjson(baseline));
+  assert.doesNotMatch(JSON.stringify(buildPages(project(result))), /你没有权限访问这个页面/);
 });
