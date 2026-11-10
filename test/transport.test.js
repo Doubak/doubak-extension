@@ -1,9 +1,11 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { Transport, withCkToken, isShortlink } from '../src/crawl/transport.js';
 import { DECODED_FILTERED, DECODED_OBSERVED, ALL, isKnownFidelity } from '../src/crawl/fidelity.js';
 import { Pacer, RequestGate } from '../src/crawl/pacing.js';
+import { isPowChallenge, extractPowChallenge } from '../src/crawl/pow.js';
 
 const enc = new TextEncoder();
 
@@ -341,6 +343,36 @@ test('无凭据请求的每一跳都 omit/no-store，不能偷偷加 ck', async 
   await assert.rejects(() => transport.fetch('https://www.douban.com/x', { credentials: 'omit', withCk: true }), /ck/);
   await assert.rejects(() => transport.fetch('https://www.douban.com/x?ck=token', { credentials: 'omit' }), /ck/);
   assert.equal(calls.length, 2);
+});
+
+describe('issue #34：真实影评权限拒绝页', () => {
+  const body = readFileSync(new URL('./fixtures/review-permission-denied.html', import.meta.url), 'utf8');
+  const url = 'https://movie.douban.com/review/7575457/';
+
+  test('权限拒绝页没有可求解的 PoW 表单', () => {
+    assert.match(body, /<title>没有访问权限<\/title>/);
+    assert.match(body, /douban_error\.gif/);
+    assert.match(body, /你没有权限访问这个页面/);
+    assert.equal(isPowChallenge(url, body), false);
+    assert.equal(extractPowChallenge(body), null);
+  });
+
+  // 报告未提供 HTTP 状态码：两种状态是测试输入，不是样本的已知事实。
+  for (const status of [200, 403]) {
+    test(`HTTP ${status} 权限拒绝响应原样交给分类器，不求解、不重发`, async () => {
+      const { transport, calls } = makeTransport({
+        http: fakeHttp([{ status, url, body, headers: { 'content-type': 'text/html; charset=utf-8' } }]),
+      });
+      const result = await transport.fetch(url);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].init.method ?? 'GET', 'GET');
+      assert.equal(result.status, status);
+      assert.equal(result.finalUrl, url);
+      assert.equal(result.bodyText, body);
+      assert.deepEqual(new Uint8Array(result.body), enc.encode(body));
+      assert.equal(result.powSolved, undefined);
+    });
+  }
 });
 
 describe('豆瓣 PoW 算力挑战自动求解与凭据续期', () => {
