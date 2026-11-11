@@ -1,5 +1,8 @@
 # doubak-extension
 
+当前代码版本：**v1.7.0**。新增本人广播回复首屏原始快照，并修复新任务身份核对、权限拒绝后的调度与恢复、短评历史展示。
+变更、`bundle/1.5` 兼容性及验证边界见 [v1.7.0 发布说明](docs/releases/v1.7.0.md)。
+
 中文 · **[English README](README.en.md)**
 
 [![test](https://github.com/Doubak/doubak-extension/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/Doubak/doubak-extension/actions/workflows/test.yml?query=branch%3Amain) [![Coverage Status](https://coveralls.io/repos/github/Doubak/doubak-extension/badge.svg?branch=main)](https://coveralls.io/github/Doubak/doubak-extension?branch=main)
@@ -119,7 +122,7 @@ node tools/make-manifest.mjs                   # 重新生成 manifest.firefox.j
 | 平台 | 商店地址 |
 |---|---|
 | Chrome / Edge | <https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe> |
-| Firefox | <https://addons.mozilla.org/firefox/addon/doubak/>（需要 Firefox 140 及以上版本） |
+| Firefox | <https://addons.mozilla.org/firefox/addon/doubak/>（需要 Firefox 142 及以上版本） |
 
 Edge 浏览器同样可直接访问 Chrome 应用商店进行安装。上述两个商店链接均**仅保留永久有效的固定路径**：Chromium 链接仅保留唯一的扩展 ID 而省略扩展名称（避免未来重命名导致旧链接失效）；AMO 链接则去除了语言前缀（未指定语言时，AMO 会通过 301 重定向将访客引导至其浏览器匹配的语言页面，避免将中文用户硬性引导至 `/en-US/` 英文页面；扩展的 `_locales` 目录下已预备了简体中文与繁体中文两套本地化文案）。
 
