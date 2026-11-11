@@ -14,6 +14,9 @@ vim manifest.json package.json
 # 2. 重新生成 Firefox 那份 manifest —— 它是**算出来的**，版本号也从上面那份来
 node tools/make-manifest.mjs
 
+# 在 docs/releases/v<版本>.md 写本版本变更、兼容性及验证边界。
+# 标签工作流生成安装说明和自动变更列表；发布后用 gh release edit --notes-file
+# 合并本版本说明，并核对正文保留两个浏览器的安装步骤。
 npm test                       # 比对那两个数字，也比对 manifest.firefox.json 是不是最新的
 
 git commit -am "release: 1.2.0"
@@ -182,7 +185,7 @@ Release 上那份 `doubak-<版本>.zip` 就是提交用的，不需要另外打�
 而它此前散在五个文件里。
 
 提交时要用的那几样——扩展 id（**永远不能改**，理由写在那儿）、联系邮箱、
-`strict_min_version` 为什么是 140、`web-ext lint` 剩下的那条警告是什么
+`strict_min_version` 的当前下限及理由、`web-ext lint` 剩下的那条警告是什么
 ——都在 [`firefox.md`](firefox.md) 的「AMO 的两件事」。**这儿一个字都不抄**：
 一份说明出现在两处就会分叉，而分叉的方向是「其中一处还写着旧的 id」，
 那正好是那个字符串唯一不能出错的地方。有测试守着这一条，而它抓到的第一个违规者
