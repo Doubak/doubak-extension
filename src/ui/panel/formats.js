@@ -67,7 +67,7 @@ import { buildCanonical, buildNeodb, buildMarkdown, deflateRaw } from '../../pip
 // 而漂掉的那一份会把人送到一个空页面。
 import { FEEDBACK_URL } from '../../vendor/export-adapters/targets/neodb-ndjson.js';
 import {
-  canPickDirectory, directoryDestination, zipDestination, shellReadme, directoryWriter,
+  canPickDirectory, directoryDestination, zipDestination, shellReadme, directoryWriter, exportErrorMessage,
 } from './destination.js';
 
 /** 正在跑的那一个。非 null 时其余按钮禁用。 */
@@ -440,7 +440,7 @@ async function performExport(kind, selectedAccount) {
 
   } catch (e) {
     // 半截的中转文件不留在 OPFS 里——它不是档案，却会算进档案的配额。
-    await dest?.abort().catch(() => {});
+    try { await dest?.abort(); } catch (cleanupError) { e.cleanupError ??= cleanupError; }
     hideProgress();
 
     // **用户按了停，不是出错。** 一张红色的「导出失败」会让人以为自己弄坏了什么，
@@ -464,7 +464,7 @@ async function performExport(kind, selectedAccount) {
     el.replaceChildren();
     const b = document.createElement('b');
     b.textContent = '导出失败';
-    el.append(b, document.createTextNode(e.message));
+    el.append(b, document.createTextNode(exportErrorMessage(e, dest?.kind ?? (canPickDirectory() ? 'directory' : 'zip'))));
 
     // **解析器那条消息的结尾是给命令行写的**（「加 --ignore-warnings」），
     // 而这里没有命令行。原样印出来等于让人去找一个不存在的开关，

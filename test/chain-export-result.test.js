@@ -40,10 +40,10 @@ test('ZIP 收尾失败不登记已导出；等待链信息时切换账号不改�
       Worker: class { constructor() { return worker; } },
       navigator: { storage: { getDirectory: async () => ({
         removeEntry: async () => {},
-        getDirectoryHandle: async () => ({ getFileHandle: async (name) => {
+        getDirectoryHandle: async () => ({ values: async function* () {}, getFileHandle: async (name) => {
           names.push(name);
           return {
-            createWritable: async () => ({ write: async () => {}, close: async () => {} }),
+            createWritable: async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }),
             getFile: async () => { throw new Error('simulated final file failure'); },
           };
         } }),
@@ -69,4 +69,55 @@ test('ZIP 收尾失败不登记已导出；等待链信息时切换账号不改�
     assert.equal(dom.sent.filter((m) => m.type === 'chain').length, 1);
     assert.equal(dom.sent.filter((m) => m.type === 'markExported').length, 0);
   } finally { resetShared(); dom.restore(); }
+});
+
+test('#35 chain ZIP stops on the first write failure, aborts and never marks any bundle exported', async () => {
+  const { fakeOpfsWorker, seedBundle } = await import('./helpers/fake-opfs-worker.js');
+  const shared = await import('../src/ui/panel/shared.js');
+  const { selectSummaryBundle } = await import('../src/ui/panel/archive.js');
+  const { initExport } = await import('../src/ui/panel/export.js');
+  const worker = fakeOpfsWorker();
+  const ids = ['20261001T000000Z-aaaaaa', '20260901T000000Z-bbbbbb'];
+  let secondReads = 0, writes = 0, closes = 0, aborts = 0;
+  for (const [i, id] of ids.entries()) {
+    const store = await seedBundle(worker, `doubak-bundle-${id}`, {
+      'manifest.json': JSON.stringify({ bundle_id: id, segments: [], index: { filename: `index-${id}.ndjson` } }),
+      [`index-${id}.ndjson`]: '',
+    });
+    if (i) { const read = store.read.bind(store); store.read = (...args) => { secondReads++; return read(...args); }; }
+  }
+  const dom = await installFakeDom({
+    html: await readRepoFile('src/ui/panel.html'),
+    onMessage: msg => msg.type === 'chain' ? { ok: true, chain: { bundles: ids.map(bundleId => ({ bundleId })) } } : { ok: true },
+    extra: {
+      Worker: class { constructor() { return worker; } },
+      navigator: { storage: { getDirectory: async () => ({
+        removeEntry: async () => {},
+        getDirectoryHandle: async () => ({
+          values: async function* () {},
+          getFileHandle: async () => ({ createWritable: async () => ({
+            write: async () => { writes++; throw new DOMException('Quota exceeded', 'QuotaExceededError'); },
+            close: async () => { closes++; },
+            abort: async () => { aborts++; },
+          }) }),
+        }),
+      }) } },
+    },
+  });
+  try {
+    shared.resetShared(); globalThis.confirm = () => true;
+    selectSummaryBundle(ids[0]); initExport();
+    dom.byId.get('export-chain').dispatch('click');
+    const deadline = Date.now() + 2000;
+    while (!dom.byId.get('export-result').textContent.includes('打包空间不足')) {
+      assert.ok(Date.now() < deadline, dom.byId.get('export-result').textContent);
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.equal(writes, 1);
+    assert.equal(closes, 0);
+    assert.equal(aborts, 1);
+    assert.equal(secondReads, 0);
+    assert.equal(dom.sent.filter(m => m.type === 'markExported').length, 0);
+    assert.match(dom.byId.get('export-result').textContent, /清理 ZIP 中转文件/);
+  } finally { shared.resetShared(); dom.restore(); }
 });

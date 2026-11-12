@@ -23,6 +23,8 @@ import {
 import {
   loadArchive, invalidateBundles, setArchiveButtons, clearSelection, currentBundleId,
 } from './archive.js';
+import { stagingUsage, clearExportStaging, exportErrorMessage } from './destination.js';
+import { preflightStorage } from '../../storage/quota.js';
 import { refreshOpenTab } from './overview.js';
 
 /**
@@ -35,6 +37,7 @@ export async function loadStorage() {
   const el = $('storage');
   el.className = 'muted small';
   el.textContent = '正在统计…';
+  await loadExportStorage();
 
   try {
     const dirs = await scanBundleDirs();
@@ -55,6 +58,19 @@ export async function loadStorage() {
     el.className = 'card tone-error';
     el.textContent = `统计不出来：${e.message}`;
   }
+}
+
+/** 临时 ZIP 与档案分别展示；档案扫描失败也能清理中转文件。 */
+export async function loadExportStorage() {
+  const el = $('export-storage');
+  if (!el) return;
+  try {
+    const usage = await stagingUsage();
+    const space = await preflightStorage({ needBytes: 0 });
+    el.textContent = `ZIP 中转文件：${bytes(usage.bytes)}（${usage.files} 个）`
+      + (space ? ` · 浏览器估算剩余配额 ${bytes(space.available)}` : ' · 无法估算浏览器剩余配额')
+      + '。配额不代表磁盘实际空闲空间。下载完成或取消后可清理；只清中转文件，不删除档案。';
+  } catch (e) { el.textContent = `暂时无法统计 ZIP 中转占用：${e.message}。可在下载完成或取消后尝试清理。`; }
 }
 
 function renderStorage() {
@@ -232,6 +248,16 @@ function setStorageResult(tone, text) {
 
 /** 绑事件。 */
 export function initStorage() {
+  $('clear-export-staging')?.addEventListener('click', async () => {
+    const button = $('clear-export-staging');
+    button.disabled = true;
+    try {
+      const usage = await clearExportStaging();
+      setStorageResult('ok', `已清理 ZIP 中转文件（${bytes(usage.bytes)}），原始档案未修改。`);
+    } catch (e) {
+      setStorageResult(e?.name === 'AbortError' ? 'idle' : 'error', exportErrorMessage(e));
+    } finally { button.disabled = false; await loadExportStorage(); }
+  });
   $('delete-all').addEventListener('click', deleteAll);
 
   // 重扫：**把缓存扔掉再画一遍**，不是「再渲染一次」——后者会拿同一份陈旧数据

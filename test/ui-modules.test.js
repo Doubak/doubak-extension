@@ -178,7 +178,7 @@ function bound(src) {
   for (const m of src.matchAll(/\(([^()]*)\)\s*=>/g)) add(m[1]);
   for (const m of src.matchAll(/([\w$]+)\s*=>/g)) out.add(m[1]);
   for (const m of src.matchAll(/catch\s*\(([^)]*)\)/g)) add(m[1]);
-  for (const m of src.matchAll(/for\s*\(\s*(?:const|let|var)\s+(\[[^\]]*\]|\{[^}]*\}|[\w$]+)/g)) add(m[1]);
+  for (const m of src.matchAll(/for\s*(?:await\s*)?\(\s*(?:const|let|var)\s+(\[[^\]]*\]|\{[^}]*\}|[\w$]+)/g)) add(m[1]);
   return out;
 }
 
@@ -217,7 +217,7 @@ document window chrome console navigator location history performance
 setTimeout setInterval clearTimeout clearInterval queueMicrotask requestAnimationFrame
 alert confirm prompt fetch structuredClone
 Promise Object Array String Number Boolean Math JSON Date Map Set WeakMap WeakSet
-Error TypeError RangeError URL URLSearchParams Blob File FileReader
+Error TypeError RangeError DOMException URL URLSearchParams Blob File FileReader
 RegExp Symbol Proxy Reflect BigInt Intl Infinity NaN undefined globalThis
 Uint8Array Int8Array Uint16Array Uint32Array Float32Array Float64Array ArrayBuffer DataView
 TextEncoder TextDecoder AbortController Worker Response Request Headers

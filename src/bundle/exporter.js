@@ -238,10 +238,11 @@ export async function copyBundle({
         done += n;
         onProgress({ phase: 'copy', file: name, done, total, files: files.length, fileIndex: index });
       }
-    } finally {
-      // 出错也要关。半开的句柄在 File System Access 那一侧会把文件留在
-      // 未落盘状态，比一个明确写坏了的文件更难查。
       await out.close();
+    } catch (error) {
+      // 原子写入失败时放弃临时副本，保留原目标文件；清理失败不覆盖最初的错误。
+      try { if (out.abort) await out.abort(); else await out.close(); } catch { /* preserve cause */ }
+      throw error;
     }
 
     copied.push({ name, bytes: total });
@@ -445,6 +446,7 @@ export function directorySink(dir) {
       return {
         write: (bytes) => w.write(bytes),
         close: () => w.close(),
+        abort: () => w.abort(),
       };
     },
     async read(name) {

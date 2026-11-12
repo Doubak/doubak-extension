@@ -44,41 +44,54 @@ const HAS_UNZIP = (() => {
 // 接缝上**（中转目录先清没清、收尾之后 `getFile` 拿到的是不是完整的那一份），
 // 所以假一个比只读源码强得多。
 function fakeOpfs() {
-  const files = new Map();
-  const removed = [];
-  const dirFor = (name) => ({
-    async getFileHandle(fname) {
-      const key = `${name}/${fname}`;
-      if (!files.has(key)) files.set(key, []);
+  const files = new Map(), dirs = new Set();
+  const removed = [], calls = [], faults = {};
+  const missing = () => new DOMException('Entry not found', 'NotFoundError');
+  const check = (op) => { calls.push(op); if (faults[op]) throw faults[op]; };
+  const fileFor = (key) => ({
+    kind: 'file',
+    async createWritable() {
+      check('createWritable');
+      const parts = [];
       return {
-        async createWritable() {
-          files.set(key, []);
-          return {
-            write: async (chunk) => { files.get(key).push(chunk.slice()); },
-            close: async () => {},
-          };
-        },
-        async getFile() {
-          const parts = files.get(key);
-          const total = parts.reduce((n, p) => n + p.length, 0);
-          const buf = new Uint8Array(total);
-          let at = 0;
-          for (const p of parts) { buf.set(p, at); at += p.length; }
-          return { size: buf.length, _bytes: buf };
-        },
+        write: async (chunk) => { check('write'); parts.push(chunk.slice()); },
+        close: async () => { check('close'); files.set(key, parts); },
+        abort: async () => { check('abort'); },
       };
     },
-  });
-  return {
-    files,
-    removed,
-    storage: {
-      getDirectory: async () => ({
-        getDirectoryHandle: async (name) => dirFor(name),
-        removeEntry: async (name) => { removed.push(name); },
-      }),
+    async getFile() {
+      check('getFile');
+      const parts = files.get(key);
+      if (!parts) throw missing();
+      const buf = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+      let at = 0;
+      for (const p of parts) { buf.set(p, at); at += p.length; }
+      return { size: buf.length, _bytes: buf };
     },
-  };
+  });
+  const dirFor = (name) => ({
+    async *values() {
+      for (const key of files.keys()) if (key.startsWith(name + '/')) yield fileFor(key);
+    },
+    async getFileHandle(fname) {
+      check('getFileHandle');
+      const key = `${name}/${fname}`;
+      if (!files.has(key)) files.set(key, []);
+      return fileFor(key);
+    },
+  });
+  return { files, removed, calls, faults, storage: {
+    getDirectory: async () => ({
+      getDirectoryHandle: async (name, opts) => {
+        if (!dirs.has(name) && !opts?.create) throw missing();
+        dirs.add(name); return dirFor(name);
+      },
+      removeEntry: async (name) => {
+        check('removeEntry'); removed.push(name); dirs.delete(name);
+        for (const key of files.keys()) if (key.startsWith(name + '/')) files.delete(key);
+      },
+    }),
+  } };
 }
 
 /** 面板那一侧要 `document` 与 `URL.createObjectURL`。 */
@@ -97,7 +110,9 @@ function fakeWindow() {
     revoke: globalThis.URL.revokeObjectURL,
     setTimeout: globalThis.setTimeout,
     navigator: globalThis.navigator,
+    confirm: globalThis.confirm,
   };
+  globalThis.confirm = () => true;
   globalThis.document = { createElement: el, body: { append() {} } };
   globalThis.URL.createObjectURL = (f) => `blob:fake/${f.size}`;
   globalThis.URL.revokeObjectURL = (u) => revoked.push(u);
@@ -107,6 +122,8 @@ function fakeWindow() {
     revoked,
     timers,
     restore() {
+      for (const timer of timers) timer.fn();
+      globalThis.confirm = prev.confirm;
       globalThis.document = prev.document;
       globalThis.URL.createObjectURL = prev.URL;
       globalThis.URL.revokeObjectURL = prev.revoke;
@@ -400,5 +417,109 @@ test('不同面板通过 Web Locks 共享 ZIP 排他锁', async () => {
     await first.finish();
     const second = await panelB.zipDestination({ zipName: 'b.zip' });
     await second.abort();
+  } finally { w.restore(); }
+});
+
+// #35: disk-full failures must not commit a partial ZIP, hide the cause or poison the next export.
+for (const stage of ['createWritable', 'write', 'close', 'getFile']) {
+  test(`ZIP ${stage} quota failure cleans staging, preserves source and releases the lock`, async () => {
+    const opfs = fakeOpfs(), w = fakeWindow();
+    Object.defineProperty(globalThis, 'navigator', { value: opfs, configurable: true });
+    const quota = new DOMException('Quota exceeded', 'QuotaExceededError');
+    try {
+      const { zipDestination } = await import('../src/ui/panel/destination.js');
+      const { store, seg } = await makeBundle();
+      let dest;
+      if (stage === 'createWritable') {
+        opfs.faults[stage] = quota;
+        await assert.rejects(zipDestination({ zipName: 'failed.zip' }), e => e === quota);
+      } else {
+        dest = await zipDestination({ zipName: 'failed.zip' });
+        if (stage === 'write') {
+          const sink = await dest.sinkFor('bundle');
+          // Fail on payload, after the member header has already been written.
+          let open = sink.open;
+          sink.open = async (name) => { const member = await open(name); opfs.faults.write = quota; return member; };
+          await assert.rejects(exportBundle({ store, sink }), e => e === quota);
+          assert.equal(opfs.calls.includes('close'), false, 'failed writes must abort, not commit');
+        } else {
+          await exportBundle({ store, sink: await dest.sinkFor('bundle') });
+          opfs.faults[stage] = quota;
+          await assert.rejects(dest.finish(), e => e === quota);
+        }
+        await dest.abort(); // callers may also abort; must be idempotent
+      }
+      assert.equal(opfs.files.size, 0);
+      assert.equal(w.clicks.length, 0, 'no partial ZIP download');
+      assert.deepEqual(await store.read('data-000001.warc.gz'), seg);
+      delete opfs.faults[stage];
+      await (await zipDestination({ zipName: 'retry.zip' })).finish();
+      assert.equal(w.clicks.length, 1);
+    } finally { w.restore(); }
+  });
+}
+
+test('quota preflight rejects before creating a ZIP; unavailable estimates do not block export', async () => {
+  const opfs = fakeOpfs(), w = fakeWindow();
+  Object.defineProperty(globalThis, 'navigator', { value: opfs, configurable: true });
+  try {
+    const { zipDestination, exportErrorMessage } = await import('../src/ui/panel/destination.js');
+    opfs.storage.estimate = async () => ({ quota: 100, usage: 80 });
+    await assert.rejects(zipDestination({ zipName: 'large.zip', expectedBytes: 30 }), e => {
+      assert.equal(e.name, 'QuotaExceededError');
+      assert.equal(e.space.available, 20);
+      assert.match(exportErrorMessage(e), /浏览器.*配额|磁盘/);
+      assert.match(exportErrorMessage(e), /逐份导出/);
+      return true;
+    });
+    assert.equal(opfs.calls.includes('createWritable'), false);
+    opfs.storage.estimate = async () => { throw new Error('unavailable'); };
+    await (await zipDestination({ zipName: 'unknown.zip', expectedBytes: 30 })).finish();
+  } finally { w.restore(); }
+});
+
+test('completed downloads survive abort; cleanup requires confirmation and touches only staging', async () => {
+  const opfs = fakeOpfs(), w = fakeWindow();
+  Object.defineProperty(globalThis, 'navigator', { value: opfs, configurable: true });
+  try {
+    const { zipDestination, clearExportStaging, stagingUsage } = await import('../src/ui/panel/destination.js');
+    opfs.files.set('doubak-bundle-source/data.warc.gz', [enc.encode('original archive')]);
+    const dest = await zipDestination({ zipName: 'done.zip' });
+    const handed = await dest.finish();
+    await dest.abort(); // a UI/metadata failure after handoff must not delete the download
+    assert.deepEqual(await stagingUsage(), { bytes: handed.bytes, files: 1 });
+    globalThis.confirm = () => false;
+    await assert.rejects(clearExportStaging(), { name: 'AbortError' });
+    await assert.rejects(zipDestination({ zipName: 'next.zip' }), { name: 'AbortError' });
+    assert.equal((await stagingUsage()).files, 1);
+    globalThis.confirm = () => true;
+    await clearExportStaging();
+    assert.equal((await stagingUsage()).files, 0);
+    assert.equal(opfs.files.size, 1, 'only the source archive remains');
+    const active = await zipDestination({ zipName: 'active.zip' });
+    await assert.rejects(clearExportStaging(), /正在打包/);
+    await active.abort();
+  } finally { w.restore(); }
+});
+
+test('cleanup errors are visible and never replace the original quota error', async () => {
+  const opfs = fakeOpfs(), w = fakeWindow();
+  Object.defineProperty(globalThis, 'navigator', { value: opfs, configurable: true });
+  try {
+    const { zipDestination, exportErrorMessage } = await import('../src/ui/panel/destination.js');
+    const dest = await zipDestination({ zipName: 'failed.zip' });
+    opfs.faults.write = new DOMException('Quota exceeded', 'QuotaExceededError');
+    opfs.faults.removeEntry = new Error('file busy');
+    await assert.rejects(dest.finish(), e => {
+      assert.equal(e, opfs.faults.write);
+      assert.equal(e.cleanupError, opfs.faults.removeEntry);
+      assert.match(exportErrorMessage(e), /未能完全清理/);
+      return true;
+    });
+    delete opfs.faults.write;
+    // A failed cleanup also blocks overwriting stale staging; don't silently keep consuming space.
+    await assert.rejects(zipDestination({ zipName: 'retry.zip' }), /file busy/);
+    delete opfs.faults.removeEntry;
+    await (await zipDestination({ zipName: 'retry.zip' })).abort();
   } finally { w.restore(); }
 });

@@ -30,21 +30,18 @@
  * 文件」）——**而 Firefox 上根本没有可选的第二条路**。代价照说：导出期间需要大约
  * 两倍的空闲空间，这句话要出现在界面上。
  *
- * ## 中转文件什么时候删：下一次导出开始时，不是这一次结束时
+ * ## 中转文件的生命周期
  *
- * `<a download>` 点下去之后，**没有任何事件告诉我们浏览器读完了没有**。此时删掉
- * OPFS 里那份，下载会静默截断——用户拿到一个能打开、但少了东西的 zip，而这正是
- * 这个项目最怕的那类结果。所以清理挪到**下一次导出的开头**：那时上一次要么早就
- * 下完了，要么用户自己知道还在下。
- *
- * 代价是真的，写在这儿而不是藏着：**上一次导出的中转文件会一直占着空间，直到下一次
- * 导出**。仅剩的窗口是「上一份还在下载时又点了一次导出」——两害相权，无界增长的
- * 那一边更糟，因为它吃的是档案自己的配额。
+ * 失败时 abort 写入并删除临时文件；成功交给下载后保留中转文件，因为 `<a download>`
+ * 没有完成通知。下次导出或手动清理必须先确认下载已完成／取消，不能凭经过了多久猜测。
+ * 清理与打包共用跨面板锁，只操作专用中转目录，不触碰档案。
  */
 
 import { subdirectorySink } from '../../bundle/exporter.js';
 import { zipSink } from '../../bundle/zip-sink.js';
 import { ZipWriter } from '../../vendor/export-adapters/zip.js';
+import { classifyWriteError, preflightStorage, QUOTA } from '../../storage/quota.js';
+import { bytes } from './shared.js';
 
 /** OPFS 里的中转目录。**刻意不叫 `doubak-bundle-*`**——那个前缀是档案扫描的判据
  * （`bundleIdFromDirName`），撞上的话中转文件会被当成一份档案列出来。 */
@@ -58,6 +55,7 @@ export const STAGING_DIR = 'doubak-export-staging';
  * 撤销只是为了不无限期钉住那个 `File`，晚一点没有任何代价。
  */
 export const REVOKE_DELAY_MS = 10 * 60 * 1000;
+const handedUrls = new Set();
 
 /** 这个浏览器能不能让用户选文件夹。**按能力问，不按 UA 问。** */
 export function canPickDirectory() {
@@ -91,12 +89,58 @@ export function applyDestinationCopy(root = globalThis.document) {
 
 /** @param {FileSystemDirectoryHandle} root */
 async function purgeStaging(root) {
-  try {
-    await root.removeEntry(STAGING_DIR, { recursive: true });
-  } catch {
-    // 不存在（第一次导出）或者正被占用。两种都不该挡住这次导出——中转文件的清理
-    // 是善后，不是前提。
+  try { await root.removeEntry(STAGING_DIR, { recursive: true }); }
+  catch (e) { if (e?.name !== 'NotFoundError') throw e; }
+}
+
+/** 中转目录不属于档案；单独统计，包括旧版本留下的临时文件。 */
+export async function stagingUsage(root = null) {
+  root ??= await navigator.storage.getDirectory();
+  let dir;
+  try { dir = await root.getDirectoryHandle(STAGING_DIR); }
+  catch (e) { if (e?.name === 'NotFoundError') return { bytes: 0, files: 0 }; throw e; }
+  const usage = { bytes: 0, files: 0 };
+  async function walk(handle) {
+    for await (const entry of handle.values()) {
+      if (entry.kind === 'directory') await walk(entry);
+      else { usage.bytes += (await entry.getFile()).size; usage.files++; }
+    }
   }
+  await walk(dir);
+  return usage;
+}
+
+async function confirmPurge(root) {
+  const usage = await stagingUsage(root);
+  if (usage.files && !globalThis.confirm(
+    `上次导出的 ZIP 中转文件占用 ${bytes(usage.bytes)}。请先在浏览器下载列表确认下载已完成或已取消。\n\n`
+    + '现在清理中转文件？仍在进行的下载可能因此中断。扩展里的原始档案不会删除。',
+  )) throw new DOMException('已取消清理，请等下载完成后再试。', 'AbortError');
+  await purgeStaging(root);
+  for (const url of handedUrls) URL.revokeObjectURL(url);
+  handedUrls.clear();
+  return usage;
+}
+
+/** 显式清理与新导出用同一把锁，不能删除另一个面板正在打包的文件。 */
+export async function clearExportStaging() {
+  const release = await claimZipExport();
+  try { return await confirmPurge(await navigator.storage.getDirectory()); }
+  finally { release(); }
+}
+
+/** 所有导出入口共用；配额不等于物理磁盘剩余空间。 */
+export function exportErrorMessage(error, kind = 'zip') {
+  let message = `${kind === 'zip' ? '打包' : '导出'}失败：${error?.message ?? String(error)}`;
+  if (classifyWriteError(error).reason === QUOTA) {
+    message = kind === 'zip'
+      ? '打包空间不足：可能是浏览器存储配额已满，或磁盘可用空间不足。到「档案」页清理 ZIP 中转文件，并检查浏览器配置文件所在磁盘及下载磁盘的空闲空间；整条链太大时可逐份导出（保留所有祖先档案）。'
+      : '导出空间不足：请释放目标磁盘空间后重试；已有文件可通过再次导出进行核对与补齐。';
+    if (error?.space) message += ` 浏览器估算剩余 ${bytes(error.space.available)}，本次中转预计需要 ${bytes(error.space.need)}。`;
+    message += ` 原始错误：${error?.message ?? error}。`;
+  }
+  if (error?.cleanupError) message += ` 中转文件未能完全清理：${error.cleanupError.message}；请稍后在「档案」页再次清理。`;
+  return message + ' 扩展里的原始档案未修改。';
 }
 
 /**
@@ -114,10 +158,11 @@ function handOff(file, name) {
   a.download = name;
   a.rel = 'noopener';
   // 必须真的挂进文档：Firefox 不点击游离节点上的下载。
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
+  try { document.body.append(a); a.click(); }
+  catch (e) { URL.revokeObjectURL(url); throw e; }
+  finally { a.remove(); }
+  handedUrls.add(url);
+  setTimeout(() => { URL.revokeObjectURL(url); handedUrls.delete(url); }, REVOKE_DELAY_MS);
 }
 
 /**
@@ -185,42 +230,72 @@ async function claimZipExport() {
  *   只影响整块写入的成员。档案那条路一个都用不上（段文件是 `.warc.gz`，已经压过），
  *   派生产物那条路（NDJSON / Markdown）值得压。
  * @param {string} [opts.readme] 放在 zip 根上的一句说明
+ * @param {number} [opts.expectedBytes] 原始档案 ZIP 的估算大小；派生输出未知时不硬性拦截。
  * @returns {Promise<Destination>}
  */
-export async function zipDestination({ zipName, deflateRaw, readme }) {
+export async function zipDestination({ zipName, deflateRaw, readme, expectedBytes }) {
   const release = await claimZipExport();
+  let root;
+  let out;
+  let ownsStaging = false;
+  let closed = false;
+  let handed = false;
+  let aborted = false;
+  const abort = async () => {
+    if (handed || aborted) return;
+    aborted = true;
+    let failure;
+    try {
+      // 失败不能 close()：那会尝试提交半份 ZIP，甚至再次遇到配额错误。
+      if (out && !closed) try { await out.abort(); } catch (e) { failure = e; }
+      if (ownsStaging) try { await purgeStaging(root); } catch (e) { failure ??= e; }
+    } finally { release(); }
+    if (failure) throw failure;
+  };
+  const fail = async (error) => {
+    try { await abort(); } catch (cleanupError) { error.cleanupError = cleanupError; }
+    throw error;
+  };
   try {
-    const root = await navigator.storage.getDirectory();
-    await purgeStaging(root);
+    root = await navigator.storage.getDirectory();
+    await confirmPurge(root);
+    if (Number.isFinite(expectedBytes) && expectedBytes > 0) {
+      const space = await preflightStorage({ needBytes: expectedBytes });
+      if (space && !space.enough) {
+        const error = new DOMException('浏览器估算的剩余配额不足以存放 ZIP 中转文件', 'QuotaExceededError');
+        error.space = space;
+        throw error;
+      }
+    }
+    ownsStaging = true;
     const dir = await root.getDirectoryHandle(STAGING_DIR, { create: true });
     const fh = await dir.getFileHandle(zipName, { create: true });
-    const out = await fh.createWritable();
-    const writer = new ZipWriter({ write: (chunk) => out.write(chunk), deflateRaw });
-
-    let closed = false;
-    const closeOnce = async () => { if (!closed) { closed = true; await out.close(); } };
-
+    out = await fh.createWritable();
+    const writer = new ZipWriter({ write: async (chunk) => {
+      if (aborted || handed) throw new Error('ZIP 打包已结束');
+      try { await out.write(chunk); } catch (e) { await fail(e); }
+    }, deflateRaw });
     return {
       kind: 'zip',
       sinkFor: async (subdir) => zipSink(writer, subdir),
       writerFor: async (subdir) => (rel, data) => writer.add(`${subdir}/${rel}`, data),
       finish: async () => {
-        // 这一句放在中央目录之前：它是解压之后第一眼看到的东西，而「这是个壳子」
-        // 恰恰要在那一刻说清楚。
-        if (readme) await writer.add('先看这个.txt', new TextEncoder().encode(readme));
-        await writer.finish();
-        await closeOnce();
-        const file = await fh.getFile();
-        handOff(file, zipName);
-        release();
-        return { name: zipName, bytes: file.size };
+        if (aborted || handed) throw new Error('ZIP 打包已结束');
+        try {
+          if (readme) await writer.add('先看这个.txt', new TextEncoder().encode(readme));
+          await writer.finish();
+          await out.close();
+          closed = true;
+          const file = await fh.getFile();
+          handOff(file, zipName);
+          handed = true;
+          release();
+          return { name: zipName, bytes: file.size };
+        } catch (e) { return fail(e); }
       },
-      abort: async () => {
-        await closeOnce().catch(() => {});
-        try { await purgeStaging(root); } finally { release(); }
-      },
+      abort,
     };
-  } catch (e) { release(); throw e; }
+  } catch (e) { return fail(e); }
 }
 
 /**
@@ -252,8 +327,13 @@ export function directoryWriter(root) {
     // **走 createWritable，不是先攒后写。** 它写的是临时文件，只在 close() 那一刻
     // 整体换上去——中断留下的是「没有这个文件」，而不是「半个文件」。
     const w = await fh.createWritable();
-    await w.write(data);
-    await w.close();
+    try {
+      await w.write(data);
+      await w.close();
+    } catch (e) {
+      await w.abort().catch(() => {});
+      throw e;
+    }
   };
 }
 

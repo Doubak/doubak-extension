@@ -16,14 +16,14 @@
  * ——那句话的**原因是错的**，而一个说错原因的提示会把人送去修一个不存在的问题。
  */
 
-import { exportBundle } from '../../bundle/exporter.js';
+import { exportBundle, NOT_PART_OF_BUNDLE } from '../../bundle/exporter.js';
 import { WorkerFileStore } from '../../storage/worker-file-store.js';
 import { bundleDirName } from '../../core/ids.js';
 import {
   $, send, bytes, table, countAlreadyExported, getOpfsWorker, noteExported,
 } from './shared.js';
 import {
-  canPickDirectory, directoryDestination, zipDestination, shellReadme,
+  canPickDirectory, directoryDestination, zipDestination, shellReadme, exportErrorMessage,
 } from './destination.js';
 import { refreshOpenTab } from './overview.js';
 import { reader, currentBundleId } from './archive.js';
@@ -173,6 +173,17 @@ function nextStepsLine() {
   return next;
 }
 
+/** 原始档案的成员已压缩；按实际文件大小加 ZIP 头部余量预检，不读取整个文件。 */
+export async function archiveZipBytes(stores) {
+  let total = 4096;
+  for (const store of stores) {
+    for (const name of await store.list()) {
+      if (!NOT_PART_OF_BUNDLE.has(name)) total += await store.size(name) + 1024;
+    }
+  }
+  return total;
+}
+
 let archiveExportRunning = false;
 function bindExport(id, action) {
   $(id).addEventListener('click', async () => {
@@ -182,7 +193,7 @@ function bindExport(id, action) {
     catch (e) {
       const el = $('export-result');
       el.className = 'card tone-error';
-      el.textContent = `导出失败：${e.message}`;
+      el.textContent = e?.name === 'AbortError' ? e.message : exportErrorMessage(e, canPickDirectory() ? 'directory' : 'zip');
     } finally { archiveExportRunning = false; }
   });
 }
@@ -230,6 +241,7 @@ export function initExport() {
       ? directoryDestination(parent)
       : await zipDestination({
         zipName,
+        expectedBytes: await archiveZipBytes(ids.map((id) => new WorkerFileStore({ worker: getOpfsWorker(), dir: bundleDirName(id) }))),
         readme: shellReadme(`这条链上的 ${ids.length} 份档案，每份一个 doubak-bundle-<编号> 文件夹`),
       });
 
@@ -254,7 +266,14 @@ export function initExport() {
         // 给的保证（删除确认框会据此决定说得多重）。
         if (res.problems.length === 0 && dest.kind === 'directory') await noteExported(id, dest.kind);
       } catch (e) {
-        // **一份失败不中断其余的。** 用户要的是尽可能多地搬走，而不是在第三份上
+        // ZIP 共用一个流；任一成员失败便不能继续生成可误认为完整的下载。
+        if (dest.kind === 'zip') {
+          try { await dest.abort(); } catch (cleanupError) { e.cleanupError ??= cleanupError; }
+          el.className = 'card tone-error';
+          el.textContent = exportErrorMessage(e);
+          return;
+        }
+        // **目录导出一份失败不中断其余的。** 用户要的是尽可能多地搬走，而不是在第三份上
         // 停下、前两份还留在原地不知道成没成。
         done.push({ bundleId: id, result: null, error: e.message });
       }
@@ -267,8 +286,8 @@ export function initExport() {
       handed = await dest.finish();
     } catch (e) {
       el.className = 'card tone-error';
-      el.textContent = `打包失败：${e.message}。扩展里的档案一份都没动。`;
-      await dest.abort();
+      try { await dest.abort(); } catch (cleanupError) { e.cleanupError ??= cleanupError; }
+      el.textContent = exportErrorMessage(e, dest.kind);
       return;
     }
 
@@ -315,9 +334,10 @@ export function initExport() {
       ? directoryDestination(dir)
       : await zipDestination({
         zipName: `doubak-archive-${bundleId}.zip`,
+        expectedBytes: await archiveZipBytes([store]),
         readme: shellReadme(`标准的档案目录 ${folder}/`),
       });
-    const sink = await dest.sinkFor(folder);
+    let sink;
     const run = (opts) => exportBundle({
       store, sink, ...opts,
       onProgress: (p) => {
@@ -332,6 +352,7 @@ export function initExport() {
     });
 
     try {
+      sink = await dest.sinkFor(folder);
       let r;
       try {
         r = await run({});
@@ -380,9 +401,9 @@ export function initExport() {
       }
     } catch (e) {
       // 中转文件不留在 OPFS 里白占地方——这一份已经确定不会交给用户了。
-      await dest.abort().catch(() => {});
+      try { await dest.abort(); } catch (cleanupError) { e.cleanupError ??= cleanupError; }
       el.className = 'card tone-error';
-      el.textContent = `导出失败：${e.message}`;
+      el.textContent = e?.name === 'AbortError' ? e.message : exportErrorMessage(e, canPickDirectory() ? 'directory' : 'zip');
     }
   });
 
