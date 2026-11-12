@@ -236,12 +236,9 @@ async function withRetry(fn) {
  * @param {boolean} opts.allowWrites
  */
 export function serveOpfsRpc({ allowWrites, importOnly = false }) {
-  /** @type {Map<string, import('./file-store.js').FileStore>} */
-  const open = new Map();
-  const storeFor = async (dir) => {
-    if (!open.has(dir)) open.set(dir, await OpfsFileStore.open(dir));
-    return open.get(dir);
-  };
+  // 目录可能被另一个 Worker 删除／重建。缓存旧句柄会让后续重扫一直报
+  // NotFoundError；每次从根重新打开，只读 Worker 也不能顺手重建已删除的档案。
+  const storeFor = (dir) => OpfsFileStore.open(dir, { create: allowWrites });
   /**
    * 认领过的目录。**活在 Worker 里，不在消息里**——写在消息里的话调用方自己就能
    * 声称认领过了，那这条边界就退回成了一句约定。

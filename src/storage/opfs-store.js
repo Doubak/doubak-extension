@@ -64,12 +64,12 @@ export class OpfsFileStore {
    * @param {string} dirName
    * @returns {Promise<OpfsFileStore>}
    */
-  static async open(dirName) {
+  static async open(dirName, { create = true } = {}) {
     if (typeof navigator === 'undefined' || !navigator.storage?.getDirectory) {
       throw new Error('当前环境没有 OPFS（navigator.storage.getDirectory 不可用）');
     }
     const root = await navigator.storage.getDirectory();
-    const dir = await root.getDirectoryHandle(dirName, { create: true });
+    const dir = await root.getDirectoryHandle(dirName, { create });
     return new OpfsFileStore(dir);
   }
 

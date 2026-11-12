@@ -133,7 +133,7 @@ export async function loadArchive() {
   } catch (e) {
     if (generation !== archiveLoadGeneration) return;
     $('archive-summary').className = 'card tone-error';
-    $('archive-summary').textContent = `读不出存储：${e.message}`;
+    $('archive-summary').textContent = `读不出存储：${e.message}。请点「重新扫描存储」；若仍失败，重新打开面板后再试。不要清除扩展数据，未导出的档案可能是唯一副本。`;
     return;
   }
 

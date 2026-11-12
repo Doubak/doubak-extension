@@ -370,7 +370,11 @@ export async function scanBundleDirs({ force = false } = {}) {
   if (bundleScan) return bundleScan;
   if (bundleScanFlight) return bundleScanFlight;
   const generation = bundleScanGeneration;
-  const flight = readBundleDirs().then((out) => {
+  const flight = readBundleDirs().catch((error) => {
+    // 扫描期间另一面板可能完成删除或导入回滚。重列一次根目录，不能吞掉持续性读取错误。
+    if (error?.name === 'NotFoundError') return readBundleDirs();
+    throw error;
+  }).then((out) => {
     if (generation === bundleScanGeneration) bundleScan = out;
     return out;
   });
