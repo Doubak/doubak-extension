@@ -56,6 +56,7 @@ export const DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024;
  * @typedef {object} ExportSinkFile
  * @property {(bytes: Uint8Array) => Promise<void>} write
  * @property {() => Promise<void>} close
+ * @property {() => Promise<void>} [abort] 放弃失败写入；支持原子写入的目的地保留旧文件。
  */
 
 /**

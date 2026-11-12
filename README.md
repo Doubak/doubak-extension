@@ -20,6 +20,8 @@
 
 ## 多账号与公开归档
 
+**main 待发布修复（#35）**：ZIP 导出空间不足时立即停止并清理失败中转，档案页可查看和清理已完成下载留下的中转文件；原始档案不变。配额与磁盘空间的区别、验证范围见[审计记录](docs/designs/export-storage-pressure.md)。
+
 Firefox 打包、账号切换及导入导出实测见[兼容性核对](docs/designs/firefox-multi-account-audit-2026-10-18.md)。
 
 设计逐项覆盖与尚未实现的部分见[实现核对记录](docs/designs/public-and-third-party-account-archive-review.md)。

@@ -1167,7 +1167,7 @@ describe('面板脚本', () => {
     assert.ok(code.includes('已抓取多次'));
   });
 
-  test('导出整条链：按钮在、逐份导、一份失败不中断其余', async () => {
+  test('导出整条链：按钮在、逐份导、每份独立目录', async () => {
     const html = await readRepoFile('src/ui/panel.html');
     assert.match(html, /id="export-chain"/);
     assert.match(html, /导出这一份/, '单份那个按钮要改名，否则两个都叫「导出」分不清');
@@ -1188,12 +1188,7 @@ describe('面板脚本', () => {
       '文件夹那条路平铺了');
     assert.match(dest, /sinkFor: async \(subdir\) => zipSink\(writer, subdir\)/,
       'zip 那条路平铺了 —— 解开之后会是一堆散文件，不是一个能搬回来的文件夹');
-    // 一份失败不中断其余
-    // **按模块取，不按字符位置切。** 原来是从 `$('export-chain')` 第一次出现的地方
-    // 切到某个函数名——那默认了「监听器写在渲染函数前面」，而面板一拆成模块，这个
-    // 默认就不成立了（拼接顺序按文件名排）。判据不该绑在源码顺序上。
-    const exp = await readRepoFile('src/ui/panel/export.js');
-    assert.match(exp, /catch \(e\)[\s\S]{0,200}done\.push/, '失败也要记下来并继续');
+    // 失败处理由 chain-export-result.test.js 执行验证：目录继续，ZIP 立即停止。
   });
 
   test('导出结果逐份说清楚，不汇总成一句「成功」', async () => {

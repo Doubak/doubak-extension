@@ -121,3 +121,48 @@ test('#35 chain ZIP stops on the first write failure, aborts and never marks any
     assert.match(dom.byId.get('export-result').textContent, /清理 ZIP 中转文件/);
   } finally { shared.resetShared(); dom.restore(); }
 });
+
+test('directory chain export still continues after a per-bundle failure', async () => {
+  const { fakeOpfsWorker, seedBundle } = await import('./helpers/fake-opfs-worker.js');
+  const shared = await import('../src/ui/panel/shared.js');
+  const { selectSummaryBundle } = await import('../src/ui/panel/archive.js');
+  const { initExport } = await import('../src/ui/panel/export.js');
+  const worker = fakeOpfsWorker();
+  const ids = ['20261001T000000Z-aaaaaa', '20260901T000000Z-bbbbbb'];
+  for (const id of ids) await seedBundle(worker, `doubak-bundle-${id}`, { 'README.txt': 'saved bytes' });
+  const saved = new Map();
+  let aborts = 0;
+  const root = { getDirectoryHandle: async dir => ({
+    getFileHandle: async name => ({
+      createWritable: async () => {
+        let bytes;
+        return {
+          write: async data => { if (dir.endsWith(ids[0])) throw new Error('first bundle failed'); bytes = data; },
+          close: async () => saved.set(`${dir}/${name}`, bytes),
+          abort: async () => { aborts++; },
+        };
+      },
+      getFile: async () => ({ arrayBuffer: async () => saved.get(`${dir}/${name}`).buffer }),
+    }),
+  }) };
+  const dom = await installFakeDom({
+    html: await readRepoFile('src/ui/panel.html'),
+    onMessage: msg => msg.type === 'chain' ? { ok: true, chain: { bundles: ids.map(bundleId => ({ bundleId })) } } : { ok: true },
+    extra: { Worker: class { constructor() { return worker; } } },
+  });
+  try {
+    globalThis.window.showDirectoryPicker = async () => root;
+    globalThis.confirm = () => true;
+    shared.resetShared(); selectSummaryBundle(ids[0]); initExport();
+    dom.byId.get('export-chain').dispatch('click');
+    const deadline = Date.now() + 2000;
+    while (!dom.byId.get('export-result').textContent.includes('2 份中有 1 份')) {
+      assert.ok(Date.now() < deadline, dom.byId.get('export-result').textContent);
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.equal(aborts, 1);
+    assert.equal(saved.size, 1);
+    assert.equal(new TextDecoder().decode(saved.get(`doubak-bundle-${ids[1]}/README.txt`)), 'saved bytes');
+    assert.deepEqual(dom.sent.filter(m => m.type === 'markExported').map(m => m.bundleId), [ids[1]]);
+  } finally { shared.resetShared(); dom.restore(); }
+});

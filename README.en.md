@@ -34,9 +34,14 @@ Two things an English-speaking reader should know before installing:
 - **Chrome, Edge and desktop Firefox are supported.** Install from the
   [Chrome Web Store](https://chromewebstore.google.com/detail/hilmaopahndgbiolohgefnbeedobpafe)
   or [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/doubak/).
-  Firefox requires version 140 or later and the dedicated Firefox package. It uses
+  Firefox requires version 142 or later and the dedicated Firefox package. It uses
   a background host page and ZIP downloads; Chrome and Edge can write to a chosen folder.
   Safari is not supported. Other browsers need separate verification.
+
+The unreleased #35 fix on main stops failed ZIP exports, aborts partial writes, and exposes
+staging usage and cleanup in the Archive tab. Cleanup requires confirming that the download
+has completed or been cancelled. Original archives stay untouched. Browser quota estimates
+cannot guarantee physical disk space; see the [audit](docs/designs/export-storage-pressure.md).
 
 ## Public archives and multiple accounts
 

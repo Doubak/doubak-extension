@@ -523,3 +523,41 @@ test('cleanup errors are visible and never replace the original quota error', as
     await (await zipDestination({ zipName: 'retry.zip' })).abort();
   } finally { w.restore(); }
 });
+
+test('explicit staging cleanup remains available when stale file sizes cannot be read', async () => {
+  const opfs = fakeOpfs(), w = fakeWindow();
+  Object.defineProperty(globalThis, 'navigator', { value: opfs, configurable: true });
+  try {
+    const { zipDestination, clearExportStaging } = await import('../src/ui/panel/destination.js');
+    await (await zipDestination({ zipName: 'old.zip' })).finish();
+    opfs.faults.getFile = new DOMException('Entry not found', 'NotFoundError');
+    let question;
+    globalThis.confirm = text => { question = text; return true; };
+    const usage = await clearExportStaging();
+    assert.equal(usage.bytes, null);
+    assert.match(question, /无法统计/);
+    assert.match(question, /下载已完成或已取消/);
+    assert.equal(opfs.files.size, 0);
+  } finally { w.restore(); }
+});
+
+test('directory raw and derived writers abort failed replacement and preserve existing bytes', async () => {
+  const opfs = fakeOpfs(), w = fakeWindow();
+  Object.defineProperty(globalThis, 'navigator', { value: opfs, configurable: true });
+  try {
+    const { directoryWriter } = await import('../src/ui/panel/destination.js');
+    const { directorySink } = await import('../src/bundle/exporter.js');
+    const dir = await (await opfs.storage.getDirectory()).getDirectoryHandle('output', { create: true });
+    const old = enc.encode('existing exported copy');
+    opfs.files.set('output/README.txt', [old]);
+    const error = new DOMException('Quota exceeded', 'QuotaExceededError');
+    opfs.faults.write = error;
+    await assert.rejects(directoryWriter(dir)('README.txt', enc.encode('new')), e => e === error);
+    const source = new MemoryFileStore();
+    await source.replace('README.txt', enc.encode('new'));
+    await assert.rejects(exportBundle({ store: source, sink: directorySink(dir), overwrite: true }), e => e === error);
+    assert.deepEqual(opfs.files.get('output/README.txt'), [old]);
+    assert.equal(opfs.calls.filter(c => c === 'abort').length, 2);
+    assert.equal(opfs.calls.includes('close'), false);
+  } finally { w.restore(); }
+});

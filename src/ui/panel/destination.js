@@ -111,9 +111,11 @@ export async function stagingUsage(root = null) {
 }
 
 async function confirmPurge(root) {
-  const usage = await stagingUsage(root);
-  if (usage.files && !globalThis.confirm(
-    `上次导出的 ZIP 中转文件占用 ${bytes(usage.bytes)}。请先在浏览器下载列表确认下载已完成或已取消。\n\n`
+  let usage;
+  try { usage = await stagingUsage(root); }
+  catch { usage = { bytes: null, files: null }; } // 统计失败不能堵死专用临时目录的清理入口。
+  if (usage.files !== 0 && !globalThis.confirm(
+    `上次导出的 ZIP 中转文件${usage.bytes === null ? '占用暂时无法统计' : `占用 ${bytes(usage.bytes)}`}。请先在浏览器下载列表确认下载已完成或已取消。\n\n`
     + '现在清理中转文件？仍在进行的下载可能因此中断。扩展里的原始档案不会删除。',
   )) throw new DOMException('已取消清理，请等下载完成后再试。', 'AbortError');
   await purgeStaging(root);

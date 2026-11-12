@@ -253,9 +253,9 @@ export function initStorage() {
     button.disabled = true;
     try {
       const usage = await clearExportStaging();
-      setStorageResult('ok', `已清理 ZIP 中转文件（${bytes(usage.bytes)}），原始档案未修改。`);
+      setStorageResult('ok', `已清理 ZIP 中转文件${usage.bytes === null ? '' : `（${bytes(usage.bytes)}）`}，原始档案未修改。浏览器可能延迟回收空间。`);
     } catch (e) {
-      setStorageResult(e?.name === 'AbortError' ? 'idle' : 'error', exportErrorMessage(e));
+      setStorageResult(e?.name === 'AbortError' ? 'idle' : 'error', e?.name === 'AbortError' ? e.message : exportErrorMessage(e));
     } finally { button.disabled = false; await loadExportStorage(); }
   });
   $('delete-all').addEventListener('click', deleteAll);

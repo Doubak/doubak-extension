@@ -192,7 +192,7 @@ function bindExport(id, action) {
     try { await action(); }
     catch (e) {
       const el = $('export-result');
-      el.className = 'card tone-error';
+      el.className = `card tone-${e?.name === 'AbortError' ? 'idle' : 'error'}`;
       el.textContent = e?.name === 'AbortError' ? e.message : exportErrorMessage(e, canPickDirectory() ? 'directory' : 'zip');
     } finally { archiveExportRunning = false; }
   });
@@ -234,7 +234,7 @@ export function initExport() {
         ? '每份各占一个子目录 doubak-bundle-<编号>。已存在的同名文件会被覆盖。'
         : `这个浏览器不能往文件夹里写，所以打包成一个 zip 交给下载：${zipName}。\n`
           + '解开之后每份各占一个子目录 doubak-bundle-<编号>，与在 Chrome 上导出的一样。\n'
-          + '打包期间需要大约两倍于档案的空闲空间。'),
+          + '打包期间需要大约两倍于档案的空闲空间（中转 ZIP 与下载文件各一份）；请同时检查浏览器配置文件和下载目录所在磁盘。浏览器配额估算不保证磁盘空间足够。'),
     )) return;
 
     const dest = parent
@@ -402,7 +402,7 @@ export function initExport() {
     } catch (e) {
       // 中转文件不留在 OPFS 里白占地方——这一份已经确定不会交给用户了。
       try { await dest.abort(); } catch (cleanupError) { e.cleanupError ??= cleanupError; }
-      el.className = 'card tone-error';
+      el.className = `card tone-${e?.name === 'AbortError' ? 'idle' : 'error'}`;
       el.textContent = e?.name === 'AbortError' ? e.message : exportErrorMessage(e, canPickDirectory() ? 'directory' : 'zip');
     }
   });
