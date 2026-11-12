@@ -5,7 +5,7 @@
 
 当前多账号交互与实现边界以[实现核对记录](designs/public-and-third-party-account-archive-review.md)为准。
 本文早期线框保留设计过程；当前操作说明见面板 Help 和 README。
-头像与个人站点图标另见[新设计](designs/account-avatar-and-site-branding.md)，尚未实现。
+头像与个人站点图标已实现，见[设计与实现记录](designs/done/account-avatar-and-site-branding.md)。
 
 ## 0. 三个约束决定了一切
 
@@ -216,7 +216,7 @@ Firefox 无目录写入 API，例外采用 OPFS 流式 ZIP 中转；不能把整
 档案页单独显示中转占用与配额估算，可在确认下载完成／取消后清理，未完成的写入用 abort 放弃。
 原始 ZIP 按实际成员大小预检配额；派生 ZIP 大小未知，不用档案大小冒充其估算。
 失败时立即停止整个 ZIP，不登记导出记录；目录模式仍允许逐份报告结果。
-见 [空间不足与中转清理审计](designs/export-storage-pressure.md)。
+见 [空间不足与中转清理审计](designs/done/export-storage-pressure.md)。
 
 三种产出**各占一个子目录**（`doubak-neodb/` / `doubak-canonical/` / `doubak-markdown/`）。
 平铺的话 `README` 之类会互相覆盖——档案页早就为这件事付过一次代价：用户的下载目录里
@@ -483,7 +483,7 @@ DESIGN 的 F-10b2。
 ### 4.5b.1 保存广播回复首屏
 
 实现版本：v1.7.0，issue #26 的首版抓取控件。完整范围见
-[回复首屏设计](designs/broadcast-details-and-replies.md)。
+[回复首屏设计](designs/done/broadcast-details-and-replies.md)。
 
 在当前登录提示已确认本人或目标账号已核验为本人之后，于抓取模式选项下放置原生复选框“保存广播回复首屏”，首次显示默认不勾选。
 辅助文字：
@@ -1022,7 +1022,7 @@ OPFS 里的东西挂在扩展的来源下。卸载扩展、清站点数据、某
 ### 10.3.1 回复首屏快照的导出边界
 
 状态：issue #26 首版采用原始快照方案，取代此前的“包含讨论”导出控件提案。
-参见 [广播回复首屏设计](designs/broadcast-details-and-replies.md)。
+参见 [广播回复首屏设计](designs/done/broadcast-details-and-replies.md)。
 
 **导出页不新增“包含讨论”复选框。**回复快照只随原始 WARC/bundle 导出；
 结构化个人数据、Markdown 站点与 NeoDB 等外部平台导出不新增回复正文。

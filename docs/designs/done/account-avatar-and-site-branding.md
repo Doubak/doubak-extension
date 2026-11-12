@@ -3,7 +3,7 @@
 状态：已在 main 实现，2026-10-17；不代表商店安装包已更新。验收结果见 [实现核对](account-avatar-implementation-review.md)。
 适用仓库：data-specs → data-parser / extension → site-generator；export-adapters 只需兼容新增记录。
 
-承接[公开与多账号归档设计](public-and-third-party-account-archive.md) §7.1.6、§7.3：
+承接[公开与多账号归档设计](../public-and-third-party-account-archive.md) §7.1.6、§7.3：
 本设计细化头像链路，并替代 §7.1.6 中没有修订与来源证据的扁平 profile 示例。
 简介、所在地、加入日期等完整个人资料留待后续，不能为完成 favicon 而猜测这些字段。
 

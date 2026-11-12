@@ -41,7 +41,7 @@ Two things an English-speaking reader should know before installing:
 The unreleased #35 fix on main stops failed ZIP exports, aborts partial writes, and exposes
 staging usage and cleanup in the Archive tab. Cleanup requires confirming that the download
 has completed or been cancelled. Original archives stay untouched. Browser quota estimates
-cannot guarantee physical disk space; see the [audit](docs/designs/export-storage-pressure.md).
+cannot guarantee physical disk space; see the [audit](docs/designs/done/export-storage-pressure.md).
 
 ## Public archives and multiple accounts
 
@@ -74,7 +74,7 @@ Site titles use the account nickname, falling back to username or UID. Titled to
 broadcasts retain their title in canonical data, Markdown and search. Target account avatars
 are archived and included in Markdown exports; the Hugo generator creates local favicons
 and header images, with the previous green logo as fallback. See the
-[avatar design](docs/designs/account-avatar-and-site-branding.md) and
+[avatar design](docs/designs/done/account-avatar-and-site-branding.md) and
 [implementation coverage](docs/designs/public-and-third-party-account-archive-review.md).
 
 
@@ -232,7 +232,8 @@ The Chinese documents are the canonical ones and go into far more depth than thi
 - [`DESIGN.md`](DESIGN.md) — scope model, crawl boundaries, three measured appendices
 - [`docs/permissions.md`](docs/permissions.md) — permission audit
 - [`docs/ui.md`](docs/ui.md) — interface design, and how progress is reported honestly
-- [`Broadcast details and replies`](docs/designs/broadcast-details-and-replies.md) — issue #26 research and an opt-in, self-account-only raw first-page reply snapshot proposal (Chinese; not implemented)
+- [Design index and status](docs/designs/README.md) — unfinished designs, implemented work in `done/`, and investigation fixtures (Chinese).
+- [`Broadcast details and replies`](docs/designs/done/broadcast-details-and-replies.md) — issue #26 design and verification for opt-in, self-account-only raw first-page reply snapshots (implemented in v1.7.0; Chinese)
 
 ## License
 

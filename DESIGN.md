@@ -763,7 +763,7 @@ M0 的第①和第④项是整个项目最大的两个未知数，应当最先�
 网站或平台导出。这是已选个人主帖的一页上下文证据，不恢复社交网络遍历。
 范围包含已验证的 status 与 personal topic（后者有独立 topic ID，正文可编辑，刷新模式重抓 HTML）；
 不因复用 group/topic 评论 API 扩大到小组讨论。
-模式、视角、恢复与跨仓库边界见 [广播快照设计](docs/designs/broadcast-details-and-replies.md)。
+模式、视角、恢复与跨仓库边界见 [广播快照设计](docs/designs/done/broadcast-details-and-replies.md)。
 
 **边界论据**：任何一条社交边都是可以无限展开的入口。关注列表指向别的用户，那些用户又有自己的内容和关注列表；回应指向回应者，回应者又有自己的广播。而档案必须是**有界**的。
 

@@ -9,8 +9,8 @@
 ---
 
 当前交付范围与缺口见[实现核对](public-and-third-party-account-archive-review.md)，不以本文的提案表格作为完成清单。
-§7.1.6 的 profile 示例及头像站点链路由[头像专项设计](account-avatar-and-site-branding.md)细化；
-昵称、域名与头像链路已在 main 实现，简介等完整资料仍待实现，见[头像核对](account-avatar-implementation-review.md)。
+§7.1.6 的 profile 示例及头像站点链路由[头像专项设计](done/account-avatar-and-site-branding.md)细化；
+昵称、域名与头像链路已在 main 实现，简介等完整资料仍待实现，见[头像核对](done/account-avatar-implementation-review.md)。
 
 ## 1. 背景与核心问题抽象
 
@@ -668,7 +668,7 @@ export class SessionGuard {
 实现补充（2026-10-15）：公开抓取的目录页与目录封面不携带登录凭据，不复用浏览器缓存；
 最小请求间隔 5 秒，并遵守全局退避。作品详情中的“我的评价”属于访问者，不属于目标账号；
 账号标记只能来自目标列表。冷恢复的旧目录队列同样适用，目标与操作者仍按原断点核验。
-实测证据、路线边界与回归测试见[页面访问者隔离核对](public-viewer-context-audit.md)。
+实测证据、路线边界与回归测试见[页面访问者隔离核对](done/public-viewer-context-audit.md)。
 
 在现有本人账号备份中，作品详情页（`interest.item`）占整场请求量的 **90.3%**（例如 2950 部电影对应近 3000 次额外请求）。
 - **对于备份我的账号**：为了支撑「数十年后离线完整建站」，作品的导演、演员、别名必须抓取。

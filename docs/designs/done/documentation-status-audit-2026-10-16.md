@@ -38,7 +38,7 @@ Canonical 则计划新增带来源与修订的 `profile.ndjson`，需要 schema�
 设计明确处理目标与导航头像隔离、同 URL 换图、默认头像与未知缺失、冷 / 热恢复、
 头像资源失败与分页连续性分离、跨账号 / 跨观测资源匹配、离线派生图标及旧档案降级。
 原公开账号设计 §7.1.6 的无来源扁平示例由专项设计替代；其他尚未交付的条款继续以
-[实现覆盖矩阵](public-and-third-party-account-archive-review.md)为准。
+[实现覆盖矩阵](../public-and-third-party-account-archive-review.md)为准。
 
 ## 验证与限制
 

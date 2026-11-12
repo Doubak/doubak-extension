@@ -2,10 +2,10 @@
 
 > 当前安装包最低版本为 **Firefox 142**，以生成的 manifest 为准；下文 140 的数值是早期测量记录。
 > v1.7.0 的广播回复首屏已通过 Firefox 155 登录态实抓与 ZIP 导出核对，见
-> [2026-11-12 验收记录](designs/broadcast-details-and-replies.md#10-firefox-登录态导出验收2026-11-12)。
+> [2026-11-12 验收记录](designs/done/broadcast-details-and-replies.md#10-firefox-登录态导出验收2026-11-12)。
 > 跨轮跳过、刷新及暂停／重载恢复的完整浏览器人工矩阵仍未完成。
 
-> 2026-10-18 更新：见[多账号、导入导出及打包核对](designs/firefox-multi-account-audit-2026-10-18.md)。
+> 2026-10-18 更新：见[多账号、导入导出及打包核对](designs/done/firefox-multi-account-audit-2026-10-18.md)。
 > 当前 Firefox 包必须保留 `host-offscreen.js` 静态依赖；以下 2026-09-09 的“排除该文件”和
 > lint 警告数量为当时记录，不再描述当前构建。
 
@@ -340,7 +340,7 @@ blob 就一直在。619 MB 的真实档案照这个比例就是把整份塞进�
 写入并清理，清理失败明确提示。占用单独显示，浏览器可能延迟回收空间。
 配额预检只针对可估算的原始 ZIP；浏览器配额不等于物理磁盘空闲空间。中转文件与下载文件
 可能在不同磁盘，改下载位置不能解决浏览器配置文件所在磁盘已满的问题。
-验证记录与限制见 [#35 审计](designs/export-storage-pressure.md)。
+验证记录与限制见 [#35 审计](designs/done/export-storage-pressure.md)。
 
 ### 量到的（Firefox 155，真机，**跑的是打好的那个包**）
 

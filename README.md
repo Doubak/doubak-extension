@@ -20,9 +20,9 @@
 
 ## 多账号与公开归档
 
-**main 待发布修复（#35）**：ZIP 导出空间不足时立即停止并清理失败中转，档案页可查看和清理已完成下载留下的中转文件；原始档案不变。配额与磁盘空间的区别、验证范围见[审计记录](docs/designs/export-storage-pressure.md)。
+**main 待发布修复（#35）**：ZIP 导出空间不足时立即停止并清理失败中转，档案页可查看和清理已完成下载留下的中转文件；原始档案不变。配额与磁盘空间的区别、验证范围见[审计记录](docs/designs/done/export-storage-pressure.md)。
 
-Firefox 打包、账号切换及导入导出实测见[兼容性核对](docs/designs/firefox-multi-account-audit-2026-10-18.md)。
+Firefox 打包、账号切换及导入导出实测见[兼容性核对](docs/designs/done/firefox-multi-account-audit-2026-10-18.md)。
 
 设计逐项覆盖与尚未实现的部分见[实现核对记录](docs/designs/public-and-third-party-account-archive-review.md)。
 
@@ -39,7 +39,7 @@ Firefox 打包、账号切换及导入导出实测见[兼容性核对](docs/desi
 若遇到算力验证（PoW），会自动求解并换取全站通行凭据（dbsawcv1）继续抓取；作品详情解析器被严格限定在 #info 范围内仅提取客观元数据，不会摄取操作者的个人评价。
 求解过程可随时取消，默认最多 30 秒或 200 万次尝试。
 超出预算或仍需验证码时暂停等待人工处理；提交返回限流或错误时保留该响应，不盲目重发。
-[按路线核对与真实 bundle 证据](docs/designs/public-viewer-context-audit.md)。匿名访客基础间隔 5 秒，登录操作者
+[按路线核对与真实 bundle 证据](docs/designs/done/public-viewer-context-audit.md)。匿名访客基础间隔 5 秒，登录操作者
 3 秒，仍保留抖动、退避与人工处理风控。公开模式不抓小组发帖及其正文；广播隐私截断页
 停止翻页并记录范围缺口。目标不存在、身份取证冲突或无法识别的停用主页会拒绝开工，
 不会用用户名代替数字 UID，也不会产出空档案。
@@ -73,8 +73,8 @@ bundle 目录布局，以 manifest/断点的 UID 归属分组，不迁移或重�
 
 目标账号头像随正式主页抓取归档；每轮重新下载，恢复时保留原目标与父捕获。
 Markdown 导出含本地头像与站点资料；Hugo 生成 favicon 和页眉图，缺图时保留文字站名。
-旧档案仍可导出，未保存的头像不会联网补抓。见[头像设计与实现](docs/designs/account-avatar-and-site-branding.md)。
-[文档核对记录](docs/designs/documentation-status-audit-2026-10-16.md)列出本轮校准范围与能力边界。
+旧档案仍可导出，未保存的头像不会联网补抓。见[头像设计与实现](docs/designs/done/account-avatar-and-site-branding.md)。
+[文档核对记录](docs/designs/done/documentation-status-audit-2026-10-16.md)列出本轮校准范围与能力边界。
 
 首次开启回复首屏时，增量会从已保存的历史列表补抓有回复的广播，可能涉及多年前的条目。
 同一广播的数字 UID / 已核验用户名链接按账号 UID 与广播 SID 去重；旧档案中的成功捕获
@@ -85,7 +85,7 @@ Markdown 导出含本地头像与站点资料；Hugo 生成 favicon 和页眉图
 广播回复首屏请求通过现有 DNR 权限补上 Referer；若旧版出现批量
 `unexpected_status`，更新并重新加载扩展后选择「继续，并重试」。
 仅「继续」不重试失败条目；已收尾的任务可在开启同一选项的新增量中补抓。
-详见[实测修正记录](docs/designs/broadcast-details-and-replies.md)。
+详见[实测修正记录](docs/designs/done/broadcast-details-and-replies.md)。
 
 ## 文档
 
@@ -94,8 +94,9 @@ Markdown 导出含本地头像与站点资料；Hugo 生成 favicon 和页眉图
 - **[docs/ui.md](docs/ui.md)** —— 界面交互设计：信息反馈、准确进度呈现与反虚假设计
 - **[docs/permissions.md](docs/permissions.md)** —— 权限审计：权限声明、最小必要原则以及各执行上下文的 API 映射表
 - **[docs/release.md](docs/release.md)** —— 发布流程与版本号管理的注意事项
+- **[设计目录与实现状态](docs/designs/README.md)** —— 未实现／部分实现设计、done 归档与调查样本的索引
 - **[同系列作品设计](docs/designs/subject-series-and-site-navigation.md)** —— 目录快照、历史兼容与站内导航的设计提案（尚未实现）
-- **[广播详情与回复归档](docs/designs/broadcast-details-and-replies.md)** —— issue #26 的页面实测与跨仓库设计：本人账号可选的回复首屏原始快照，默认关闭；第三方账号保持现有范围
+- **[广播详情与回复归档](docs/designs/done/broadcast-details-and-replies.md)** —— issue #26 的页面实测与跨仓库设计：本人账号可选的回复首屏原始快照，默认关闭；第三方账号保持现有范围
 - 档案格式规范定义详见独立仓库：[`doubak-data-specs`](https://github.com/Doubak/doubak-data-specs)
 
 ## 开发
@@ -281,7 +282,7 @@ book.douban.com/subject/4820710/      → m.douban.com/book/subject/4820710/
 - **小组划分**：豆备坚持个人 UGC 归档定位，严格排除无边界的社交外围（Social Periphery）。豆瓣小组社区广场、他人回帖及讨论串由于体量无限且涉及他人隐私，不予收录；用户本人发起的讨论主帖（`publish`）与加入的小组列表（`joins`）属于有界的个人资产，已确定纳入后续支持规划；在他人帖子下的回帖因定位复杂度高暂缓。
 
 **长广播正文关联机制**：
-早期样本中的显式“（全文）”链接指向独立日记，由日记路线收录；解析器保留 `text_truncated` 与 `full_text_url`。不能据此断言所有广播详情都只是日记，也不以句尾省略号判断截断。当前已支持带标题的 personal topic 列表内容；开启回复首屏后，合格的 status／personal topic 另存详情 HTML 与首屏 API，详情暂不用于增强 Canonical 正文。完整范围见[广播快照设计](docs/designs/broadcast-details-and-replies.md)。
+早期样本中的显式“（全文）”链接指向独立日记，由日记路线收录；解析器保留 `text_truncated` 与 `full_text_url`。不能据此断言所有广播详情都只是日记，也不以句尾省略号判断截断。当前已支持带标题的 personal topic 列表内容；开启回复首屏后，合格的 status／personal topic 另存详情 HTML 与首屏 API，详情暂不用于增强 Canonical 正文。完整范围见[广播快照设计](docs/designs/done/broadcast-details-and-replies.md)。
 
 - **图片归档与长文正文捕获**：完整支持离线查看，彻底消除备份对远程图床的依赖；
 - **全量抓取压力验证**：单次连续抓取 4 小时 16 分钟，成功捕获 5880 个资源对象，零异常失败；

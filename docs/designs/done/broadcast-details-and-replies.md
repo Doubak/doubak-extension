@@ -59,13 +59,13 @@ douc.cc 不新增权限或解析路线。首版不引入 `discussion-state.ndjso
 
 关键代码与规范：
 
-- [`routes.js`](../../src/crawl/routes.js)、[`classifier.js`](../../src/crawl/classifier.js)：
+- [`routes.js`](../../../src/crawl/routes.js)、[`classifier.js`](../../../src/crawl/classifier.js)：
   `broadcast.timeline` 是有水位线的 bounded 列表路线，不能证明历史广播全部存在或不存在。
-- [`loop.js`](../../src/crawl/loop.js)：现有 `_enqueueLongformItems`、`_enqueueStatusPhotos`
+- [`loop.js`](../../../src/crawl/loop.js)：现有 `_enqueueLongformItems`、`_enqueueStatusPhotos`
   可参考派生与父 capture 关联方式，但没有广播详情派生。
-- [`backlog.js`](../../src/crawl/backlog.js)、[`offscreen.js`](../../src/offscreen/offscreen.js)：
+- [`backlog.js`](../../../src/crawl/backlog.js)、[`offscreen.js`](../../../src/offscreen/offscreen.js)：
   已有从旧广播 HTML 补算附图的机制，应扩展这一模式，避免增量水位线永久漏掉旧回复。
-- [`replay.js`](../../src/crawl/replay.js)：`derivesWork()` 目前靠 pagination / interest 前缀判断，
+- [`replay.js`](../../../src/crawl/replay.js)：`derivesWork()` 目前靠 pagination / interest 前缀判断，
   新增无列表分页的详情派生路线也需要纳入崩溃恢复。
 - [parser `extract-broadcast.js`](https://github.com/Doubak/doubak-data-parser/blob/f7130cc/src/extract-broadcast.js)：
   `topicHeading()` 已验证 `data-aid` 与 topic 链接一致；`fullTextUrl()` 只认结构化 `（全文）` 链接。
@@ -178,8 +178,8 @@ target.id  = 当前 status sid
 调度去重可剥离已确认的跟踪参数和 fragment，但必须保留 `tab`、分页位置及未来未知的语义参数。
 同一作者的数字 UID / 用户名形式仅在已有主页身份或详情证据确认后合并。
 
-短链实现还有两处现成缺口：[`manifest.json`](../../manifest.json) 未声明 `douc.cc` host 权限；
-[`transport.js`](../../src/crawl/transport.js) 虽有短链主机表，真实浏览器 fetch 用
+短链实现还有两处现成缺口：[`manifest.json`](../../../manifest.json) 未声明 `douc.cc` host 权限；
+[`transport.js`](../../../src/crawl/transport.js) 虽有短链主机表，真实浏览器 fetch 用
 `redirect: 'follow'`，通常只能取得起点与终点。Node 中拿到 302，不代表浏览器能读取逐跳响应。
 不能把测试替身的 manual redirect 能力当成已实现的 WARC 跳转保真度。
 
@@ -187,8 +187,8 @@ target.id  = 当前 status sid
 
 ### 4.1 开关先于路线和模式生效
 
-沿用 [`target-account.js`](../../src/crawl/target-account.js) 的身份取证与
-[`run-context.js`](../../src/crawl/run-context.js) 的断点约束。
+沿用 [`target-account.js`](../../../src/crawl/target-account.js) 的身份取证与
+[`run-context.js`](../../../src/crawl/run-context.js) 的断点约束。
 只有 `visibility=self`、`operatorMode=authenticated` 且 operator UID 等于 target UID，才能开启快照。
 用户输入自己的 UID 或主页链接并不改变这个判据；未登录访问自己的主页仍为 public/anonymous。
 
@@ -205,8 +205,8 @@ UI 禁用不是唯一防线：runner 构造路线前校验选项，public 请求
 
 ### 4.2 三种模式（仅 self 且开关开启）
 
-已核对 [`crawl-modes.js`](../../src/crawl/crawl-modes.js) 和
-[`offscreen.js`](../../src/offscreen/offscreen.js)。保留现有模式语义，不设置统一的 30 天自动刷新周期。
+已核对 [`crawl-modes.js`](../../../src/crawl/crawl-modes.js) 和
+[`offscreen.js`](../../../src/offscreen/offscreen.js)。保留现有模式语义，不设置统一的 30 天自动刷新周期。
 
 | 行为 | 增量 incremental | 增量＋可变内容 refresh-editable | 全量 full |
 | --- | --- | --- | --- |
@@ -309,7 +309,7 @@ index 的 intent 明确其首屏性质，实际 URL 保留 start/count，item_co
 
 界面沿用路线表，分别显示“广播详情”和“广播回复首屏”的捕获数量；失败沿用缺口面板，不另建合并计数器。开关说明与帮助注明“不翻页、不展开楼中楼、不加入生成站点”。
 public 显示“首版仅支持本人账号”，这不是说第三方主页已抓完或没有回复。
-具体控件与导出边界同步于 [docs/ui.md](../ui.md)。
+具体控件与导出边界同步于 [docs/ui.md](../../ui.md)。
 
 ## 5. Canonical、公开展示与未来工作
 
