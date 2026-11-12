@@ -879,7 +879,7 @@ test('**Markdown 导出也要筛掉豆瓣上不公开的东西**', async () => {
   // 扩展这条路照样把私密日记、私密豆列、只有自己看得见的广播写进 Markdown 树。
   // **规则在一个宿主上有、在另一个上没有**，正是最初那条泄漏的同一形状。
   const src = await read('src/pipeline/targets.js');
-  assert.match(src, /project\(withoutPrivate\(data, \{ includePrivate \}\)\)/,
+  assert.match(src, /project\(withoutPrivate\(data, \{ includePrivate \}\)(?:\)|,)/,
     'buildMarkdown 必须先筛再投影');
   assert.match(src, /from '\.\.\/vendor\/site-generator\/private\.js'/,
     '判据必须是搬过来的那一份字节，不许在这儿另写一个');

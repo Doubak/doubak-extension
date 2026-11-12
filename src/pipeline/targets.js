@@ -132,7 +132,9 @@ export async function buildMarkdown(data, { sources, write, onImageProgress, inc
   // 上——所以这一行必须自己写，而**判据本身**（`withoutPrivate`）是搬过来的同一份
   // 字节。少了它，扩展这条路会静默地把私密日记、私密豆列、只有自己看得见的广播
   // 一起写进导出的 Markdown 树，而那正是「一条规则只在一个宿主上生效」的老毛病。
-  const p = project(withoutPrivate(data, { includePrivate }));
+  const p = project(withoutPrivate(data, { includePrivate }), {
+    replySnapshots: (sources ?? []).map(source => ({ account: source.manifest?.account, rows: source.index })),
+  });
 
   // 想要哪些图：封面、正文内嵌的、广播附图、相册照片、小组话题插图与图标。
   // **广播附图与相册照片是用户自己上传的**，比封面更不可替代——封面豆瓣还有一份，这些没有第二处。

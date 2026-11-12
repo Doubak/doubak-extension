@@ -33,7 +33,8 @@
 export function project({
   marks = [], subjects = [], longform = [], broadcasts = [], doulists = [],
   albums = [], group_topics = [], group_joins = [],
-}) {
+}, { replySnapshots = [] } = {}) {
+  const replyCounts = indexReplySnapshots(replySnapshots);
   const bySubject = new Map();
   for (const s of subjects) bySubject.set(`${s.medium}:${s.id}`, s);
 
@@ -62,7 +63,7 @@ export function project({
     albums: albums.map(projectAlbum),
     groupTopics: group_topics.map(projectGroupTopic),
     groupJoins: group_joins.map(projectGroupJoin),
-    broadcasts: broadcasts.map((b) => projectBroadcast(b, targetIndex(projectedMarks), have)),
+    broadcasts: broadcasts.map((b) => projectBroadcast(b, targetIndex(projectedMarks), have, replyCounts)),
   };
 }
 
@@ -294,15 +295,17 @@ function targetIndex(projectedMarks) {
  * 「那一刻这句话是什么样」的带日期快照。标记页上的短评会被后来的编辑覆盖，广播里
  * 的不会。
  */
-function projectBroadcast(b, targets, have = { subjects: new Set(), doulists: new Set(), longform: new Set() }) {
+function projectBroadcast(b, targets, have = { subjects: new Set(), doulists: new Set(), longform: new Set() }, replyCounts = new Map()) {
   const r = b.revisions[b.revisions.length - 1];
   const f = r.fields;
   const target = f.target_id ? (targets.get(f.target_id) ?? null) : null;
+  const reply = replyCounts.get(`${b.account?.user_id}:${replyIdentity(b.url, false)}`);
 
   return {
     kind: 'broadcast',
     id: b.upstream_id,
     url: stableStatusUrl(b.url, b.account?.user_id),
+    ...(reply ? { replySnapshotCount: reply.count } : {}),
     postedAt: f.posted_at?.iso ?? null,
     postedAtRaw: f.posted_at?.raw ?? null,
     text: f.text ?? null,
@@ -463,6 +466,54 @@ const resolveActionParts = resolveParts;
  * @param {string|null|undefined} url @param {string|null|undefined} ownerId
  * @returns {string|null}
  */
+// Counts are index metadata, not parsed discussion entities. Keep status IDs and
+// personal-topic IDs separate, and never match across archive owner accounts.
+function replyIdentity(value, api) {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    if (url.origin !== (api ? 'https://m.douban.com' : 'https://www.douban.com')
+      || url.username || url.password) return null;
+    if (api && (url.searchParams.getAll('start').join() !== '0'
+      || url.searchParams.getAll('count').join() !== '20')) return null;
+    const status = (api ? /^\/rexxar\/api\/v2\/status\/([1-9]\d*)\/comments$/
+      : /^(?:\/people\/[^/]+)?\/status\/([1-9]\d*)\/?$/).exec(url.pathname);
+    if (status) return `status:${status[1]}`;
+    const topic = (api ? /^\/rexxar\/api\/v2\/group\/topic\/([1-9]\d*)\/comments$/
+      : /^\/topic\/([1-9]\d*)\/?$/).exec(url.pathname);
+    if (!topic) return null;
+    if (api && (url.searchParams.getAll('nested').join() !== '1'
+      || (url.searchParams.has('topic_id') && url.searchParams.getAll('topic_id').join() !== topic[1]))) {
+      return null;
+    }
+    return `topic:${topic[1]}`;
+  } catch { return null; }
+}
+
+function indexReplySnapshots(bundles) {
+  const result = new Map();
+  for (const { account, rows } of bundles) {
+    if (!/^[1-9]\d*$/.test(String(account?.user_id ?? ''))) continue;
+    for (const row of rows ?? []) {
+      if (row.intent !== 'broadcast.comments_snapshot' || row.route_key !== 'broadcast.comments_snapshot'
+        || row.surface !== 'api' || row.verdict !== 'ok') continue;
+      const identity = replyIdentity(row.url, true);
+      const time = Date.parse(row.observed_at);
+      const count = row.item_count;
+      if (!identity || !Number.isFinite(time) || typeof row.capture_id !== 'string'
+        || (count != null && (!Number.isSafeInteger(count) || count < 0 || count > 20))) continue;
+      const key = `${account.user_id}:${identity}`;
+      const previous = result.get(key);
+      // Latest successful observation wins, not max or sum. A later failure
+      // cannot erase an earlier snapshot; repeated bundles cannot inflate it.
+      if (!previous || time > previous.time || (time === previous.time && row.capture_id > previous.id)) {
+        result.set(key, { count: count ?? null, time, id: row.capture_id });
+      }
+    }
+  }
+  return result;
+}
+
 function stableStatusUrl(url, ownerId) {
   if (!url) return null;
   const bare = url.split('?')[0].split('#')[0];
