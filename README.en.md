@@ -38,10 +38,12 @@ Two things an English-speaking reader should know before installing:
   a background host page and ZIP downloads; Chrome and Edge can write to a chosen folder.
   Safari is not supported. Other browsers need separate verification.
 
-The unreleased #35 fix on main stops failed ZIP exports, aborts partial writes, and exposes
+The #35 fix in v1.7.1 stops failed ZIP exports, aborts partial writes, and exposes
 staging usage and cleanup in the Archive tab. Cleanup requires confirming that the download
 has completed or been cancelled. Original archives stay untouched. Browser quota estimates
 cannot guarantee physical disk space; see the [audit](docs/designs/done/export-storage-pressure.md).
+
+See the [v1.7.1 release notes](docs/releases/v1.7.1.md) for changes and verification limits (Chinese).
 
 ## Public archives and multiple accounts
 

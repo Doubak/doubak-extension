@@ -1,7 +1,7 @@
 # doubak-extension
 
-当前代码版本：**v1.7.0**。新增本人广播回复首屏原始快照，并修复新任务身份核对、权限拒绝后的调度与恢复、短评历史展示。
-变更、`bundle/1.5` 兼容性及验证边界见 [v1.7.0 发布说明](docs/releases/v1.7.0.md)。
+当前代码版本：**v1.7.1**。修复 ZIP 导出空间不足时的失败处理与中转清理、失效目录句柄导致的存储读取错误。
+变更、兼容性及验证边界见 [v1.7.1 发布说明](docs/releases/v1.7.1.md)。档案格式继续使用 `bundle/1.5`。
 
 中文 · **[English README](README.en.md)**
 
@@ -20,7 +20,7 @@
 
 ## 多账号与公开归档
 
-**main 待发布修复（#35）**：ZIP 导出空间不足时立即停止并清理失败中转，档案页可查看和清理已完成下载留下的中转文件；原始档案不变。配额与磁盘空间的区别、验证范围见[审计记录](docs/designs/done/export-storage-pressure.md)。
+**v1.7.1 修复（#35）**：ZIP 导出空间不足时立即停止并清理失败中转，档案页可查看和清理已完成下载留下的中转文件；原始档案不变。配额与磁盘空间的区别、验证范围见[审计记录](docs/designs/done/export-storage-pressure.md)。
 
 Firefox 打包、账号切换及导入导出实测见[兼容性核对](docs/designs/done/firefox-multi-account-audit-2026-10-18.md)。
 

@@ -1,6 +1,7 @@
 # 导出空间不足与 ZIP 中转清理（#35）
 
 2026-11-12，main 上的待发布修复；不代表已发布的 v1.7.0 含这些修改。
+后续版本：修复纳入 [v1.7.1](../../releases/v1.7.1.md)；下文保留修复时的调查与验证记录。
 问题：[Firefox 打包 Quota exceeded，偶发 Entry not found](https://github.com/Doubak/doubak-extension/issues/35)。
 
 ## 查明的问题

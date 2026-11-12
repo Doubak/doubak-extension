@@ -28,7 +28,7 @@
 | [账号头像与站点图标](done/account-avatar-and-site-branding.md) | profile 规范、目标头像捕获、解析修订与离线站点图标已实现；完整个人资料属于上面的公开账号设计待办。 |
 | [头像实现核对](done/account-avatar-implementation-review.md) | 已完成身份、字节来源、图片处理和旧输入兼容核对，含重载后本人／第三方真实采样。 |
 | [广播详情与回复首屏](done/broadcast-details-and-replies.md) | v1.7.0 已实现最终约定的本人可选首屏原始快照，含 Chrome／Firefox 导出证据。完整讨论分页和 Canonical 正文增强不属于最终交付范围；剩余人工操作矩阵仍如实保留。 |
-| [导出空间不足与 ZIP 清理](done/export-storage-pressure.md) | #35 的 ZIP 失败停止、abort、清理入口、配额提示与失效目录句柄修复已在 main；**尚未发布**，实际磁盘不足环境复测仍待进行。 |
+| [导出空间不足与 ZIP 清理](done/export-storage-pressure.md) | #35 的 ZIP 失败停止、abort、清理入口、配额提示与失效目录句柄修复纳入 **v1.7.1**，实际磁盘不足环境复测仍待进行。 |
 | [Firefox 多账号、导入导出](done/firefox-multi-account-audit-2026-10-18.md) | 打包依赖、账号绑定、ZIP 互斥及结果提示已修复，含实际 Firefox 导入／下载验证。旧中转清理行为的后续修正见 #35 记录。 |
 | [全流程与多账号核对](done/full-flow-and-multi-account-audit-2026-10-17.md) | §7 已落实前文提出的混合账号阻断、三端 `--account`／`--all-accounts`、递归目录读取；舞台剧封面修复亦已落地。前文保留调查时的状态。 |
 | [权限拒绝回归](done/permission-denied-regression-review.md) | v1.7.0 已交付 denied 分类、缺口处理、显式重试与崩溃恢复修复，保留原始错误响应与旧档案兼容。 |
