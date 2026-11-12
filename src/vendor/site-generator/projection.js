@@ -469,6 +469,7 @@ const resolveActionParts = resolveParts;
 // Counts are index metadata, not parsed discussion entities. Keep status IDs and
 // personal-topic IDs separate, and never match across archive owner accounts.
 function replyIdentity(value, api) {
+  if (typeof value !== 'string') return null;
   try {
     const url = new URL(value);
     if (url.origin !== (api ? 'https://m.douban.com' : 'https://www.douban.com')
@@ -480,7 +481,12 @@ function replyIdentity(value, api) {
     if (status) return `status:${status[1]}`;
     const topic = (api ? /^\/rexxar\/api\/v2\/group\/topic\/([1-9]\d*)\/comments$/
       : /^\/topic\/([1-9]\d*)\/?$/).exec(url.pathname);
-    return topic ? `topic:${topic[1]}` : null;
+    if (!topic) return null;
+    if (api && (url.searchParams.getAll('nested').join() !== '1'
+      || (url.searchParams.has('topic_id') && url.searchParams.getAll('topic_id').join() !== topic[1]))) {
+      return null;
+    }
+    return `topic:${topic[1]}`;
   } catch { return null; }
 }
 
