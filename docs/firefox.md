@@ -1,7 +1,9 @@
 # Firefox 支持：第 0 步的实测
 
 > 当前安装包最低版本为 **Firefox 142**，以生成的 manifest 为准；下文 140 的数值是早期测量记录。
-> v1.7.0 的广播回复首屏已有自动化、布局及打包验证，Firefox 登录态实际抓取仍待验收。
+> v1.7.0 的广播回复首屏已通过 Firefox 155 登录态实抓与 ZIP 导出核对，见
+> [2026-11-12 验收记录](designs/broadcast-details-and-replies.md#10-firefox-登录态导出验收2026-11-12)。
+> 跨轮跳过、刷新及暂停／重载恢复的完整浏览器人工矩阵仍未完成。
 
 > 2026-10-18 更新：见[多账号、导入导出及打包核对](designs/firefox-multi-account-audit-2026-10-18.md)。
 > 当前 Firefox 包必须保留 `host-offscreen.js` 静态依赖；以下 2026-09-09 的“排除该文件”和
