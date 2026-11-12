@@ -420,6 +420,59 @@ test('不同面板通过 Web Locks 共享 ZIP 排他锁', async () => {
   } finally { w.restore(); }
 });
 
+// Firefox releases the native lock asynchronously after the callback settles.
+for (const action of ['finish', 'abort', 'clear', 'write failure']) {
+  test(`ZIP ${action} waits for the browser to release its lock before immediate retry`, async () => {
+    const opfs = fakeOpfs();
+    const w = fakeWindow();
+    let held = false;
+    let unlock;
+    let callbackEnded;
+    const ended = new Promise(resolve => { callbackEnded = resolve; });
+    const delayedRelease = new Promise(resolve => { unlock = resolve; });
+    opfs.locks = { request: async (name, opts, callback) => {
+      if (held) return callback(null);
+      held = true;
+      try { return await callback({ name }); }
+      finally {
+        callbackEnded();
+        await delayedRelease;
+        held = false;
+      }
+    } };
+    Object.defineProperty(globalThis, 'navigator', { value: opfs, configurable: true });
+    try {
+      const panel = await import('../src/ui/panel/destination.js');
+      let operation;
+      if (action === 'clear') operation = panel.clearExportStaging();
+      else {
+        const dest = await panel.zipDestination({ zipName: 'first.zip' });
+        if (action === 'write failure') {
+          const quota = new DOMException('Full', 'QuotaExceededError');
+          opfs.faults.write = quota;
+          const write = await dest.writerFor('data');
+          operation = assert.rejects(write('item.txt', enc.encode('data')), e => e === quota);
+        } else operation = dest[action]();
+      }
+      let settled = false;
+      operation.then(() => { settled = true; });
+      await ended;
+      // Drain promise reactions while keeping the simulated native lock held.
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(settled, false, 'completion must include native lock release');
+      await assert.rejects(panel.zipDestination({ zipName: 'busy.zip' }), /已有 ZIP 正在打包/);
+      unlock();
+      await operation;
+      assert.equal(held, false);
+      delete opfs.faults.write;
+      const retry = await panel.zipDestination({ zipName: 'retry.zip' });
+      await retry.finish();
+      await panel.clearExportStaging();
+      assert.equal(opfs.files.size, 0);
+    } finally { unlock(); w.restore(); }
+  });
+}
+
 // #35: disk-full failures must not commit a partial ZIP, hide the cause or poison the next export.
 for (const stage of ['createWritable', 'write', 'close', 'getFile']) {
   test(`ZIP ${stage} quota failure cleans staging, preserves source and releases the lock`, async () => {

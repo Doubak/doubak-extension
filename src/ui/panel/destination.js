@@ -128,7 +128,7 @@ async function confirmPurge(root) {
 export async function clearExportStaging() {
   const release = await claimZipExport();
   try { return await confirmPurge(await navigator.storage.getDirectory()); }
-  finally { release(); }
+  finally { await release(); }
 }
 
 /** 所有导出入口共用；配额不等于物理磁盘剩余空间。 */
@@ -206,20 +206,27 @@ async function claimZipExport() {
   if (zipActive) throw new Error('已有 ZIP 正在打包，请等它完成后再导出。');
   zipActive = true;
   let releaseLock = () => {};
+  let lockDone = Promise.resolve();
   try {
     if (navigator.locks?.request) {
       await new Promise((resolve, reject) => {
-        navigator.locks.request('doubak-export-staging', { ifAvailable: true }, (lock) => {
+        lockDone = navigator.locks.request('doubak-export-staging', { ifAvailable: true }, (lock) => {
           if (!lock) { reject(new Error('另一个面板正在打包 ZIP，请等它完成后再导出。')); return; }
           return new Promise((release) => { releaseLock = release; resolve(); });
-        }).catch(reject);
+        });
+        lockDone.catch(reject);
       });
     }
   } catch (e) { zipActive = false; throw e; }
-  let released = false;
+  let releasing;
   return () => {
-    if (released) return;
-    released = true; releaseLock(); zipActive = false;
+    // 回调结束不代表浏览器已经释放锁；等 request 完成再允许下一次导出。
+    releasing ??= (async () => {
+      releaseLock();
+      try { await lockDone; }
+      finally { zipActive = false; }
+    })();
+    return releasing;
   };
 }
 
@@ -251,7 +258,7 @@ export async function zipDestination({ zipName, deflateRaw, readme, expectedByte
       // 失败不能 close()：那会尝试提交半份 ZIP，甚至再次遇到配额错误。
       if (out && !closed) try { await out.abort(); } catch (e) { failure = e; }
       if (ownsStaging) try { await purgeStaging(root); } catch (e) { failure ??= e; }
-    } finally { release(); }
+    } finally { await release(); }
     if (failure) throw failure;
   };
   const fail = async (error) => {
@@ -291,7 +298,7 @@ export async function zipDestination({ zipName, deflateRaw, readme, expectedByte
           const file = await fh.getFile();
           handOff(file, zipName);
           handed = true;
-          release();
+          await release();
           return { name: zipName, bytes: file.size };
         } catch (e) { return fail(e); }
       },
