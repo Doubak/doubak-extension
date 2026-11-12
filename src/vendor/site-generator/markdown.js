@@ -27,6 +27,7 @@ import { frontMatter } from './yaml.js';
  * 独占一行的文字——两边各有一条测试钉着。
  */
 export const SOURCE_LINK_TITLE = '在豆瓣上看这条广播';
+export const REPLY_SNAPSHOT_LINK_TITLE = '归档回复首屏：抓取时的顶层回复下限，不代表完整讨论；在豆瓣查看，需联网';
 
 /** 豆瓣的动词跟着媒介走。「看过一本书」是错的说法，所以这个映射不能省。 */
 const VERB = {
@@ -632,6 +633,10 @@ export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../'
   const stamp = b.postedAtRaw ?? b.postedAt ?? '时间未知';
   const out = [`### ${stamp}`, ''];
   if (b.url) out.push(`[豆瓣原页](${b.url} "${SOURCE_LINK_TITLE}")`, '');
+  if (b.url && Object.hasOwn(b, 'replySnapshotCount')) {
+    const label = b.replySnapshotCount > 0 ? `${b.replySnapshotCount}+ 条回复` : '回复首屏';
+    out.push(`[${label}](${b.url} "${REPLY_SNAPSHOT_LINK_TITLE}")`, '');
+  }
   // 保留时间标题和锚点；动态自己的标题单独显示，不冒充作品卡片。
   if (b.title) out.push(`**${plainText(b.title)}**`, '');
   // **只有作者本人看得见的那些，页面上要说出来。**
