@@ -27,6 +27,7 @@ import {
   markPage, longformPage, markPath, longformPath, doulistPage, doulistPath, verb,
   albumPage, albumPath, groupTopicPage, groupTopicPath, groupJoinsPage, groupJoinsPath,
   broadcastMonthPage, broadcastMonthPath, monthOf,
+  broadcastFilterPath, broadcastFilterPage, broadcastFilterMonthPath,
   markFilterPath, markFilterPage, broadcastBlock, plainText, coverStripItem,
   sectionIndexPath, sectionIndexPage,
 } from './markdown.js';
@@ -126,6 +127,24 @@ export function buildPages(p, { images = {}, coverBySubject = {}, siteTitle = nu
 
   for (const [month, list] of byMonth) {
     files.push([content(broadcastMonthPath(month)), broadcastMonthPage(month, list, { images: paths, covers })]);
+  }
+
+  // 有回复的广播筛选子小节（`broadcast/replied/`）：仅在确有 `1+ 条回复` 时生成。
+  const replied = p.broadcasts.filter((b) => Boolean(b.url && b.replySnapshotCount > 0));
+  if (replied.length > 0) {
+    const repliedByMonth = new Map();
+    for (const b of replied) {
+      const k = monthOf(b);
+      if (!repliedByMonth.has(k)) repliedByMonth.set(k, []);
+      repliedByMonth.get(k).push(b);
+    }
+    files.push([content(broadcastFilterPath('replied')), broadcastFilterPage('replied', '有回复', replied.length)]);
+    for (const [month, list] of repliedByMonth) {
+      files.push([
+        content(broadcastFilterMonthPath('replied', month)),
+        broadcastMonthPage(month, list, { images: paths, covers, linkPrefix: '../../', filter: 'replied' }),
+      ]);
+    }
   }
 
   // 每个媒介的每个状态一页（`movie/done/`）。**只给真有条目的状态出页**——

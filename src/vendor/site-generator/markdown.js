@@ -633,10 +633,6 @@ export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../'
   const stamp = b.postedAtRaw ?? b.postedAt ?? '时间未知';
   const out = [`### ${stamp}`, ''];
   if (b.url) out.push(`[豆瓣原页](${b.url} "${SOURCE_LINK_TITLE}")`, '');
-  if (b.url && Object.hasOwn(b, 'replySnapshotCount')) {
-    const label = b.replySnapshotCount > 0 ? `${b.replySnapshotCount}+ 条回复` : '回复首屏';
-    out.push(`[${label}](${b.url} "${REPLY_SNAPSHOT_LINK_TITLE}")`, '');
-  }
   // 保留时间标题和锚点；动态自己的标题单独显示，不冒充作品卡片。
   if (b.title) out.push(`**${plainText(b.title)}**`, '');
   // **只有作者本人看得见的那些，页面上要说出来。**
@@ -770,6 +766,11 @@ export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../'
       return `[![](${p})](${p})`;
     }).join(' '), '');
   }
+  // 回复按钮放在整条广播末尾（正文、作品卡片与附图之后），与豆瓣卡片底部动作条一致。
+  if (b.url && Object.hasOwn(b, 'replySnapshotCount')) {
+    const label = b.replySnapshotCount > 0 ? `${b.replySnapshotCount}+ 条回复` : '回复首屏';
+    out.push(`[${label}](${b.url} "${REPLY_SNAPSHOT_LINK_TITLE}")`, '');
+  }
   return out.join('\n');
 }
 
@@ -792,9 +793,9 @@ export function broadcastBlock(b, { images = {}, covers = {}, linkPrefix = '../'
  *
  * @param {string} month  `2021-11`
  * @param {object[]} list 该月的广播，未排序
- * @param {{images?: Record<string, string>}} [opts] 附图 URL → 本地路径
+ * @param {{images?: Record<string, string>, covers?: Record<string, string>, linkPrefix?: string, filter?: string}} [opts] 附图 URL → 本地路径与相对前缀
  */
-export function broadcastMonthPage(month, list, { images = {}, covers = {} } = {}) {
+export function broadcastMonthPage(month, list, { images = {}, covers = {}, linkPrefix = '../', filter = undefined } = {}) {
   const sorted = [...list].sort((a, b) => (a.postedAt < b.postedAt ? 1 : -1));
   const [y, m] = month.split('-');
   const dated = month !== UNDATED;
@@ -809,6 +810,7 @@ export function broadcastMonthPage(month, list, { images = {}, covers = {} } = {
     date: dated ? `${month}-01` : undefined,
     douban_kind: 'broadcast_month',
     douban_month: month,
+    douban_filter: filter,
     douban_count: sorted.length,
     // 带正文的有几条。**这个数才是「这一页有多少自己写的东西」**——
     // 总数里大部分是纯标记动作。
@@ -816,8 +818,8 @@ export function broadcastMonthPage(month, list, { images = {}, covers = {} } = {
     douban_images: sorted.reduce((n, b) => n + b.images.length, 0),
   };
 
-  // 月页在 `broadcast/` 底下，到作品页要退一级。
-  const blocks = sorted.map((b) => broadcastBlock(b, { images, covers, linkPrefix: '../' }));
+  // 月页在 `broadcast/` 底下，到作品页默认退一级；筛选子小节退两级。
+  const blocks = sorted.map((b) => broadcastBlock(b, { images, covers, linkPrefix }));
 
   return frontMatter(fm) + '\n' + blocks.join('\n');
 }
@@ -825,6 +827,31 @@ export function broadcastMonthPage(month, list, { images = {}, covers = {} } = {
 /** @param {string} month `2021-11` */
 export function broadcastMonthPath(month) {
   return `broadcast/${month}.md`;
+}
+
+/** @param {string} filter 例如 `replied` */
+export function broadcastFilterPath(filter) {
+  return `broadcast/${filter}/_index.md`;
+}
+
+/**
+ * 广播筛选页（例如 `broadcast/replied/`）：与媒介状态筛选页同理，做成真实小节。
+ * @param {string} filter
+ * @param {string} title
+ * @param {number} count 筛选命中的广播总数（跨分页恒定）
+ */
+export function broadcastFilterPage(filter, title, count) {
+  return frontMatter({
+    title,
+    douban_kind: 'broadcast-filter',
+    douban_filter: filter,
+    douban_count: count,
+  });
+}
+
+/** @param {string} filter @param {string} month */
+export function broadcastFilterMonthPath(filter, month) {
+  return `broadcast/${filter}/${month}.md`;
 }
 
 /**
