@@ -95,7 +95,7 @@ Markdown 导出含本地头像与站点资料；Hugo 生成 favicon 和页眉图
 - **[docs/permissions.md](docs/permissions.md)** —— 权限审计：权限声明、最小必要原则以及各执行上下文的 API 映射表
 - **[docs/release.md](docs/release.md)** —— 发布流程与版本号管理的注意事项
 - **[设计目录与实现状态](docs/designs/README.md)** —— 未实现／部分实现设计、done 归档与调查样本的索引
-- **[同系列作品设计](docs/designs/subject-series-and-site-navigation.md)** —— 目录快照、历史兼容与站内导航的设计提案（尚未实现）
+- **[同系列作品设计](docs/designs/done/subject-series-and-site-navigation.md)** —— 目录快照、历史兼容与站内导航的设计提案（第一版已实现并归档）
 - **[广播详情与回复归档](docs/designs/done/broadcast-details-and-replies.md)** —— issue #26 的页面实测与跨仓库设计：本人账号可选的回复首屏原始快照，默认关闭；第三方账号保持现有范围
 - 档案格式规范定义详见独立仓库：[`doubak-data-specs`](https://github.com/Doubak/doubak-data-specs)
 
@@ -348,7 +348,7 @@ node tools/package.mjs --firefox  # dist/doubak-<版本>-firefox.zip
 
 ### 为何采用源码同步而非 Git Submodule
 
-扩展仓库的 `src/vendor/` 目录同步维护了下游三个核心仓库中 29 个纯函数模块的代码，并通过 `tools/sync-vendor.mjs --check` 结合 CI 自动化检测各模块与上游的一致性。
+扩展仓库的 `src/vendor/` 目录同步维护了下游三个核心仓库中 34 个纯函数模块的代码，并通过 `tools/sync-vendor.mjs --check` 结合 CI 自动化检测各模块与上游的一致性。
 
 **跨仓库协同遵循“上游优先”准则**：CI 在构建和测试时基于各个兄弟仓库的主分支进行校验。若有跨仓库特性变更，必须先将核心逻辑合并至对应的上游专业仓库，随后再同步至扩展端并更新 vendor 清单，从而确保规范与底层定义先行。
 
@@ -469,4 +469,4 @@ Markdown 导出包含已归档电影详情中的同系列列表、站内导航�
 未收录成员不生成空页，不增加抓取请求；旧档案可重新导出，未抓详情的档案照常使用。
 字段契约为 canonical/1.4，parser 0.18.0 修正作品详情的历史时序，作品修订数可能增加，
 个人评分与短评不因此变化。取得新的豆瓣列表仍需显式选择「增量抓取，并重新抓取可以编辑的内容」。
-实施范围与验收见 [系列导航设计](docs/designs/subject-series-and-site-navigation.md)。
+实施范围与验收见 [系列导航设计](docs/designs/done/subject-series-and-site-navigation.md)。

@@ -1,7 +1,7 @@
 # 同系列作品：本地 WARC 中的公开目录片段
 
 来源：2026-10-26 只读检查 `~/downloads/exports`。对应设计见
-[同系列作品归档与导航](../../subject-series-and-site-navigation.md) §2.3。
+[同系列作品归档与导航](../../done/subject-series-and-site-navigation.md) §2.3。
 
 这些 `.html` 是真实详情页里完整的 `_CONFIG` script 元素（末尾补一个换行），
 不是整个页面，也不是浏览器执行脚本之后的 DOM。包含公开作品 ID、系列成员、系列 URL、

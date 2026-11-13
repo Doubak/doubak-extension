@@ -364,6 +364,8 @@ describe('告警怎么显示', () => {
       { type: 'extractor_stale', capture: 'c1', kind: 'broadcast' },
       { type: 'unknown_verdict', verdict: 'weird', capture: 'c1' },
       { type: 'no_owner', capture: 'c1' },
+      { type: 'series_extract', capture: 'c1', reason: 'unrecognized_series_container' },
+      { type: 'series_time_conflict', subject: 'movie:1', capture: 'c1' },
     ];
     for (const w of known) {
       const [line] = warningLines([w]);

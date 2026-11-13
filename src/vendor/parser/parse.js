@@ -516,7 +516,11 @@ export async function parse(sources, opts = {}) {
   throwIfAborted(opts.signal);
   // Extraction may group catalog payloads for cache locality; subject history is replayed below.
   const compareText = (a, b) => a < b ? -1 : a > b ? 1 : 0;
-  work.sort((a, b) => (Date.parse(a.row.observed_at) - Date.parse(b.row.observed_at))
+  const parseTime = (at) => {
+    const t = Date.parse(at);
+    return Number.isFinite(t) ? t : 0;
+  };
+  work.sort((a, b) => (parseTime(a.row.observed_at) - parseTime(b.row.observed_at))
     || compareText(a.src.bundleId, b.src.bundleId) || compareText(a.row.capture_id, b.row.capture_id)
     || compareText(a.kind, b.kind));
 
@@ -771,7 +775,7 @@ export async function parse(sources, opts = {}) {
   }
   if (lastSrc) lastSrc.close();
 
-  subjectPatches.sort((a, b) => (Date.parse(a.observation.observed_at) - Date.parse(b.observation.observed_at))
+  subjectPatches.sort((a, b) => (parseTime(a.observation.observed_at) - parseTime(b.observation.observed_at))
     || compareText(a.observation.bundle_id, b.observation.bundle_id)
     || compareText(a.observation.capture_ids[0], b.observation.capture_ids[0]) || compareText(a.kind, b.kind));
   const seriesAt = new Map();
@@ -783,7 +787,8 @@ export async function parse(sources, opts = {}) {
     if (seenSubjectPatches.has(patchId)) continue;
     seenSubjectPatches.add(patchId);
     if (patch.fields.series) {
-      const key = `${patch.key}:${Date.parse(patch.observation.observed_at)}`;
+      const t = Date.parse(patch.observation.observed_at);
+      const key = `${patch.key}:${Number.isFinite(t) ? t : patch.observation.observed_at}`;
       const digest = digestAll({ series: patch.fields.series }).series;
       if (seriesAt.has(key) && seriesAt.get(key) !== digest) warnings.push({ type: 'series_time_conflict',
         subject: patch.key, capture: patch.observation.capture_ids[0] });

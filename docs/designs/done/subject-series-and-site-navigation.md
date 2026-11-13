@@ -1,9 +1,9 @@
 # 「同系列作品」归档、修订与站内导航
 
-状态：第一版嵌入配置提取与离线导航已实现；静态栏目模板与 §8.2 新捕获路线尚未实现。
+状态：第一版嵌入配置提取与离线导航已实现，已归档至 `done/`；静态栏目模板与 §8.2 新捕获路线保留为后续工作。
 调查日期：2026-10-26；实施与复核：2026-11-13。
-范围：data-specs、data-parser、site-generator、extension；可涉及 importer 与 export-adapters 的兼容检查。
-按本文分阶段实施；不扩展抓取范围，不重新发布 sample 站点。
+范围：data-specs、data-parser、site-generator、extension；已核查 importer、export-adapters 与 sample 站点重新生成。
+按本文分阶段实施第一版（见 §12 验收结果与保留范围）。
 
 ## 1. 结论与边界
 
@@ -54,9 +54,9 @@
   [ `markdown.js`](https://github.com/Doubak/doubak-site-generator/blob/11baba7/src/markdown.js)：
   `project()` 按 `(medium,id)` 关联 subject；`buildPages()` 遍历投影后的 marks 生成作品页。
   **有 subject 记录不等于有对应页面**，不能拿 subject 索引直接判断链接是否有效。
-- [`known-captures.js`](../../src/crawl/known-captures.js)、[`runner.js`](../../src/crawl/runner.js)：
+- [`known-captures.js`](../../../src/crawl/known-captures.js)、[`runner.js`](../../../src/crawl/runner.js)：
   已有 `refreshSubjectUrls` 能直接排队重抓旧详情，不必依赖增量标记列表重新发现它们。
-- [`sync-vendor.mjs`](../../tools/sync-vendor.mjs)：共享逻辑必须先在上游仓库实现，再同步；
+- [`sync-vendor.mjs`](../../../tools/sync-vendor.mjs)：共享逻辑必须先在上游仓库实现，再同步；
   不在 OPFS 宿主另写系列解析或导航逻辑。
 
 ### 2.2 豆瓣页面证据
@@ -124,7 +124,7 @@
 `series_url` 已给出上游系列标识（例如 `/series/ECGUB25UQ`），应保存；目前没有证明
 这个标识跨平台合并 / 拆分永不变化，仍不能用它替换作品主键。
 
-已提交 [9 个公开目录 script 片段与来源清单](fixtures/subject-series/README.md)：
+已提交 [9 个公开目录 script 片段与来源清单](../fixtures/subject-series/README.md)：
 
 - BJ单身日记4（`36848001`）：2026-07-31 → 2026-09-04，其他成员 3 → 4、总数 4 → 5，
   同一 series_url。新增成员 ID 为 `35309929`。
@@ -635,11 +635,9 @@ Hugo 验收在临时输出目录完成：普通与无 series 的作品页、长�
 | 周边工具 | NeoDB NDJSON/CSV、Letterboxd、Goodreads 对附加 series/版本升级输出逐项一致；importer 逐字节保留配置，原 soft404 不因添加配置变为成功，也不合成成员捕获。 |
 | Hugo 与浏览器 | 根路径/子路径、ugly/目录式网址；遍历实际 HTML 链接验证目标存在。修正默认渲染钩子与主题导航在带 baseURL 子路径时重复路径的问题。Firefox 360/1000px、浅/深色、可聚焦链接、86 条成员列表通过；长英文片名自动换行。file:// 390px 实际截图确认可读，页面无新增远程 src。 |
 | 真实档案差异 | 24 个本地 bundle、2,955 个作品：排除 canonical/parser 版本字段后，2,955 条标记、3,413 条广播、5 篇长文、6 个豆列、1 份 profile 的序列化摘要与旧 parser 完全相同。subject 修订 7,818 → 12,346；2,103 个作品有系列观测（含明确空配置），没有新提取诊断。 |
-| 帮助与发布边界 | README/Help 已说明旧字节重解析与显式刷新详情的区别；当前 main 已实现，扩展发布版仍为 v1.7.1。没有重生成 sample，也没有部署官网。 |
+| 帮助与发布边界 | README/Help 已说明旧字节重解析与显式刷新详情的区别；当前 main 已实现，扩展发布版仍为 v1.7.1。已完成 sample 站点重新生成与静态检查，未部署线上官网。 |
 
-未完成的范围明确保留：尚无真实 `rendered_section` HTML 夹具，因此不发布猜测的静态
-栏目提取；未知结构保留 WARC 并诊断。§8.2 的「全部」入口捕获、定时刷新和 Enricher
-外部系列关系整合均属后续阶段。本文继续留在 designs 根目录跟踪这些范围，不移动到 done。
+第一版范围（canonical/1.4、嵌入配置提取与时序重放、站点与扩展离线导航及 sample 站点验证）已完成，本文按计划归档至 `docs/designs/done/`。后续工作明确保留：尚无真实 `rendered_section` HTML 夹具，因此暂不发布猜测的静态栏目提取（未知结构继续保留 WARC 并诊断）；§8.2 的「全部」入口捕获、定时刷新和 Enricher 外部系列关系整合均属后续阶段。
 
 file:// 自动化的跨文件 iframe 探针受浏览器来源限制未能回报；改以直接打开作品页截图
 验证显示，加上 Hugo 产物的全链接目标检查。没有把该失败探针写成已通过的自动化。

@@ -2,7 +2,7 @@
 
 这里存放跨模块／跨仓库的功能设计、实现核对与专题审计。按**当前 main 的实现状态**归档，
 不以 issue 是否关闭、版本是否发布或所有浏览器人工测试是否完成作为唯一判据。
-本次逐项核对：2026-11-12；只有本仓库存在 `docs/designs/`，相关规范与下游实现仍分别维护在兄弟仓库。
+本次逐项核对：2026-11-13；只有本仓库存在 `docs/designs/`，相关规范与下游实现仍分别维护在兄弟仓库。
 
 ## 每个目录存放什么
 
@@ -19,12 +19,12 @@
 | --- | --- |
 | [公开与第三方账号归档](public-and-third-party-account-archive.md) | **部分实现**。目标／操作者隔离、多账号选择、昵称、头像及 CLI 账号分流已落地；软封禁二级探测与抢救流程、推荐小组新路线、完整转播关系、简介／地点／加入日期和第三方转换器新 scope/fidelity 契约仍有缺口。不能因主要抓取功能可用就把整份设计标为完成。 |
 | [公开账号实现覆盖核对](public-and-third-party-account-archive-review.md) | 配合上面的未完成设计保留，记录逐项交付与缺口。该核对主要写于 10 月 15–17 日；其中 CLI 的历史“待实现”结论已由[全流程核对 §7](done/full-flow-and-multi-account-audit-2026-10-17.md#7-改造落地与真实数据验证结果2026-10-17-实施完成)的实际实现记录更新。 |
-| [同系列作品与站内导航](subject-series-and-site-navigation.md) | **第一版已实现，后续范围保留**（2026-11-13）。canonical/1.4、parser 时序重放与嵌入配置提取、站点/扩展 Markdown 导航及兼容测试已落地；尚无真实静态栏目模板，§8.2 完整入口捕获和 Enricher 衔接未实施，见正文 §12。 |
 
 ## 已实现并移入 done 的文档
 
 | 文档 | 归档依据与范围 |
 | --- | --- |
+| [同系列作品与站内导航](done/subject-series-and-site-navigation.md) | 第一版嵌入配置提取、canonical/1.4 时序重放、站点与扩展 Markdown 导航、兼容测试及 sample 站点重新生成已完成（2026-11-13）；尚无真实静态栏目模板，§8.2 完整入口捕获和 Enricher 衔接保留为后续工作（见正文 §12）。 |
 | [账号头像与站点图标](done/account-avatar-and-site-branding.md) | profile 规范、目标头像捕获、解析修订与离线站点图标已实现；完整个人资料属于上面的公开账号设计待办。 |
 | [头像实现核对](done/account-avatar-implementation-review.md) | 已完成身份、字节来源、图片处理和旧输入兼容核对，含重载后本人／第三方真实采样。 |
 | [广播详情与回复首屏](done/broadcast-details-and-replies.md) | v1.7.0 已实现最终约定的本人可选首屏原始快照，含 Chrome／Firefox 导出证据。完整讨论分页和 Canonical 正文增强不属于最终交付范围；剩余人工操作矩阵仍如实保留。 |

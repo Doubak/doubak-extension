@@ -44,6 +44,12 @@ test('same WARC bytes through Node and OPFS produce identical canonical and seri
   const nodeFiles=buildPages(project(node),{siteTitle:'tester的豆瓣存档'}).files;
   const portableFiles=md.files.map(f=>[f.name,new TextDecoder().decode(f.bytes)]).filter(([name])=>name.startsWith('content/'));
   assert.deepEqual(portableFiles,nodeFiles.filter(([name])=>name.startsWith('content/')));
-  assert.match(new Map(portableFiles).get('content/movie/36848001.md'),/\.\.\/movie\/1304585\.md/);
-  assert.match(new Map(portableFiles).get('content/movie/1304585.md'),/其他作品页中的关联/);
+  const byName = new Map(portableFiles);
+  assert.match(byName.get('content/movie/36848001.md'), /\.\.\/movie\/1304585\.md/);
+  assert.match(byName.get('content/movie/36848001.md'), /BJ单身日记2：理性边缘 · 本档案未收录/);
+  assert.match(byName.get('content/movie/1304585.md'), /其他作品页中的关联/);
+  assert.doesNotMatch(byName.get('content/movie/1304585.md'), /BJ单身日记2/);
+  assert.equal(byName.has('content/movie/1308819.md'), false);
+  const searchJs = new TextDecoder().decode(md.files.find(f => f.name === 'static/search-index.js').bytes);
+  assert.doesNotMatch(searchJs, /1308819|理性边缘/);
 });

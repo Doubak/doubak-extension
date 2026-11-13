@@ -625,6 +625,13 @@ export function warningLines(warnings) {
       lines.push(`${n} 条捕获带着这个版本不认识的判定（${vs.join('、')}），已跳过`);
     } else if (type === 'no_owner') {
       lines.push(`${n} 条广播分不出是谁发的，已跳过（转发进来的别人的内容就是这样）`);
+    } else if (type === 'series_extract') {
+      const reasons = [...new Set(list.map((w) => w.reason).filter(Boolean))];
+      lines.push(`${n} 个作品页中的同系列配置未能完整识别${reasons.length ? `（${reasons.join('、')}）` : ''}，`
+        + '保留旧列表不清空，原始字节仍在档案里');
+    } else if (type === 'series_time_conflict') {
+      const subjects = new Set(list.map((w) => w.subject).filter(Boolean)).size;
+      lines.push(`${subjects || n} 个作品在同一秒内捕获到不同的同系列列表，已按确定性规则保留全部观测并在页面标注冲突`);
     } else {
       // **认不出来的一条一行、原样印。** 折叠进「其它」等于把还不理解的东西藏起来。
       for (const w of list) lines.push(JSON.stringify(w));
