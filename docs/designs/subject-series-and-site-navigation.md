@@ -1,8 +1,8 @@
 # 「同系列作品」归档、修订与站内导航
 
-状态：设计提案，尚未实现。调查日期：2026-10-26。
+状态：实施中。调查日期：2026-10-26；实施前复核：2026-11-13。
 范围：data-specs、data-parser、site-generator、extension；可涉及 importer 与 export-adapters 的兼容检查。
-本次只提交设计，不改变抓取行为、不重新发布 sample 站点。
+按本文分阶段实施；不扩展抓取范围，不重新发布 sample 站点。
 
 ## 1. 结论与边界
 
@@ -28,29 +28,29 @@
 工作区根没有 `README.md`；各子仓库的 README 是对应上下文。
 项目文档采用中文，canonical 是可重建的观测记录，WARC 才是原始证据；解析、生成均离线。
 
-调查时的 main 基线：
+2026-11-13 实施前的 main 基线（固定链接保留核对时的代码）：
 
 | 仓库 | 提交 | 与本设计有关的当前行为 |
 | --- | --- | --- |
-| data-specs | `11b3075` | canonical/1.x 接受未知附加字段；subject 使用修订、字段摘要及 observation |
-| data-parser | `f7130cc` | parser `0.16.0`，输出 `canonical/1.3`；详情只抽 `info` / `aliases` |
-| site-generator | `e814e66` | 作品页由标记投影生成；正文为 Markdown，Hugo 负责 HTML |
-| extension | `d20fa8e` | vendor 复用 parser / generator；详情页默认跳过已成功抓取的 URL，可显式重抓 |
+| data-specs | `186264e` | bundle/1.5（含 denied）；canonical/1.3，subject 使用修订、字段摘要及 observation |
+| data-parser | `b548526` | parser `0.17.0`，输出 `canonical/1.3`；详情只抽 `info` / `aliases` |
+| site-generator | `11baba7` | project(canonical, { replySnapshots = [] } = {})；作品页由标记投影生成，已有回复提示、相册、小组及头像徽标 |
+| extension | `e44ec80` | v1.7.1 + PR #36；vendor 已含 site-title / image-index / avatar / avatar-image；详情可显式重抓 |
 
 代码依据（实施时以对应 main 最新代码重新核对）：
 
-- [parser `extract-subject.js`](https://github.com/Doubak/doubak-data-parser/blob/f7130cc/src/extract-subject.js)：
+- [parser `extract-subject.js`](https://github.com/Doubak/doubak-data-parser/blob/b548526/src/extract-subject.js)：
   `extractSubjectDetail()` 只返回媒介、ID、`info`、`aliases`；没有系列关系抽取。
-- [parser `parse.js`](https://github.com/Doubak/doubak-data-parser/blob/f7130cc/src/parse.js)：
+- [parser `parse.js`](https://github.com/Doubak/doubak-data-parser/blob/b548526/src/parse.js)：
   先处理所有 detail，`details.set(medium:id, ...)` 覆盖为一份，随后 `upsertSubject()`
   把它补到列表页产生的记录中。这能补齐当前资料，但**不能保存详情变化的时序**。
   detail 仅在 info 或 aliases 非空时入表；只出现系列栏的页面会被现有条件丢掉。
-- [subject schema](https://github.com/Doubak/doubak-data-specs/blob/11b3075/canonical/v1/subject.schema.json)
-  与 [摄取规则 §5.4](https://github.com/Doubak/doubak-data-specs/blob/11b3075/canonical/INGESTION.md)：
+- [subject schema](https://github.com/Doubak/doubak-data-specs/blob/186264e/canonical/v1/subject.schema.json)
+  与 [摄取规则 §5.4](https://github.com/Doubak/doubak-data-specs/blob/186264e/canonical/INGESTION.md)：
   字段缺失不是空值；`omitted_fields` 已能表达本次不提供某字段的新证据。
-- [generator `projection.js`](https://github.com/Doubak/doubak-site-generator/blob/e814e66/src/projection.js)、
-  [ `pages.js`](https://github.com/Doubak/doubak-site-generator/blob/e814e66/src/pages.js)、
-  [ `markdown.js`](https://github.com/Doubak/doubak-site-generator/blob/e814e66/src/markdown.js)：
+- [generator `projection.js`](https://github.com/Doubak/doubak-site-generator/blob/11baba7/src/projection.js)、
+  [ `pages.js`](https://github.com/Doubak/doubak-site-generator/blob/11baba7/src/pages.js)、
+  [ `markdown.js`](https://github.com/Doubak/doubak-site-generator/blob/11baba7/src/markdown.js)：
   `project()` 按 `(medium,id)` 关联 subject；`buildPages()` 遍历投影后的 marks 生成作品页。
   **有 subject 记录不等于有对应页面**，不能拿 subject 索引直接判断链接是否有效。
 - [`known-captures.js`](../../src/crawl/known-captures.js)、[`runner.js`](../../src/crawl/runner.js)：
@@ -149,6 +149,14 @@
 5. 本地作品页是否存在，以本次筛选后将输出的页面集合为准。关系不会创建用户标记。
 6. 同一批字节在 Node 和扩展导出中产生一致结果；没有网络和 enricher 仍可构建。
 
+### 3.1 与 Enricher 的边界
+
+`fields.series` 只保存豆瓣详情 WARC 中的一手目录观测。Enricher 的
+`enrichment/1.0`、`series_of` / `part_of` 属于外部证据与派生关系，不写回这个字段，
+也不以推断替代某次豆瓣列表。当前功能不依赖 Enricher 或 `--enrichment`。
+未来消费两种来源时，复用同一个系列导航模块，分明标注来源、日期及置信边界；
+不得生成两块相互矛盾却都称为「同系列」的 UI，不自动取并集或合并作品身份。
+
 ## 4. Canonical 数据契约
 
 ### 4.1 一个可选的 subject 字段
@@ -209,7 +217,7 @@ schema 对对象允许附加属性，`kind` / `source` / `scope` 用可扩展字
 | 这次输入 | 系列字段及后续行为 |
 | --- | --- |
 | 旧 canonical 没有 `series` | 完全合法；没有可显示的直接证据，不报「损坏」 |
-| 只有标记列表页，未抓详情 / `skip_catalog` / catalog 段已删 | 首次省略字段；已有值原样保留，本次 observation 标 `omitted_fields: ["series", ...]` |
+| 只有标记列表页，未抓详情 / `includeCatalog: false` / catalog 段已删 | 首次省略字段；已有值原样保留，本次 observation 标 `omitted_fields: ["series", ...]` |
 | 正常详情页既无可读配置也无已识别栏目 | 同上；模板差异、旧页面和平台隐藏不能解释为「不再属于系列」 |
 | 空 `#series-items`，但有有效 `_CONFIG` | 读取配置；不能把空 DOM 当空系列，也不能因此漏掉数组 |
 | 标题在但容器不认识、未闭合、全部条目解析失败 | 不更新该字段；保留旧证据，发可定位到 capture 的诊断 |
@@ -222,6 +230,9 @@ schema 对对象允许附加属性，`kind` / `source` / `scope` 用可扩展字
 **没有栏目不是明确空列表。** §2.3 已有明确空配置的真实夹具，可对这一经过验证的
 完整配置启用清空分支；丢失键、空 shell、配置截断和未知模板仍没有清空权限。
 `series: null` 不由新 producer 输出；reader 遇到它按未知处理并诊断，不将其当作清空。
+这不改变既有 `info` / `aliases` 的 null 兼容约定：初次未读详情时仍用 null；
+series 初次未观测则省略键及摘要。subject 的 omitted_fields 只列 subject 字段，
+无论字段目前为 null、缺键或携带旧值，都表达本次补丁没有提供它，不包含 mark 的 rating / tags。
 
 完整空值是一个字段的正面观测，不是用路线缺失推导删除，和 `absence_authority`
 是两套概念。即使公开抓取的 authority 恒为 `none`，仍可以保存页面明确展示的列表；
@@ -244,6 +255,9 @@ schema 对对象允许附加属性，`kind` / `source` / `scope` 用可扩展字
 必须在 `omitted_fields` 中声明，不能延长「最后确认系列列表」时间。
 
 生成器从**未省略 series 的 observation**取该列表最后一次实证时间和出处。
+必须跨全部 revisions 倒序寻找与当前展示值相同的实证，不能只检查最后一条 revision：
+较晚的列表页可能只修改 raw_meta，同时携带旧 series，新 revision 的 observations
+因此全部省略 series。显式损坏的新 series 不得借此回退旧值。
 不能直接用整个 subject 的 `last_observed_at`，它可能只是较晚的一次标记列表捕获。
 新版 parser 的初次提取、不同 parser_version 之间的差异不描述为豆瓣编辑。
 
@@ -315,7 +329,7 @@ subject 修订数可以增加，旧的「修订数恰好 N」测试要核对内�
 作品链接用 `new URL(href, detailUrl)` 解析并验证协议、准确 host 和完整路径
 `/subject/<数字>/`（允许经过明确规则处理的末尾斜杠及 query）。拒绝凭据、外站、
 `javascript:`、伪造子域、`/photos/` / `/reviews/` 子路径。不要直接复用当前宽松的
-`subjectRefOf()` 子串匹配来建立关系。只接受 movie 来源，不以数字 ID 跨媒介关联。
+`subjectRefOf()` 子串匹配来建立关系。只接受 movie 来源，不以数字 ID 跨媒介关联。图书 #info 的「丛书」仍是普通 info，不属于 douban_same_series。
 静态标题实体解码一次，配置标题只做 JSON 解码，结果都留作文本而不执行 HTML；
 缺标题也不从相邻推荐卡片借一个。
 同一条目首次出现决定顺序，后续重复链接只补齐尚缺的标题；相互冲突的非空标题
@@ -355,12 +369,12 @@ subject 修订数可以增加，旧的「修订数恰好 N」测试要核对内�
 • 示例剧 第三季       想看                 [站内链接]
 • 示例剧 特别篇       本档案未收录          [纯文本]
 
-页面标示「全部 8」；本次记录含 4 个条目，不保证包含全部系列作品。
+页面标示「全部 8」；本次记录含 3 个条目，不保证包含全部系列作品。
 ```
 
 列表省略自项，并用「当前作品：…」的单行上下文在需要时说明当前位置。
-`本次记录含 4 个条目` 按保存的 distinct items 计数，包含
-来源确实显示的自项；链接列表数量因此可能少一项。scope 未知时改为「列表范围未知」。
+`本次记录含 3 个条目` 按保存的 distinct items 计数，本例为 embedded_config，不含自项，不手动 +1。
+只有将来经取证的 rendered_section 确实保存自项时，计数才包含自项，链接数量可少一项。scope 未知时改为「列表范围未知」。
 只有真实 complete 且自项规则已核实，才可以说明「该页面的完整列表」。
 
 按来源顺序展示，不把顺序改称「观看顺序」；不从标题猜季数，不自动推荐补看。
@@ -368,6 +382,8 @@ subject 修订数可以增加，旧的「修订数恰好 N」测试要核对内�
 `作品 <id>`；历史差异仍使用各快照自己的名称。关系标题不得写回目标 subject。
 评分和「看过 / 在看 / 想看」取本站同一账号投影，未有标记绝不显示「没看过」。
 
+第一版使用普通 Markdown `- ` 列表，禁止复用作品信息表格（全局 td:first-child 的 nowrap 会造成窄屏溢出）。
+名称和 season_label 必须经 plainText() 转义，不能将方括号、下划线或 HTML 当作标记。
 第一版使用文字列表，不新增封面下载；未来可复用已验证的本地图，但绝无远程图片 fallback。
 小屏自然换行；状态有文字，不只靠颜色；长列表全量静态展示，不只加载前五项。
 无 JS、`file://`、浅色 / 深色主题均可读。无直接或可用间接证据时不输出空模块，
@@ -431,7 +447,7 @@ partial / unknown 尤其不能称「删除」。相同列表重复观测不增�
 ### 6.5 共享实现位置
 
 建议 generator 增加纯 `series.js`：选取字段证据、生成本页 / 反向引用和目录变化摘要。
-`projection.js` 调用它，`pages.js` 提供输出路径表，`markdown.js` 负责文本和链接转义。
+`projection.js` 调用它，保留现有 `project(canonical, { replySnapshots = [] } = {})` 参数兼容，`pages.js` 提供输出路径表，`markdown.js` 负责文本和链接转义。
 主题只负责间距、字号、颜色和链接渲染；不用原始 HTML / `unsafe=true` 才能看到系列内容。
 Markdown 导出自身就包含导航，因此扩展 ZIP、文件夹、CLI、第三方 SSG 都能受益。
 新增纯文件须加入 extension vendor 清单及 portable 检查，不另造浏览器版本。
@@ -480,13 +496,14 @@ series items 的已知部分可单项容错：无效 ID / 不认识的媒介不�
 
 ### 8.1 第一版沿用既有抓取范围
 
-首次全量 / 选择详情的抓取天然可能保存该配置 / 栏目；公开轻量模式 `skip_catalog` 没有它
+首次全量 / 选择详情的抓取天然可能保存该配置 / 栏目；公开轻量模式（#public-lightweight：「仅归档用户内容与标记列表（推荐，跳过作品详情页）」）
+通过 includeCatalog / includeCovers 控制抓取；includeCatalog: false 时没有它
 也完全正常。新 parser 不联网补全，不因 series 中的新 ID 递归扩展抓取范围。
 不会突然抓完整个电影宇宙，也不会增加系列推荐图的下载。
 
 普通增量默认跳过成功抓过的详情，因此**升级解析器不等于刷新豆瓣列表**。
 如果原字节已经包含配置 / 栏目，只需重新解析；若要取得后来的变化，由用户使用已有
-「重抓作品详情页」能力。`refreshSubjectUrls` 从已知 URL 集合直接排队，所以旧作品
+「增量抓取，并重新抓取可以编辑的内容」能力（同时刷新详情与可编辑长文）。`refreshSubjectUrls` 从已知 URL 集合直接排队，所以旧作品
 即使不在增量标记列表的新几页里也会刷新。保持其现有节奏、前置门控、挑战处理及恢复行为。
 
 帮助文案需把「从旧档案提取」「重新取得平台最新页面」分开说明。不要为关系信息
@@ -543,7 +560,7 @@ series items 的已知部分可单项容错：无效 ID / 不认识的媒介不�
 
 | 场景 | 必须观察到的结果 |
 | --- | --- |
-| 旧 canonical、无详情、skip_catalog、只有旧季数 select | 原有作品正常生成；没有编造系列或强制补抓提示 |
+| 旧 canonical、无详情、includeCatalog: false、只有旧季数 select | 原有作品正常生成；没有编造系列或强制补抓提示 |
 | 空 `#series-items` + 有效配置、推荐区 / 简介 / 评论 / 假配置字符串同页 | 读取真实配置数组；空 shell 不清空；旁边文本和链接不污染关系 |
 | 配置中转义引号、括号 / `</script>` 字面量、注释、重复键 / 配置、主体 ID 不符 | 不越过实际 script 边界、不执行代码；不认识 / 冲突时诊断而不清空 |
 | 多于五项的嵌入数组、season label 为 null、空数组但有系列 URL | 数组不截断、不丢 null 季名成员、单成员系列与没有系列不同 |
@@ -594,6 +611,6 @@ Hugo 验收在临时输出目录完成：普通与无 series 的作品页、长�
 预期成员数组；未执行其中任何脚本。文档本地链接及 JSON 示例检查通过。
 
 本次已做的兼容性探针：向一个合成 canonical subject 添加上述 `series` 对象、
-将其版本改为 `canonical/1.4`，调用当前 generator 的 `project()` + `buildPages()`，
+将其版本改为 `canonical/1.4`，调用当时 generator 的 `project()` + `buildPages()`（当前 project 第二参数可选，含 replySnapshots），
 全部输出与没有 series 的输入深比较一致。这只验证现有投影 / Markdown 生成忽略可选字段，
 不代表新系列功能、Hugo 或各 export-adapter 已通过 §10 的未来验收。
