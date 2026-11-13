@@ -18,6 +18,7 @@
 | 文档 | 当前状态与保留原因 |
 | --- | --- |
 | [公开与第三方账号归档](public-and-third-party-account-archive.md) | **部分实现**（含 [§9 实现覆盖核对与验收记录](public-and-third-party-account-archive.md#9-实现覆盖核对与验收记录)）。目标／操作者隔离、多账号选择、昵称、头像及 CLI 账号分流已落地（见[全流程核对 §7](done/full-flow-and-multi-account-audit-2026-10-17.md#7-改造落地与真实数据验证结果2026-10-17-实施完成)）；软封禁二级探测与抢救流程、推荐小组新路线、完整转播关系、简介／地点／加入日期和第三方转换器新 scope/fidelity 契约仍有缺口。不能因主要抓取功能可用就把整份设计标为完成。 |
+| [定期备份提醒与多本人账号到期巡检](backup-reminder.md) | **待实现**（关联 [#7](https://github.com/Doubak/doubak-extension/issues/7)）。确立纯本地离线到期巡检方案（仅限 `visibility === 'self'` 本人账号、单号独立 Toggler 默认开启、每天最多提醒一次且未处理次日再提醒、跨本人账号登录态防呆提示及 16 项边界情况处置）。 |
 
 ## 已实现并移入 done 的文档
 
