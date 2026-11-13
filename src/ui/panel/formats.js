@@ -631,7 +631,7 @@ export function warningLines(warnings) {
         + '保留旧列表不清空，原始字节仍在档案里');
     } else if (type === 'series_time_conflict') {
       const subjects = new Set(list.map((w) => w.subject).filter(Boolean)).size;
-      lines.push(`${subjects || n} 个作品在同一秒内捕获到不同的同系列列表，已按确定性规则保留全部观测并在页面标注冲突`);
+      lines.push(`${subjects || n} 个作品在同一秒内捕获到不同的同系列列表，已按确定性顺序保留全部观测并在并集中取最新版`);
     } else {
       // **认不出来的一条一行、原样印。** 折叠进「其它」等于把还不理解的东西藏起来。
       for (const w of list) lines.push(JSON.stringify(w));

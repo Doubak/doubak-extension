@@ -5,7 +5,8 @@
 /** Pure, source-labelled directory observations. No entity merging or network lookups. */
 const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 const keyOf = item => `${item.medium}:${item.id}`;
-const time = at => Date.parse(at) || 0;
+const time = at => { const t = Date.parse(at); return Number.isFinite(t) ? t : 0; };
+const compareText = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 function stable(value) {
   if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
   if (object(value)) return `{${Object.keys(value).sort().map(k=>`${JSON.stringify(k)}:${stable(value[k])}`).join(',')}}`;
@@ -58,27 +59,38 @@ export function projectSeries(subject) {
   // Revision/observation order is the canonical deterministic tie-break for equal instants.
   events.sort((a,b)=>time(a.at)-time(b.at));
   const evidence=[...events].reverse().find(e=>e.raw===stable(latest.fields.series));
-  const history=[]; let prior=null;
+  const selfKey=`movie:${subject.id}`;
+  // Union readable snapshots chronologically so each Douban ID keeps its latest title/label;
+  // an explicit complete-empty snapshot resets earlier members until a later non-empty list.
+  const merged=new Map();
   for (const event of events) {
-    if (!event.value) { prior=null; continue; }
-    if (prior && visible(prior.value)!==visible(event.value)) {
-      const before=new Map(prior.value.items.map(i=>[keyOf(i),i]));
-      const after=new Map(event.value.items.map(i=>[keyOf(i),i]));
-      history.push({ at:event.at, parserChanged:prior.parser!==event.parser,
-        conflict:time(prior.at)===time(event.at), partial:event.value.scope==='partial',
-        added:event.value.items.filter(i=>!before.has(keyOf(i))),
-        removed:prior.value.items.filter(i=>!after.has(keyOf(i))),
-        changed:!event.value.items.some(i=>!before.has(keyOf(i))) && !prior.value.items.some(i=>!after.has(keyOf(i))) });
+    if (!event.value) continue;
+    if (!event.value.items.length && event.value.scope==='complete') { merged.clear(); continue; }
+    for (const item of event.value.items) {
+      const k=keyOf(item); if (k===selfKey) continue;
+      const prev=merged.get(k);
+      merged.set(k,{ medium:'movie', id:item.id, title:item.title??prev?.title??null,
+        season_label:item.season_label??null, at:event.at??prev?.at??null });
     }
-    prior=event;
+  }
+  const unionItems=[]; let hasHistoryUnionExtras=false;
+  if (current.value) {
+    const seenCurrent=new Set();
+    for (const item of current.value.items) {
+      const k=keyOf(item); if (k===selfKey || seenCurrent.has(k)) continue;
+      seenCurrent.add(k); unionItems.push(merged.get(k)??item);
+    }
+    for (const [k,item] of merged) {
+      if (!seenCurrent.has(k)) { unionItems.push(item); hasHistoryUnionExtras=true; }
+    }
   }
   const laterUnknown=Boolean(evidence && revisions.some(r=>(r.observations??[]).some(o=>
     time(o.observed_at)>time(evidence.at) && ['series','title','cover_url','raw_meta'].every(k=>o.omitted_fields?.includes(k)))));
-  return { current:current.value??null, at:evidence?.at??null, evidence:evidence?.observation??null,
-    laterUnknown, history, diagnostics };
+  return { current:current.value??null, unionItems, hasHistoryUnionExtras, at:evidence?.at??null,
+    evidence:evidence?.observation??null, laterUnknown, diagnostics };
 }
 
-/** Only actual, filtered output pages can supply destinations or reverse evidence. */
+/** Merge own series snapshots and direct 1-hop incoming references; latest version wins per Douban ID. */
 export function seriesNavigation(marks, paths) {
   const byKey=new Map(marks.map(m=>[`${m.medium}:${m.subjectId}`,m]));
   const incoming=new Map();
@@ -88,19 +100,45 @@ export function seriesNavigation(marks, paths) {
     for (const item of m.series.current.items) {
       const key=keyOf(item); if (key===source || !paths.has(key)) continue;
       if (!incoming.has(key)) incoming.set(key,[]);
-      incoming.get(key).push({ source, title:m.title??`作品 ${m.subjectId}`, at:m.series.at, path:paths.get(source) });
+      incoming.get(key).push({ source, title:m.title??`作品 ${m.subjectId}`, at:item.at??m.series.at, path:paths.get(source) });
     }
   }
   const out=new Map();
   for (const m of marks) {
     const key=`${m.medium}:${m.subjectId}`;
+    const hasInvalidLatest=Boolean(m.series && !m.series.current && m.series.diagnostics?.length);
     if (!m.series && !incoming.has(key)) continue;
-    out.set(key, { ...m.series, incoming:incoming.get(key)??[],
-      items:(m.series?.current?.items??[]).filter(i=>keyOf(i)!==key).map(item=>{
-        const dest=paths.has(keyOf(item))?byKey.get(keyOf(item)):null;
-        return { ...item, title:dest?.title??item.title??`作品 ${item.id}`,
-          path:dest?paths.get(keyOf(item)):null, status:dest?.status??null, rating:dest?.rating??null };
-      }) });
+    const merged=new Map();
+    if (!hasInvalidLatest) {
+      for (const item of m.series?.unionItems??[]) {
+        if (keyOf(item)===key) continue;
+        merged.set(keyOf(item),{ ...item, at:item.at??m.series?.at??null });
+      }
+    }
+    let addedByIncoming=false, unionAt=m.series?.at??null;
+    const incList=[...(incoming.get(key)??[])].sort((a,b)=>(time(a.at)-time(b.at))||compareText(a.source,b.source));
+    if (!hasInvalidLatest) {
+      for (const inc of incList) {
+        if (inc.at && (!unionAt || time(inc.at)>time(unionAt))) unionAt=inc.at;
+        if (!merged.has(inc.source)) {
+          addedByIncoming=true;
+          merged.set(inc.source,{ medium:'movie', id:inc.source.split(':')[1], title:inc.title, season_label:null, at:inc.at });
+        } else {
+          const prev=merged.get(inc.source);
+          if (inc.at && (!prev.at || time(inc.at)>=time(prev.at))) {
+            merged.set(inc.source,{ ...prev, title:inc.title??prev.title, at:inc.at });
+          }
+        }
+      }
+    }
+    const items=[];
+    for (const [k,item] of merged) {
+      const dest=paths.has(k)?byKey.get(k):null;
+      items.push({ ...item, title:dest?.title??item.title??`作品 ${item.id}`,
+        path:dest?paths.get(k):null, status:dest?.status??null, rating:dest?.rating??null });
+    }
+    out.set(key,{ ...m.series, current:m.series?.current??null,
+      hasUnionExtras:Boolean(m.series?.hasHistoryUnionExtras || addedByIncoming), unionAt, items });
   }
   return out;
 }

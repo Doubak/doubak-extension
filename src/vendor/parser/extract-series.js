@@ -184,6 +184,9 @@ export function extractSeries(html, url) {
     else if (!items.length) throw Error('unproven_empty_series');
     else if (diagnostics.length || !series_url || items.length + 1 !== claimed_total || seen.has(id)) {
       scope = 'partial'; diagnostics.push('inconsistent_series_extent');
+    } else {
+      // SERIES_OTHER_SUBJECTS omits self while series_total counts self, so items.length + 1 === claimed_total confirms completeness.
+      scope = 'complete';
     }
     return { value: { kind: 'douban_same_series', source: 'embedded_config', series_url, items, scope, claimed_total, more_url: null }, diagnostics };
   } catch (e) { diagnostics.push(e.message); return { diagnostics }; }

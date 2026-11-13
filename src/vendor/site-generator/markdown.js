@@ -996,38 +996,31 @@ function seriesSection(s) {
   const lines=[];
   const date=at=>plainText(at??'时间未知');
   const name=item=>plainText(item.title??`作品 ${item.id}`);
-  if (s.current) {
+  if (s.current || s.items?.length) {
     const c=s.current;
-    lines.push('', '## 同系列作品', '', `豆瓣作品页于 ${date(s.at)} 提供的列表 · ${c.scope==='complete'?'该页面的完整列表':c.scope==='partial'?'仅收录页面可见部分':'列表范围未知'}`, '');
-    for (const item of s.items) {
-      const title=item.path?`[${name(item)}](../${item.path})`:name(item);
-      const label=item.season_label?` · ${plainText(item.season_label)}`:'';
-      const state=item.path?plainText(verb(item.medium,item.status)??''): '本档案未收录';
-      const stars=Number.isInteger(item.rating)&&item.rating>=1&&item.rating<=5?` · ${'★'.repeat(item.rating)}${'☆'.repeat(5-item.rating)}`:'';
-      lines.push(`- ${title}${label} · ${state}${stars}`);
-    }
-    if (!c.items.length) {
+    if (s.items.length) {
+      const heading = !s.hasUnionExtras && c
+        ? (c.scope==='complete'
+          ? `豆瓣作品页于 ${date(s.at)} 提供的列表 · 该页面的完整列表（含本作共 ${c.claimed_total??s.items.length+1} 项）`
+          : `豆瓣作品页于 ${date(s.at)} 提供的列表 · ${c.scope==='partial'?'仅收录页面可见部分':'列表范围未知'}（列其他 ${s.items.length} 项${c.claimed_total!==null?`，页面标示含本作共 ${c.claimed_total} 项`:''}）`)
+        : `综合截至 ${date(s.unionAt??s.at)} 的档案观测并集（列其他 ${s.items.length} 项，同 ID 取最新版）`;
+      lines.push('', '## 同系列作品', '', heading, '');
+      for (const item of s.items) {
+        const title=item.path?`[${name(item)}](../${item.path})`:name(item);
+        const label=item.season_label?` · ${plainText(item.season_label)}`:'';
+        const state=item.path?plainText(verb(item.medium,item.status)??''): '本档案未收录';
+        const stars=Number.isInteger(item.rating)&&item.rating>=1&&item.rating<=5?` · ${'★'.repeat(item.rating)}${'☆'.repeat(5-item.rating)}`:'';
+        lines.push(`- ${title}${label} · ${state}${stars}`);
+      }
+      if (s.laterUnknown) lines.push('', '后续页面未提供可识别的系列列表。');
+    } else if (c) {
+      lines.push('', '## 同系列作品', '', `豆瓣作品页于 ${date(s.at)} 提供的列表 · ${c.scope==='complete'?'该页面的完整列表':c.scope==='partial'?'仅收录页面可见部分':'列表范围未知'}`, '');
       lines.push(c.scope==='complete' && c.source==='embedded_config' && !c.series_url && c.claimed_total===0
         ? `此来源在 ${date(s.at)} 明确未设置系列。`
         : c.scope==='complete' && c.source==='embedded_config' && c.series_url && c.claimed_total===1
           ? `此来源在 ${date(s.at)} 仅列当前作品，没有其他系列条目。` : '本次列表未记录其他条目，范围无法确认。');
-    } else lines.push('', `${c.claimed_total!==null?`页面标示「全部 ${c.claimed_total}」；`:''}本次记录含 ${c.items.length} 个条目${c.scope==='complete'?'。':'，不保证包含全部系列作品。'}`);
-    if (s.laterUnknown) lines.push('', '后续页面未提供可识别的系列列表。');
-  } else if (s.diagnostics?.length) lines.push('', '## 同系列作品', '', '最新系列记录无法展示；未以旧列表替代。');
-  if (s.history?.length) {
-    lines.push('', '## 系列列表的观测变化', '');
-    for (const h of s.history) {
-      const message=h.conflict?'同一时间有不同列表记录':h.parserChanged?'解析版本不同，不推断平台列表变化':[
-        h.added.length?`本次多显示：${h.added.map(name).join('、')}`:null,
-        h.removed.length?`${h.partial?'本次可读取部分未列出':'该来源本次未列出'}：${h.removed.map(name).join('、')}`:null,
-        h.changed?'顺序 / 名称 / 范围变更':null,
-      ].filter(Boolean).join('；');
-      lines.push(`- ${date(h.at)}：${message}。`);
+      if (s.laterUnknown) lines.push('', '后续页面未提供可识别的系列列表。');
     }
-  }
-  if (s.incoming?.length) {
-    lines.push('', '## 其他作品页中的关联', '');
-    for (const i of s.incoming) lines.push(`- [${plainText(i.title)}](../${i.path}) 的作品页曾将本作列入同系列（观测于 ${date(i.at)}）。`);
-  }
+  } else if (s.diagnostics?.length) lines.push('', '## 同系列作品', '', '最新系列记录无法展示；未以旧列表替代。');
   return lines.length?lines.join('\n')+'\n':'';
 }
