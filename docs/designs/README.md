@@ -17,8 +17,7 @@
 
 | 文档 | 当前状态与保留原因 |
 | --- | --- |
-| [公开与第三方账号归档](public-and-third-party-account-archive.md) | **部分实现**。目标／操作者隔离、多账号选择、昵称、头像及 CLI 账号分流已落地；软封禁二级探测与抢救流程、推荐小组新路线、完整转播关系、简介／地点／加入日期和第三方转换器新 scope/fidelity 契约仍有缺口。不能因主要抓取功能可用就把整份设计标为完成。 |
-| [公开账号实现覆盖核对](public-and-third-party-account-archive-review.md) | 配合上面的未完成设计保留，记录逐项交付与缺口。该核对主要写于 10 月 15–17 日；其中 CLI 的历史“待实现”结论已由[全流程核对 §7](done/full-flow-and-multi-account-audit-2026-10-17.md#7-改造落地与真实数据验证结果2026-10-17-实施完成)的实际实现记录更新。 |
+| [公开与第三方账号归档](public-and-third-party-account-archive.md) | **部分实现**（含 [§9 实现覆盖核对与验收记录](public-and-third-party-account-archive.md#9-实现覆盖核对与验收记录)）。目标／操作者隔离、多账号选择、昵称、头像及 CLI 账号分流已落地（见[全流程核对 §7](done/full-flow-and-multi-account-audit-2026-10-17.md#7-改造落地与真实数据验证结果2026-10-17-实施完成)）；软封禁二级探测与抢救流程、推荐小组新路线、完整转播关系、简介／地点／加入日期和第三方转换器新 scope/fidelity 契约仍有缺口。不能因主要抓取功能可用就把整份设计标为完成。 |
 
 ## 已实现并移入 done 的文档
 

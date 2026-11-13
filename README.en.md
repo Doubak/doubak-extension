@@ -77,7 +77,7 @@ broadcasts retain their title in canonical data, Markdown and search. Target acc
 are archived and included in Markdown exports; the Hugo generator creates local favicons
 and header images, with the previous green logo as fallback. See the
 [avatar design](docs/designs/done/account-avatar-and-site-branding.md) and
-[implementation coverage](docs/designs/public-and-third-party-account-archive-review.md).
+[implementation coverage](docs/designs/public-and-third-party-account-archive.md#9-实现覆盖核对与验收记录).
 
 
 ## Why this exists

@@ -24,7 +24,7 @@
 
 Firefox 打包、账号切换及导入导出实测见[兼容性核对](docs/designs/done/firefox-multi-account-audit-2026-10-18.md)。
 
-设计逐项覆盖与尚未实现的部分见[实现核对记录](docs/designs/public-and-third-party-account-archive-review.md)。
+设计逐项覆盖与尚未实现的部分见[公开与多账号归档设计 §9 实现覆盖核对](docs/designs/public-and-third-party-account-archive.md#9-实现覆盖核对与验收记录)。
 
 概览页留空即可备份当前登录账号；输入豆瓣主页 HTTPS 网址、用户名或数字 UID 后点击
 「查看账号」，核对昵称与可备份范围后再开始抓取。输入本人 UID 时自动使用本人视图。本地账号气泡
