@@ -1,6 +1,7 @@
 # 「同系列作品」归档、修订与站内导航
 
-状态：实施中。调查日期：2026-10-26；实施前复核：2026-11-13。
+状态：第一版嵌入配置提取与离线导航已实现；静态栏目模板与 §8.2 新捕获路线尚未实现。
+调查日期：2026-10-26；实施与复核：2026-11-13。
 范围：data-specs、data-parser、site-generator、extension；可涉及 importer 与 export-adapters 的兼容检查。
 按本文分阶段实施；不扩展抓取范围，不重新发布 sample 站点。
 
@@ -604,13 +605,41 @@ Hugo 验收在临时输出目录完成：普通与无 series 的作品页、长�
 收益是旧档案仍可用，新增 / 移出 / 重排都有来源可查，生成站点不会随系列变化破坏
 每一季的 URL、评价和历史；将来补抓完整列表也不必推翻这一数据模型。
 
-本次交付为设计、代码 / 归档调查及 9 个公开目录配置片段；具体解析器尚未实现。
+以下为 2026-10-26 的历史交付记录；当前实施验收见 §12。
+当时交付为设计、代码 / 归档调查及 9 个公开目录配置片段，未实现解析器。
 已经确认的嵌入数据不依赖实时网页；静态栏目变体、完整入口点击行为仍需后续取证。
 不能把搜索索引内容或本次只读探针当作正式 parser 已通过全部验收。
 九个片段均已逐一回读对应 WARC 核实原文、capture 时间和 URL，并验证片段摘要与
 预期成员数组；未执行其中任何脚本。文档本地链接及 JSON 示例检查通过。
 
-本次已做的兼容性探针：向一个合成 canonical subject 添加上述 `series` 对象、
+2026-10-26 已做的兼容性探针：向一个合成 canonical subject 添加上述 `series` 对象、
 将其版本改为 `canonical/1.4`，调用当时 generator 的 `project()` + `buildPages()`（当前 project 第二参数可选，含 replySnapshots），
 全部输出与没有 series 的输入深比较一致。这只验证现有投影 / Markdown 生成忽略可选字段，
 不代表新系列功能、Hugo 或各 export-adapter 已通过 §10 的未来验收。
+
+
+## 12. 第一版实施与验收（2026-11-13）
+
+规格为 canonical/1.4（bundle/1.5 不变），parser 0.18.0；generator 共享纯模块
+`series.js`，extension 同步 `extract-series.js` 与 `series.js`，无新增权限或请求。
+上述基线表仍是实施前的固定基线，不把历史链接改成不可复现的 main。
+
+| 范围 | 落地与证据 |
+| --- | --- |
+| 安全配置提取 | 9 个真实片段已进入 parser 测试目录并保留来源清单；单双引号外层对象、JSON 成员、null 季名、大于 5 项、明确空/单成员、增加/减少/重排均通过。脚本注释、字符串、HTML 注释、textarea/template、JSON-LD 不冒充配置；截断、表达式、重复键、冲突配置、ID/URL 不符诊断而不清空。 |
+| 详情时序 | 按时间、bundle/capture、补丁种类重放；先确认标记资格，详情不创建额外作品。info/aliases 沿真实详情时间修订；subject 独立 omitted_fields，保留 cover 摘要豁免。新增实现无关的 subject-series-history conformance 及 canonical 示例。 |
+| 内存与取消 | 稀疏补丁的字段与 URL 脱离原 HTML 的 substring backing storage；70 个 3 MiB 页面在 128 MiB Node heap 下通过。原有取消与坏字节测试保持。 |
+| 页面与来源 | 跨全部 revisions 查当前值的真实 observation；最新直接列表、带日期的反向关联、独立变化摘要。缺字段保留旧日期，同秒冲突和解析版本变更不宣称平台编辑；局部解析失败仅称「本次可读取部分未列出」。 |
+| 身份与兼容 | 本次实际输出路径表控制链接与状态；无输出页的 source 不进入反向导航。不合并季、无传递闭包、无空壳页、无新评分。旧 canonical 输出不变，未知/损坏最新字段不回退旧列表，未知 scope 不授予完整性。 |
+| 双宿主 | BundleWriter 写出同一批 WARC，MemoryFileStore/OpfsBundleSource 与 Node 文件读取逐字段比较 canonical，逐文件比较 Markdown 内容与路径；扩展 vendor/portable 检查通过。 |
+| 周边工具 | NeoDB NDJSON/CSV、Letterboxd、Goodreads 对附加 series/版本升级输出逐项一致；importer 逐字节保留配置，原 soft404 不因添加配置变为成功，也不合成成员捕获。 |
+| Hugo 与浏览器 | 根路径/子路径、ugly/目录式网址；遍历实际 HTML 链接验证目标存在。修正默认渲染钩子与主题导航在带 baseURL 子路径时重复路径的问题。Firefox 360/1000px、浅/深色、可聚焦链接、86 条成员列表通过；长英文片名自动换行。file:// 390px 实际截图确认可读，页面无新增远程 src。 |
+| 真实档案差异 | 24 个本地 bundle、2,955 个作品：排除 canonical/parser 版本字段后，2,955 条标记、3,413 条广播、5 篇长文、6 个豆列、1 份 profile 的序列化摘要与旧 parser 完全相同。subject 修订 7,818 → 12,346；2,103 个作品有系列观测（含明确空配置），没有新提取诊断。 |
+| 帮助与发布边界 | README/Help 已说明旧字节重解析与显式刷新详情的区别；当前 main 已实现，扩展发布版仍为 v1.7.1。没有重生成 sample，也没有部署官网。 |
+
+未完成的范围明确保留：尚无真实 `rendered_section` HTML 夹具，因此不发布猜测的静态
+栏目提取；未知结构保留 WARC 并诊断。§8.2 的「全部」入口捕获、定时刷新和 Enricher
+外部系列关系整合均属后续阶段。本文继续留在 designs 根目录跟踪这些范围，不移动到 done。
+
+file:// 自动化的跨文件 iframe 探针受浏览器来源限制未能回报；改以直接打开作品页截图
+验证显示，加上 Hugo 产物的全链接目标检查。没有把该失败探针写成已通过的自动化。

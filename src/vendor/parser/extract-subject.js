@@ -35,6 +35,9 @@
  * 之后两者再也分不开。
  */
 
+import { extractSeries } from './extract-series.js';
+export { extractSeries } from './extract-series.js';
+
 import { decodeEntities } from './html-entities.js';
 
 /**
@@ -175,7 +178,7 @@ export function subjectRefOf(url) {
 /**
  * 详情页 → 能补进作品记录的东西。
  *
- * 目前只有又名。这个函数存在的意义是**给后续留个口子**：详情页上还有结构化的
+ * 保留 info、又名，以及已取证的电影同系列配置。详情页上还有结构化的
  * 导演/编剧/主演、制片国家、语言、IMDb id ——都是列表页那行 `raw_meta` 里
  * 拆不出来的（实测电影 2090 条里出现过 43 种段数）。
  *
@@ -186,5 +189,7 @@ export function extractSubjectDetail(html, url) {
   const ref = subjectRefOf(url);
   if (!ref) return null;
   const info = extractInfo(html);
-  return { ...ref, info, aliases: info?.['又名'] ?? [] };
+  const series = extractSeries(html, url);
+  return { ...ref, info, aliases: info?.['又名'] ?? [],
+    ...(series.value ? { series: series.value } : {}), diagnostics: series.diagnostics };
 }

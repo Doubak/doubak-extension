@@ -62,7 +62,7 @@ export function verb(medium, status) {
  * @param {object} m 投影后的标记
  * @param {{coverPath?: string|null}} [opts] `coverPath` 是导出到本地之后的路径
  */
-export function markPage(m, { coverPath = null } = {}) {
+export function markPage(m, { coverPath = null, series = null } = {}) {
   const fm = {
     // ── SSG 通用的几个
     //
@@ -117,7 +117,7 @@ export function markPage(m, { coverPath = null } = {}) {
   // 页首只放用户自己写的短评。没有短评就省略，不编一句「暂无短评」——
   // 那会让「没写」和「写了但抓不到」在页面上长得一样。
   const body = m.comment ? `${plainText(m.comment)}\n` : '';
-  return frontMatter(fm) + (body ? `\n${body}` : '') + infoSection(m) + timelineSection(m);
+  return frontMatter(fm) + (body ? `\n${body}` : '') + seriesSection(series) + infoSection(m) + timelineSection(m);
 }
 
 /**
@@ -988,4 +988,46 @@ export function mdTitleAttr(s) {
 export function coverStripItem(m, coverPath) {
   const name = m.title ?? '';
   return `- [![${plainText(name)}](${coverPath} "${mdTitleAttr(name)}")](${markPath(m)})`;
+}
+
+/** Series is directory evidence, kept out of the personal timeline and search index. */
+function seriesSection(s) {
+  if (!s) return '';
+  const lines=[];
+  const date=at=>plainText(at??'时间未知');
+  const name=item=>plainText(item.title??`作品 ${item.id}`);
+  if (s.current) {
+    const c=s.current;
+    lines.push('', '## 同系列作品', '', `豆瓣作品页于 ${date(s.at)} 提供的列表 · ${c.scope==='complete'?'该页面的完整列表':c.scope==='partial'?'仅收录页面可见部分':'列表范围未知'}`, '');
+    for (const item of s.items) {
+      const title=item.path?`[${name(item)}](../${item.path})`:name(item);
+      const label=item.season_label?` · ${plainText(item.season_label)}`:'';
+      const state=item.path?plainText(verb(item.medium,item.status)??''): '本档案未收录';
+      const stars=Number.isInteger(item.rating)&&item.rating>=1&&item.rating<=5?` · ${'★'.repeat(item.rating)}${'☆'.repeat(5-item.rating)}`:'';
+      lines.push(`- ${title}${label} · ${state}${stars}`);
+    }
+    if (!c.items.length) {
+      lines.push(c.scope==='complete' && c.source==='embedded_config' && !c.series_url && c.claimed_total===0
+        ? `此来源在 ${date(s.at)} 明确未设置系列。`
+        : c.scope==='complete' && c.source==='embedded_config' && c.series_url && c.claimed_total===1
+          ? `此来源在 ${date(s.at)} 仅列当前作品，没有其他系列条目。` : '本次列表未记录其他条目，范围无法确认。');
+    } else lines.push('', `${c.claimed_total!==null?`页面标示「全部 ${c.claimed_total}」；`:''}本次记录含 ${c.items.length} 个条目${c.scope==='complete'?'。':'，不保证包含全部系列作品。'}`);
+    if (s.laterUnknown) lines.push('', '后续页面未提供可识别的系列列表。');
+  } else if (s.diagnostics?.length) lines.push('', '## 同系列作品', '', '最新系列记录无法展示；未以旧列表替代。');
+  if (s.history?.length) {
+    lines.push('', '## 系列列表的观测变化', '');
+    for (const h of s.history) {
+      const message=h.conflict?'同一时间有不同列表记录':h.parserChanged?'解析版本不同，不推断平台列表变化':[
+        h.added.length?`本次多显示：${h.added.map(name).join('、')}`:null,
+        h.removed.length?`${h.partial?'本次可读取部分未列出':'该来源本次未列出'}：${h.removed.map(name).join('、')}`:null,
+        h.changed?'顺序 / 名称 / 范围变更':null,
+      ].filter(Boolean).join('；');
+      lines.push(`- ${date(h.at)}：${message}。`);
+    }
+  }
+  if (s.incoming?.length) {
+    lines.push('', '## 其他作品页中的关联', '');
+    for (const i of s.incoming) lines.push(`- [${plainText(i.title)}](../${i.path}) 的作品页曾将本作列入同系列（观测于 ${date(i.at)}）。`);
+  }
+  return lines.length?lines.join('\n')+'\n':'';
 }

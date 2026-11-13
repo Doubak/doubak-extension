@@ -2,6 +2,8 @@
  * 改动请在那个仓库里做，然后运行 node tools/sync-vendor.mjs。
  * 理由见 tools/sync-vendor.mjs：两份实现对同一段输入得出不同结论，只是早晚的事。
  */
+import { projectSeries } from './series.js';
+
 /**
  * canonical → 投影。
  *
@@ -526,6 +528,7 @@ const latest = (rec) => rec.revisions[rec.revisions.length - 1];
 function projectMark(m, subject, fromBroadcasts = [], superseded = []) {
   const r = latest(m);
   const s = subject ? latest(subject) : null;
+  const series = projectSeries(subject);
 
   return {
     kind: 'mark',
@@ -546,6 +549,7 @@ function projectMark(m, subject, fromBroadcasts = [], superseded = []) {
     // 详情页 #info 那一整块。键是豆瓣自己的标签，原样带过来——
     // 翻译或跨媒介统一属于 enricher，不是这一层的事。
     info: s?.fields?.info ?? null,
+    ...(series ? { series } : {}),
 
     status: r.fields.status,
     rating: r.fields.rating ?? null,

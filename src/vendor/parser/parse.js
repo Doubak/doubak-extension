@@ -74,8 +74,9 @@ import {
 // 0.15.2：支持不带 <p> 的广播与转发附言正文抽取，剔除尾随转发卡片与私密/注销占位符。
 // 0.15.3：保留 topic 广播的独立标题和原页链接。
 // 0.15.4：广播多出 text_parts —— 正文里那几个链接（话题、@豆友、站外链接、作品名…）。
-export const PARSER_VERSION = 'doubak-data-parser/0.17.0';
-export const CANONICAL_VERSION = 'canonical/1.3';
+// 0.18.0：电影系列快照；subject 列表/详情字段按捕获时间重放，省略来源独立记录。
+export const PARSER_VERSION = 'doubak-data-parser/0.18.0';
+export const CANONICAL_VERSION = 'canonical/1.4';
 
 /** 路线状态词 → canonical 的封闭词表。 */
 const STATUS = { collect: 'done', do: 'doing', wish: 'wish' };
@@ -222,14 +223,9 @@ export async function parse(sources, opts = {}) {
   /** @type {Map<string, object>} 小组 ID → 用户加入的小组记录 */
   const groupJoins = new Map();
   const profiles = new Map();
-  /**
-   * `medium:id` → 从详情页补来的字段。
-   *
-   * **先收齐再用**，不是边读边写。解析必须与档案的处理顺序无关
-   *（canonical/INGESTION.md §5.2），而详情页与列表页谁先被读到是不一定的。
-   * @type {Map<string, {aliases: string[], bundleId: string, captureId: string}>}
-   */
-  const details = new Map();
+  // 只缓存抽取后的稀疏字段；全输入确认标记资格后重放，详情本身不创建作品。
+  const subjectPatches = [];
+  const subjectKeys = new Set();
   const warnings = [];
   // 被 --ignore-warnings 放行的那条，照样记进告警里：绕过的是「停下来」，不是「说出来」。
   if (accountWarning) warnings.push({ type: 'multiple_accounts', accounts: topo.accounts, message: accountWarning });
@@ -518,21 +514,11 @@ export async function parse(sources, opts = {}) {
   }
 
   throwIfAborted(opts.signal);
-  work.sort((a, b) => ((Date.parse(a.row.observed_at) || 0) - (Date.parse(b.row.observed_at) || 0)) || (a.row.capture_id ?? '').localeCompare(b.row.capture_id ?? ''));
-
-  // **详情页必须全部先读完。**
-  //
-  // 它们只给作品记录补字段，而记录是列表页建的。同一趟里边读边用的话，
-  // 结果就取决于谁先被处理——而抓取顺序天然是「先列表页后详情页」，于是
-  // 补进去的东西一个都用不上。实测这个 bug：2102 部电影里只有 44 部拿到了
-  // 又名，而抽查显示 96% 的详情页上都有。
-  //
-  // 这正是 canonical/INGESTION.md §5.2 禁止的那种顺序依赖，而它**不报错**——
-  // 只是安静地少了一大半数据。
-  //
-  // 分完之后详情页还聚在一起，段缓存的命中率反而更好：它们都在同一个
-  // catalog 段里。
-  work.sort((a, b) => (a.kind === 'detail' ? 0 : 1) - (b.kind === 'detail' ? 0 : 1));
+  // Extraction may group catalog payloads for cache locality; subject history is replayed below.
+  const compareText = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+  work.sort((a, b) => (Date.parse(a.row.observed_at) - Date.parse(b.row.observed_at))
+    || compareText(a.src.bundleId, b.src.bundleId) || compareText(a.row.capture_id, b.row.capture_id)
+    || compareText(a.kind, b.kind));
 
   /** @type {object|null} */
   let lastSrc = null;
@@ -552,6 +538,8 @@ export async function parse(sources, opts = {}) {
     // **取消不留半份产物。**
     throwIfAborted(opts.signal);
 
+    if (lastSrc && lastSrc !== src) lastSrc.close();
+    lastSrc = src;
     let html;
     try {
       html = await src.payload(row);
@@ -593,10 +581,15 @@ export async function parse(sources, opts = {}) {
       // **详情页只补充，不创建。** 作品记录的来源是列表页（那才是「我标记过它」
       // 的凭据）；一张详情页单独存在时，我们并不知道用户是否标记过它。
       const d = extractSubjectDetail(html, row.url);
-      if (d && (d.aliases.length || (d.info && Object.keys(d.info).length))) {
-        details.set(`${d.medium}:${d.id}`, {
-          aliases: d.aliases, info: d.info, bundleId: src.bundleId, captureId: row.capture_id,
-        });
+      if (d) {
+        for (const reason of d.diagnostics) warnings.push({ type: 'series_extract', capture: row.capture_id, reason });
+        const fields = {};
+        // An absent #info is not evidence that old metadata disappeared.
+        if (d.info !== null) { fields.info = d.info; fields.aliases = d.aliases; }
+        if (d.series) fields.series = d.series;
+        subjectPatches.push({ key: `${d.medium}:${d.id}`, medium: d.medium, id: d.id,
+          url: row.url, kind: 'detail', fields: detached(fields),
+          observation: { ...observationBase, absence_authority: 'none' } });
       }
       continue;
     }
@@ -767,26 +760,37 @@ export async function parse(sources, opts = {}) {
       }
 
       upsertMark(marks, markKeys, { m, medium, status, account: accountOf(src), observation, parserVersion, tz });
-      upsertSubject(subjects, {
-        m, medium, observation, parserVersion,
-        detail: details.get(`${medium}:${m.subjectId}`),
-      });
+      const key = `${medium}:${m.subjectId}`;
+      subjectKeys.add(key);
+      subjectPatches.push({ key, medium, id: m.subjectId, url: detached(m.subjectUrl ?? null),
+        upstream_deleted: m.upstreamDeleted, kind: 'list', observation: { ...observationBase },
+        fields: detached({ title: m.upstreamDeleted ? null : m.title, cover_url: m.coverUrl,
+          cover_url_key: coverUrlKey(m.coverUrl), raw_meta: m.rawMeta }) });
     }
 
-    // **段缓存只在换 bundle 时才丢。**
-    //
-    // 原来每处理完一条捕获就 close 一次，也就是把整个段缓存清掉；下一条捕获
-    // 又要把那个段从头读一遍、解一遍。列表页只有 571 张时这只是「有点慢」，
-    // 加进 2925 张作品详情页之后就变成了灾难——它们都在同一个 159 MB 的
-    // catalog 段里，于是同一个文件被读了两千多遍。
-    //
-    // work 是按 observed_at 排的，而同一份档案里的捕获时间上连成一片，所以
-    // 「换了 bundle 才清」既能让缓存一直命中，又把峰值内存压在一份档案的
-    // 段大小上。这与站点生成器里踩过的是同一个坑（那次是 8 分钟对 1.5 秒）。
-    if (lastSrc && lastSrc !== src) lastSrc.close();
-    lastSrc = src;
   }
   if (lastSrc) lastSrc.close();
+
+  subjectPatches.sort((a, b) => (Date.parse(a.observation.observed_at) - Date.parse(b.observation.observed_at))
+    || compareText(a.observation.bundle_id, b.observation.bundle_id)
+    || compareText(a.observation.capture_ids[0], b.observation.capture_ids[0]) || compareText(a.kind, b.kind));
+  const seriesAt = new Map();
+  const seenSubjectPatches = new Set();
+  for (const patch of subjectPatches) {
+    throwIfAborted(opts.signal);
+    if (!subjectKeys.has(patch.key)) continue;
+    const patchId = JSON.stringify([patch.key, patch.kind, patch.observation.bundle_id, patch.observation.capture_ids]);
+    if (seenSubjectPatches.has(patchId)) continue;
+    seenSubjectPatches.add(patchId);
+    if (patch.fields.series) {
+      const key = `${patch.key}:${Date.parse(patch.observation.observed_at)}`;
+      const digest = digestAll({ series: patch.fields.series }).series;
+      if (seriesAt.has(key) && seriesAt.get(key) !== digest) warnings.push({ type: 'series_time_conflict',
+        subject: patch.key, capture: patch.observation.capture_ids[0] });
+      seriesAt.set(key, digest);
+    }
+    upsertSubject(subjects, patch, parserVersion);
+  }
 
   // 一份档案里的一份豆列 = 一次观测，页面按 start 升序拼起来。
   //
@@ -1018,7 +1022,7 @@ function upsertMark(store, resolved, { m, medium, status, account, observation, 
       upstream_id: m.upstreamId ?? null,
       account: canonicalAccount(account, accountId),
       medium,
-      subject: { id: m.subjectId, url: m.subjectUrl, upstream_deleted: m.upstreamDeleted },
+      subject: { id: m.subjectId, url: detached(m.subjectUrl ?? null), upstream_deleted: m.upstreamDeleted },
       revisions: [],
     };
     store.set(key, rec);
@@ -1032,52 +1036,22 @@ function upsertMark(store, resolved, { m, medium, status, account, observation, 
   appendRevision(rec.revisions, { fields, digests, observation, parserVersion });
 }
 
-function upsertSubject(store, { m, medium, observation, parserVersion, detail }) {
-  const key = `${medium}:${m.subjectId}`;
-  const fields = {
-    // 上游条目被删时，页面上写的「未知电影」是占位符，不是作品名。
-    title: m.upstreamDeleted ? null : m.title,
-    // 又名只在详情页上有。**没读到详情页时是 null，不是空数组**——
-    // 「这个作品没有又名」与「我们没看过它的详情页」是两件事，
-    // 混成一个的话，补抓详情页之后会冒出一批看起来像编辑的修订。
-    aliases: detail?.aliases ?? null,
-    // 详情页 #info 里那一整块带标签的字段，键用豆瓣自己的标签原样存。
-    // **它不替代 raw_meta**：raw_meta 是列表页那一行的原样记录，两者来自
-    // 不同的捕获、也可能不一致，而「页面当时就是这么说的」两边都算数。
-    info: detail?.info ?? null,
-    cover_url: m.coverUrl,
-    // 封面 URL 的**索引**：抹掉量过的那一族 CDN 分片主机。判据用它，事实用上面
-    // 那个——豆瓣挪过一次图（实测每张海报只挪一次、不挪回去），而那会让 111 条
-    // 作品修订凭空冒出来，两版之间唯一的差别是 img1 还是 img3。见 cover-url-key.js。
-    cover_url_key: coverUrlKey(m.coverUrl),
-    raw_meta: m.rawMeta,
-  };
-  // **`cover_url` 不算摘要**，所以它不参与修订判定；判据是紧挨着它的那个 key。
-  // 豁免明写在这儿而不是事后 delete 一个键：没有摘要的字段含义是「不参与判定」，
-  // 那是个决定，得看得见。canonical 的 validate.py 会核对这组键。
-  const digests = digestAll(fields, SUBJECT_DIGEST_EXEMPT);
-
-  // 又名来自另一张捕获，出处要跟着记——canonical 的每一条断言都得能指回
-  // WARC 里的具体字节。
-  if (detail?.captureId && !observation.capture_ids.includes(detail.captureId)) {
-    observation = { ...observation, capture_ids: [...observation.capture_ids, detail.captureId] };
-  }
-
-  let rec = store.get(key);
+// V8 substring views can keep an entire HTML payload alive. Patches retain only their
+// extracted data, never the backing page string, while awaiting chronological replay.
+const detached = fields => JSON.parse(JSON.stringify(fields));
+const SUBJECT_FIELDS = ['title', 'aliases', 'info', 'cover_url', 'cover_url_key', 'raw_meta', 'series'];
+function upsertSubject(store, patch, parserVersion) {
+  let rec = store.get(patch.key);
   if (!rec) {
-    rec = {
-      canonical_version: CANONICAL_VERSION,
-      medium,
-      id: m.subjectId,
-      url: m.subjectUrl,
-      upstream_deleted: m.upstreamDeleted,
-      revisions: [],
-    };
-    store.set(key, rec);
+    rec = { canonical_version: CANONICAL_VERSION, medium: patch.medium, id: patch.id,
+      url: patch.url, upstream_deleted: Boolean(patch.upstream_deleted), revisions: [] };
+    store.set(patch.key, rec);
   }
-  if (m.upstreamDeleted) rec.upstream_deleted = true;
-
-  appendRevision(rec.revisions, { fields, digests, observation, parserVersion });
+  if (patch.upstream_deleted) rec.upstream_deleted = true;
+  const fields = { aliases: null, info: null, ...(rec.revisions.at(-1)?.fields ?? {}), ...patch.fields };
+  const observation = { ...patch.observation,
+    omitted_fields: SUBJECT_FIELDS.filter(key => !Object.hasOwn(patch.fields, key)) };
+  appendRevision(rec.revisions, { fields, digests: digestAll(fields, SUBJECT_DIGEST_EXEMPT), observation, parserVersion });
 }
 
 /**

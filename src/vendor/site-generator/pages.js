@@ -2,6 +2,8 @@
  * 改动请在那个仓库里做，然后运行 node tools/sync-vendor.mjs。
  * 理由见 tools/sync-vendor.mjs：两份实现对同一段输入得出不同结论，只是早晚的事。
  */
+import { seriesNavigation } from './series.js';
+
 /**
  * 投影 → 一整棵 Markdown 树。**纯函数，一个内建模块都不碰。**
  *
@@ -79,6 +81,7 @@ export function buildPages(p, { images = {}, coverBySubject = {}, siteTitle = nu
   /** @param {string|null|undefined} url */
   const stillRemote = (url) => { if (url && !paths[url]) remote.push(url); };
 
+  const series = seriesNavigation(p.marks, new Map(p.marks.map(m=>[`${m.medium}:${m.subjectId}`, markPath(m)])));
   for (const m of p.marks) {
     // 按作品 id 找到的优先——那是档案里真的有的那一张。按 URL 找到的作为退路。
     const cover = coverBySubject[m.subjectId] ?? paths[m.coverUrl] ?? null;
@@ -94,7 +97,7 @@ export function buildPages(p, { images = {}, coverBySubject = {}, siteTitle = nu
     //
     // 没有本地封面这件事本身照样会被报——它走的是 `missing`，那才是它的性质。
     // 一个数字同时被两条不同结论的告警引用，其中必有一条是错的。
-    files.push([content(markPath(m)), markPage(m, { coverPath: cover })]);
+    files.push([content(markPath(m)), markPage(m, { coverPath: cover, series: series.get(`${m.medium}:${m.subjectId}`) })]);
   }
   for (const r of p.longform) {
     for (const m of (r.body ?? '').matchAll(/https:\/\/[a-z0-9.]*doubanio\.com\/[^\s"'<>)）]+/g)) {

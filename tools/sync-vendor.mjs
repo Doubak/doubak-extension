@@ -97,6 +97,7 @@ export const SOURCES = [
       'extract-group.js',
       'extract-profile.js',
       'extract-subject.js',
+      'extract-series.js',
       'sha256.js',
       'digest.js',
       'cover-url-key.js',
@@ -136,6 +137,7 @@ export const SOURCES = [
       // **规则在一个宿主上有，在另一个上没有。**
       'private.js',
       'projection.js',
+      'series.js',
       'markdown.js',
       'search.js',
       'pages.js',
